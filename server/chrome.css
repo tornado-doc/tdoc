@@ -1197,7 +1197,6 @@
   .tdoc-suggest-bar.is-narrow .tdoc-suggest-bar-actions { flex: 1 1 auto; justify-content: flex-end; flex-wrap: wrap; }
   @media (prefers-reduced-motion: reduce) { .tdoc-suggest-dot { animation: none; } }
   .tdoc-suggest-chip { position: fixed; z-index: 999996; display: inline-flex; gap: 4px; padding: 3px; background: var(--td-ground, #fff); border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.10); }
-  .tdoc-composer-edit-ai { display: inline-flex; align-items: center; gap: 4px; }
   .tdoc-ask-conversation { display: grid; gap: 11px; min-width: 0; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
   .tdoc-ask-conversation > *, .tdoc-ask-turn > * { min-width: 0; }
   .tdoc-ask-turn { display: grid; min-width: 0; gap: 8px; }
@@ -1445,15 +1444,16 @@ html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; 
   html[data-tdoc-navigating] body::after { animation: none; transform: scaleX(0.6); }
 }
 
-/* The comment composer's @agent button, the agent pill's menu
-   and the Answers only / Only me row under the text. */
+/* The comment composer's @agent button, the agent pill's menu,
+   the Only me row under the text and Ask only beside Comment. */
 .tdoc-popup .tdoc-ask-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; color: #e8e8e8; }
 .tdoc-popup .tdoc-ask-mode { border-color: #4a4a4a; flex-wrap: nowrap; }
 .tdoc-popup .tdoc-ask-mode button { padding: 4px 10px; background: #1d1d1f; color: #d8d8d8; font-size: 12px; white-space: nowrap; }
 .tdoc-popup .tdoc-ask-mode button + button { border-left-color: #4a4a4a; }
 .tdoc-popup .tdoc-ask-mode button.active { background: var(--td-accent); color: #fff; }
 .tdoc-popup .tdoc-ask-mode button:disabled { color: #6e6e73; }
-.tdoc-popup .tdoc-ask-row .ui-checkbox-box:not([data-checked]) { border-color: #8a8a90; }
+.tdoc-popup .tdoc-ask-row .ui-checkbox-box:not([data-checked]),
+.tdoc-popup .tdoc-ask-only .ui-checkbox-box:not([data-checked]) { border-color: #8a8a90; }
 /* The agent pill's dropdown in the typed-@ list's light style (Julie,
    2026-10-25): its box, rows and highlight are .tdoc-mention-menu's and
    .tdoc-mention-option's; no group headers, no focus ring. Each row: mark,
@@ -1533,8 +1533,8 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
 .tdoc-reply-form .tdoc-ask-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; font-size: 12px; color: #444; }
 .tdoc-reply-form .tdoc-ask-mode { flex-wrap: nowrap; }
 .tdoc-reply-form .tdoc-ask-mode button { padding: 3px 9px; font-size: 12px; white-space: nowrap; }
-.tdoc-ask-only-label { font-size: 12px; color: #888; }
-.tdoc-popup .tdoc-ask-only-label { color: #a8a8ad; }
+.tdoc-ask-only { display: inline-flex; flex: none; }
+.tdoc-popup .tdoc-ask-only { color: #e8e8e8; }
 .tdoc-reply-form.tdoc-private-ask .tdoc-private-q { margin: 4px 0 6px; font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
 .tdoc-reply-form.tdoc-private-ask .tdoc-private-a { max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: #f4f4f5; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .tdoc-reply-form.tdoc-private-ask .tdoc-private-who { display: block; margin-bottom: 4px; font-size: 11px; font-weight: 600; color: var(--td-accent, #1652f0); }

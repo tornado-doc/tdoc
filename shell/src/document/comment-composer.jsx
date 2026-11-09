@@ -1,8 +1,8 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import { Copy, Sparkles, X } from 'lucide-react';
+import { Copy, X } from 'lucide-react';
 import { AgentButtonsContext, MentionField } from './mention-field.jsx';
 import { joinAiTags, mentionsAi } from './ai-answerer.js';
-import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
+import { AgentAskRow, AgentButton, AskOnlyToggle, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { TOP_BAR_HEIGHT, copyText } from './model.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 
@@ -81,9 +81,6 @@ export function CommentComposer({
   privateAsk = null,
   onMakePublic = null,
   onCopyToast = null,
-  // Ask/Edit v2 (flag askEditV2): "Edit with AI" on a text selection. The
-  // draft is the instruction; tdoc AI's edits show in the passage.
-  onEditWithAi = null,
 }) {
   const [text, setText] = useState(initialText);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -146,7 +143,7 @@ export function CommentComposer({
       }
       // ⌘⇧Enter puts the default agent in, then sends. A named agent that
       // may edit this doc gets the comment to answer or change; one that may
-      // not (or Only me) answers only.
+      // not (or Ask only, or Only me) answers only.
       const out = ask.outgoing(sendToAgent);
       const recipient = canSendToAgent && out.target && !out.askOnly ? out.target : null;
       await onSubmit(out.target || mentionsAi(out.text) ? joinAiTags(out.text) : out.text, {
@@ -252,13 +249,7 @@ export function CommentComposer({
               {busy ? 'Posting…' : '@agent'}
             </button>
           ) : null}
-          {onEditWithAi && selection.kind !== 'document' && selection.kind !== 'element' && quoted ? (
-            <button className="tdoc-composer-edit-ai ui-btn ui-btn-secondary ui-btn-m" type="button" disabled={busy}
-              title="tdoc AI suggests an edit to the selected text; you accept or reject it"
-              onClick={() => onEditWithAi(text.trim())}>
-              <Sparkles size={14} aria-hidden="true" />Edit with AI
-            </button>
-          ) : null}
+          {!agentButtons ? <AskOnlyToggle ask={ask} busy={busy} /> : null}
           <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
             {busy ? 'Posting…' : 'Comment'}
           </button>

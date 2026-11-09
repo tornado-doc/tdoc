@@ -127,11 +127,12 @@ export function useMyAgent(slug, enabled) {
 }
 
 // What a comment box picked that only the commenter's own agent can do: an
-// agent of theirs that may not edit here (can_edit false), so it answers in
-// the thread. null for tdoc AI, a team agent, an editor, or nothing picked.
+// agent of theirs asked to answer only (it may not edit here, or Ask only is
+// ticked), in the thread. null for tdoc AI, a team agent, a hand-off to edit,
+// or nothing picked.
 export function ownAgentPick(opts) {
   const t = opts && opts.target;
-  return t && opts.askOnly && !opts.onlyMe && !t.tdoc_ai && !t.team_agent && !t.can_edit ? t : null;
+  return t && opts.askOnly && !opts.onlyMe && !t.tdoc_ai && !t.team_agent ? t : null;
 }
 
 // Hand a comment its writer just posted to one of their own agents

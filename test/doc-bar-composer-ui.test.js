@@ -9,8 +9,10 @@
 //             the pill's menu is Mine / Team / tdoc AI (with "Connect my
 //             agent"). No mode to pick: the agent answers or edits from the
 //             text, where authorship lets it edit; elsewhere it answers only
-//             ("Answers only"). "Only me" for one's own agent or tdoc AI,
-//             never a team agent.
+//             (Ask only ticked and locked). Where it may edit, Ask only beside
+//             Comment is off until ticked; ticked, it is a question, not an
+//             edit (Julie, 2026-11-08). "Only me" for one's own agent or tdoc
+//             AI, never a team agent. No Edit with AI.
 // Each case checks what reached the server: an edit handoff, or a question.
 // Run with: node test/doc-bar-composer-ui.test.js
 
@@ -150,7 +152,8 @@ async function dragSelect(page, phrase) {
     if (await pop.locator('.tdoc-ask-mode').count()) throw new Error('a mode control is back');
     return { pop, items };
   };
-  const answersOnly = (pop) => pop.locator('.tdoc-ask-only-label').count();
+  // Answer only, forced: the Ask only box ticked and locked (it may not edit).
+  const answersOnly = (pop) => pop.locator('.tdoc-ask-only [role=checkbox][aria-checked="true"][data-disabled]').count();
   const comments = async (slug, v = 1) => { const r = await api(`/api/comments?slug=${slug}&version=${v}`, { cookie: julie.cookie }); return Array.isArray(r.body) ? r.body : r.body.comments; };
   const pending = async (device, token) => (await api(`/api/notify/local/pending?device=${device}`, { token })).body.pending;
   let failed = 0;
@@ -470,12 +473,41 @@ async function dragSelect(page, phrase) {
       const { pop, items } = await compose(page, 'Tighten this line');
       if (!/Mine/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
       if (await answersOnly(pop)) throw new Error('"Answers only" for an agent that may edit');
+      const box = pop.locator('.tdoc-ask-only [role=checkbox]');
+      if (await box.getAttribute('aria-checked') !== 'false' || await box.getAttribute('data-disabled') !== null) throw new Error('Ask only is not offered, off, for an agent that may edit');
+      if (await pop.getByText('Edit with AI').count()) throw new Error('Edit with AI is back');
       await pop.getByRole('button', { name: 'Comment', exact: true }).click();
       let queued = [];
       for (let i = 0; i < 40 && !queued.length; i++) { queued = (await pending('juliesmac', julie.token)).filter((h) => h.kind !== 'ask'); if (!queued.length) await page.waitForTimeout(250); }
       if (queued.length !== 1) throw new Error(`not handed to edit: ${JSON.stringify(queued)}`);
       await context.close();
     });
+
+    for (const phone of [false, true]) {
+      await t(`owner on own doc, Ask only ticked${phone ? ' (390px)' : ''}: a question, not an edit; the server holds the agent to it`, async () => {
+        const { context, page } = await open(julie, 'launch-plan');
+        if (phone) await page.setViewportSize({ width: 390, height: 844 });
+        const before = (await pending('juliesmac', julie.token)).filter((h) => h.kind !== 'ask').length;
+        const { pop } = await compose(page, 'Why billing first?');
+        await pop.locator('.tdoc-ask-only').click();
+        if (await pop.locator('.tdoc-ask-only [role=checkbox]').getAttribute('aria-checked') !== 'true') throw new Error('Ask only did not tick');
+        if (!/answers in the thread/.test(await pop.locator('.foot').innerText())) throw new Error('the hint still says it may change the doc');
+        const fits = await pop.evaluate((el) => { const r = el.getBoundingClientRect(); return r.right <= innerWidth + 0.5 && el.scrollWidth <= el.clientWidth + 1; });
+        if (!fits) throw new Error('the composer foot overflows');
+        await shot(page, phone ? 'composer-ask-only-phone.png' : 'composer-ask-only.png');
+        await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+        let asks = [];
+        for (let i = 0; i < 40 && !asks.length; i++) { asks = (await pending('juliesmac', julie.token)).filter((h) => h.kind === 'ask'); if (!asks.length) await page.waitForTimeout(250); }
+        if (!asks.length) throw new Error('no question queued');
+        const edits = (await pending('juliesmac', julie.token)).filter((h) => h.kind !== 'ask').length;
+        if (edits !== before) throw new Error(`Ask only handed it off to edit: ${edits - before}`);
+        // The agent asked (as the daemon's scripts name it) is held.
+        const held = await api('/api/upload', { method: 'POST', token: julie.token, headers: julieAgent, body: { slug: 'launch-plan', version: 99, html: '<h1>x</h1>', meta: { title: 'x' } } });
+        if (held.status !== 403 || held.body.error !== 'answer_only_run') throw new Error(`the agent was not held: ${held.status} ${JSON.stringify(held.body)}`);
+        for (const a of asks) await api(`/api/docs/launch-plan/my-agent/cancel`, { method: 'POST', cookie: julie.cookie, body: { ask_id: a.ask_id || a.handoff_id } });
+        await context.close();
+      });
+    }
 
     await t('member on a doc the team agent wrote: Team first; no Only me; Comment hands it to the team agent', async () => {
       const { context, page } = await open(bob, 'team-plan');
