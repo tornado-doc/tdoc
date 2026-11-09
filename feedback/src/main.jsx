@@ -19,7 +19,7 @@ import { askOwnAgent, threadAskPick, useMyAgent } from '../../shell/src/document
 import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
 import {
-  createComment, listComments, listMentionableUsers, postNotifyHandoff,
+  createComment, getThreadSeen, listComments, listMentionableUsers, postNotifyHandoff,
   removeComment, resendNotifyHandoff, setApiTransport, setCommentResolved,
   toggleReaction, updateCommentAnchor, updateCommentText,
 } from '../../shell/src/document/api.js';
@@ -1096,6 +1096,7 @@ ${uiCss}
 
   // The panel's width, dragged by its edge (ui/side-resize.jsx). A phone gets
   // the whole screen and no handle.
+  const SITE_SEEN = { load: getThreadSeen, save: null };
   const PANEL_WIDTH = { storageKey: 'tdoc-feedback-panel-width', initial: 340, min: 280, max: 640 };
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
   const labelOf = (anchor) => {
@@ -1478,6 +1479,9 @@ ${uiCss}
       flagOn: (name) => flagOn(name, session),
       // Read state on the server, so the space's tdoc page agrees.
       syncSeen: Boolean(slug && session?.token && surface?.ok && surface.signedIn !== false),
+      // A site's (SDK) token lives in a page tdoc does not control: it reads
+      // the person's read state but never writes it (the server refuses).
+      seenTransport: space ? SITE_SEEN : undefined,
     });
     const unreadComments = area.unread;
     const teamMember = Boolean(surface?.teamMember);

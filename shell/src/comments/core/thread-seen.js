@@ -62,10 +62,15 @@ export function isThreadUnread(comment, seenMap, viewerLogin = '') {
   return activity > seen;
 }
 
-/** Marks the thread seen up to its latest agent activity. The stamp, or false. */
+/**
+ * Marks the thread seen up to its latest agent activity. The stamp, or false.
+ * A thread no agent has spoken in has nothing to read: nothing is written
+ * (here or on the server), however often it is opened or polled.
+ */
 export function markThreadSeen(slug, comment) {
   if (!slug || !comment?.id) return false;
-  const activity = latestAgentActivityAt(comment) || Date.now();
+  const activity = latestAgentActivityAt(comment);
+  if (!activity) return false;
   const map = readSeenMap(slug);
   const prev = Number(map[comment.id] || 0);
   if (prev >= activity) return false;
@@ -100,4 +105,25 @@ export function mergeSeenMap(slug, remote) {
   }
   if (changed && slug) writeStored(storageKey(slug), JSON.stringify(merged));
   return { map: merged, ahead, changed };
+}
+
+/**
+ * After a POST, the server's answer is the truth for the ids that were sent:
+ * an id it dropped (a deleted thread, one past its cap) leaves this cache,
+ * and a stamp it lowered (a clock running ahead) takes its value, so the
+ * cache never holds marks that would be sent again and again.
+ */
+export function reconcileSeenMap(slug, sent, server) {
+  if (!slug || !sent) return false;
+  const map = readSeenMap(slug);
+  const answer = server && typeof server === 'object' && !Array.isArray(server) ? server : {};
+  let changed = false;
+  for (const id of Object.keys(sent)) {
+    const theirs = cleanStamp(answer[id]);
+    const mine = cleanStamp(map[id]);
+    if (!theirs) { if (id in map) { delete map[id]; changed = true; } continue; }
+    if (mine !== theirs) { map[id] = theirs; changed = true; }
+  }
+  if (changed) writeStored(storageKey(slug), JSON.stringify(map));
+  return changed;
 }

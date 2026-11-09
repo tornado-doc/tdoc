@@ -17761,11 +17761,22 @@ function redactCommentHandoffs(env, gate, comments, handoffs, allComments) {
 const THREAD_SEEN_TTL_SECONDS = 180 * 86400;
 const THREAD_SEEN_MAX_ENTRIES = 500;
 const THREAD_SEEN_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+// A POST holds at most the ids of a few hundred threads: anything bigger is
+// refused unread. Writes are counted per person per hour.
+const THREAD_SEEN_MAX_BODY = 64 * 1024;
+const THREAD_SEEN_WRITES_PER_HOUR = 240;
 
-function threadSeenKey(slug, session) {
-  const who = typeof session.account_id === 'string' && session.account_id
-    ? `a:${session.account_id}` : `k:${actorKey(session)}`;
-  return `thread-seen:${slug}:${who}`;
+// The person, by their account group's canonical id: the same person
+// through a linked identity is one record. A session with no account yet
+// falls back to its actor key.
+async function threadSeenWho(env, session) {
+  const accountId = await sessionAccountId(env, session);
+  if (accountId) {
+    let group = null;
+    try { group = await accountGroup(env, accountId); } catch {}
+    return `a:${(group && group.canonical) || accountId}`;
+  }
+  return `k:${actorKey(session)}`;
 }
 
 function cleanThreadSeen(raw, { now = Date.now(), allowed = null } = {}) {
@@ -17787,7 +17798,13 @@ function cleanThreadSeen(raw, { now = Date.now(), allowed = null } = {}) {
 async function handleThreadSeen(env, req, url) {
   let body = null;
   if (req.method === 'POST') {
-    try { body = await req.json(); } catch { body = null; }
+    // Size first, before a byte is parsed.
+    const declared = Number(req.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > THREAD_SEEN_MAX_BODY) return json({ error: 'body_too_large', limit: THREAD_SEEN_MAX_BODY }, { status: 413 });
+    let text = '';
+    try { text = await req.text(); } catch { text = ''; }
+    if (text.length > THREAD_SEEN_MAX_BODY) return json({ error: 'body_too_large', limit: THREAD_SEEN_MAX_BODY }, { status: 413 });
+    try { body = JSON.parse(text); } catch { body = null; }
     if (!body || typeof body !== 'object') return json({ error: 'invalid_body' }, { status: 400 });
   }
   const slug = req.method === 'POST' ? body.slug : url.searchParams.get('slug');
@@ -17802,25 +17819,44 @@ async function handleThreadSeen(env, req, url) {
   if (!session || gate.ownerToken || gate.bearerSession || session.bearerAdmin || !sessionPrincipal(session)) {
     return json({ error: 'sign_in_required' }, { status: 401 });
   }
-  const key = threadSeenKey(slug, session);
+  // A site's (SDK) token lives in a third-party page whose scripts can read
+  // it: it may read its holder's read state, never write it.
+  if (req.method === 'POST' && session.feedback && session.feedback.site) {
+    return json({ error: 'feedback_token_scope' }, { status: 403 });
+  }
+  const who = await threadSeenWho(env, session);
+  const key = `thread-seen:${slug}:${who}`;
   let stored = {};
   try { stored = cleanThreadSeen(JSON.parse(await env.META.get(key) || '{}')); } catch { stored = {}; }
   const headers = { 'Cache-Control': 'no-store' };
   if (req.method === 'GET') return json({ seen: stored }, { headers });
 
-  const asked = cleanThreadSeen(body.seen);
-  if (!Object.keys(asked).length) return json({ ok: true, seen: stored }, { headers });
+  // Nothing newer than what is kept: no comment read, no write.
+  const asked = Object.entries(cleanThreadSeen(body.seen)).filter(([id, stamp]) => stamp > (stored[id] || 0));
+  if (!asked.length) return json({ ok: true, seen: stored }, { headers });
+  if (await rateLimited(env, `seen:${who}`, THREAD_SEEN_WRITES_PER_HOUR, 3600)) {
+    return json({ error: 'rate_limited' }, { status: 429, headers: { ...headers, 'Retry-After': '60' } });
+  }
   const list = await readComments(env, slug);
   ensureMigrated(list);
   const threads = new Set(snapshotList(list, Infinity).map((c) => c.id));
   const next = cleanThreadSeen(stored, { allowed: threads });
   let changed = Object.keys(next).length !== Object.keys(stored).length;
-  for (const [id, stamp] of Object.entries(cleanThreadSeen(asked, { allowed: threads }))) {
+  for (const [id, stamp] of asked) {
+    if (!threads.has(id)) continue;
     if (stamp > (next[id] || 0)) { next[id] = stamp; changed = true; }
   }
   // Newest marks first when there are more threads than the record keeps.
   const kept = Object.fromEntries(Object.entries(next).sort((a, b) => b[1] - a[1]).slice(0, THREAD_SEEN_MAX_ENTRIES));
-  if (changed) await env.META.put(key, JSON.stringify(kept), { expirationTtl: THREAD_SEEN_TTL_SECONDS });
+  if (changed) {
+    try {
+      await env.META.put(key, JSON.stringify(kept), { expirationTtl: THREAD_SEEN_TTL_SECONDS });
+    } catch {
+      // KV refused (its own write limit): the browser keeps the mark and
+      // sends it again later.
+      return json({ error: 'seen_unavailable' }, { status: 503, headers: { ...headers, 'Retry-After': '60' } });
+    }
+  }
   return json({ ok: true, seen: kept }, { headers });
 }
 

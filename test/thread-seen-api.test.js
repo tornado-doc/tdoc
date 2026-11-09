@@ -129,6 +129,51 @@ const OTHER_APP = 'http://localhost:5173';
     assert(viaAgent.status === 401 || viaAgent.status === 403, `agent token: ${viaAgent.status} ${viaAgent.text}`);
   });
 
+  await t('an oversized body is refused before it is read; a write past the hourly budget gets 429', async () => {
+    const { f, julie, space, c1 } = await setup();
+    const big = { slug: space.slug, seen: Object.fromEntries(Array.from({ length: 4000 }, (_, i) => [`c_pad_${String(i).padStart(10, '0')}`, 1])) };
+    const r = await f('/api/comments/seen', { method: 'POST', cookie: julie, body: big });
+    assert(r.status === 413 && r.body.error === 'body_too_large', `big: ${r.status} ${r.text}`);
+    let last = null;
+    for (let i = 1; i <= 241; i++) {
+      last = await seenPost(f, space.slug, { [c1]: 1000 + i }, { cookie: julie });
+      if (last.status !== 200) break;
+    }
+    assert(last.status === 429 && last.body.error === 'rate_limited', `budget: ${last.status} ${last.text}`);
+  });
+
+  await t('a POST that raises nothing reads no comments and writes nothing; a KV refusal is a 503, not a 500', async () => {
+    const { env, f, julie, space, c1 } = await setup();
+    await seenPost(f, space.slug, { [c1]: 5000 }, { cookie: julie });
+    const put = env.META.put.bind(env.META);
+    let puts = 0;
+    env.META.put = async (key, ...rest) => { if (/^(thread-seen|rl):/.test(String(key))) puts++; return put(key, ...rest); };
+    const idFromName = env.COMMENTS.idFromName.bind(env.COMMENTS);
+    let reads = 0;
+    env.COMMENTS.idFromName = (name) => { reads++; return idFromName(name); };
+    const same = await seenPost(f, space.slug, { [c1]: 5000 }, { cookie: julie });
+    const older = await seenPost(f, space.slug, { [c1]: 10 }, { cookie: julie });
+    assert(same.status === 200 && older.status === 200 && same.body.seen[c1] === 5000, `no-op answers: ${same.text} ${older.text}`);
+    assert(puts === 0, `${puts} KV writes for a POST that raised nothing`);
+    assert(reads === 0, `${reads} comment reads for a POST that raised nothing`);
+    env.COMMENTS.idFromName = idFromName;
+    env.META.put = async (key, ...rest) => { if (String(key).startsWith('thread-seen:')) { const e = new Error('KV PUT failed: 429 Too Many Requests'); throw e; } return put(key, ...rest); };
+    const refused = await seenPost(f, space.slug, { [c1]: 9000 }, { cookie: julie });
+    env.META.put = put;
+    assert(refused.status === 503 && refused.body.error === 'seen_unavailable', `kv refusal: ${refused.status} ${refused.text}`);
+  });
+
+  await t('a site (SDK) token reads its holder\'s read state but never writes it', async () => {
+    const { env, f, space, c1 } = await setup();
+    const rec = JSON.parse(await env.META.get(`feedback:token:${space.token}`));
+    const siteToken = `fb_${'cd'.repeat(24)}`;
+    await env.META.put(`feedback:token:${siteToken}`, JSON.stringify({ ...rec, site: true }));
+    const read = await seenGet(f, space.slug, { token: siteToken });
+    assert(read.status === 200, `site GET: ${read.status} ${read.text}`);
+    const write = await seenPost(f, space.slug, { [c1]: 1000 }, { token: siteToken });
+    assert(write.status === 403 && write.body.error === 'feedback_token_scope', `site POST: ${write.status} ${write.text}`);
+  });
+
   console.log(`\n${fail ? 'FAIL' : 'PASS'} — ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

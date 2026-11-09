@@ -157,6 +157,11 @@ const HANDOFF_POLL_MS = 3000;
 // Live sync while a doc is open (see the effect in DocumentShell).
 const LIVE_SYNC_MIN_MS = (typeof window !== "undefined" && window.__TDOC_LIVE_SYNC_MS) || 20000;
 const LIVE_SYNC_MAX_MS = 60000;
+// The comment feed's longest wait on a quiet doc (use-comment-feed.js).
+const COMMENT_FEED_IDLE_MAX_MS = 60000;
+const commentsFingerprint = (list) => (Array.isArray(list) ? list : [])
+  .map((c) => `${c && c.id}:${(c && c.replies || []).length}:${c && c.status}:${c && c.handoff_status}:${c && c.handoff_acked_at || ''}:${c && c.handoff_delivery?.at || ''}`)
+  .join(',');
 // Whether the block is open. The onboarding doc opens it; anywhere else the
 // reader's last choice holds.
 const HANDOFF_OPEN_KEY = 'tdoc-handoff-open';
@@ -1656,10 +1661,19 @@ export function DocumentShell({ boot, config }) {
   // when it comes back, never while somebody is typing or the composer is
   // open, and on the Refresh button by the filter. An agent's reply appears
   // on an open doc without a reload.
+  // A quiet doc backs off to a minute, as live sync used to; a handoff still
+  // on its way (`sent`) keeps it at 15 s until the agent answers.
+  const outstandingHandoffs = useMemo(
+    () => comments.comments.some((c) => c && !c.deleted && c.handoff_status === 'sent'),
+    [comments.comments],
+  );
   const commentFeed = useCommentFeed({
     load: commentsRefresh,
     enabled: Boolean(config.slug) && !config.isLanding && !config.demoComments,
     paused: Boolean(composer),
+    idleMax: COMMENT_FEED_IDLE_MAX_MS,
+    active: outstandingHandoffs,
+    fingerprint: commentsFingerprint,
   });
 
   // A version published meanwhile is announced in the strip above the doc
@@ -1700,64 +1714,8 @@ export function DocumentShell({ boot, config }) {
     return () => { cancelled = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
   }, [config.slug, config.isLanding, config.mode]);
 
-  // Connected-App handoffs: while any comment is still `sent`, refresh so the
-  // waiting tags and banner catch agent replies / resolve without a manual reload.
-  // No outstanding sent → no requests. Hidden tab → pause. Back off when quiet.
-  const outstandingHandoffs = useMemo(
-    () => comments.comments.some((c) => c && !c.deleted && c.handoff_status === 'sent'),
-    [comments.comments],
-  );
-  const commentsRef = useRef(comments.comments);
-  commentsRef.current = comments.comments;
-  useEffect(() => {
-    if (!outstandingHandoffs || !notifyEnabled) return undefined;
-    let cancelled = false;
-    let timer = null;
-    let delay = 8000;
-    let unchanged = 0;
-    let lastFingerprint = '';
-    const fingerprint = () => (commentsRef.current || [])
-      .filter((c) => c && c.handoff_status === 'sent')
-      .map((c) => `${c.id}:${c.handoff_at || ''}:${c.handoff_acked_at || ''}:${c.handoff_delivery?.at || ''}:${(c.replies || []).length}`)
-      .sort()
-      .join('|');
-    const tick = async () => {
-      if (cancelled) return;
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-        timer = window.setTimeout(tick, delay);
-        return;
-      }
-      try {
-        await commentsRefresh();
-      } catch { /* next tick */ }
-      if (cancelled) return;
-      const next = fingerprint();
-      if (next === lastFingerprint) {
-        unchanged += 1;
-        delay = Math.min(8000 * (2 ** Math.min(unchanged, 3)), 60000);
-      } else {
-        unchanged = 0;
-        delay = 8000;
-        lastFingerprint = next;
-      }
-      timer = window.setTimeout(tick, delay);
-    };
-    lastFingerprint = fingerprint();
-    timer = window.setTimeout(tick, delay);
-    const onVis = () => {
-      if (document.visibilityState !== 'visible' || cancelled) return;
-      unchanged = 0;
-      delay = 8000;
-      window.clearTimeout(timer);
-      timer = window.setTimeout(tick, 500);
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-      document.removeEventListener('visibilitychange', onVis);
-    };
-  }, [outstandingHandoffs, notifyEnabled, commentsRefresh]);
+  // Connected-App handoffs still `sent` keep the comment feed at its base
+  // pace (above); there is no second poll for them.
 
   const answered = comments.comments.filter((c) => c.status === 'applied').length;
   // Copied in this session: the banner stays, as the confirmation, so the

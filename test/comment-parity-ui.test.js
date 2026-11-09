@@ -281,6 +281,46 @@ async function startServer(worker, env) {
       });
     }
 
+    // Read state costs nothing at rest: a poll over a thread no agent has
+    // spoken in sends no mark; a mark the server will not keep (a thread
+    // that is gone) is sent once, then dropped from this browser's cache.
+    for (const kind of ['doc', 'widget']) {
+      const s = ui[kind];
+      await t(`${tag}: ${kind}: a steady poll over an open human-only thread sends no read marks`, async () => {
+        const target = kind === 'doc' ? await freshDoc() : await freshSpace();
+        const id = await thread(target, kind, 0, `Quiet ${tag}`);
+        const ctx = await contextFor();
+        const page = await tracked(ctx, { pollMs: 400 });
+        const posts = [];
+        page.on('request', (r) => { if (r.method() === 'POST' && r.url().includes('/api/comments/seen')) posts.push(r.url()); });
+        await s.open(page, target);
+        await (await s.present(page, id)).first().waitFor({ timeout: 10000 });
+        if (!(kind === 'doc' && phone)) await s.openThread(page, id);
+        await page.waitForTimeout(4000);
+        assert.deepEqual(posts, [], `${posts.length} read-mark POSTs at rest`);
+        assert.deepEqual(page.errors, []);
+        await ctx.close();
+      });
+
+      await t(`${tag}: ${kind}: a mark the server will not keep is sent once, then dropped`, async () => {
+        const target = kind === 'doc' ? await freshDoc() : await freshSpace();
+        const id = await thread(target, kind, 0, `Gone mark ${tag}`);
+        const ctx = await contextFor();
+        const page = await tracked(ctx, { pollMs: 400 });
+        await page.addInitScript((slug) => { if (window.top !== window) return; if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', '1'); localStorage.setItem(`tdoc.thread-seen.${slug}`, JSON.stringify({ c_gone_thread_1: Date.now() - 1000 })); } }, target.slug);
+        const posts = [];
+        page.on('request', (r) => { if (r.method() === 'POST' && r.url().includes('/api/comments/seen')) posts.push(r.postData()); });
+        await s.open(page, target);
+        await (await s.present(page, id)).first().waitFor({ timeout: 10000 });
+        await page.waitForTimeout(12000);
+        assert.ok(posts.length <= 1, `sent ${posts.length} times: ${posts.join(' | ')}`);
+        const cache = await page.evaluate((slug) => JSON.parse(localStorage.getItem(`tdoc.thread-seen.${slug}`) || '{}'), target.slug);
+        assert.ok(!('c_gone_thread_1' in cache), `still cached: ${JSON.stringify(cache)}`);
+        assert.deepEqual(page.errors, []);
+        await ctx.close();
+      });
+    }
+
     // The widget and the space's own tdoc page are two origins of the same
     // space in real life (the app's and tdoc's): a reply read on one is read
     // on the other, both ways.

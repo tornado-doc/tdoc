@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { canSeeHandoff, handoffWaitState, isHandoffInFlight, summarizeHandoffSurfaces } from './handoff-state.js';
-import { isThreadUnread, markThreadSeen, mergeSeenMap, readSeenMap } from './thread-seen.js';
+import { isThreadUnread, markThreadSeen, mergeSeenMap, readSeenMap, reconcileSeenMap } from './thread-seen.js';
 import { DEFAULT_FILTER, DEFAULT_SORT, normalizeFilter, normalizeSort, queryThreads } from './comment-query.js';
 import { hasReplyDraft, subscribeReplyDrafts } from '../../document/reply-draft.js';
 import { isFeatureOn } from '../../feature-flags.js';
@@ -86,6 +86,7 @@ export function useCommentListPrefs(slug, { initialFilter = null } = {}) {
 // this browser. `syncSeen` is false where there is nobody to keep it for
 // (signed out, the homepage demo).
 const SEEN_PULL_MS = 5000;
+const SEEN_BATCH_MS = 1500;
 const defaultSeenTransport = { load: getThreadSeen, save: postThreadSeen };
 
 export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FILTER, sort = DEFAULT_SORT, search = '',
@@ -99,15 +100,37 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
 
   const transport = useRef(seenTransport);
   transport.current = seenTransport;
-  const push = useCallback((entries) => {
-    if (!syncSeen || !slug || !entries || !Object.keys(entries).length) return;
-    Promise.resolve(transport.current.save(slug, entries)).then((body) => {
-      if (body?.seen) {
-        const { changed } = mergeSeenMap(slug, body.seen);
-        if (changed) setSeenMap(readSeenMap(slug));
-      }
+  // Marks go up in one POST: at once for a click (open, Mark as read, Mark
+  // all), gathered for SEEN_BATCH_MS for read-when-seen, where a scroll marks
+  // card after card. A page going away sends what is waiting.
+  const pending = useRef({});
+  const timer = useRef(null);
+  const flush = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    const entries = pending.current;
+    pending.current = {};
+    const save = transport.current.save;
+    if (!syncSeen || !slug || !save || !Object.keys(entries).length) return;
+    Promise.resolve(save(slug, entries)).then((body) => {
+      if (!body?.seen) return;
+      // The answer is the truth for what was sent: no mark the server will
+      // not keep is sent again.
+      const reconciled = reconcileSeenMap(slug, entries, body.seen);
+      const { changed } = mergeSeenMap(slug, body.seen);
+      if (reconciled || changed) setSeenMap(readSeenMap(slug));
     }).catch(() => {});
   }, [slug, syncSeen]);
+  const push = useCallback((entries, { batch = false } = {}) => {
+    if (!syncSeen || !slug || !entries || !Object.keys(entries).length) return;
+    Object.assign(pending.current, entries);
+    if (!batch) { flush(); return; }
+    if (!timer.current) timer.current = setTimeout(flush, SEEN_BATCH_MS);
+  }, [slug, syncSeen, flush]);
+  useEffect(() => {
+    const away = () => { if (document.visibilityState === 'hidden') flush(); };
+    document.addEventListener('visibilitychange', away);
+    return () => { document.removeEventListener('visibilitychange', away); flush(); };
+  }, [flush]);
   // Pull the server's map with the comments: on load and on every poll, at
   // most every few seconds. What this browser marked while the server could
   // not hear it goes up.
@@ -133,7 +156,7 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
     }).catch(() => {});
   }, [comments, slug, syncSeen, push]);
 
-  const mark = useCallback((list) => {
+  const mark = useCallback((list, options) => {
     const entries = {};
     for (const comment of list) {
       const stamp = markThreadSeen(slug, comment);
@@ -141,7 +164,7 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
     }
     if (!Object.keys(entries).length) return false;
     setSeenMap(readSeenMap(slug));
-    push(entries);
+    push(entries, options);
     return true;
   }, [slug, push]);
 
@@ -165,13 +188,14 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
     return next;
   }, [comments, filter, sort, search, positionOf, selectedId, handoffViewer, isOwner, seenMap, pageUrl, draftsPosted]);
   const markRead = useCallback((comment) => mark([comment]), [mark]);
+  const markSeen = useCallback((comment) => mark([comment], { batch: true }), [mark]);
   // Mark all as read: one rule everywhere. It is offered whenever something
   // is unread, and it marks exactly what the unread count counts.
   const markAllRead = useCallback((commentsToMark = area.unread) => mark(commentsToMark), [mark, area.unread]);
   return {
     ...area, autoRead, seenMap, markRead, markAllRead,
     // For CommentThreadList / CommentCard: read when seen, only with the flag.
-    onSeen: autoRead ? markRead : null,
+    onSeen: autoRead ? markSeen : null,
     showMarkAll: area.unreadCount > 0,
   };
 }

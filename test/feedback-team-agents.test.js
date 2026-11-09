@@ -75,9 +75,27 @@ const APP = 'http://localhost:3000';
         assert(r.status === 403, `${opts.method || 'GET'} from ${headers.Origin}: ${r.status} ${r.text}`);
       }
     }
-    // Nor does the team's hand-off (an editing run) open to any widget token.
-    const handoff = await call('/api/notify/handoff', { method: 'POST', token: bobHome.token, body: { slug: ownSpace.slug, comment_ids: [] } });
-    assert(handoff.status !== 200, `hand-off through a token: ${handoff.status}`);
+    // Nor does the team's hand-off (an editing run) open to any widget token,
+    // with a real comment of his, so the refusal is the gate, not the body.
+    const own = await post(bobHome.token, ownSpace.slug, TDOC);
+    const target = (await call(`/api/docs/${ownSpace.slug}/my-agent`, { token: bobHome.token, headers: home })).body.team_agents[0];
+    const handoff = await call('/api/notify/handoff', { method: 'POST', token: bobHome.token, body: { slug: ownSpace.slug, comment_ids: [own.id], recipient: target } });
+    assert(handoff.status === 401 || handoff.status === 403, `hand-off through a token: ${handoff.status} ${handoff.text}`);
+  });
+
+  await t('a reader of the team space who is not on the team gets no team agent, and asking one is refused', async () => {
+    const carl = await issue(worker, env, 'carl');
+    const meta = JSON.parse(await env.META.get(`meta:${ownSpace.slug}`));
+    await env.META.put(`meta:${ownSpace.slug}`, JSON.stringify({ ...meta, access: { ...(meta.access || {}), allowed_users: [...((meta.access && meta.access.allowed_users) || []), 'carl'] } }));
+    const carlHome = await connect(carl, { origin: TDOC, slug: ownSpace.slug });
+    assert(carlHome.slug === ownSpace.slug && carlHome.own_agent === true, `carl connect ${JSON.stringify({ slug: carlHome.slug, own_agent: carlHome.own_agent, error: carlHome.error })}`);
+    const got = await call(`/api/docs/${ownSpace.slug}/my-agent`, { token: carlHome.token, headers: home });
+    assert(got.status === 200 && Array.isArray(got.body.team_agents) && got.body.team_agents.length === 0, `carl's list ${got.status} ${got.text}`);
+    const teamTarget = (await call(`/api/docs/${ownSpace.slug}/my-agent`, { token: bobHome.token, headers: home })).body.team_agents[0];
+    const comment = await post(carlHome.token, ownSpace.slug, TDOC);
+    assert(comment && comment.id, `carl comment ${JSON.stringify(comment)}`);
+    const asked = await call(`/api/docs/${ownSpace.slug}/my-agent`, { method: 'POST', token: carlHome.token, headers: home, body: { comment_id: comment.id, recipient: teamTarget } });
+    assert(asked.status === 403, `carl asks the team agent: ${asked.status} ${asked.text}`);
   });
 
   console.log(`\n${fail ? 'FAIL' : 'PASS'} — ${pass} passed, ${fail} failed`);

@@ -37,7 +37,11 @@ function pollMs() {
   return pinned > 0 ? pinned : FEED_POLL_MS;
 }
 
-export function useCommentFeed({ load, enabled = true, paused = false, interval = null }) {
+// `idleMax` (the doc page): a quiet list backs off, doubling up to idleMax,
+// and is read every interval again as soon as `fingerprint(list)` changes,
+// the tab comes back, Refresh is pressed, or `active` (a handoff in flight)
+// says something is on its way.
+export function useCommentFeed({ load, enabled = true, paused = false, interval = null, idleMax = 0, fingerprint = null, active = false }) {
   const [refreshing, setRefreshing] = useState(false);
   const busy = useRef(false);
   const loadRef = useRef(load);
@@ -57,16 +61,54 @@ export function useCommentFeed({ load, enabled = true, paused = false, interval 
 
   useEffect(() => watchTyping(), []);
 
+  const fingerprintRef = useRef(fingerprint);
+  fingerprintRef.current = fingerprint;
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const delay = useRef(0);
+  const last = useRef(null);
+  // Something happened: read at the base pace again.
+  useEffect(() => { delay.current = 0; }, [active]);
+
   useEffect(() => {
     if (!enabled || paused) return undefined;
-    const tick = () => {
-      if (document.visibilityState !== 'visible' || isTypingInComments()) return;
-      refresh().catch(() => {});
+    const base = interval || pollMs();
+    let timer = null;
+    let stopped = false;
+    let running = false;
+    const schedule = () => {
+      if (stopped) return;
+      timer = setTimeout(tick, delay.current || base);
     };
-    const timer = setInterval(tick, interval || pollMs());
-    document.addEventListener('visibilitychange', tick);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
-  }, [enabled, paused, interval, refresh]);
+    async function tick() {
+      timer = null;
+      if (document.visibilityState !== 'visible' || isTypingInComments()) { schedule(); return; }
+      running = true;
+      let list = null;
+      try { list = await refresh(); } catch {}
+      running = false;
+      if (idleMax && fingerprintRef.current && !activeRef.current) {
+        const now = fingerprintRef.current(list);
+        delay.current = now === last.current ? Math.min((delay.current || base) * 2, idleMax) : base;
+        last.current = now;
+      } else delay.current = base;
+      schedule();
+    }
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || stopped) return;
+      delay.current = base;
+      if (running) return;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      tick();
+    };
+    schedule();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { stopped = true; if (timer) clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, [enabled, paused, interval, idleMax, refresh]);
 
-  return { refresh, refreshing };
+  // Refresh pressed: back to the base pace.
+  const refreshNow = useCallback(() => { delay.current = 0; return refresh(); }, [refresh]);
+
+  return { refresh: refreshNow, refreshing };
 }
