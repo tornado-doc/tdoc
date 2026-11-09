@@ -67,7 +67,10 @@ header row is the last row of `<thead>`; each `<th>` declares its column type.
 
 A doc whose bulk is sheet tables may be up to 8 MB of HTML (10,000 rows of
 20 columns is about 3-6 MB); everything outside the sheet tables still has
-to fit the ordinary 2 MB. The grid stays smooth at 10,000 rows. Beyond that,
+to fit the ordinary 2 MB. Only cell text and cell markup count towards the
+larger limit: a sheet table holding an image, a script, a style, an HTML
+comment or a `data:` URL gets no allowance. The grid stays smooth at 10,000
+rows. Beyond that,
 split the data into several docs or summarise it.
 
 ## From a file

@@ -3018,7 +3018,9 @@ function stampAids(rawHtml) {
 // new `anchor_changed` event). This replaces aid_history.
 function reconcileAnchors(comments, aidsInVersion, V) {
   // Self-contained (test/reconcile.test.js runs this function on its own).
-  const isSheetAnchor = (a) => !!(a && ((a.sheet && typeof a.sheet === 'object') || /^table\[data-tdoc-sheet\]/.test(String(a.selector || ''))));
+  // Only an anchor that names its column by key (a.sheet.key) is the
+  // reader's to resolve; a positional sheet anchor reconciles like any other.
+  const isSheetAnchor = (a) => !!(a && a.sheet && typeof a.sheet === 'object' && typeof a.sheet.key === 'string' && /^[\w-]{1,40}$/.test(a.sheet.key));
   if (!Array.isArray(comments)) return comments;
   ensureMigrated(comments);
   const byAid = new Map(aidsInVersion.map(a => [a.aid, a]));
@@ -3035,10 +3037,10 @@ function reconcileAnchors(comments, aidsInVersion, V) {
     // so once lost they were orphaned forever even when the target came back.
     // (text anchors are resolved client-side, not here.)
     if (!a || (a.kind !== 'element' && a.kind !== 'lost')) continue;
-    // A sheet cell, column or sheet is resolved in the reader by table name,
-    // row id and column key (sheets-viewer.js), never by aid: a sheet anchor
-    // has no aid to keep, and rebinding it by tag would point it at another
-    // element or mark it lost on every new version.
+    // A sheet cell or column anchored by its column key is resolved in the
+    // reader by table name, row id and key (sheets-viewer.js), never by aid:
+    // it has no aid to keep, and rebinding it by tag would point it at
+    // another element or mark it lost on every new version.
     if (isSheetAnchor(a)) continue;
 
     const knownAid = a.aid
@@ -3252,10 +3254,19 @@ function wrapBareTables(html) {
 // text-size-adjust: iOS Safari otherwise "autosizes" long text blocks, so
 // on a phone some table columns rendered huge next to short ones (Julie,
 // 2026-10-13; diagnosed by research-claw). Applied to every doc at serve time.
-// A sheet (<table data-tdoc-sheet>) is drawn by the sheets viewer, which hides
-// the table; until it loads, only its first 200 rows are laid out. Laying out
-// all of a 10,000-row table first took the frame 7 seconds.
-const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}table[data-tdoc-sheet]>tbody>tr:nth-child(n+201){display:none}';
+// Sheets: while the sheets viewer is on its way, only the first 200 rows of a
+// <table data-tdoc-sheet> are laid out; laying out all of a 10,000-row table
+// first took the frame 7 seconds. A provider style baked into a sheet doc's
+// frame only, removed by server/sheets-loader.js in compare mode (no viewer
+// there) or when the viewer fails, and by the viewer once it is mounted, so
+// no row is ever lost to it. Kept byte-identical in server.js and worker.js
+// (test/sheets-size.test.js).
+const SHEETS_PENDING_STYLE = '<style id="tdoc-sheets-pending" data-tdoc-provider>table[data-tdoc-sheet]>tbody>tr:nth-child(n+201){display:none}</style>';
+function withSheetsPending(body) {
+  if (body.indexOf('data-tdoc-sheet') === -1 || body.indexOf('id="tdoc-sheets-pending"') !== -1) return body;
+  return /<head[^>]*>/i.test(body) ? body.replace(/<head[^>]*>/i, (open) => `${open}${SHEETS_PENDING_STYLE}`) : SHEETS_PENDING_STYLE + body;
+}
+const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 function hasReaderBlock(html) {
   return READER_BLOCK_RE.test(html);
 }
@@ -3268,7 +3279,7 @@ function hasReaderBlock(html) {
 // the documents that followed the contract, and :where() zero-specificity
 // makes the injection harmless to a document that styles itself.
 function bakeFrameBody(raw) {
-  let body = forceWidgetSandbox(raw);
+  let body = withSheetsPending(forceWidgetSandbox(raw));
   if (!hasReaderBlock(body)) {
     const rcss = readerCssSource();
     if (rcss) {
@@ -9378,23 +9389,93 @@ function browserSaveHtmlRefusal(doc) {
 // fit the ordinary cap, so an empty sheet does not buy room for anything
 // else. Every write path (upload/CLI, MCP, browser save, restore, accepted
 // suggestions, duplicate) passes the HTML it is about to store.
-// sheetMarkupLength is duplicated in server/server.js;
-// test/sheets-size.test.js holds the two together.
+// sheetScan is duplicated in server/server.js; test/sheets-size.test.js
+// holds the two together.
 const SHEET_MAX_DOC_BYTES = 8 * 1024 * 1024;
-function sheetMarkupLength(html) {
-  if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return 0;
-  const open = /<table\b[^>]*\sdata-tdoc-sheet[\s=>/][^>]*>/gi;
-  const close = /<\/table\s*>/gi;
-  let total = 0, m;
-  while ((m = open.exec(html))) {
-    // A sheet holds no nested table, so its end is the next </table>.
-    close.lastIndex = open.lastIndex;
-    const end = close.exec(html);
-    if (!end) break;
-    total += close.lastIndex - m.index;
-    open.lastIndex = close.lastIndex;
+// Sheet content in a document: { bytes, rows, tables }. `bytes` is what a
+// sheet's larger size cap may count: the text in sheet cells and the cell
+// markup itself (each tag to 256 bytes, so a long attribute counts as
+// ordinary bytes). One pass; every index only moves forward and nothing is
+// re-scanned, so the time is linear in the input whatever it holds. Comments,
+// bogus comments (<!x>, <?x>) and raw-text elements are skipped the way a
+// browser skips them. A sheet table that holds anything else (an image, a
+// script, a style, a comment, a data: or javascript: URL, a nested table, a
+// tag outside the list below) gets no allowance at all.
+var SHEET_SCAN_TAGS = new Set(['table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'span', 'a', 'b', 'i', 'em', 'strong', 'code', 'br', 'wbr', 's', 'u', 'small', 'sub', 'sup', 'mark']);
+var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript', 'plaintext']);
+function sheetScan(html) {
+  var out = { bytes: 0, rows: 0, tables: 0 };
+  if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return out;
+  var n = html.length, i = 0, sheet = null;
+  while (i < n) {
+    var lt = html.indexOf('<', i);
+    if (lt === -1) break;
+    if (sheet) sheet.bytes += lt - i;
+    var c1 = html.charCodeAt(lt + 1);
+    if (c1 === 33 || c1 === 63) { // <! or <?: a comment, doctype or bogus comment
+      var end = html.startsWith('<!--', lt) ? html.indexOf('-->', lt + 4) : html.indexOf('>', lt + 2);
+      if (sheet) sheet.ok = false;
+      if (end === -1) break;
+      i = end + (html.startsWith('<!--', lt) ? 3 : 1);
+      continue;
+    }
+    var j = lt + 1, closing = c1 === 47;
+    if (closing) j++;
+    var nameStart = j;
+    while (j < n) {
+      var c = html.charCodeAt(j);
+      if ((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c === 45) j++; else break;
+    }
+    if (j === nameStart) {
+      if (closing) { // </ followed by no name: a bogus comment to the next '>'
+        var be = html.indexOf('>', j);
+        if (sheet) sheet.ok = false;
+        if (be === -1) break;
+        i = be + 1;
+        continue;
+      }
+      if (sheet) sheet.bytes += 1; // a bare '<' is text
+      i = lt + 1;
+      continue;
+    }
+    var name = html.slice(nameStart, j).toLowerCase();
+    var quote = 0, colon = false;
+    while (j < n) {
+      var d = html.charCodeAt(j);
+      if (quote) { if (d === quote) quote = 0; else if (d === 58) colon = true; }
+      else if (d === 34 || d === 39) quote = d;
+      else if (d === 62) break;
+      else if (d === 58) colon = true;
+      j++;
+    }
+    if (j >= n) break; // an unterminated tag: what follows is not sheet content
+    var tagEnd = j + 1, tagLen = tagEnd - lt;
+    if (!closing && SHEET_SCAN_RAW.has(name)) {
+      // Raw text runs to its own end tag, whatever it holds (</table> too).
+      var close = new RegExp('</' + name + '[\\s/>]', 'ig');
+      close.lastIndex = tagEnd;
+      var m = close.exec(html);
+      if (sheet) sheet.ok = false;
+      if (!m) break;
+      var re = html.indexOf('>', m.index);
+      i = re === -1 ? n : re + 1;
+      continue;
+    }
+    if (!sheet) {
+      if (!closing && name === 'table' && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) sheet = { bytes: 0, rows: 0, ok: true, depth: 1 };
+    } else if (closing && name === 'table' && sheet.depth === 1) {
+      if (sheet.ok) { out.bytes += sheet.bytes + Math.min(tagLen, 256); out.rows += Math.max(0, sheet.rows - 1); out.tables++; }
+      sheet = null;
+    } else {
+      if (!SHEET_SCAN_TAGS.has(name) || name === 'table') sheet.ok = false;
+      if (name === 'table') sheet.depth += closing ? -1 : 1;
+      if (colon && /(data|javascript|vbscript)\s*:/i.test(html.slice(lt, tagEnd))) sheet.ok = false;
+      if (!closing && name === 'tr') sheet.rows++;
+      sheet.bytes += Math.min(tagLen, 256);
+    }
+    i = tagEnd;
   }
-  return total;
+  return out;
 }
 function hostedBaseUploadBytes(env) {
   const n = Number(env && env.TDOC_HOSTED_MAX_UPLOAD_BYTES);
@@ -9409,11 +9490,14 @@ function hostedSheetUploadBytes(env) {
 function hostedMaxUploadBytes(env, html) {
   const base = hostedBaseUploadBytes(env);
   if (typeof html !== 'string') return base;
-  const sheet = sheetMarkupLength(html);
+  // Under the ordinary cap there is nothing to decide, and nothing to scan.
+  const size = utf8ByteLength(html);
+  if (size <= base) return base;
+  const sheet = sheetScan(html).bytes;
   if (!sheet) return base;
   // Characters, not bytes, inside the sheet: counting the rest as total bytes
   // minus sheet characters can only overstate it.
-  return utf8ByteLength(html) - sheet <= base ? hostedSheetUploadBytes(env) : base;
+  return size - sheet <= base ? hostedSheetUploadBytes(env) : base;
 }
 function hostedUploadCeiling(env) {
   return hostedSheetUploadBytes(env);
@@ -17126,33 +17210,14 @@ function historyBlocks(html) {
 
 // What changed between two versions' bytes: how many places (runs of changed
 // blocks, as the compare marks them) and in which sections, in order.
-// Body rows in a doc's sheet tables, by a linear scan (no parse): the
-// summary a sheet too big to diff gets instead.
-function sheetRowCount(html) {
-  if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return 0;
-  const open = /<table\b[^>]*\sdata-tdoc-sheet[\s=>/][^>]*>/gi;
-  const close = /<\/table\s*>/gi;
-  const tr = /<tr\b/gi;
-  let rows = 0, m;
-  while ((m = open.exec(html))) {
-    close.lastIndex = open.lastIndex;
-    const end = close.exec(html);
-    if (!end) break;
-    tr.lastIndex = open.lastIndex;
-    let n = 0, t;
-    while ((t = tr.exec(html)) && t.index < end.index) n++;
-    rows += Math.max(0, n - 1); // less the header row
-    open.lastIndex = close.lastIndex;
-  }
-  return rows;
-}
 function historyChangeSummary(beforeHtml, afterHtml) {
   const engine = globalThis.TdocVersionDiff;
   if (!engine || typeof TdocParse5 === 'undefined') return null;
   if (String(beforeHtml || '').length > HISTORY_SUMMARY_MAX_HTML || String(afterHtml || '').length > HISTORY_SUMMARY_MAX_HTML) {
     // A big sheet is not parsed and diffed here (a 10,000-row sheet is
     // megabytes): its rows are counted instead.
-    if (sheetMarkupLength(afterHtml)) return { places: null, sections: [], rows: [sheetRowCount(beforeHtml || ''), sheetRowCount(afterHtml)] };
+    const after = sheetScan(afterHtml);
+    if (after.tables) return { places: null, sections: [], rows: [sheetScan(beforeHtml || '').rows, after.rows] };
     return { places: null, sections: [] };
   }
   const before = beforeHtml ? historyBlocks(beforeHtml) : [];
@@ -29750,36 +29815,55 @@ const tdocHandlers = {
     // ---- explicit browser save (owner/latest only in the shell) ----
     if (p === '/api/doc/versions' && method === 'POST') {
       if (!env.COMMENTS) return json({ error: 'version_store_unavailable' }, { status: 503 });
-      const ceiling = hostedUploadCeiling(env);
-      const contentLength = Number(req.headers.get('content-length') || 0);
-      // The HTML arrives JSON-escaped (every attribute quote grows): leave
-      // room here; the exact cap is checked on the decoded HTML below.
-      if (contentLength && (!Number.isFinite(contentLength) || contentLength > ceiling * 1.25 + 64 * 1024)) {
-        return json({ error: 'payload_too_large', limit: ceiling }, { status: 413 });
+      // The browser editor's save, and only that: it is recorded as a
+      // person's edit (source: browser), which authorship trusts. An upload
+      // or agent token publishes through /api/upload, where authorship and
+      // answer-only locks apply.
+      if (req.headers.get('authorization')) return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
+      // Order matters: the doc's edit right is checked before the body is
+      // read, and size work happens only after. The shell names the doc in
+      // the query (?slug=) so that check can come first; a request without
+      // it (an older shell) is held to the ordinary cap until authorized.
+      const base = hostedMaxUploadBytes(env);
+      const named = url.searchParams.get('slug');
+      let auth = null;
+      if (named != null) {
+        if (!isValidSlug(named)) return json({ error: 'invalid_slug' }, { status: 400 });
+        auth = await authorizeDocEdit(req, env, named);
+        if (!auth.ok) return auth.response;
+        if (auth.actor.kind !== 'owner_session' && auth.actor.kind !== 'team_member') {
+          return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
+        }
       }
+      // JSON escaping grows HTML, hence the slack over the cap.
+      const readCap = (auth ? Math.ceil(hostedUploadCeiling(env) * 1.25) : base) + 64 * 1024;
+      const contentLength = Number(req.headers.get('content-length') || 0);
+      if (contentLength && (!Number.isFinite(contentLength) || contentLength > readCap)) {
+        return json({ error: 'payload_too_large', limit: auth ? hostedUploadCeiling(env) : base }, { status: 413 });
+      }
+      const raw = await mcpReadCapped(req, readCap);
+      if (!raw) return json({ error: 'payload_too_large', limit: auth ? hostedUploadCeiling(env) : base }, { status: 413 });
       let body = {};
-      try { body = await req.json(); } catch {}
+      try { body = JSON.parse(new TextDecoder().decode(raw)); } catch {}
       const slug = body && body.slug;
       const baseVersion = Number(body && body.baseVersion);
       const doc = body && body.html;
       if (!isValidSlug(slug) || !Number.isInteger(baseVersion) || baseVersion < 1 || typeof doc !== 'string') {
         return json({ error: 'slug, baseVersion, html required' }, { status: 400 });
       }
+      if (named != null && slug !== named) return json({ error: 'slug_mismatch' }, { status: 400 });
+      if (!auth) {
+        auth = await authorizeDocEdit(req, env, slug);
+        if (!auth.ok) return auth.response;
+        if (auth.actor.kind !== 'owner_session' && auth.actor.kind !== 'team_member') {
+          return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
+        }
+      }
       const size = utf8ByteLength(doc);
       const maxBytes = hostedMaxUploadBytes(env, doc);
       if (size > maxBytes) return json({ error: 'payload_too_large', limit: maxBytes, size }, { status: 413 });
       const docRefusal = browserSaveHtmlRefusal(doc);
       if (docRefusal) return docRefusal;
-      // The browser editor's save, and only that: it is recorded as a
-      // person's edit (source: browser), which authorship trusts. An upload
-      // or agent token publishes through /api/upload, where authorship and
-      // answer-only locks apply.
-      if (req.headers.get('authorization')) return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
-      const auth = await authorizeDocEdit(req, env, slug);
-      if (!auth.ok) return auth.response;
-      if (auth.actor.kind !== 'owner_session' && auth.actor.kind !== 'team_member') {
-        return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
-      }
       const result = await createBrowserVersion(env, slug, {
         baseVersion,
         html: doc,

@@ -178,7 +178,9 @@ export function duplicateDocument(slug, version) {
 }
 
 export function saveDocumentVersion(slug, baseVersion, html) {
-  return request('/api/doc/versions', {
+  // The slug rides in the query too: the server checks the edit right
+  // before it reads a body that may be a multi-megabyte sheet.
+  return request(`/api/doc/versions?slug=${encodeURIComponent(slug)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug, baseVersion, html }),

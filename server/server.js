@@ -534,27 +534,99 @@ const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
 // A sheet may be larger: its <table data-tdoc-sheet> tables can bring a doc
 // up to SHEET_MAX_DOC_BYTES while the rest still fits MAX_DOCUMENT_BYTES.
 // The worker applies the same rule (hostedMaxUploadBytes);
-// test/sheets-size.test.js holds sheetMarkupLength identical in both.
+// test/sheets-size.test.js holds sheetScan identical in both.
 const SHEET_MAX_DOC_BYTES = 8 * 1024 * 1024;
-function sheetMarkupLength(html) {
-  if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return 0;
-  const open = /<table\b[^>]*\sdata-tdoc-sheet[\s=>/][^>]*>/gi;
-  const close = /<\/table\s*>/gi;
-  let total = 0, m;
-  while ((m = open.exec(html))) {
-    // A sheet holds no nested table, so its end is the next </table>.
-    close.lastIndex = open.lastIndex;
-    const end = close.exec(html);
-    if (!end) break;
-    total += close.lastIndex - m.index;
-    open.lastIndex = close.lastIndex;
+// Sheet content in a document: { bytes, rows, tables }. `bytes` is what a
+// sheet's larger size cap may count: the text in sheet cells and the cell
+// markup itself (each tag to 256 bytes, so a long attribute counts as
+// ordinary bytes). One pass; every index only moves forward and nothing is
+// re-scanned, so the time is linear in the input whatever it holds. Comments,
+// bogus comments (<!x>, <?x>) and raw-text elements are skipped the way a
+// browser skips them. A sheet table that holds anything else (an image, a
+// script, a style, a comment, a data: or javascript: URL, a nested table, a
+// tag outside the list below) gets no allowance at all.
+var SHEET_SCAN_TAGS = new Set(['table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'span', 'a', 'b', 'i', 'em', 'strong', 'code', 'br', 'wbr', 's', 'u', 'small', 'sub', 'sup', 'mark']);
+var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript', 'plaintext']);
+function sheetScan(html) {
+  var out = { bytes: 0, rows: 0, tables: 0 };
+  if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return out;
+  var n = html.length, i = 0, sheet = null;
+  while (i < n) {
+    var lt = html.indexOf('<', i);
+    if (lt === -1) break;
+    if (sheet) sheet.bytes += lt - i;
+    var c1 = html.charCodeAt(lt + 1);
+    if (c1 === 33 || c1 === 63) { // <! or <?: a comment, doctype or bogus comment
+      var end = html.startsWith('<!--', lt) ? html.indexOf('-->', lt + 4) : html.indexOf('>', lt + 2);
+      if (sheet) sheet.ok = false;
+      if (end === -1) break;
+      i = end + (html.startsWith('<!--', lt) ? 3 : 1);
+      continue;
+    }
+    var j = lt + 1, closing = c1 === 47;
+    if (closing) j++;
+    var nameStart = j;
+    while (j < n) {
+      var c = html.charCodeAt(j);
+      if ((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c === 45) j++; else break;
+    }
+    if (j === nameStart) {
+      if (closing) { // </ followed by no name: a bogus comment to the next '>'
+        var be = html.indexOf('>', j);
+        if (sheet) sheet.ok = false;
+        if (be === -1) break;
+        i = be + 1;
+        continue;
+      }
+      if (sheet) sheet.bytes += 1; // a bare '<' is text
+      i = lt + 1;
+      continue;
+    }
+    var name = html.slice(nameStart, j).toLowerCase();
+    var quote = 0, colon = false;
+    while (j < n) {
+      var d = html.charCodeAt(j);
+      if (quote) { if (d === quote) quote = 0; else if (d === 58) colon = true; }
+      else if (d === 34 || d === 39) quote = d;
+      else if (d === 62) break;
+      else if (d === 58) colon = true;
+      j++;
+    }
+    if (j >= n) break; // an unterminated tag: what follows is not sheet content
+    var tagEnd = j + 1, tagLen = tagEnd - lt;
+    if (!closing && SHEET_SCAN_RAW.has(name)) {
+      // Raw text runs to its own end tag, whatever it holds (</table> too).
+      var close = new RegExp('</' + name + '[\\s/>]', 'ig');
+      close.lastIndex = tagEnd;
+      var m = close.exec(html);
+      if (sheet) sheet.ok = false;
+      if (!m) break;
+      var re = html.indexOf('>', m.index);
+      i = re === -1 ? n : re + 1;
+      continue;
+    }
+    if (!sheet) {
+      if (!closing && name === 'table' && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) sheet = { bytes: 0, rows: 0, ok: true, depth: 1 };
+    } else if (closing && name === 'table' && sheet.depth === 1) {
+      if (sheet.ok) { out.bytes += sheet.bytes + Math.min(tagLen, 256); out.rows += Math.max(0, sheet.rows - 1); out.tables++; }
+      sheet = null;
+    } else {
+      if (!SHEET_SCAN_TAGS.has(name) || name === 'table') sheet.ok = false;
+      if (name === 'table') sheet.depth += closing ? -1 : 1;
+      if (colon && /(data|javascript|vbscript)\s*:/i.test(html.slice(lt, tagEnd))) sheet.ok = false;
+      if (!closing && name === 'tr') sheet.rows++;
+      sheet.bytes += Math.min(tagLen, 256);
+    }
+    i = tagEnd;
   }
-  return total;
+  return out;
 }
 function maxDocumentBytes(html) {
-  const sheet = sheetMarkupLength(html);
+  const size = Buffer.byteLength(html, 'utf8');
+  if (size <= MAX_DOCUMENT_BYTES) return MAX_DOCUMENT_BYTES;
+  const sheet = sheetScan(html).bytes;
   if (!sheet) return MAX_DOCUMENT_BYTES;
-  return Buffer.byteLength(html, 'utf8') - sheet <= MAX_DOCUMENT_BYTES ? SHEET_MAX_DOC_BYTES : MAX_DOCUMENT_BYTES;
+  return size - sheet <= MAX_DOCUMENT_BYTES ? SHEET_MAX_DOC_BYTES : MAX_DOCUMENT_BYTES;
 }
 function readBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
@@ -980,9 +1052,19 @@ function wrapBareTables(html) {
   return out.join('');
 }
 
-// Sheets: only the first 200 rows of a <table data-tdoc-sheet> are laid out
-// before the sheets viewer replaces it (see the worker's comment).
-const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}table[data-tdoc-sheet]>tbody>tr:nth-child(n+201){display:none}';
+// Sheets: while the sheets viewer is on its way, only the first 200 rows of a
+// <table data-tdoc-sheet> are laid out; laying out all of a 10,000-row table
+// first took the frame 7 seconds. A provider style baked into a sheet doc's
+// frame only, removed by server/sheets-loader.js in compare mode (no viewer
+// there) or when the viewer fails, and by the viewer once it is mounted, so
+// no row is ever lost to it. Kept byte-identical in server.js and worker.js
+// (test/sheets-size.test.js).
+const SHEETS_PENDING_STYLE = '<style id="tdoc-sheets-pending" data-tdoc-provider>table[data-tdoc-sheet]>tbody>tr:nth-child(n+201){display:none}</style>';
+function withSheetsPending(body) {
+  if (body.indexOf('data-tdoc-sheet') === -1 || body.indexOf('id="tdoc-sheets-pending"') !== -1) return body;
+  return /<head[^>]*>/i.test(body) ? body.replace(/<head[^>]*>/i, (open) => `${open}${SHEETS_PENDING_STYLE}`) : SHEETS_PENDING_STYLE + body;
+}
+const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function readerCss() {
@@ -1739,6 +1821,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
       body = wrapBareTables(body);
+      body = withSheetsPending(body);
       if (body.indexOf('id="tdoc-reader-patch"') === -1) {
         const ptag = `<style id="tdoc-reader-patch">${READER_PATCH_CSS}</style>`;
         // Anchor on the OPENING tag — see the matching comment in worker.js:
