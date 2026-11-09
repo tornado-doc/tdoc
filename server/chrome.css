@@ -80,15 +80,15 @@
      three controls share a baseline instead of stepping. It stays borderless
      until hovered: Publish is the only thing in this row that should look
      filled. */
-  .tdoc-bar .tdoc-switch, .tdoc-modal .tdoc-switch { display: inline-flex; align-items: center; gap: 8px; height: 32px; box-sizing: border-box; padding: 0 12px 0 10px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; user-select: none; }
-  .tdoc-bar .tdoc-switch:hover, .tdoc-modal .tdoc-switch:hover { border-color: #e5e5e7; background: #fafafa; }
-  .tdoc-bar .tdoc-switch-track, .tdoc-modal .tdoc-switch-track { min-width: 0; min-height: 0; box-shadow: none; position: relative; flex: 0 0 auto; width: 28px; height: 16px; padding: 0; border: none; border-radius: 999px; background: #d4d4d9; cursor: pointer; transition: background .14s; }
-  .tdoc-bar .tdoc-switch-track[data-checked], .tdoc-modal .tdoc-switch-track[data-checked] { background: #1a7340; }
-  .tdoc-bar .tdoc-switch-track:focus-visible, .tdoc-modal .tdoc-switch-track:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
-  .tdoc-bar .tdoc-switch-thumb, .tdoc-modal .tdoc-switch-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .14s; }
-  .tdoc-bar .tdoc-switch-track[data-checked] .tdoc-switch-thumb, .tdoc-modal .tdoc-switch-track[data-checked] .tdoc-switch-thumb { transform: translateX(12px); }
-  .tdoc-bar .tdoc-switch-label, .tdoc-modal .tdoc-switch-label { font-size: 13px; color: #555; white-space: nowrap; }
-  .tdoc-bar .tdoc-switch:hover .tdoc-switch-label, .tdoc-modal .tdoc-switch:hover .tdoc-switch-label { color: #1a1a1a; }
+  .tdoc-bar .tdoc-switch, .tdoc-modal .tdoc-switch, .tdoc-history-toggle .tdoc-switch { display: inline-flex; align-items: center; gap: 8px; height: 32px; box-sizing: border-box; padding: 0 12px 0 10px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; user-select: none; }
+  .tdoc-bar .tdoc-switch:hover, .tdoc-modal .tdoc-switch:hover, .tdoc-history-toggle .tdoc-switch:hover { border-color: #e5e5e7; background: #fafafa; }
+  .tdoc-bar .tdoc-switch-track, .tdoc-modal .tdoc-switch-track, .tdoc-history-toggle .tdoc-switch-track { min-width: 0; min-height: 0; box-shadow: none; position: relative; flex: 0 0 auto; width: 28px; height: 16px; padding: 0; border: none; border-radius: 999px; background: #d4d4d9; cursor: pointer; transition: background .14s; }
+  .tdoc-bar .tdoc-switch-track[data-checked], .tdoc-modal .tdoc-switch-track[data-checked], .tdoc-history-toggle .tdoc-switch-track[data-checked] { background: #1a7340; }
+  .tdoc-bar .tdoc-switch-track:focus-visible, .tdoc-modal .tdoc-switch-track:focus-visible, .tdoc-history-toggle .tdoc-switch-track:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
+  .tdoc-bar .tdoc-switch-thumb, .tdoc-modal .tdoc-switch-thumb, .tdoc-history-toggle .tdoc-switch-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .14s; }
+  .tdoc-bar .tdoc-switch-track[data-checked] .tdoc-switch-thumb, .tdoc-modal .tdoc-switch-track[data-checked] .tdoc-switch-thumb, .tdoc-history-toggle .tdoc-switch-track[data-checked] .tdoc-switch-thumb { transform: translateX(12px); }
+  .tdoc-bar .tdoc-switch-label, .tdoc-modal .tdoc-switch-label, .tdoc-history-toggle .tdoc-switch-label { font-size: 13px; color: #555; white-space: nowrap; }
+  .tdoc-bar .tdoc-switch:hover .tdoc-switch-label, .tdoc-modal .tdoc-switch:hover .tdoc-switch-label, .tdoc-history-toggle .tdoc-switch:hover .tdoc-switch-label { color: #1a1a1a; }
 
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
@@ -1478,6 +1478,10 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
    muted words and quiet buttons, the one accent is the unread dot. */
 .tdoc-bar .tdoc-edited { height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: #8a8a8f; font: 13px system-ui, -apple-system, sans-serif; white-space: nowrap; cursor: pointer; }
 .tdoc-bar .tdoc-edited:hover { background: #f0f1f4; color: #1a1a1a; }
+.tdoc-bar .tdoc-edited[aria-expanded="true"] { background: var(--td-surface, #f0f0ee); color: var(--td-ink, #1a1a1a); }
+.tdoc-bar .tdoc-edited:disabled { cursor: default; opacity: .6; }
+/* A thread whose words are gone from this version, written on an older one. */
+.tdoc-margin-comment .tdoc-cc-earlier { margin: 0 0 4px; font-size: 12px; color: var(--td-muted, #6b6a66); }
 .tdoc-bar .tdoc-share-quiet { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #1a1a1a; font: 500 13.5px system-ui, -apple-system, sans-serif; cursor: pointer; }
 .tdoc-bar .tdoc-share-quiet:hover { background: #f0f1f4; }
 .tdoc-bar .tdoc-share-quiet svg { width: 18px; height: 18px; }
