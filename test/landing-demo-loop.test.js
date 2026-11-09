@@ -88,5 +88,16 @@ t('the tab is browser chrome, and the page is indexable', () => {
   assert(!/name="robots"[^>]*noindex/.test(work), 'the homepage must not carry noindex');
 });
 
+t('a real published doc sits under the mock and links to it', () => {
+  const after = work.slice(work.indexOf('<!-- /hd demo -->'), work.indexOf('</section>', work.indexOf('<!-- /hd demo -->')));
+  const a = after.match(/<a class="hd-real" href="([^"]+)">([\s\S]*?)<\/a>/);
+  assert(a, 'missing the .hd-real link under the demo');
+  assert(/^\/d\/[a-z0-9-]+$/.test(a[1]), `the real doc link should be a /d/<slug> path, got ${a[1]}`);
+  const img = a[2].match(/<img src="data:image\/(webp|jpeg|png);base64,([A-Za-z0-9+\/=]+)"[^>]*>/);
+  assert(img, 'the screenshot must be inline (the release payload ships index.html only)');
+  assert(img[2].length < 80000, `the screenshot is ${img[2].length} base64 chars; keep it under 80k`);
+  assert(/alt="[^"]{20,}"/.test(a[2]) && /width="\d+" height="\d+"/.test(a[2]), 'the screenshot needs alt text and a size');
+});
+
 console.log(`\n${pass} passed, ${fail} failed.`);
 process.exit(fail ? 1 : 0);
