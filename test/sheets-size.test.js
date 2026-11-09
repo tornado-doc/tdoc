@@ -140,7 +140,7 @@ const O = { Origin: 'https://tdoc.dev' };
     assert.equal(r.body.error, 'slug_mismatch');
   });
 
-  await t('the size scan is linear: adversarial 2 MB inputs take under 50 ms', async () => {
+  await t('the size scan is linear: adversarial 2 MB inputs take under 50 ms (100 ms on CI)', async () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'server.js'), 'utf8');
     const code = src.slice(src.indexOf('var SHEET_SCAN_TAGS'), src.indexOf('function maxDocumentBytes'));
     const sheetScan = new Function(`${code}; return sheetScan;`)();
@@ -153,11 +153,17 @@ const O = { Origin: 'https://tdoc.dev' };
       'bogus comments': 'data-tdoc-sheet' + '<!x'.repeat(700000),
       'colons in tags': '<table data-tdoc-sheet>' + '<a href="x:">'.repeat(150000) + '</table>',
       'nested tables': '<table data-tdoc-sheet>' + '<table>'.repeat(280000),
+      'bare < in a cell': '<table data-tdoc-sheet><tr><td>' + '<'.repeat(2 * MB) + '</td></tr></table>',
+      'short tags in a sheet': '<table data-tdoc-sheet>' + '<b>'.repeat(650000) + '</table>',
     };
+    // 50 ms is the bound (10-20 ms on a laptop). A shared CI runner measures
+    // about 2.4x slower, so there it is 100 ms; a quadratic scan takes
+    // seconds either way.
+    const bound = process.env.CI ? 100 : 50;
     for (const [what, input] of Object.entries(inputs)) {
       let best = Infinity;
-      for (let k = 0; k < 3; k++) { const t0 = process.hrtime.bigint(); sheetScan(input); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); }
-      assert(best < 50, `${what} (${input.length} chars): ${best.toFixed(1)}ms`);
+      for (let k = 0; k < 5; k++) { const t0 = process.hrtime.bigint(); sheetScan(input); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); }
+      assert(best < bound, `${what} (${input.length} chars): ${best.toFixed(1)}ms`);
     }
     const ok = sheetScan(big);
     assert(ok.tables === 1 && ok.rows === 10000 && ok.bytes > big.length * 0.6, JSON.stringify(ok));

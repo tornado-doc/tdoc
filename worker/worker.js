@@ -9526,53 +9526,115 @@ var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'if
 var SHEET_SCAN_FOREIGN = new Set(['template', 'svg', 'math']);
 var SHEET_SCAN_MAX_TABLES = 20;
 var SHEET_SCAN_CELL_CHARS = 10000;
+// Every tag name the scan acts on, found by a hash of its lower-cased letters
+// and then compared, so naming a tag builds no string: its class (below) or
+// 0 for a name the scan does not act on.
+var SHEET_SCAN_OTHER = 0, SHEET_SCAN_TABLE = 1, SHEET_SCAN_TR = 2, SHEET_SCAN_CELL = 3, SHEET_SCAN_SECTION = 4,
+  SHEET_SCAN_INLINE = 5, SHEET_SCAN_RAWTAG = 6, SHEET_SCAN_FOREIGNTAG = 7, SHEET_SCAN_PLAINTEXT = 8;
+var SHEET_SCAN_NAMES = (function () {
+  var byHash = new Map();
+  var put = function (name, cls) {
+    var h = 0;
+    for (var k = 0; k < name.length; k++) h = (h * 31 + name.charCodeAt(k)) | 0;
+    var list = byHash.get(h) || [];
+    list.push({ name: name, cls: cls });
+    byHash.set(h, list);
+  };
+  SHEET_SCAN_TAGS.forEach(function (name) {
+    put(name, name === 'table' ? SHEET_SCAN_TABLE : name === 'tr' ? SHEET_SCAN_TR : name === 'td' || name === 'th' ? SHEET_SCAN_CELL
+      : name === 'tbody' || name === 'thead' || name === 'tfoot' ? SHEET_SCAN_SECTION : SHEET_SCAN_INLINE);
+  });
+  SHEET_SCAN_RAW.forEach(function (name) { put(name, SHEET_SCAN_RAWTAG); });
+  SHEET_SCAN_FOREIGN.forEach(function (name) { put(name, SHEET_SCAN_FOREIGNTAG); });
+  put('plaintext', SHEET_SCAN_PLAINTEXT);
+  return byHash;
+})();
+function sheetScanClass(html, from, to) {
+  if (to - from > 9) return SHEET_SCAN_OTHER;
+  var h = 0;
+  for (var k = from; k < to; k++) { var c = html.charCodeAt(k); if (c >= 65 && c <= 90) c += 32; h = (h * 31 + c) | 0; }
+  var list = SHEET_SCAN_NAMES.get(h);
+  if (!list) return SHEET_SCAN_OTHER;
+  for (var x = 0; x < list.length; x++) {
+    var name = list[x].name;
+    if (name.length !== to - from) continue;
+    var same = true;
+    for (var y = 0; y < name.length && same; y++) { var cc = html.charCodeAt(from + y); if (cc >= 65 && cc <= 90) cc += 32; same = cc === name.charCodeAt(y); }
+    if (same) return list[x].cls;
+  }
+  return SHEET_SCAN_OTHER;
+}
 function sheetScan(html) {
   var out = { bytes: 0, rows: 0, tables: 0 };
   if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return out;
   var n = html.length, i = 0, sheet = null, foreign = 0, sheetCount = 0;
-  // Text in a sheet: counted per cell, each cell to its cap.
-  var addText = function (len) {
-    if (!sheet || len <= 0) return;
-    if (!sheet.inCell) { sheet.bytes += Math.min(len, 256); return; }
-    var room = SHEET_SCAN_CELL_CHARS - sheet.cell;
-    var take = len < room ? len : room > 0 ? room : 0;
-    sheet.cell += take;
-    sheet.bytes += take;
-  };
+  var len, room;
+  // Where the next '"', "'" and ':' are: looked up again only once passed,
+  // so these searches cover the document once in all.
+  var nextDq = -1, nextSq = -1, nextColon = -1;
   while (i < n) {
     var lt = html.indexOf('<', i);
     if (lt === -1) break;
-    addText(lt - i);
     var c1 = html.charCodeAt(lt + 1);
+    var closing = c1 === 47;
+    var c2 = closing ? html.charCodeAt(lt + 2) : c1;
+    var letter = (c2 >= 97 && c2 <= 122) || (c2 >= 65 && c2 <= 90);
+    if (!letter && c1 !== 33 && c1 !== 63 && !closing) {
+      // A run of '<' that opens no tag is text: take it whole.
+      var k = lt + 1;
+      while (k < n && html.charCodeAt(k) === 60) {
+        var d1 = html.charCodeAt(k + 1);
+        if ((d1 >= 97 && d1 <= 122) || (d1 >= 65 && d1 <= 90) || d1 === 47 || d1 === 33 || d1 === 63) break;
+        k++;
+      }
+      // k is the first char after the run that is not a bare '<' (or a '<'
+      // that opens something): the text runs from i to k.
+      if (sheet) {
+        len = k - i;
+        if (!sheet.inCell) sheet.bytes += len < 256 ? len : 256;
+        else { room = SHEET_SCAN_CELL_CHARS - sheet.cell; if (room > 0) { if (len > room) len = room; sheet.cell += len; sheet.bytes += len; } }
+      }
+      i = k;
+      continue;
+    }
+    if (sheet && lt > i) {
+      len = lt - i;
+      if (!sheet.inCell) sheet.bytes += len < 256 ? len : 256;
+      else { room = SHEET_SCAN_CELL_CHARS - sheet.cell; if (room > 0) { if (len > room) len = room; sheet.cell += len; sheet.bytes += len; } }
+    }
     if (c1 === 33 || c1 === 63) { // <! or <?: a comment, doctype, CDATA or bogus comment
-      var isComment = html.startsWith('<!--', lt);
+      var isComment = c1 === 33 && html.startsWith('<!--', lt);
       var end = isComment ? html.indexOf('-->', lt + 4) : html.indexOf('>', lt + 2);
       if (sheet) sheet.ok = false;
       if (end === -1) break;
       i = end + (isComment ? 3 : 1);
       continue;
     }
-    var j = lt + 1, closing = c1 === 47;
-    if (closing) j++;
+    if (closing && !letter) { // </ followed by no name: a bogus comment to the next '>'
+      var be = html.indexOf('>', lt + 2);
+      if (sheet) sheet.ok = false;
+      if (be === -1) break;
+      i = be + 1;
+      continue;
+    }
+    var j = closing ? lt + 2 : lt + 1;
     var nameStart = j;
     while (j < n) {
       var c = html.charCodeAt(j);
       if ((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c === 45) j++; else break;
     }
-    if (j === nameStart) {
-      if (closing) { // </ followed by no name: a bogus comment to the next '>'
-        var be = html.indexOf('>', j);
-        if (sheet) sheet.ok = false;
-        if (be === -1) break;
-        i = be + 1;
-        continue;
-      }
-      addText(1); // a bare '<' is text
-      i = lt + 1;
-      continue;
-    }
-    var name = html.slice(nameStart, j).toLowerCase();
+    var nameEnd = j;
     var quote = 0, colon = false, quotedLt = false;
+    // Most tags hold no quote: their end is the next '>'.
+    var gt = html.indexOf('>', j);
+    if (gt === -1) break; // an unterminated tag: what follows is not sheet content
+    if (nextDq !== n && nextDq < j) { nextDq = html.indexOf('"', j); if (nextDq === -1) nextDq = n; }
+    if (nextSq !== n && nextSq < j) { nextSq = html.indexOf("'", j); if (nextSq === -1) nextSq = n; }
+    if (nextDq > gt && nextSq > gt) {
+      if (nextColon !== n && nextColon < j) { nextColon = html.indexOf(':', j); if (nextColon === -1) nextColon = n; }
+      colon = nextColon < gt;
+      j = gt;
+    }
     while (j < n) {
       var d = html.charCodeAt(j);
       if (quote) { if (d === quote) quote = 0; else if (d === 58) colon = true; else if (d === 60) quotedLt = true; }
@@ -9583,10 +9645,11 @@ function sheetScan(html) {
     }
     if (j >= n) break; // an unterminated tag: what follows is not sheet content
     var tagEnd = j + 1, tagLen = tagEnd - lt;
-    if (!closing && name === 'plaintext') { if (sheet) sheet.ok = false; break; } // the rest is text
-    if (!closing && SHEET_SCAN_RAW.has(name)) {
+    var cls = sheetScanClass(html, nameStart, nameEnd);
+    if (!closing && cls === SHEET_SCAN_PLAINTEXT) { if (sheet) sheet.ok = false; break; } // the rest is text
+    if (!closing && cls === SHEET_SCAN_RAWTAG) {
       // Raw text runs to its own end tag, whatever it holds (</table> too).
-      var close = new RegExp('</' + name + '[\\s/>]', 'ig');
+      var close = new RegExp('</' + html.slice(nameStart, nameEnd).toLowerCase() + '[\\s/>]', 'ig');
       close.lastIndex = tagEnd;
       var m = close.exec(html);
       if (sheet) sheet.ok = false;
@@ -9596,23 +9659,23 @@ function sheetScan(html) {
       continue;
     }
     if (!sheet) {
-      if (SHEET_SCAN_FOREIGN.has(name)) foreign += closing ? (foreign > 0 ? -1 : 0) : 1;
-      if (!closing && name === 'table' && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) {
+      if (cls === SHEET_SCAN_FOREIGNTAG) foreign += closing ? (foreign > 0 ? -1 : 0) : 1;
+      if (!closing && cls === SHEET_SCAN_TABLE && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) {
         sheetCount++;
-        sheet = { bytes: Math.min(tagLen, 256), rows: 0, ok: foreign === 0 && !quotedLt, depth: 1, inCell: false, cell: 0 };
+        sheet = { bytes: tagLen < 256 ? tagLen : 256, rows: 0, ok: foreign === 0 && !quotedLt, depth: 1, inCell: false, cell: 0 };
       }
-    } else if (closing && name === 'table' && sheet.depth === 1) {
-      if (sheet.ok) { out.bytes += sheet.bytes + Math.min(tagLen, 256); out.rows += Math.max(0, sheet.rows - 1); out.tables++; }
+    } else if (closing && cls === SHEET_SCAN_TABLE && sheet.depth === 1) {
+      if (sheet.ok) { out.bytes += sheet.bytes + (tagLen < 256 ? tagLen : 256); out.rows += Math.max(0, sheet.rows - 1); out.tables++; }
       sheet = null;
     } else {
-      if (!SHEET_SCAN_TAGS.has(name) || name === 'table') sheet.ok = false;
-      if (name === 'table') sheet.depth += closing ? -1 : 1;
+      if (cls === SHEET_SCAN_OTHER || cls >= SHEET_SCAN_RAWTAG || cls === SHEET_SCAN_TABLE) sheet.ok = false;
+      if (cls === SHEET_SCAN_TABLE) sheet.depth += closing ? -1 : 1;
       if (quotedLt) sheet.ok = false;
       if (colon && /(data|javascript|vbscript)\s*:/i.test(html.slice(lt, tagEnd))) sheet.ok = false;
-      if (!closing && name === 'tr') sheet.rows++;
-      if (name === 'td' || name === 'th') { sheet.inCell = !closing; sheet.cell = 0; }
-      else if (name === 'tr' || name === 'tbody' || name === 'thead' || name === 'tfoot') sheet.inCell = false;
-      sheet.bytes += Math.min(tagLen, 256);
+      if (cls === SHEET_SCAN_TR && !closing) sheet.rows++;
+      if (cls === SHEET_SCAN_CELL) { sheet.inCell = !closing; sheet.cell = 0; }
+      else if (cls === SHEET_SCAN_TR || cls === SHEET_SCAN_SECTION) sheet.inCell = false;
+      sheet.bytes += tagLen < 256 ? tagLen : 256;
     }
     i = tagEnd;
   }
