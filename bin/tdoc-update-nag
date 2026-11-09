@@ -78,9 +78,19 @@ fi
 
 # Best-effort fetch. Abort if the connection is stalled (~2s of <1KB/s).
 # Never prompt for credentials; never fail the caller.
+# lowSpeedTime only catches a stalled transfer, not a slow connect or a slow
+# but moving download, so the whole fetch also gets a few seconds at most:
+# the command the user ran must not wait on it (it once held tdoc-new for
+# 20s+). A killed fetch just means no notice this time.
 GIT_TERMINAL_PROMPT=0 \
   git -C "$REPO" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=2 \
-  fetch origin main --quiet >/dev/null 2>&1 || true
+  fetch origin main --quiet >/dev/null 2>&1 &
+FETCH_PID=$!
+( sleep "${TDOC_UPDATE_FETCH_SECONDS:-4}"; kill "$FETCH_PID" 2>/dev/null ) >/dev/null 2>&1 &
+WATCH_PID=$!
+disown "$WATCH_PID" 2>/dev/null || true  # no "Terminated" notice when it is stopped
+wait "$FETCH_PID" 2>/dev/null || true
+kill "$WATCH_PID" 2>/dev/null || true
 
 LOCAL="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
 REMOTE="$(git -C "$REPO" rev-parse origin/main 2>/dev/null || true)"

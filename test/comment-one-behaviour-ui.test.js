@@ -154,10 +154,14 @@ async function startServer(worker, env) {
       await ctx.route(/api\.github\.com/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' }));
       return ctx;
     };
-    const tracked = async (ctx) => {
+    // pollMs pins the comment feed's poll (window.__TDOC_COMMENT_POLL_MS, as
+    // comment-parity-ui does): a case about what a list refresh does must not
+    // wait on the doc page's 15 s clock, which backs off to 60 s when quiet.
+    const tracked = async (ctx, { pollMs = 0 } = {}) => {
       const page = await ctx.newPage();
       page.errors = [];
       page.on('pageerror', (e) => page.errors.push(e.message));
+      if (pollMs) await page.addInitScript((ms) => { window.__TDOC_COMMENT_POLL_MS = ms; }, pollMs);
       return page;
     };
     const shot = async (page, name) => { if (SHOTS) { await page.waitForTimeout(250); await page.screenshot({ path: path.join(SHOTS, `${tag}-${name}.png`) }); } };
@@ -547,14 +551,14 @@ async function startServer(worker, env) {
     await t(`${tag}: doc page: a list refresh with a new reply leaves the text alone`, async () => {
       const id = await docThread();
       const ctx = await contextFor(julie);
-      const page = await tracked(ctx);
+      const page = await tracked(ctx, { pollMs: 500 });
       await surfaces.doc.open(page);
       const { card, box } = await openBox(surfaces.doc, page, id);
       await box.fill(DRAFT);
       await julieAgentAnswers(SLUG, id);
-      // The next read of the list: one 15 s feed tick (the composer-free card
-      // does not pause it), as the resolve case below allows for.
-      await card.locator('.tdoc-replies-toggle').waitFor({ timeout: 40000 });
+      // The next read of the list, a feed tick (the composer-free card does
+      // not pause it; ticks wait out 4 s after typing).
+      await card.locator('.tdoc-replies-toggle').waitFor();
       assert.equal(await box.inputValue(), DRAFT);
       assert.deepEqual(page.errors, []);
       await ctx.close();
@@ -562,7 +566,7 @@ async function startServer(worker, env) {
     await t(`${tag}: doc page: someone resolves the thread mid-sentence under Open: the card and the text stay`, async () => {
       const id = await docThread();
       const ctx = await contextFor(julie);
-      const page = await tracked(ctx);
+      const page = await tracked(ctx, { pollMs: 500 });
       await surfaces.doc.open(page);
       if (phone) await page.locator('.tdoc-fab').click();
       await page.getByRole('radio', { name: /^Open/ }).first().click();
@@ -571,7 +575,7 @@ async function startServer(worker, env) {
       await box.fill(DRAFT);
       const done = await call('/api/comments', { method: 'PATCH', cookie: julie.cookie, body: { slug: SLUG, version: 1, id, resolved: true } });
       assert.equal(done.status, 200, JSON.stringify(done.body));
-      await card.locator('.tdoc-resolved-chip').waitFor({ timeout: 40000 });
+      await card.locator('.tdoc-resolved-chip').waitFor();
       assert.equal(await box.inputValue(), DRAFT);
       await page.getByRole('radio', { name: /^Resolved/ }).first().click();
       await page.getByRole('radio', { name: /^Open/ }).first().click();

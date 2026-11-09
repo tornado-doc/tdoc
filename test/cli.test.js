@@ -17,6 +17,16 @@ const { execFileSync, spawnSync } = require('child_process');
 // Stubs get their port from the OS, never from a guess — see startStub's note.
 const { startStub } = require('./helpers/fixture-server');
 
+// Hermetic by default: every bin that a user runs (tdoc-new, tdoc-publish, ...)
+// first runs tdoc-update-nag, which fetches origin/main of the checkout it
+// lives in. In a CI clone that is a live fetch from GitHub with no overall
+// time limit, and a slow one ran past a test's 20s spawn timeout (the test
+// then failed with an empty message or "exit null"). Only the tests about
+// the nag itself turn it back on, with NAG_ON, and they use mocks or a
+// local origin.
+process.env.TDOC_SKIP_UPDATE_CHECK = '1';
+const NAG_ON = { TDOC_SKIP_UPDATE_CHECK: '0' };
+
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
 function bad(n, e) { console.log(`  ✗ ${n}\n    ${e}`); fail++; }
@@ -759,7 +769,7 @@ t('tdoc-update-nag is silent when skipped or current (mock: skip)', () => {
 
 t('tdoc-update-nag prints TDOC_UPDATE_AVAILABLE when behind (mock)', () => {
   const nag = path.join(BIN, 'tdoc-update-nag');
-  const r = spawnSync(nag, [], { env: { ...process.env, TDOC_MOCK_UPDATE_BEHIND: '3' }, encoding: 'utf8' });
+  const r = spawnSync(nag, [], { env: { ...process.env, ...NAG_ON, TDOC_MOCK_UPDATE_BEHIND: '3' }, encoding: 'utf8' });
   assert(r.status === 0, `behind path must exit 0, got ${r.status}`);
   assert(/TDOC_UPDATE_AVAILABLE: 3/.test(r.stdout), `stdout machine line missing: ${r.stdout}`);
   assert(/tdoc-update --yes/.test(r.stderr), `stderr must encourage tdoc-update --yes, got: ${r.stderr}`);
@@ -768,7 +778,7 @@ t('tdoc-update-nag prints TDOC_UPDATE_AVAILABLE when behind (mock)', () => {
 
 t('tdoc-update-nag --json is parseable', () => {
   const nag = path.join(BIN, 'tdoc-update-nag');
-  const r = spawnSync(nag, ['--json'], { env: { ...process.env, TDOC_MOCK_UPDATE_BEHIND: '2' }, encoding: 'utf8' });
+  const r = spawnSync(nag, ['--json'], { env: { ...process.env, ...NAG_ON, TDOC_MOCK_UPDATE_BEHIND: '2' }, encoding: 'utf8' });
   assert(r.status === 0, `json path must exit 0, got ${r.status}`);
   const j = JSON.parse(r.stdout);
   assert(j.ok === false && j.behind === 2 && j.checked === true, `json body: ${r.stdout}`);
@@ -780,6 +790,7 @@ t('tdoc-doctor --json preserves the machine report contract', () => {
   const r = spawnSync(doctor, ['--json'], {
     env: {
       ...process.env,
+      ...NAG_ON,
       TDOC_MOCK_UPDATE_BEHIND: '2',
       TDOC_MOCK_NO_WRANGLER: '1',
       TDOC_MOCK_NO_GH: '1',
@@ -894,7 +905,7 @@ t('a network blip does not silently change which account you sign in as', () => 
 
 t('tdoc-update-nag diverged mock does not tell the user to --yes', () => {
   const nag = path.join(BIN, 'tdoc-update-nag');
-  const r = spawnSync(nag, [], { env: { ...process.env, TDOC_MOCK_UPDATE_DIVERGED: '1' }, encoding: 'utf8' });
+  const r = spawnSync(nag, [], { env: { ...process.env, ...NAG_ON, TDOC_MOCK_UPDATE_DIVERGED: '1' }, encoding: 'utf8' });
   assert(r.status === 0);
   assert(/TDOC_UPDATE_DIVERGED/.test(r.stdout), `stdout: ${r.stdout}`);
   assert(/cannot fast-forward/.test(r.stderr), `stderr: ${r.stderr}`);
@@ -905,7 +916,7 @@ t('tdoc-update-nag diverged mock does not tell the user to --yes', () => {
 
 t('tdoc-new --help/--quiet stay silent; otherwise nag stays off stdout', () => {
   const bin = path.join(BIN, 'tdoc-new');
-  const env = { ...process.env, TDOC_MOCK_UPDATE_BEHIND: '3' };
+  const env = { ...process.env, ...NAG_ON, TDOC_MOCK_UPDATE_BEHIND: '3' };
   const help = spawnSync(bin, ['--help'], { env, encoding: 'utf8' });
   assert(help.status === 0);
   assert(!/TDOC_UPDATE|newer commit/.test(help.stdout + help.stderr), `help leaked nag: ${help.stdout}${help.stderr}`);
@@ -977,7 +988,7 @@ t('tdoc-update-nag real git: ahead-only is silent, behind nags, both diverge', (
   for (const { kind, want } of cases) {
     const { root, nag } = makeNagRepo(kind);
     try {
-      const r = spawnSync(nag, [], { encoding: 'utf8', timeout: 15000 });
+      const r = spawnSync(nag, [], { env: { ...process.env, ...NAG_ON }, encoding: 'utf8', timeout: 15000 });
       assert(r.status === 0, `${kind}: exit ${r.status} stderr=${r.stderr}`);
       if (want === 'silent') {
         assert(!r.stdout, `${kind} stdout: ${r.stdout}`);
@@ -995,6 +1006,31 @@ t('tdoc-update-nag real git: ahead-only is silent, behind nags, both diverge', (
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+t('tdoc-update-nag gives up on a fetch that hangs, quietly, within seconds', () => {
+  // http.lowSpeedTime only stops a stalled transfer; a slow connect or a slow
+  // download once held tdoc-new for 20s+. Here fetch never answers.
+  const { root, nag } = makeNagRepo('behind');
+  const fake = path.join(root, 'fake-bin');
+  fs.mkdirSync(fake);
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(path.join(fake, 'git'),
+    `#!/bin/sh\nfor a in "$@"; do [ "$a" = fetch ] && exec sleep 60; done\nexec "${realGit}" "$@"\n`);
+  fs.chmodSync(path.join(fake, 'git'), 0o755);
+  try {
+    const started = Date.now();
+    const r = spawnSync(nag, [], {
+      env: { ...process.env, ...NAG_ON, PATH: `${fake}:${process.env.PATH}`, TDOC_UPDATE_FETCH_SECONDS: '1' },
+      encoding: 'utf8', timeout: 30000,
+    });
+    const took = Date.now() - started;
+    assert(r.status === 0, `exit ${r.status} stderr=${r.stderr}`);
+    assert(took < 10000, `nag waited ${took}ms on a hanging fetch`);
+    assert(!r.stderr, `a stopped fetch must not print anything: ${r.stderr}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
