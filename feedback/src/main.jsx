@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MessageSquarePlus, MessagesSquare, Plus, Share2, ExternalLink, X, Send, RefreshCw, SquareDashed, ChevronDown, Check } from 'lucide-react';
+import { MessageSquarePlus, MessagesSquare, Plus, Share2, ExternalLink, X, Send, RefreshCw, ChevronDown, Check } from 'lucide-react';
 import { FLAGS, isPreviewHostname } from '../../shell/src/feature-flags.js';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentThreadList } from '../../shell/src/document/comment-thread-list.jsx';
@@ -210,12 +210,6 @@ ${uiCss}
     /* The box keeps a ground-colored hairline so it shows on accent-colored
        content (a blue chart) as well as on white. */
     #tdoc-feedback-root .tdoc-drag-marquee { box-shadow: 0 0 0 1px var(--td-ground); }
-    #tdoc-feedback-root .tdoc-fb-area-label { display: none; }
-    #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area { padding: 7px; }
-    @media (min-width: 701px) {
-      #tdoc-feedback-root .tdoc-fb-area-label { display: inline; }
-      #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area { padding: 7px 11px; }
-    }
     /* The space switcher: the list's title, a menu of My space and the
        spaces this person was invited to on this site. */
     #tdoc-feedback-root .tdoc-fb-space { appearance: none; border: 0; background: none; padding: 2px 4px; margin: -2px -4px; border-radius: 6px;
@@ -451,18 +445,20 @@ ${uiCss}
     event.stopImmediatePropagation();
   }, true);
 
-  // Comment on an area: drag a box, the dock's Area tool, C, and long-press
-  // then drag on a phone (shell/src/feature-flags.js feedbackAreaSelect). The
-  // flag is read for the tdoc origin that served this script.
-  const flagOn = (name) => {
+  // Feature flags (shell/src/feature-flags.js), read for the tdoc origin
+  // that served this script, not the page. Dev mode is the signed-in
+  // viewer's: there is no shell boot on another site, so the session answer
+  // (/api/feedback/session, connect) names the dev flags on for the person
+  // behind this token (worker feedbackDevFlags). Nobody connected: none.
+  const flagOn = (name, session) => {
     const pinned = window.__TDOC_FLAGS__ && window.__TDOC_FLAGS__[name];
     if (typeof pinned === 'boolean') return pinned;
     const flag = FLAGS[name];
     if (!flag) return false;
     if (flag.default === true) return true;
+    if (session && session.token && Array.isArray(session.dev_flags) && session.dev_flags.includes(name)) return true;
     try { return flag.preview === true && isPreviewHostname(new URL(base).hostname); } catch (_) { return false; }
   };
-  const areaSelectOn = flagOn('feedbackAreaSelect');
   // Share and invites inside the widget (feature-flags.js feedbackInvites).
   const invitesOn = flagOn('feedbackInvites');
 
@@ -832,6 +828,12 @@ ${uiCss}
       if (document.caretPositionFromPoint) node = document.caretPositionFromPoint(x, y)?.offsetNode || null;
       else if (document.caretRangeFromPoint) node = document.caretRangeFromPoint(x, y)?.startContainer || null;
       if (!node || node.nodeType !== 3 || !node.textContent.trim() || isOurs(node.parentNode)) return false;
+      // Text a person cannot select is not text here: a chart's SVG labels,
+      // anything under user-select: none (buttons, canvases' overlays).
+      const parent = node.parentElement;
+      if (!parent || parent.closest('svg')) return false;
+      const css = getComputedStyle(parent);
+      if ((css.userSelect || css.webkitUserSelect) === 'none') return false;
       const range = document.createRange();
       range.selectNodeContents(node);
       return [...range.getClientRects()].some((r) => x >= r.left - 1 && x <= r.right + 1 && y >= r.top - 1 && y <= r.bottom + 1);
@@ -1108,7 +1110,7 @@ ${uiCss}
     return parts.join(' · ');
   };
 
-  function Dock({ session, openCount, unreadCount = 0, panelOpen, panelWidth, picking, areaMode, onArea, onList, onPick, onHide, sendCount, onSend, onShare }) {
+  function Dock({ session, openCount, unreadCount = 0, panelOpen, panelWidth, picking, onList, onPick, onHide, sendCount, onSend, onShare }) {
     // Share: in the widget, the owner's invites (SharePanel). Who else has
     // access, and moving the space into a team, stay in the space's Share on
     // tdoc: this page's token can add an invite, never change the rest.
@@ -1123,13 +1125,6 @@ ${uiCss}
         <button type="button" className={`primary${picking ? ' on' : ''}`} onClick={onPick} title="Click anything on the page to comment on it">
           <Plus aria-hidden="true" /> Comment
         </button>
-        {onArea ? (
-          // Same toggle as Comment, but every drag draws a box (no element
-          // or text guess). Icon only on a phone, as Share.
-          <button type="button" className={`tdoc-fb-area${picking && areaMode ? ' on' : ''}`} onClick={onArea} aria-pressed={picking && areaMode ? 'true' : 'false'} title="Drag a box around an area to comment on it" aria-label="Area">
-            <SquareDashed aria-hidden="true" /><span className="tdoc-fb-area-label">Area</span>
-          </button>
-        ) : null}
         {onSend ? (
           // The doc page's Send to agent: same icon, same count (comments
           // never sent, or with a human word since the last handoff).
@@ -1258,12 +1253,13 @@ ${uiCss}
     const [filter, setFilter] = useState('open');
     const [surface, setSurface] = useState(null);
     const [session, setSession] = useState(() => readSession());
+    // Comment on an area (feedbackAreaSelect): a preview host, or this
+    // viewer's own dev mode, from the session answer.
+    const areaSelectOn = flagOn('feedbackAreaSelect', session);
     const [hovered, setHovered] = useState(null);
     const [selected, setSelected] = useState(null);
     // A box being commented on: fractions of `selected` (its container).
     const [areaSel, setAreaSel] = useState(null);
-    // The dock's Area tool: every drag draws a box.
-    const [areaMode, setAreaMode] = useState(false);
     // The box while it is being drawn, in viewport pixels.
     const [drag, setDrag] = useState(null);
     const pressRef = useRef(null);
@@ -1528,10 +1524,11 @@ ${uiCss}
     // closes on an outside press, no slider or drag-and-drop starts). One
     // gesture, decided where it starts:
     //   - a click (moved < 8px) picks the element under it;
-    //   - a drag that starts on text picks the element holding the text
-    //     (product anchors have no text ranges yet);
-    //   - a drag that starts anywhere else (blank, image, canvas, chart,
-    //     iframe), with Option/Alt held, or with the Area tool on, draws a box;
+    //   - a drag that starts on selectable text picks the element holding
+    //     the text (product anchors have no text ranges yet), no box;
+    //   - a drag that starts where text can't be selected (blank, image,
+    //     canvas, chart, iframe) draws a box. No key or tool changes this
+    //     (no C shortcut: it would take a host site's own C);
     //   - on a touch screen a tap picks, a long press then drag draws a box,
     //     and a plain swipe still scrolls.
     useEffect(() => {
@@ -1596,10 +1593,12 @@ ${uiCss}
         reset();
         const x = event.clientX, y = event.clientY;
         const start = underPoint(x, y);
-        const forced = areaSelectOn && (areaMode || event.altKey);
+        // One rule (Julie, 2026-11-08): a drag that starts on text a person
+        // could select picks the element; anywhere else (blank, an image, a
+        // canvas, a chart, an iframe) it draws a box.
         const p = {
           id: event.pointerId, touch: event.pointerType !== 'mouse', x, y, lastX: x, lastY: y, start,
-          mode: 'pending', onText: !forced && startsOnText(x, y), forced, timer: 0, scroller: undefined,
+          mode: 'pending', onText: areaSelectOn && startsOnText(x, y), timer: 0, scroller: undefined,
         };
         if (p.touch && areaSelectOn) {
           // Hold still, then drag: a box. Moving first is a scroll.
@@ -1623,7 +1622,7 @@ ${uiCss}
         const far = Math.hypot(x - p.x, y - p.y) >= THRESHOLD;
         if (p.mode === 'pending' && far) {
           if (p.touch) { p.mode = 'scroll'; clearTimeout(p.timer); return; }
-          p.mode = !areaSelectOn ? 'element' : (p.forced || !p.onText ? 'area' : 'text');
+          p.mode = !areaSelectOn ? 'element' : (p.onText ? 'text' : 'area');
         }
         if (p.mode === 'area') { setHovered(null); setDrag(boxOf(p, x, y)); }
         else if (p.mode === 'text') setHovered(commonAncestor(p.start, underPoint(x, y)));
@@ -1697,10 +1696,7 @@ ${uiCss}
         for (const type of types) window.removeEventListener(type, listener, options);
         window.removeEventListener('blur', away);
       };
-    }, [picking, reanchorId, selected, apply, areaMode]);
-
-    // Leaving pick mode puts the Area tool away.
-    useEffect(() => { if (!picking && !reanchorId) setAreaMode(false); }, [picking, reanchorId]);
+    }, [picking, reanchorId, selected, apply, areaSelectOn]);
 
     // Esc steps back one level: composer → picking → card → list → hidden.
     useEffect(() => {
@@ -1737,26 +1733,6 @@ ${uiCss}
       document.addEventListener('keydown', keydown, true);
       return () => document.removeEventListener('keydown', keydown, true);
     }, [surface, load]);
-
-    // C: Comment (pick mode) while the layer is shown, unless someone is
-    // typing (in the app or in our composer) or holds a modifier. The app
-    // does not get that C.
-    useEffect(() => {
-      if (!areaSelectOn || !shown) return undefined;
-      const keydown = (event) => {
-        if (event.key !== 'c' && event.key !== 'C') return;
-        if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
-        const target = event.composedPath()[0];
-        if (target instanceof Element && (target.matches('input,textarea,select,[contenteditable=""],[contenteditable="true"]') || target.isContentEditable)) return;
-        if (selected || notifyIds) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        setOpenId(null); setPanelOpen(false);
-        setPicking((p) => !p);
-      };
-      window.addEventListener('keydown', keydown, true);
-      return () => window.removeEventListener('keydown', keydown, true);
-    }, [shown, selected, notifyIds]);
 
     // Hash-route navigation is a new page: reload which comments are here.
     useEffect(() => {
@@ -1859,11 +1835,9 @@ ${uiCss}
     const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     const bannerText = !areaSelectOn
       ? (reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it')
-      : areaMode
-        ? (coarse ? 'Hold, then drag a box around the area' : 'Drag a box around the area')
-        : reanchorId
-          ? (coarse ? 'Tap the element, or hold and drag a box' : 'Click the element, or drag a box, this comment should point at')
-          : (coarse ? 'Tap an element, or hold and drag a box' : 'Click an element, or drag a box around an area');
+      : reanchorId
+        ? (coarse ? 'Tap the element this comment should point at, or hold and drag a box' : 'Click the element this comment should point at, or drag a box from an empty spot')
+        : (coarse ? 'Tap an element, or hold and drag a box' : 'Click an element, or drag a box from an empty spot');
     // A box on screen: one being drawn, one being commented on, the open
     // comment's area.
     const marquee = (box, tag) => box ? (
@@ -2040,13 +2014,8 @@ ${uiCss}
           panelOpen={panelOpen}
           panelWidth={panelSide.width}
           picking={picking}
-          areaMode={areaMode}
-          onArea={areaSelectOn ? () => {
-            setOpenId(null); setSelected(null); setAreaSel(null); setPanelOpen(false);
-            if (!picking) { setPicking(true); setAreaMode(true); } else setAreaMode((v) => !v);
-          } : null}
           onList={() => setPanelOpen((v) => !v)}
-          onPick={() => { setOpenId(null); setSelected(null); setAreaSel(null); setPanelOpen(false); setAreaMode(false); setPicking((v) => !v); }}
+          onPick={() => { setOpenId(null); setSelected(null); setAreaSel(null); setPanelOpen(false); setPicking((v) => !v); }}
           onHide={hide}
           sendCount={ready.length}
           onSend={showSend ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}
