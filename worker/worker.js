@@ -38,6 +38,11 @@ const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;
 // The push service worker (shell/src/push-sw.js → server/runtime/tdoc-sw.js),
 // served at /tdoc-sw.js. See "web push" below.
 const PUSH_SW_JS = `__TDOC_PUSH_SW_JS__`;
+// The sheets viewer (server/sheets-source.js: shared/sheet-*.mjs +
+// server/sheets-viewer.js), fetched at /sheets-viewer.js?v=<hash> only by a
+// doc frame that holds a <table data-tdoc-sheet> (server/sheets-loader.js).
+const SHEETS_VIEWER_JS = `__TDOC_SHEETS_VIEWER_JS__`;
+const SHEETS_VIEWER_VERSION = "__TDOC_SHEETS_VIEWER_VERSION__";
 const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
 
 const TDOC_ONBOARDING_URL = 'https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md';
@@ -3239,7 +3244,10 @@ function wrapBareTables(html) {
 // text-size-adjust: iOS Safari otherwise "autosizes" long text blocks, so
 // on a phone some table columns rendered huge next to short ones (Julie,
 // 2026-10-13; diagnosed by research-claw). Applied to every doc at serve time.
-const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
+// A sheet (<table data-tdoc-sheet>) is drawn by the sheets viewer, which hides
+// the table; until it loads, only its first 200 rows are laid out. Laying out
+// all of a 10,000-row table first took the frame 7 seconds.
+const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}table[data-tdoc-sheet]>tbody>tr:nth-child(n+201){display:none}';
 function hasReaderBlock(html) {
   return READER_BLOCK_RE.test(html);
 }
@@ -24855,6 +24863,20 @@ const tdocHandlers = {
           'Cache-Control': 'no-cache',
           'Service-Worker-Allowed': '/',
           'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+    if (p === '/sheets-viewer.js' && (method === 'GET' || method === 'HEAD')) {
+      // The loader names the version it was built with. That URL never
+      // changes content, so it is cached for a year; any other asks again.
+      const current = url.searchParams.get('v') === SHEETS_VIEWER_VERSION;
+      return new Response(method === 'HEAD' ? null : SHEETS_VIEWER_JS, {
+        headers: {
+          'Content-Type': 'text/javascript; charset=utf-8',
+          'Cache-Control': current ? 'public, max-age=31536000, immutable' : 'public, max-age=300',
+          'X-Content-Type-Options': 'nosniff',
+          // Fetched by the sandboxed (opaque-origin) doc frame.
+          'Cross-Origin-Resource-Policy': 'cross-origin',
         },
       });
     }

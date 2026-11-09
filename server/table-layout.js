@@ -7,8 +7,12 @@ function layoutTables({ apply = true } = {}) {
   // Serve-time wrapping also covers historical files. This handles tables
   // inserted by the browser editor after the frame was served, using the
   // same ordinary wrapper that the provider already saves/exports.
+  // A sheet (`table[data-tdoc-sheet]`) is drawn by the sheets viewer, which
+  // sizes its own columns; measuring every cell of a 10,000-row sheet here
+  // would cost seconds. Its wrapper still comes from serve time.
+  const isSheet = t => t.matches('table[data-tdoc-sheet]');
   if (apply) for (const table of document.querySelectorAll('table')) {
-    if (table.parentElement.classList.contains('tdoc-table-scroll') ||
+    if (isSheet(table) || table.parentElement.classList.contains('tdoc-table-scroll') ||
         getComputedStyle(table).display !== 'table' ||
         getComputedStyle(table).writingMode !== 'horizontal-tb') continue;
     const wrapper = document.createElement('div');
@@ -46,7 +50,7 @@ function layoutTables({ apply = true } = {}) {
     return rects;
   };
   const allTables = [...document.querySelectorAll('table')];
-  const tables = allTables.filter(t =>
+  const tables = allTables.filter(t => !isSheet(t) &&
     t.getClientRects().length && getComputedStyle(t).display === 'table' &&
     getComputedStyle(t).visibility !== 'hidden' && getComputedStyle(t).writingMode === 'horizontal-tb');
   const records = tables.map(table => {

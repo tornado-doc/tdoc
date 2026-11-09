@@ -37,6 +37,7 @@ function childEnv() {
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const frameProbeSource = require('./frame-probe-source');
+const { sheetsViewerSource, sheetsViewerVersion } = require('./sheets-source');
 // Shared shell builder keeps local and production boot markup identical.
 const SHELL = require('./shell.js');
 const { loadRuntimeAssets } = require('./runtime-assets.js');
@@ -954,7 +955,9 @@ function wrapBareTables(html) {
   return out.join('');
 }
 
-const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
+// Sheets: only the first 200 rows of a <table data-tdoc-sheet> are laid out
+// before the sheets viewer replaces it (see the worker's comment).
+const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}table[data-tdoc-sheet]>tbody>tr:nth-child(n+201){display:none}';
 
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function readerCss() {
@@ -1356,6 +1359,18 @@ const server = http.createServer(async (req, res) => {
       'Cache-Control': 'no-cache',
       'Service-Worker-Allowed': '/',
       'X-Content-Type-Options': 'nosniff',
+    });
+  }
+  // The sheets viewer, fetched by a doc frame that holds a sheet
+  // (server/sheets-loader.js). Read per request so an edit shows on reload;
+  // the hashed URL is what the worker caches for a year.
+  if (p === '/sheets-viewer.js' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const source = sheetsViewerSource();
+    return send(res, 200, req.method === 'HEAD' ? '' : source, {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Tdoc-Sheets-Version': sheetsViewerVersion(source),
     });
   }
   if (p === '/feedback.js' && (req.method === 'GET' || req.method === 'HEAD')) {
