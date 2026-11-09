@@ -57,7 +57,8 @@ async function startServer(worker, env) {
       return res.end(fs.readFileSync(asset.file));
     }
     const chunks = [];
-    for await (const chunk of request) chunks.push(chunk);
+    // A browser closing mid-request (a poll, a read mark) aborts its body.
+    try { for await (const chunk of request) chunks.push(chunk); } catch { return; }
     const headers = { ...request.headers, host: 'tdoc.dev' };
     if (headers.origin) headers.origin = TDOC;
     delete headers.referer;
