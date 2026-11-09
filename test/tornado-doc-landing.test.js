@@ -62,8 +62,8 @@ t('hero demo is a static mock, no iframe or author script', () => {
   assert(demo.length > 1000, 'the hd demo block is missing');
   assert(!/<iframe/i.test(html), 'the page frames an iframe; the demo is a static mock now');
   assert(!/<script\b/i.test(html), 'a published tdoc runs no author script');
-  assert(/class="hd-bars"/.test(demo) && /class="hd-scatter"/.test(demo) && /class="hd-stack"/.test(demo),
-    'each demo window needs its crafted artifact (bars / scatter / stack)');
+  assert(/class="hd-bars"/.test(demo) && /class="hd-hbars"/.test(demo),
+    'the demo needs its crafted charts (v1 bars, v2 cost bars)');
   // The old CSS-sprite glider workaround must stay gone from the host.
   assert(!/<g class="glider"/.test(html), 'CSS-sprite glider group still present');
   assert(!/@keyframes\s+glide/.test(html), 'host CSS still has the sprite @keyframes glide');
@@ -200,10 +200,10 @@ t('phone rules override the headline, and no redundant Star pill in the doc', ()
     `last h1.tagline media query is ${last && last[1]}px; 640 must come last so phones do not inherit the 840px size`);
 });
 
-t('each demo thread is one comment with one agent reply', () => {
+t('the demo thread is one comment with one agent reply', () => {
   const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
   const threads = demo.match(/<aside class="hd-notes">[\s\S]*?<\/aside>/g) || [];
-  assert(threads.length === 3, `expected 3 threads, found ${threads.length}`);
+  assert(threads.length === 1, `expected 1 thread, found ${threads.length}`);
   for (const th of threads) {
     const humans = (th.match(/<b>Jesse Pollak<\/b>/g) || []).length;
     const replies = (th.match(/<div class="hd-reply">/g) || []).length;
@@ -218,7 +218,6 @@ t('agent avatars are filled brand discs, not hollow glyphs', () => {
   const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
   assert(/background:#d97757"><svg[^>]*><use href="#hd-claude"/.test(demo),
     'Claude reply needs a terracotta disc with the claude mark');
-  assert(/#hd-openai/.test(demo) && /#hd-x/.test(demo), 'Codex and Grok marks must be present');
   assert(/#hd-claude"[\s\S]*?fill="#fff"/.test(html), 'the claude mark must be white on its disc');
 });
 

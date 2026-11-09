@@ -714,70 +714,69 @@
       
     </div>
 
-    <!-- tdoc demo: refined static mock (self-contained, hd- namespaced).
-         Auto-rotates the three docs until a tab is clicked, then pins. -->
+    <!-- tdoc demo: one doc, one full loop (self-contained, hd- namespaced).
+         CSS-only, 16s cycle: select a line, comment, the agent rewrites the
+         doc, v1 becomes v2. Every animated piece shares the same 16s clock. -->
 <svg style="display:none">
   <symbol id="hd-ck" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="hd-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
   <symbol id="hd-fbars" viewBox="0 0 24 24"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="6" width="4" height="15" rx="1"/><rect x="17" y="9" width="4" height="12" rx="1"/></symbol>
-  <symbol id="hd-fscan" viewBox="0 0 24 24"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="m20 20-5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
-  <symbol id="hd-fcode" viewBox="0 0 24 24"><path d="m8 6-6 6 6 6M16 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="hd-claude" viewBox="0 0 24 24"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" fill="#fff"/></symbol>
-  <symbol id="hd-openai" viewBox="0 0 24 24"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" fill="#fff"/></symbol>
-  <symbol id="hd-x" viewBox="0 0 24 24"><path d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z" fill="#fff"/></symbol>
+  <symbol id="hd-arrow" viewBox="0 0 24 24"><path d="M5 2.5v17.2l4.6-4.3 2.9 6.6 3-1.3-2.9-6.5h6.2Z" fill="#10121a" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></symbol>
 </svg>
 <style>
 /* ============================ tdoc demo (hd-) ============================ */
-  .hd{--serif:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:system-ui,-apple-system,"Segoe UI",sans-serif;
+  @property --hd-sel{syntax:'<color>';inherits:false;initial-value:#cfe0ff}
+  .hd{--serif:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:system-ui,-apple-system,"Segoe UI",sans-serif;--T:16s;
     display:grid;position:relative}
-  .hd input{position:absolute;opacity:0;pointer-events:none}
   /* the published overlay forces margin:16px auto + border-radius on every doc
      svg (to space out figures). That pushes our inline icons out of their
      discs, so opt every demo svg back out. */
   .hd svg{margin:0 !important;border-radius:0 !important}
-  .hd-win{grid-area:1/1;min-width:0;border-radius:14px;background:#fff;overflow:hidden;border:1px solid var(--rule);
-    box-shadow:0 1px 2px rgba(16,18,26,.04);
-    opacity:0;visibility:hidden}
-  /* auto-rotate until a tab is clicked (mirrors the original) */
-  .hd:not(:has(input:checked)) .hd-w1{animation:hcyc1 18s steps(1,end) infinite}
-  .hd:not(:has(input:checked)) .hd-w2{animation:hcyc2 18s steps(1,end) infinite}
-  .hd:not(:has(input:checked)) .hd-w3{animation:hcyc3 18s steps(1,end) infinite}
-  @keyframes hcyc1{0%{opacity:1;visibility:visible}33.33%{opacity:0;visibility:hidden}}
-  @keyframes hcyc2{0%{opacity:0;visibility:hidden}33.33%{opacity:1;visibility:visible}66.66%{opacity:0;visibility:hidden}}
-  @keyframes hcyc3{0%{opacity:0;visibility:hidden}66.66%{opacity:1;visibility:visible}}
-  /* click pins one and cancels rotation */
-  #hd1:checked~.hd-w1,#hd2:checked~.hd-w2,#hd3:checked~.hd-w3{opacity:1;visibility:visible;animation:none}
-  @supports not selector(:has(*)){.hd-w1{opacity:1;visibility:visible}}
+  .hd-win{min-width:0;border-radius:14px;background:#fff;overflow:hidden;border:1px solid var(--rule);
+    box-shadow:0 1px 2px rgba(16,18,26,.04)}
 
   .hd-bar{display:flex;align-items:center;gap:10px;height:46px;padding:0 14px;background:var(--wash);border-bottom:1px solid var(--rule)}
   .hd-lights{display:flex;gap:8px;flex:none}
   .hd-lights i{width:11px;height:11px;border-radius:50%;display:block}
   .hd-lights i:nth-child(1){background:#ff5f57}.hd-lights i:nth-child(2){background:#febc2e}.hd-lights i:nth-child(3){background:#28c840}
   .hd-tabs{display:flex;align-items:flex-end;gap:2px;margin-left:4px;min-width:0}
-  .hd-tab{display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:9px 9px 0 0;font-size:12.5px;color:var(--muted);
-    white-space:nowrap;position:relative;top:1px;cursor:pointer;transition:background .12s,color .12s}
-  .hd-tab:hover{background:rgba(16,18,26,.045);color:var(--body)}
+  .hd-tab{display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:9px 9px 0 0;font-size:12.5px;
+    white-space:nowrap;position:relative;top:1px;background:#fff;color:var(--ink);font-weight:600;border:1px solid var(--rule);border-bottom-color:#fff}
   .hd-tab .hd-fav{width:15px;height:15px;border-radius:4px;display:grid;place-items:center;flex:none}
   .hd-tab .hd-fav svg{width:9px;height:9px;display:block}
-  .hd-tab .hd-x{opacity:0;font-size:14px;margin-left:2px}
-  .hd-tab.on{background:#fff;color:var(--ink);font-weight:600;border:1px solid var(--rule);border-bottom-color:#fff}
-  .hd-tab.on .hd-x{opacity:.4}
   .hd-addr{flex:1;display:flex;justify-content:center;min-width:0}
   .hd-omni{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 14px;max-width:340px;min-width:0;background:#fff;border:1px solid var(--rule);border-radius:8px;font-size:12.5px;color:var(--muted)}
   .hd-url{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
   .hd-omni svg{width:11px;height:11px;flex:none;opacity:.5;display:block}
   .hd-omni b{color:var(--ink);font-weight:600}
 
-  .hd-canvas{display:grid;grid-template-columns:1fr 300px;height:590px}
+  .hd-canvas{display:grid;grid-template-columns:1fr 300px;min-height:540px}
   .hd-doc{padding:32px 36px 30px;border-right:1px solid var(--rule);position:relative;overflow:hidden}
+  .hd-prog{position:absolute;left:0;right:0;top:0;height:3px;background:var(--accent);transform-origin:left;transform:scaleX(0);opacity:0;
+    animation:hd-prog var(--T) linear infinite}
   .hd-ey{font:700 10.5px/1 system-ui;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 12px}
   .hd-doc h3{font:600 29px/1.15 var(--serif);color:var(--ink);letter-spacing:-.01em;margin:0 0 6px}
   .hd-by{font-size:12.5px;color:var(--muted);margin:0 0 18px}
+  .hd-by .v{display:inline-block;font:700 10.5px/1 system-ui;color:var(--accent);background:var(--soft);border-radius:5px;padding:3px 6px;margin-left:4px;vertical-align:1px}
   .hd-doc p{font-size:14.5px;line-height:1.62;color:var(--body);margin:0 0 14px}
   .hd-lead{font-size:15.5px;color:#2b3040}
-  .hd-anchor{background:linear-gradient(transparent 62%,#fff2b8 0);box-shadow:0 0 0 1px #f2d675 inset;border-radius:2px;padding:0 1px}
-  .hd-pin{display:inline-grid;place-items:center;vertical-align:-3px;margin-left:3px;width:22px;height:22px;border-radius:50% 50% 50% 3px;
-    background:var(--accent);border:2px solid #fff;color:#fff;font:700 9px/1 system-ui}
+  /* the two versions of the doc body share one grid cell and cross-fade */
+  .hd-ver{display:grid}
+  .hd-ver>div{grid-area:1/1;min-width:0}
+  .hd-v1{animation:hd-v1 var(--T) ease infinite}
+  .hd-v2{opacity:0;animation:hd-v2 var(--T) ease infinite}
+
+  /* v1: the selected line -> anchored comment -> struck out */
+  .hd-sel{background:linear-gradient(var(--hd-sel),var(--hd-sel)) no-repeat 0 0/0% 100%;border-radius:2px;
+    text-decoration:line-through 2px transparent;animation:hd-sel var(--T) linear infinite}
+  .hd-cur{display:inline-block;width:0;height:1em;position:relative;vertical-align:-2px}
+  .hd-cur svg{position:absolute;left:-3px;top:6px;width:20px;height:20px;display:block;opacity:0;animation:hd-cur var(--T) ease infinite}
+  .hd-pin{display:inline-grid;place-items:center;vertical-align:-3px;overflow:hidden;width:0;margin-left:0;height:22px;box-sizing:border-box;border-radius:50% 50% 50% 3px;
+    background:var(--accent);border:0 solid #fff;color:#fff;font:700 9px/1 system-ui;animation:hd-pin var(--T) ease infinite}
+  /* v2: what the agent changed is washed green, then settles */
+  .hd-new{border-radius:2px;animation:hd-new var(--T) ease infinite}
+
   .hd-tldr{display:flex;gap:11px;padding:12px 15px;background:var(--wash);border:1px solid var(--rule);border-left:3px solid var(--ink);border-radius:0 8px 8px 0;margin:4px 0 18px;font-size:13.5px}
   .hd-tldr b.k{color:var(--ink);font-weight:700;letter-spacing:.03em;font-size:11px;flex:none;padding-top:1px}
   .hd-tldr b{color:var(--ink)}
@@ -786,27 +785,25 @@
   .hd-vt b{font-size:13px;color:var(--ink)}.hd-vt span{font-size:11px;color:var(--muted)}
   .hd-bars{display:flex;align-items:flex-end;gap:16px;height:112px;padding-left:4px}
   .hd-bars .c{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:7px;height:100%}
-  .hd-bars .b{width:100%;max-width:44px;border-radius:5px 5px 0 0;background:#e3e7ef;transform-origin:bottom;animation:hgrow 1s cubic-bezier(.2,.85,.25,1) both}
+  .hd-bars .b{width:100%;max-width:44px;border-radius:5px 5px 0 0;background:#e3e7ef}
   .hd-bars .c.hot .b{background:var(--accent)}
-  .hd-bars .c:nth-child(1) .b{animation-delay:.05s}.hd-bars .c:nth-child(2) .b{animation-delay:.13s}
-  .hd-bars .c:nth-child(3) .b{animation-delay:.21s}.hd-bars .c:nth-child(4) .b{animation-delay:.29s}
-  .hd-bars .v{font:700 11px/1 var(--mono);color:var(--ink);animation:hrise .6s .35s both}
+  .hd-bars .v{font:700 11px/1 var(--mono);color:var(--ink)}
   .hd-bars .l{font-size:10.5px;color:var(--muted)}
-  @keyframes hgrow{from{transform:scaleY(0)}}
-  @keyframes hrise{from{opacity:0;transform:translateY(6px)}}
-  .hd-scatter{width:100%;max-width:360px !important;height:auto;animation:hfade .7s ease both}
-  @keyframes hfade{from{opacity:0;transform:translateY(10px)}}
-  .hd-stack{display:flex;height:34px;border-radius:7px;overflow:hidden;border:1px solid var(--rule);animation:hwipe .9s cubic-bezier(.2,.8,.2,1) both}
-  @keyframes hwipe{from{clip-path:inset(0 100% 0 0)}}
-  .hd-stack i{display:grid;place-items:center;font:600 10px/1 var(--mono);color:#fff}
-  .hd-sleg{display:flex;flex-wrap:wrap;gap:9px 15px;margin:11px 0 0;font-size:11px;color:var(--muted)}
-  .hd-sleg span{display:inline-flex;align-items:center;gap:5px}.hd-sleg em{width:9px;height:9px;border-radius:2px}
-  .hd-fade{display:none}
+  .hd-hbars{display:grid;grid-template-columns:auto 1fr;gap:12px 14px;align-items:center;padding:6px 0 4px}
+  .hd-hbars .l{font-size:12px;color:var(--body)}
+  .hd-hbars .t{height:26px;display:flex;align-items:center;gap:8px}
+  .hd-hbars .b{height:100%;border-radius:0 5px 5px 0;background:#e3e7ef;transform-origin:left;animation:hd-grow var(--T) cubic-bezier(.2,.85,.25,1) infinite}
+  .hd-hbars .hot .b{background:var(--accent)}
+  .hd-hbars .v{font:700 12px/1 var(--mono);color:var(--ink)}
+  .hd-hbars .s{font-size:10.5px;color:var(--muted);grid-column:1/-1;margin-top:2px}
 
   .hd-notes{background:#fafbfc;padding:20px 18px;display:flex;flex-direction:column}
-  .hd-thread{border:1px solid var(--rule);border-radius:12px;background:#fff;padding:13px 14px}
-  .hd-chip{display:inline-flex;align-items:center;gap:5px;font:700 10px/1 system-ui;letter-spacing:.04em;text-transform:uppercase;color:var(--good);background:#e8f6ee;border-radius:5px;padding:4px 7px;margin:0 0 10px}
-  .hd-chip.b{color:var(--accent);background:var(--soft)}
+  .hd-panel{display:grid}
+  .hd-panel>*{grid-area:1/1;min-width:0}
+  .hd-empty{align-self:start;border:1px dashed #d6dbe5;border-radius:12px;padding:18px 14px;text-align:center;font-size:12px;color:var(--muted);animation:hd-empty var(--T) ease infinite}
+  .hd-thread{align-self:start;border:1px solid var(--rule);border-radius:12px;background:#fff;padding:13px 14px;opacity:0;animation:hd-thread var(--T) ease infinite}
+  .hd-quote{font-size:11.5px;line-height:1.45;color:var(--muted);border-left:2px solid #f2d675;padding-left:8px;margin:0 0 10px}
+  .hd-chip{display:inline-flex;align-items:center;gap:5px;font:700 10px/1 system-ui;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);background:var(--soft);border-radius:5px;padding:4px 7px;margin:0 0 9px}
   .hd-chip svg{width:11px;height:11px;display:block}
   .hd-who{display:flex;align-items:center;gap:8px;margin:0 0 7px}
   .hd-av{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;overflow:hidden}
@@ -814,166 +811,141 @@
   .hd-av svg{width:15px;height:15px;display:block}
   .hd-who b{font-size:12.5px;color:var(--ink);font-weight:650}.hd-who .t{margin-left:auto;font-size:10.5px;color:var(--muted)}
   .hd-msg{font-size:12.5px;line-height:1.5;color:var(--body);margin:0 0 9px}.hd-msg b{color:var(--ink)}
-  .hd-reply{margin-top:11px;padding-top:12px;border-top:1px solid var(--rule)}
-  .hd-r{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);background:var(--wash);border:1px solid var(--rule);border-radius:20px;padding:2px 8px}
-  .hd-vbump{display:flex;align-items:center;gap:7px;margin:auto 2px 0;font:600 11px/1 var(--mono);color:var(--accent)}
+  /* the comment is typed out, then posted */
+  .hd-typed{display:block;white-space:nowrap;overflow:hidden;clip-path:inset(0 100% 0 0);animation:hd-type var(--T) steps(36,end) infinite}
+  .hd-post{display:flex;justify-content:flex-end;height:28px;animation:hd-post var(--T) ease infinite;overflow:hidden}
+  .hd-post span{font:600 11.5px/1 system-ui;color:#fff;background:var(--ink);border-radius:7px;padding:8px 12px;align-self:flex-start;animation:hd-press var(--T) ease infinite}
+  .hd-reply{margin-top:11px;padding-top:12px;border-top:1px solid var(--rule);opacity:0;animation:hd-reply var(--T) ease infinite}
+  .hd-step{display:grid}
+  .hd-step>*{grid-area:1/1;min-width:0}
+  .hd-work{font-size:12.5px;color:var(--muted);animation:hd-work var(--T) ease infinite}
+  .hd-work i{display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--muted);margin-left:3px;animation:hd-dot 1s ease-in-out infinite}
+  .hd-work i:nth-child(2){animation-delay:.15s}.hd-work i:nth-child(3){animation-delay:.3s}
+  .hd-done{opacity:0;animation:hd-done var(--T) ease infinite}
+  .hd-vbump{display:flex;align-items:center;gap:7px;margin:auto 2px 0;padding-top:16px;font:600 11px/1 var(--mono);color:var(--accent)}
   .hd-vbump .dot{width:5px;height:5px;border-radius:50%;background:var(--good)}
   .hd-vbump .f{color:var(--muted)}.hd-vbump em{color:var(--muted);font:500 11px/1 system-ui;font-style:normal}
+  .hd-vbump .n{opacity:0;animation:hd-done var(--T) ease infinite}
   .hd-cap{text-align:center;color:var(--muted);font-size:13px;margin:20px 0 0}.hd-cap b{color:var(--ink);font-weight:600}
 
+  /* ---- the 16s clock ----
+      0-6%   v1 sits still
+      6-18%  cursor drags across a line, selecting it
+     20-36%  a comment card opens and the question is typed
+     36-40%  Comment is pressed; the line is anchored (JP pin)
+     41-55%  Claude replies "rewriting"; progress runs across the doc
+     52-56%  the old line is struck out
+     57%     v2 cross-fades in, change washed green; reply says applied; v1 -> v2
+     57-93%  hold
+     93-100% reset to v1 */
+  @keyframes hd-cur{0%,5%{opacity:0;transform:translate(-150px,4px)}7%{opacity:1;transform:translate(-150px,4px)}
+    17%{opacity:1;transform:translate(0,0)}21%,100%{opacity:0;transform:translate(0,0)}}
+  @keyframes hd-sel{0%,7%{background-size:0% 100%;--hd-sel:#cfe0ff;text-decoration-color:transparent;color:inherit}
+    17%{background-size:100% 100%;--hd-sel:#cfe0ff}
+    36%{--hd-sel:#cfe0ff}39%{--hd-sel:#fff2b8;text-decoration-color:transparent;color:inherit}
+    52%{background-size:100% 100%;--hd-sel:#fff2b8;text-decoration-color:transparent;color:inherit}
+    55%,94%{background-size:100% 100%;--hd-sel:#ffe1e1;text-decoration-color:#d33a3a;color:#a12a2a}
+    96%,100%{background-size:0% 100%;--hd-sel:#cfe0ff;text-decoration-color:transparent;color:inherit}}
+  @keyframes hd-pin{0%,37%{width:0;margin-left:0;border-width:0}39%,94%{width:22px;margin-left:3px;border-width:2px}96%,100%{width:0;margin-left:0;border-width:0}}
+  @keyframes hd-prog{0%,42%{opacity:0;transform:scaleX(0)}43%{opacity:1;transform:scaleX(.04)}55%{opacity:1;transform:scaleX(1)}58%,100%{opacity:0;transform:scaleX(1)}}
+  @keyframes hd-v1{0%,56%{opacity:1}59%,94%{opacity:0}97%,100%{opacity:1}}
+  @keyframes hd-v2{0%,56%{opacity:0}59%,94%{opacity:1}97%,100%{opacity:0}}
+  @keyframes hd-new{0%,57%{background-color:#bdeccb}62%{background-color:#bdeccb}85%,100%{background-color:#e3f7ea}}
+  @keyframes hd-grow{0%,57%{transform:scaleX(0)}64%,100%{transform:scaleX(1)}}
+  @keyframes hd-empty{0%,18%{opacity:1}20%,95%{opacity:0}98%,100%{opacity:1}}
+  @keyframes hd-thread{0%,19%{opacity:0;transform:translateY(8px)}22%,93%{opacity:1;transform:none}96%,100%{opacity:0;transform:none}}
+  @keyframes hd-type{0%,23%{clip-path:inset(0 100% 0 0)}34%,100%{clip-path:inset(0 0 0 0)}}
+  @keyframes hd-post{0%,38%{height:28px;opacity:1}40%,100%{height:0;opacity:0}}
+  @keyframes hd-press{0%,36%{transform:none}37%{transform:scale(.92)}38%,100%{transform:none}}
+  @keyframes hd-reply{0%,40%{opacity:0;transform:translateY(6px)}43%,100%{opacity:1;transform:none}}
+  @keyframes hd-work{0%,56%{opacity:1}58%,100%{opacity:0}}
+  @keyframes hd-done{0%,56%{opacity:0}59%,100%{opacity:1}}
+  @keyframes hd-dot{0%,100%{opacity:.25}50%{opacity:1}}
+
+  /* reduced motion: no clock, show the finished v2 state */
   @media (prefers-reduced-motion:reduce){
-    .hd:not(:has(input:checked)) .hd-w1{opacity:1;visibility:visible;animation:none}
-    .hd:not(:has(input:checked)) .hd-w2,.hd:not(:has(input:checked)) .hd-w3{animation:none}
-    .hd-bars .b,.hd-bars .v,.hd-scatter,.hd-stack{animation:none}
+    .hd *{animation:none !important}
+    .hd-v1,.hd-empty,.hd-post,.hd-work,.hd-cur svg,.hd-prog{opacity:0 !important}
+    .hd-post{height:0}
+    .hd-v2,.hd-thread,.hd-reply,.hd-done,.hd-vbump .n{opacity:1 !important}
+    .hd-typed{clip-path:none}
+    .hd-new{background-color:#e3f7ea}
   }
   @media (max-width:780px){ .hd-addr{display:none} }
   @media (max-width:560px){
     .wrap{margin:20px auto;padding:0 12px}
     .subhead{font-size:19px;margin-bottom:12px}
-    .hd{align-items:start}
     .hd-win{border-radius:13px}
     .hd-bar{height:42px;padding:0 9px;gap:5px}
     .hd-addr{display:none}
-    /* inactive tabs collapse to their favicon so all three fit without scrolling */
-    .hd-tabs{gap:2px;margin-left:2px;flex:1;min-width:0}
     .hd-tab{padding:0 8px;font-size:12px;gap:5px}
-    .hd-tab .hd-x{display:none}
-    .hd-tab:not(.on) .tt{display:none}
-    .hd-tab:not(.on){padding:0 7px}
     /* stack doc over comments at natural height so neither is cut */
-    .hd-canvas{grid-template-columns:1fr;height:auto}
-    .hd-doc{padding:22px 18px 18px;border-right:0;overflow:visible}
+    .hd-canvas{grid-template-columns:1fr;min-height:0}
+    .hd-doc{padding:22px 18px 18px;border-right:0}
     .hd-doc h3{font-size:23px}.hd-doc p{font-size:13.5px}.hd-lead{font-size:14px}
-    .hd-fade{display:none}
     .hd-notes{border-top:1px solid var(--rule);padding:16px 16px 18px}
     .hd-cap{font-size:12px;margin-top:14px}
   }
 </style>
     <div class="hd" style="margin-top:34px">
-    <input type="radio" name="hd" id="hd1"><input type="radio" name="hd" id="hd2"><input type="radio" name="hd" id="hd3">
-
-    <!-- window 1 : GTM report -->
     <div class="hd-win hd-w1">
       <div class="hd-bar">
         <div class="hd-lights"><i></i><i></i><i></i></div>
         <div class="hd-tabs">
-          <label class="hd-tab on" for="hd1"><span class="hd-fav" style="background:#eef3ff;color:#1652f0"><svg viewBox="0 0 24 24"><use href="#hd-fbars"/></svg></span><span class="tt">GTM report</span><span class="hd-x">×</span></label>
-          <label class="hd-tab" for="hd2"><span class="hd-fav" style="background:#f3eefe;color:#7c3aed"><svg viewBox="0 0 24 24"><use href="#hd-fscan"/></svg></span><span class="tt">Competitor analysis</span></label>
-          <label class="hd-tab" for="hd3"><span class="hd-fav" style="background:#eefaf1;color:#1a7340"><svg viewBox="0 0 24 24"><use href="#hd-fcode"/></svg></span><span class="tt">Tech design doc</span></label>
+          <span class="hd-tab"><span class="hd-fav" style="background:#eef3ff;color:#1652f0"><svg viewBox="0 0 24 24"><use href="#hd-fbars"/></svg></span><span class="tt">GTM report</span></span>
         </div>
         <div class="hd-addr"><span class="hd-omni"><svg viewBox="0 0 24 24"><use href="#hd-lock"/></svg><span class="hd-url">tdoc.dev/d/<b>gtm-weekly</b></span></span></div>
       </div>
       <div class="hd-canvas">
         <div class="hd-doc">
+          <div class="hd-prog"></div>
           <p class="hd-ey">Growth · weekly</p>
           <h3>Weekly GTM report</h3>
-          <p class="hd-by">Prepared by your agent · Aug 18 · 947 signups, up 23%</p>
-          <p class="hd-lead">Fund referral next week and cut paid social back. <span class="hd-anchor">Paid social is down but we spent more there.<span class="hd-pin">JP</span></span> Referral costs a fraction of it.</p>
-          <div class="hd-tldr"><b class="k">TL;DR</b><span>Paid social is <b>19% of signups and 62% of the spend</b>. Referral is 34% of signups on 19% of it.</span></div>
-          <div class="hd-viz"><div class="hd-vt"><b>Signups by channel</b><span>this week</span></div>
-            <div class="hd-bars">
-              <div class="c hot"><span class="v">322</span><div class="b" style="height:96%"></div><span class="l">Referral</span></div>
-              <div class="c"><span class="v">180</span><div class="b" style="height:54%"></div><span class="l">Paid social</span></div>
-              <div class="c"><span class="v">151</span><div class="b" style="height:45%"></div><span class="l">Organic</span></div>
-              <div class="c"><span class="v">94</span><div class="b" style="height:28%"></div><span class="l">Direct</span></div>
+          <div class="hd-ver">
+            <div class="hd-v1">
+              <p class="hd-by">Prepared by your agent · Aug 18 <span class="v">v1</span></p>
+              <p class="hd-lead">Fund referral next week and cut paid social back. <span class="hd-sel">Paid social is down but we spent more there.</span><span class="hd-cur"><svg viewBox="0 0 24 24"><use href="#hd-arrow"/></svg></span><span class="hd-pin">JP</span> Referral costs a fraction of it.</p>
+              <div class="hd-tldr"><b class="k">TL;DR</b><span>Referral brought <b>322 signups</b>, paid social 180. 947 signups in all, up 23%.</span></div>
+              <div class="hd-viz"><div class="hd-vt"><b>Signups by channel</b><span>this week</span></div>
+                <div class="hd-bars">
+                  <div class="c hot"><span class="v">322</span><div class="b" style="height:96%"></div><span class="l">Referral</span></div>
+                  <div class="c"><span class="v">180</span><div class="b" style="height:54%"></div><span class="l">Paid social</span></div>
+                  <div class="c"><span class="v">151</span><div class="b" style="height:45%"></div><span class="l">Organic</span></div>
+                  <div class="c"><span class="v">94</span><div class="b" style="height:28%"></div><span class="l">Direct</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="hd-v2">
+              <p class="hd-by">Prepared by your agent · Aug 18 <span class="v">v2</span></p>
+              <p class="hd-lead">Fund referral next week and cut paid social back. <span class="hd-new">Each paid-social signup costs $63; a referral costs $11.</span> Paid social is now our most expensive channel.</p>
+              <div class="hd-tldr"><b class="k">TL;DR</b><span>Paid social is <b>19% of signups and 62% of the spend</b>. Referral is 34% of signups on 19% of it.</span></div>
+              <div class="hd-viz"><div class="hd-vt"><b>Cost per signup</b><span>this week</span></div>
+                <div class="hd-hbars">
+                  <span class="l">Paid social</span><span class="t hot"><i class="b" style="width:78%"></i><b class="v">$63</b></span>
+                  <span class="l">Referral</span><span class="t"><i class="b" style="width:14%"></i><b class="v">$11</b></span>
+                  <span class="s">Spend ÷ signups. Organic and direct cost nothing.</span>
+                </div>
+              </div>
             </div>
           </div>
           <p>Referral is the cheapest channel we have and it is still supply-limited: only 6% of accounts have ever sent an invite.</p>
-          <div class="hd-fade"></div>
         </div>
-        <aside class="hd-notes"><div class="hd-thread">
-          <span class="hd-chip"><svg viewBox="0 0 24 24"><use href="#hd-ck"/></svg>fixed · v2</span>
-          <div class="hd-who"><span class="hd-av ph">JP</span><b>Jesse Pollak</b><span class="t">9:12 AM</span></div>
-          <p class="hd-msg">Paid social is down but we spent more there. Can you split it by cost per signup?</p>
-          <span class="hd-r">✅ 1</span>
-          <div class="hd-reply"><div class="hd-who"><span class="hd-av" style="background:#d97757"><svg viewBox="0 0 24 24"><use href="#hd-claude"/></svg></span><b>Claude</b><span class="t">9:14 AM</span></div>
-            <span class="hd-chip b"><svg viewBox="0 0 24 24"><use href="#hd-ck"/></svg>applied</span>
-            <p class="hd-msg">Split by cost per signup. Paid social costs <b>$63</b> against referral’s <b>$11</b>, so it is the most expensive channel now, not the second.</p>
-            <span class="hd-r">❤️ 1</span></div>
-        </div><div class="hd-vbump"><span class="dot"></span><span class="f">v1</span>→<span>v2</span><em>1 comment applied</em></div></aside>
-      </div>
-    </div>
-
-    <!-- window 2 : Competitor analysis -->
-    <div class="hd-win hd-w2">
-      <div class="hd-bar">
-        <div class="hd-lights"><i></i><i></i><i></i></div>
-        <div class="hd-tabs">
-          <label class="hd-tab" for="hd1"><span class="hd-fav" style="background:#eef3ff;color:#1652f0"><svg viewBox="0 0 24 24"><use href="#hd-fbars"/></svg></span><span class="tt">GTM report</span></label>
-          <label class="hd-tab on" for="hd2"><span class="hd-fav" style="background:#f3eefe;color:#7c3aed"><svg viewBox="0 0 24 24"><use href="#hd-fscan"/></svg></span><span class="tt">Competitor analysis</span><span class="hd-x">×</span></label>
-          <label class="hd-tab" for="hd3"><span class="hd-fav" style="background:#eefaf1;color:#1a7340"><svg viewBox="0 0 24 24"><use href="#hd-fcode"/></svg></span><span class="tt">Tech design doc</span></label>
-        </div>
-        <div class="hd-addr"><span class="hd-omni"><svg viewBox="0 0 24 24"><use href="#hd-lock"/></svg><span class="hd-url">tdoc.dev/d/<b>competitor-analysis</b></span></span></div>
-      </div>
-      <div class="hd-canvas">
-        <div class="hd-doc">
-          <p class="hd-ey">Market · teardown</p>
-          <h3>Competitor analysis</h3>
-          <p class="hd-by">Prepared by your agent · 42 products screened, 5 plotted</p>
-          <p class="hd-lead"><span class="hd-anchor">Everything with your context is built for one person; everything built for a team makes you paste it in.<span class="hd-pin">JP</span></span></p>
-          <div class="hd-tldr"><b class="k">TL;DR</b><span>Of 42 products, <b>none</b> sit in team-shaped and already-has-your-context. Five come close on one axis and fail the other.</span></div>
-          <div class="hd-viz"><div class="hd-vt"><b>Where they land</b><span>context × team</span></div>
-            <svg class="hd-scatter" viewBox="0 0 300 150">
-              <line x1="34" y1="8" x2="34" y2="128" stroke="#c9cedb" stroke-width="1"/><line x1="34" y1="128" x2="292" y2="128" stroke="#c9cedb" stroke-width="1"/>
-              <line x1="163" y1="8" x2="163" y2="128" stroke="#eceef4" stroke-width="1" stroke-dasharray="3 3"/><line x1="34" y1="68" x2="292" y2="68" stroke="#eceef4" stroke-width="1" stroke-dasharray="3 3"/>
-              <text x="6" y="16" font-family="system-ui" font-size="7.5" fill="#767c8b">has your</text><text x="6" y="25" font-family="system-ui" font-size="7.5" fill="#767c8b">context</text>
-              <text x="6" y="124" font-family="system-ui" font-size="7.5" fill="#767c8b">paste</text><text x="44" y="140" font-family="system-ui" font-size="7.5" fill="#767c8b">solo</text><text x="270" y="140" font-family="system-ui" font-size="7.5" fill="#767c8b">team</text>
-              <circle cx="66" cy="34" r="4.5" fill="#c3cbdb"/><circle cx="88" cy="50" r="4.5" fill="#c3cbdb"/><circle cx="54" cy="52" r="4.5" fill="#c3cbdb"/><circle cx="214" cy="104" r="4.5" fill="#c3cbdb"/><circle cx="238" cy="92" r="4.5" fill="#c3cbdb"/>
-              <g transform="translate(252 38)"><path d="M0-8 2.4-2.5 8.3-2.2 3.6 1.5 5.1 7.4 0 3.9-5.1 7.4-3.6 1.5-8.3-2.2-2.4-2.5Z" fill="#1652f0"/></g>
-              <text x="236" y="28" font-family="system-ui" font-size="8.5" font-weight="700" fill="#1652f0">tdoc</text>
-            </svg>
+        <aside class="hd-notes"><div class="hd-panel">
+          <div class="hd-empty">Select any line to comment on it.</div>
+          <div class="hd-thread">
+            <p class="hd-quote">Paid social is down but we spent more there.</p>
+            <div class="hd-who"><span class="hd-av ph">JP</span><b>Jesse Pollak</b><span class="t">9:12 AM</span></div>
+            <p class="hd-msg"><span class="hd-typed">Can you split it by cost per signup?</span></p>
+            <div class="hd-post"><span>Comment</span></div>
+            <div class="hd-reply"><div class="hd-who"><span class="hd-av" style="background:#d97757"><svg viewBox="0 0 24 24"><use href="#hd-claude"/></svg></span><b>Claude</b><span class="t">9:14 AM</span></div>
+              <div class="hd-step">
+                <p class="hd-msg hd-work">Rewriting the doc<i></i><i></i><i></i></p>
+                <div class="hd-done"><span class="hd-chip"><svg viewBox="0 0 24 24"><use href="#hd-ck"/></svg>applied · v2</span>
+                  <p class="hd-msg">Split by cost per signup. Paid social costs <b>$63</b> against referral’s <b>$11</b>. I rewrote the lead and swapped the chart.</p></div>
+              </div>
+            </div>
           </div>
-          <div class="hd-fade"></div>
-        </div>
-        <aside class="hd-notes"><div class="hd-thread">
-          <span class="hd-chip"><svg viewBox="0 0 24 24"><use href="#hd-ck"/></svg>fixed · v3</span>
-          <div class="hd-who"><span class="hd-av ph">JP</span><b>Jesse Pollak</b><span class="t">10:02 AM</span></div>
-          <p class="hd-msg">Notion has an AI panel now. Does that still count as pasting?</p>
-          <span class="hd-r">✅ 1</span>
-          <div class="hd-reply"><div class="hd-who"><span class="hd-av" style="background:#0a0a0a"><svg viewBox="0 0 24 24"><use href="#hd-openai"/></svg></span><b>Codex</b><span class="t">10:05 AM</span></div>
-            <span class="hd-chip b"><svg viewBox="0 0 24 24"><use href="#hd-ck"/></svg>applied</span>
-            <p class="hd-msg">It reads the page you are on, not your repo and not your session. Outside Notion it is still paste, so it stays on the left.</p>
-            <span class="hd-r">❤️ 1</span></div>
-        </div><div class="hd-vbump"><span class="dot"></span><span class="f">v2</span>→<span>v3</span><em>1 comment applied</em></div></aside>
-      </div>
-    </div>
-
-    <!-- window 3 : Tech design doc -->
-    <div class="hd-win hd-w3">
-      <div class="hd-bar">
-        <div class="hd-lights"><i></i><i></i><i></i></div>
-        <div class="hd-tabs">
-          <label class="hd-tab" for="hd1"><span class="hd-fav" style="background:#eef3ff;color:#1652f0"><svg viewBox="0 0 24 24"><use href="#hd-fbars"/></svg></span><span class="tt">GTM report</span></label>
-          <label class="hd-tab" for="hd2"><span class="hd-fav" style="background:#f3eefe;color:#7c3aed"><svg viewBox="0 0 24 24"><use href="#hd-fscan"/></svg></span><span class="tt">Competitor analysis</span></label>
-          <label class="hd-tab on" for="hd3"><span class="hd-fav" style="background:#eefaf1;color:#1a7340"><svg viewBox="0 0 24 24"><use href="#hd-fcode"/></svg></span><span class="tt">Tech design doc</span><span class="hd-x">×</span></label>
-        </div>
-        <div class="hd-addr"><span class="hd-omni"><svg viewBox="0 0 24 24"><use href="#hd-lock"/></svg><span class="hd-url">tdoc.dev/d/<b>agent-context</b></span></span></div>
-      </div>
-      <div class="hd-canvas">
-        <div class="hd-doc">
-          <p class="hd-ey">Engineering · design</p>
-          <h3>How the agent gets your context</h3>
-          <p class="hd-by">Prepared by your agent · measured over 40 sessions</p>
-          <p class="hd-lead">The window is full before tdoc asks for anything. <span class="hd-anchor">Once it fills, the oldest thread silently falls out and nobody is told.<span class="hd-pin">JP</span></span></p>
-          <div class="hd-tldr"><b class="k">TL;DR</b><span>The repo is a third of the window. The doc being edited is <b>14%</b>, and free space is <b>12%</b>.</span></div>
-          <div class="hd-viz"><div class="hd-vt"><b>200k context window</b><span>this session</span></div>
-            <div class="hd-stack"><i style="flex:68;background:#1652f0">repo 68k</i><i style="flex:44;background:#4f7bf7">conn 44k</i><i style="flex:36;background:#7a9bf9">threads</i><i style="flex:28;background:#a9c0fb;color:#1a2c66">doc</i><i style="flex:24;background:#eef1f8;color:#767c8b">free</i></div>
-            <div class="hd-sleg"><span><em style="background:#1652f0"></em>repo 68k</span><span><em style="background:#4f7bf7"></em>connectors 44k</span><span><em style="background:#7a9bf9"></em>threads 36k</span><span><em style="background:#a9c0fb"></em>this doc 28k</span><span><em style="background:#eef1f8;box-shadow:0 0 0 1px var(--rule) inset"></em>free 24k</span></div>
-          </div>
-          <p>Nothing here is a new integration. Every source is already open in the session before tdoc is asked for anything.</p>
-          <p>The budget is the design constraint: once the window fills, the oldest thread drops and nobody is told.</p>
-          <div class="hd-fade"></div>
-        </div>
-        <aside class="hd-notes"><div class="hd-thread">
-          <span class="hd-chip"><svg viewBox="0 0 24 24"><use href="#hd-ck"/></svg>fixed · v5</span>
-          <div class="hd-who"><span class="hd-av ph">JP</span><b>Jesse Pollak</b><span class="t">11:20 AM</span></div>
-          <p class="hd-msg">24k free is nothing. What happens the moment it runs out?</p>
-          <span class="hd-r">✅ 1</span>
-          <div class="hd-reply"><div class="hd-who"><span class="hd-av" style="background:#0a0a0a"><svg viewBox="0 0 24 24"><use href="#hd-x"/></svg></span><b>Grok</b><span class="t">11:23 AM</span></div>
-            <span class="hd-chip b"><svg viewBox="0 0 24 24"><use href="#hd-ck"/></svg>applied</span>
-            <p class="hd-msg">The oldest thread drops silently and nobody is told. That is in the last section now, with the repo trim that buys <b>44k</b> back.</p>
-            <span class="hd-r">❤️ 1</span></div>
-        </div><div class="hd-vbump"><span class="dot"></span><span class="f">v4</span>→<span>v5</span><em>1 comment applied</em></div></aside>
+        </div><div class="hd-vbump"><span class="dot"></span><span class="f">v1</span><span class="n">→ v2</span><em class="n">1 comment applied</em></div></aside>
       </div>
     </div>
   </div>
