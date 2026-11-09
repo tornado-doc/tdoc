@@ -35,7 +35,7 @@ t('every surface takes its list from useCommentArea, so a card being typed in st
     assert.match(read(file), /useCommentArea\(/, `${file} filters on its own`);
     assert.doesNotMatch(read(file), /\.filter\(\(c\) => filter === 'all'/, `${file} has its own tab filter`);
   }
-  assert.match(read('shell/src/document/comment-area.js'), /hasReplyDraft/);
+  assert.match(read('shell/src/comments/core/comment-area.js'), /hasReplyDraft/);
 });
 t('the reply draft is the card\'s: no surface touches it', () => {
   for (const file of SURFACES) assert.doesNotMatch(read(file), /reply-draft|ReplyDraft/, `${file} handles reply drafts`);

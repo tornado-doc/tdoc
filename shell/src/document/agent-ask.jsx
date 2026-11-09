@@ -42,10 +42,9 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   const askOnlyForced = Boolean(target) && (!canChange || private_);
   const askOnly = Boolean(target) && (askOnlyForced || askOnlyPicked);
   // Where a question cannot reach this agent, Ask only is not offered and
-  // the comment is handed over as before: the feedback space page and the
-  // widget never ask a team agent (the widget's token reaches its holder's
-  // own agents only), and the widget on another site's page asks nobody
-  // (worker feedbackTokenOwnAgent: tdoc's own pages only).
+  // the comment is handed over as before: the widget on another site's page
+  // asks nobody, own or team agent (worker feedbackTokenOwnAgent: tdoc's own
+  // pages only).
   const askOnlyOffered = Boolean(target) && agents.ownAskSupported !== false
     && !(target.team_agent && agents.teamAskSupported === false);
   const tagOf = (t) => `@${AGENT_TAG_JOINER}${agentMentionName(t, choices)}`;

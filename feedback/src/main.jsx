@@ -5,17 +5,21 @@ import { FLAGS, isPreviewHostname } from '../../shell/src/feature-flags.js';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentThreadList } from '../../shell/src/document/comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from '../../shell/src/document/comment-pin.jsx';
-import { useCommentArea } from '../../shell/src/document/comment-area.js';
+import { useCommentArea, useCommentListPrefs } from '../../shell/src/comments/core/comment-area.js';
+import { filterOptions, groupBy, SORT_OPTIONS } from '../../shell/src/comments/core/comment-query.js';
+import { useCommentFeed } from '../../shell/src/comments/core/use-comment-feed.js';
+import { isNarrowViewport } from '../../shell/src/comments/core/narrow.js';
+import { AppSelect } from '../../shell/src/ui/select.jsx';
 import { productPageUrl } from '../../shell/src/document/product-url.js';
 import { AgentButtonsContext, AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
 import { composerAgents } from '../../shell/src/document/ai-answerer.js';
 import { composerDefault } from '../../shell/src/document/agent-choices.js';
-import { askOwnAgent, ownAgentPick, useMyAgent } from '../../shell/src/document/my-agent.js';
+import { askOwnAgent, threadAskPick, useMyAgent } from '../../shell/src/document/my-agent.js';
 import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
 import {
-  createComment, listComments, listMentionableUsers, postNotifyHandoff,
+  createComment, getThreadSeen, listComments, listMentionableUsers, postNotifyHandoff,
   removeComment, resendNotifyHandoff, setApiTransport, setCommentResolved,
   toggleReaction, updateCommentAnchor, updateCommentText,
 } from '../../shell/src/document/api.js';
@@ -131,7 +135,7 @@ ${uiCss}
     }
     #tdoc-feedback-root .tdoc-fb-panel header strong { flex: 1 1 auto; min-width: 0; }
     #tdoc-feedback-root .tdoc-fb-panel header .tdoc-fb-filter { order: 3; flex: 1 1 100%; margin-left: 0; justify-content: space-between; }
-    #tdoc-feedback-root .tdoc-fb-panel header .tdoc-fb-filter button { flex: 1 1 0; }
+    #tdoc-feedback-root .tdoc-fb-panel header .tdoc-fb-filter button { flex: 1 1 auto; padding: 4px 3px; white-space: nowrap; }
     #tdoc-feedback-root .tdoc-fb-panel header strong { font-size: 15px; }
     #tdoc-feedback-root .tdoc-fb-filter { display: inline-flex; gap: 2px; margin-left: auto; background: #f3f3f1; border-radius: 8px; padding: 2px; }
     #tdoc-feedback-root .tdoc-fb-filter button { appearance: none; border: 0; background: transparent; border-radius: 6px; padding: 4px 6px; font: 600 11.5px system-ui, sans-serif; color: #6b6a66; cursor: pointer; }
@@ -143,6 +147,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-refresh[aria-busy="true"] svg { animation: tdoc-fb-spin .7s linear infinite; }
     #tdoc-feedback-root .tdoc-fb-add { appearance: none; border: 0; border-radius: 6px; background: #1652f0; color: #fff; cursor: pointer; padding: 5px 8px; font: 600 11.5px system-ui, sans-serif; }
     @keyframes tdoc-fb-spin { to { transform: rotate(360deg); } }
+    #tdoc-feedback-root .tdoc-fb-query { margin: 0; padding: 8px 14px; border-bottom: 1px solid #efeeea; }
     #tdoc-feedback-root .tdoc-fb-readbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; border-bottom: 1px solid #efeeea; color: #6b6a66; font: 12px system-ui, sans-serif; }
     #tdoc-feedback-root .tdoc-fb-readbar button { appearance: none; border: 0; background: none; color: var(--td-accent); cursor: pointer; font: 600 12px system-ui, sans-serif; }
     #tdoc-feedback-root .tdoc-fb-scroll { flex: 1; overflow-y: auto; padding: 6px 8px 16px; overscroll-behavior: contain; }
@@ -398,6 +403,11 @@ ${uiCss}
       if (!(inner instanceof Node) || inner === host || inner === shield || !path.includes(host)) return;
       if (inner instanceof Element && inner.matches('.ui-dialog-backdrop, .ui-dialog-viewport')) return;
       if (e.type === 'click' && path.some((n) => n instanceof Element && n.localName === 'a' && n.hasAttribute('href'))) return;
+      // Our own code clicking one of our inputs (a Base UI checkbox forwards
+      // its press to its hidden <input>): cancelling that click and sending a
+      // copy toggled the box and then undid it, so Ask only never ticked.
+      // Let it run; the person's own press was already kept from the app.
+      if (e.type === 'click' && !e.isTrusted && inner instanceof Element && inner.localName === 'input') return;
       let event;
       try { event = copy(e); } catch (_) { return; }
       e.stopImmediatePropagation();
@@ -1091,8 +1101,8 @@ ${uiCss}
 
   // The panel's width, dragged by its edge (ui/side-resize.jsx). A phone gets
   // the whole screen and no handle.
+  const SITE_SEEN = { load: getThreadSeen, save: null };
   const PANEL_WIDTH = { storageKey: 'tdoc-feedback-panel-width', initial: 340, min: 280, max: 640 };
-  const POLL_MS = 15_000;
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
   const labelOf = (anchor) => {
     const a = anchor || {};
@@ -1110,15 +1120,15 @@ ${uiCss}
     return parts.join(' · ');
   };
 
-  function Dock({ session, openCount, unreadCount = 0, panelOpen, panelWidth, picking, onList, onPick, onHide, sendCount, onSend, onShare }) {
+  function Dock({ session, openCount, waitingCount = 0, unreadCount = 0, panelOpen, panelWidth, picking, onList, onPick, onHide, sendCount, onSend, onShare }) {
     // Share: in the widget, the owner's invites (SharePanel). Who else has
     // access, and moving the space into a team, stay in the space's Share on
     // tdoc: this page's token can add an invite, never change the rest.
     // (feedbackInvites off: Share opens that page, as it used to.)
     const shareUrl = session && session.share_url;
     return (
-      <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen && innerWidth > 700 ? { right: panelWidth + 18 } : null}>
-        <button type="button" className={panelOpen ? 'on' : ''} onClick={onList} title={unreadCount ? `${unreadCount} new agent ${unreadCount === 1 ? 'reply' : 'replies'}` : 'All comments on this app'}>
+      <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen && !isNarrowViewport() ? { right: panelWidth + 18 } : null}>
+        <button type="button" className={panelOpen ? 'on' : ''} onClick={onList} title={unreadCount ? `${unreadCount} new agent ${unreadCount === 1 ? 'reply' : 'replies'}` : waitingCount ? `${waitingCount} waiting on you` : 'All comments on this app'}>
           <MessagesSquare aria-hidden="true" /> <strong>{openCount}</strong> open
           {unreadCount ? <span className="tdoc-fb-inline-unread-dot" aria-label="New agent reply" /> : null}
         </button>
@@ -1172,15 +1182,21 @@ ${uiCss}
     );
   }
 
-  function ListPanel({ side, area, unreadComments, pageUrl, filter, setFilter, cardProps, onPick, onOpen, onClose, onRefresh, refreshing, spaces = [], onSwitch = null }) {
-    const here = area.shownPageComments;
-    const unreadIds = new Set(unreadComments.map((comment) => comment.id));
-    const elsewhere = new Map();
-    for (const c of area.shown) {
-      if (c.anchor.url === pageUrl) continue;
-      if (!elsewhere.has(c.anchor.url)) elsewhere.set(c.anchor.url, []);
-      elsewhere.get(c.anchor.url).push(c);
-    }
+  // Where a thread is on this page, for the list's position order: top to
+  // bottom, then left to right. Threads not on screen follow, oldest first.
+  const positionOnPage = (comment) => {
+    const el = elementFor(comment);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return [r.top + scrollY, r.left + scrollX];
+  };
+
+  function ListPanel({ side, area, prefs, pageUrl, cardProps, onPick, onOpen, onClose, onRefresh, refreshing, spaces = [], onSwitch = null }) {
+    const { filter, setFilter } = prefs;
+    const unreadIds = new Set(area.unread.map((comment) => comment.id));
+    // This page first, then one section per other page (comment-query.js
+    // groupBy), each in the order the query gave.
+    const groups = groupBy(area.shown, (c) => c.anchor.url, { first: pageUrl });
     const threadList = (list) => <CommentThreadList
       comments={list}
       cardProps={cardProps}
@@ -1189,38 +1205,48 @@ ${uiCss}
       itemClassName="tdoc-fb-item"
       isAnchored={(c) => c.anchor.url !== pageUrl || Boolean(elementFor(c)) || Boolean(stateLabel(c.anchor))}
       isUnread={(c) => unreadIds.has(c.id)}
+      onSeen={area.onSeen}
       onNavigate={(id) => { const c = area.byId.get(id); if (c) onOpen(c, c.anchor.url === pageUrl); }}
       beforeCard={(c) => <button type="button" className="tdoc-fb-context" onClick={() => onOpen(c, c.anchor.url === pageUrl)}>
         {c.anchor.url === pageUrl && !elementFor(c) ? 'Not on screen now · ' : ''}
         {stateLabel(c.anchor) ? `${stateLabel(c.anchor)} · ` : ''}{labelOf(c.anchor)}
       </button>}
     />;
+    const wide = !isNarrowViewport();
     return (
-      <aside className="tdoc-fb-panel" aria-label="Feedback on this app" style={innerWidth > 700 ? { width: side.width } : undefined}>
-        {innerWidth > 700 ? <SideResizeHandle side={side} label="Resize the feedback panel" /> : null}
+      <aside className="tdoc-fb-panel" aria-label="Feedback on this app" style={wide ? { width: side.width } : undefined}>
+        {wide ? <SideResizeHandle side={side} label="Resize the feedback panel" /> : null}
         <header>
           {spaces.length > 1 && onSwitch ? <strong><SpaceSwitcher spaces={spaces} onSwitch={onSwitch} /></strong> : <strong>Feedback</strong>}
           <span className="tdoc-fb-filter" role="group" aria-label="Show">
-            {['open', 'replied', 'resolved', 'all'].map((f) => (
-              <button key={f} type="button" className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>
+            {filterOptions(area.counts).map((f) => (
+              <button key={f.value} type="button" className={filter === f.value ? 'on' : ''} aria-pressed={filter === f.value} onClick={() => setFilter(f.value)}>{f.label}</button>
             ))}
           </span>
           <button type="button" className="tdoc-fb-add" onClick={onPick}>+ Comment</button>
           <button type="button" className="tdoc-fb-refresh" aria-label="Refresh feedback" title="Refresh feedback" aria-busy={refreshing ? 'true' : 'false'} onClick={onRefresh}><RefreshCw aria-hidden="true" /></button>
           <button type="button" className="x" aria-label="Close list" onClick={onClose}><X size={14} aria-hidden="true" /></button>
         </header>
-        {unreadComments.length ? <div className="tdoc-fb-readbar"><span>{unreadComments.length} new agent {unreadComments.length === 1 ? 'reply' : 'replies'}</span><button type="button" onClick={() => area.markAllRead(unreadComments)}>Mark all as read</button></div> : null}
+        <div className="tdoc-comment-query tdoc-fb-query">
+          <input type="search" className="tdoc-comment-search" placeholder="Search comments" aria-label="Search comments"
+            value={prefs.search} onChange={(event) => prefs.setSearch(event.target.value)} />
+          <AppSelect className="tdoc-comment-sort" ariaLabel="Order" value={prefs.sort} onChange={prefs.setSort} options={SORT_OPTIONS} />
+        </div>
+        {area.showMarkAll ? <div className="tdoc-fb-readbar"><span>{area.unreadCount} new agent {area.unreadCount === 1 ? 'reply' : 'replies'}</span><button type="button" onClick={() => area.markAllRead()}>Mark all as read</button></div> : null}
         <div className="tdoc-fb-scroll">
-          <h4>This page</h4>
-          {here.length ? threadList(here) : (
-            <p className="empty">Nothing {filter === 'all' ? '' : filter} here yet. <button type="button" className="link" onClick={onPick}>Add a comment</button></p>
-          )}
-          {[...elsewhere.entries()].map(([url, list]) => (
+          {groups.map(({ key: url, items }) => (url === pageUrl ? (
+            <React.Fragment key={url}>
+              <h4>This page</h4>
+              {items.length ? threadList(items) : (
+                <p className="empty">{prefs.search ? 'No comments match.' : <>Nothing {filter === 'all' ? '' : filter} here yet. <button type="button" className="link" onClick={onPick}>Add a comment</button></>}</p>
+              )}
+            </React.Fragment>
+          ) : (
             <section key={url}>
               <h4 title={url}>{pathOf(url)}</h4>
-              {threadList(list)}
+              {threadList(items)}
             </section>
-          ))}
+          )))}
         </div>
       </aside>
     );
@@ -1250,9 +1276,11 @@ ${uiCss}
     const [picking, setPicking] = useState(false);
     const [panelOpen, setPanelOpen] = useState(false);
     const panelSide = useSideWidth(PANEL_WIDTH);
-    const [filter, setFilter] = useState('open');
     const [surface, setSurface] = useState(null);
     const [session, setSession] = useState(() => readSession());
+    // Filter (Open by default), order and search: the same query as the doc
+    // page, the choice remembered per space (this origin's storage).
+    const listPrefs = useCommentListPrefs(session && session.slug);
     // Comment on an area (feedbackAreaSelect): a preview host, or this
     // viewer's own dev mode, from the session answer.
     const areaSelectOn = flagOn('feedbackAreaSelect', session);
@@ -1269,8 +1297,6 @@ ${uiCss}
     const [waiting, setWaiting] = useState(null);
     useEffect(() => { connectWaiting = setWaiting; return () => { connectWaiting = () => {}; }; }, []);
     const [toast, setToast] = useState(null);
-    const [refreshing, setRefreshing] = useState(false);
-    const refreshingRef = useRef(false);
     const [reanchorId, setReanchorId] = useState(null);
     const [notifyIds, setNotifyIds] = useState(null);
     const [notifyAvoid, setNotifyAvoid] = useState(null);
@@ -1299,13 +1325,6 @@ ${uiCss}
     }, [say]);
 
     const load = useCallback(async () => apply(await call({ type: 'tdoc-feedback-load' })), [apply]);
-    const refresh = useCallback(async () => {
-      if (refreshingRef.current) return false;
-      refreshingRef.current = true;
-      setRefreshing(true);
-      try { return await load(); }
-      finally { refreshingRef.current = false; setRefreshing(false); }
-    }, [load]);
 
     // Showing the overlay loads the thread. The first time on an app with no
     // comments yet goes straight to picking — that is what someone who just
@@ -1457,12 +1476,19 @@ ${uiCss}
     const handoffViewer = useMemo(() => surface?.handoffViewer || [surface?.currentUser || 'anon'], [surface?.handoffViewer, surface?.currentUser]);
     const area = useCommentArea({
       comments: surface?.allComments || [], slug, selectedId: openId,
-      filter, filterMode: 'phase', handoffViewer, isOwner: owner,
+      filter: listPrefs.filter, sort: listPrefs.sort, search: listPrefs.search, positionOf: positionOnPage,
+      handoffViewer, isOwner: owner,
       pageUrl: canonical(),
+      // This widget's flags (a preview host, the viewer's dev mode), not the
+      // host page's: autoReadComments decides read-when-seen here as on tdoc.
+      flagOn: (name) => flagOn(name, session),
+      // Read state on the server, so the space's tdoc page agrees.
+      syncSeen: Boolean(slug && session?.token && surface?.ok && surface.signedIn !== false),
+      // A site's (SDK) token lives in a page tdoc does not control: it reads
+      // the person's read state but never writes it (the server refuses).
+      seenTransport: space ? SITE_SEEN : undefined,
     });
-    const unreadComments = area.unread.filter((comment) => commentPinState(comment, {
-      seenMap: area.seenMap, handoffViewer, isOwner: owner,
-    }).unread);
+    const unreadComments = area.unread;
     const teamMember = Boolean(surface?.teamMember);
     const agent = useNotifyTargets(slug, Boolean((owner || teamMember) && slug && session?.notify));
     const canSendToAgent = Boolean(agent.ready && agent.available && agent.reason !== 'no_agent_bound'
@@ -1473,20 +1499,27 @@ ${uiCss}
     // button silently not being there. A team member gets it once the team
     // has an agent to send to; anyone else never does.
     const showSend = Boolean(slug && (owner || (teamMember && session?.notify && canSendToAgent)));
-    // Anyone else's own agents, answer only (my-agent.js): only where the
-    // server allows this token to reach them, the bookmarklet on tdoc's own
-    // pages (own_agent). No tdoc AI or team agent: they have no way in here.
-    const myAgent = useMyAgent(slug, Boolean(slug && surface?.ok && !owner && session?.own_agent));
+    // Own and team agents, answer only (my-agent.js): only where the server
+    // allows this token to reach them, the bookmarklet on tdoc's own pages
+    // (own_agent). A token living in another site's page never makes an
+    // agent run that way.
+    const myAgent = useMyAgent(slug, Boolean(slug && surface?.ok && session?.own_agent));
     const agentChoices = useMemo(() => composerAgents({
       canSendToAgent,
       notifyTargets: agent,
-      mine: !owner && session?.own_agent && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: [], tdoc_ai: false } : null,
-    }), [canSendToAgent, agent, owner, session?.own_agent, myAgent.state]);
+      // The doc page's @ list through the same door: the holder's own agents
+      // and, on a team's space, the team's agents (answer only, in the
+      // thread). Never tdoc AI: it answers from a stored doc, and an app's
+      // page has none on tdoc.
+      mine: session?.own_agent && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: myAgent.state.team_agents || [], tdoc_ai: false } : null,
+    }), [canSendToAgent, agent, session?.own_agent, myAgent.state]);
     // The default is an agent that may edit (the owner's, the team's); an
     // own agent is picked from the @ list, as on a doc page.
     const agentMentions = useMemo(() => ({
       choices: agentChoices, preselected: composerDefault(agentChoices, { orTop: true }),
-      ai: null, privateAskSupported: false, teamAskSupported: false,
+      // Own and team agents are asked through my-agent, which this token
+      // reaches only on tdoc's own pages (own_agent).
+      ai: null, privateAskSupported: false, teamAskSupported: Boolean(session?.own_agent),
       ownAskSupported: Boolean(session?.own_agent),
       fixesTheApp: true,
     }), [agentChoices, session?.own_agent]);
@@ -1745,17 +1778,15 @@ ${uiCss}
       return () => { window.removeEventListener('hashchange', onNav); window.removeEventListener('popstate', onNav); };
     }, [shown, load]);
 
-    // Refresh lightly while the overlay is visible. Hidden tabs make no
-    // requests, and a composer/thread stays still while somebody is typing.
-    // Returning to the tab refreshes immediately; the list also has a manual
-    // refresh button for the moments when a person wants certainty now.
-    useEffect(() => {
-      if (!shown || !surface || !(session && session.token) || selected || openId) return undefined;
-      const tick = () => { if (document.visibilityState === 'visible') refresh(); };
-      const timer = setInterval(tick, POLL_MS);
-      document.addEventListener('visibilitychange', tick);
-      return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
-    }, [shown, surface, session && session.token, selected, openId, refresh]);
+    // Refresh lightly while the overlay is visible: every 15 s, at once on
+    // returning to the tab, never while somebody is typing or the composer is
+    // open; the list also has a Refresh button. One rule with the doc page.
+    // The doc page's feed (use-comment-feed.js) over this widget's call().
+    const feed = useCommentFeed({
+      load,
+      enabled: Boolean(shown && surface && session && session.token),
+      paused: Boolean(selected),
+    });
 
     // Modals, tabs and client-side routing change the page without a scroll
     // or resize. Watch the DOM (not our own overlay) and re-place the pins.
@@ -1799,7 +1830,7 @@ ${uiCss}
       productLinkOrigin: location.origin,
       canSendToAgent,
       agentSetupHref: agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null,
-      onReply: (parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: ownAgentPick(opts), handoffCommentId: opts.handoffCommentId }),
+      onReply: (parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: threadAskPick(opts), handoffCommentId: opts.handoffCommentId }),
       onReact: (id, emoji) => mutate({ type: 'tdoc-feedback-react', id, emoji }),
       onDelete: (id) => mutate({ type: 'tdoc-feedback-delete', id }, false),
       onResolve: (id, resolved) => mutate({ type: 'tdoc-feedback-resolve', id, resolved }),
@@ -1827,7 +1858,7 @@ ${uiCss}
       return (
         <button className="tdoc-comment-pill tdoc-feedback-mode tdoc-feedback-idle" type="button" title="tdoc feedback" onClick={() => show({ intent: 'bookmark' })}>
           <MessageSquarePlus aria-hidden="true" />
-          {openCount ? <span className="tdoc-fb-badge">{openCount}</span> : null}
+          {area.waitingCount ? <span className="tdoc-fb-badge" title={`${area.waitingCount} waiting on you`}>{area.waitingCount}</span> : null}
         </button>
       );
     }
@@ -1846,7 +1877,7 @@ ${uiCss}
         {tag ? <span className={`tdoc-fb-area-tag${box.top < 30 ? ' below' : ''}`}>{tag}</span> : null}
       </div>
     ) : null;
-    const rightInset = panelOpen ? (innerWidth > 700 ? panelSide.width : innerWidth) : 0;
+    const rightInset = panelOpen ? (!isNarrowViewport() ? panelSide.width : innerWidth) : 0;
     // The box being commented on, where it is now (it follows a scroll).
     const areaBox = (() => {
       if (!selected || !areaSel) return null;
@@ -1933,7 +1964,7 @@ ${uiCss}
             onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); }}
             onSubmit={async (text, opts = {}) => {
               const anchor = areaBox ? regionContext(areaBox, selected) : contextFor(selected);
-              const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: ownAgentPick(opts) });
+              const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: threadAskPick(opts) });
               if (apply(result)) { setSelected(null); setAreaSel(null); setPicking(false); }
             }}
           />
@@ -1953,16 +1984,14 @@ ${uiCss}
           <ListPanel
             side={panelSide}
             area={area}
-            unreadComments={unreadComments}
+            prefs={listPrefs}
             pageUrl={canonical()}
-            filter={filter}
-            setFilter={setFilter}
             cardProps={cardProps}
             onPick={() => { setOpenId(null); setPanelOpen(false); setPicking(true); }}
             onOpen={openFromList}
             onClose={() => setPanelOpen(false)}
-            onRefresh={refresh}
-            refreshing={refreshing}
+            onRefresh={feed.refresh}
+            refreshing={feed.refreshing}
             spaces={invitesOn && !space ? (session?.spaces || []) : []}
             onSwitch={switchSpace}
           />
@@ -2011,6 +2040,7 @@ ${uiCss}
         <Dock
           session={session || surface?.config}
           openCount={openCount}
+          waitingCount={area.waitingCount}
           unreadCount={unreadComments.length}
           panelOpen={panelOpen}
           panelWidth={panelSide.width}

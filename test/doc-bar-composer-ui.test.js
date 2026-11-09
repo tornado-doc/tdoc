@@ -664,6 +664,8 @@ async function dragSelect(page, phrase) {
         await input.fill('What happens next?');
         await input.press('Enter');
         await panel.getByText('Billing goes first.').last().waitFor();
+        // The first answer is already on screen: wait for the second one to fold it.
+        await panel.locator('.tdoc-ask-turn-summary').first().waitFor({ timeout: 10000 }).catch(() => {});
         if (await panel.locator('.tdoc-ask-turn').count() !== 1 || await panel.locator('.tdoc-ask-turn-summary').count() !== 1) throw new Error('previous answer did not collapse');
         await panel.locator('.tdoc-ask-turn-summary').click();
         if (!(await panel.locator('.tdoc-ask-turn').getByText('Kept private').isVisible())) throw new Error('previous answer did not expand');
