@@ -59,7 +59,7 @@ t('hero shows a real doc, no iframe or author script', () => {
   // of a real published doc that links to it. An iframe of the real doc does
   // not work here: the homepage runs in a sandboxed frame, so a nested doc's
   // shell script is blocked by CORS from the null origin.
-  assert(/<a class="hd-real" href="\/d\/[a-z0-9-]+"><img /.test(html), 'the real-doc screenshot link is missing');
+  assert(/<a class="hd-real" href="\/d\/[a-z0-9-]+">[\s\S]{0,400}?<img /.test(html), 'the real-doc screenshot link is missing');
   assert(!/<div class="hd" style/.test(html), 'the old CSS mock demo is back');
   assert(!/<iframe/i.test(html), 'the page frames an iframe');
   assert(!/<script\b/i.test(html), 'a published tdoc runs no author script');
