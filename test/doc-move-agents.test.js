@@ -947,6 +947,36 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(!JSON.parse(await w.env.META.get(`local-pending:${conn.account_id}`)).length, 'off the queue');
   });
 
+  await t('a team agent\'s handoff is marked access_lost when its doc stops being shared with the team, and is not handed out again', async () => {
+    const w = await world();
+    const added = (await w.call('/api/team/agents', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { id: w.team.id, name: 'bot' } })).body;
+    const conn = (await w.call('/api/team/agents/connect', { method: 'POST', body: { code: added.setup_code, device: 'botbox' } })).body;
+    await w.call('/api/notify/local/register', { method: 'POST', token: conn.token, body: { device: 'botbox', clis: ['claude'] } });
+    await w.teamDoc('plan');
+    const up = await w.call('/api/upload', { method: 'POST', token: conn.token, body: { slug: 'plan', version: 2, html: '<h1>x</h1><p>a sentence to comment on</p>' } });
+    assert(up.status === 200, up.text);
+    const body = await w.targets(w.ben, 'plan');
+    const c = await w.comment(w.ben, 'plan');
+    const sent = await w.send(w.ben, 'plan', [c], body.default || body.candidates[0]);
+    assert(sent.status === 200, sent.text);
+    const before = await w.call('/api/notify/local/pending', { token: conn.token });
+    assert(before.body.pending.length === 1, `queued: ${before.text}`);
+    // Still in the team, but the doc no longer shares with it.
+    const meta = JSON.parse(await w.env.META.get('meta:plan'));
+    meta.access = { ...(meta.access || {}), visibility: 'private', team: false, allowed_users: [] };
+    await w.env.META.put('meta:plan', JSON.stringify(meta));
+    const ack = await w.call('/api/notify/ack', { method: 'POST', token: conn.token, body: { slug: 'plan', handoff_id: sent.body.handoff_id } });
+    assert(ack.status === 403, `its ack is refused: ${ack.status} ${ack.text}`);
+    const after = await w.call('/api/notify/local/pending', { token: conn.token });
+    assert(after.status === 200 && !after.body.pending.length, `handed out: ${after.text}`);
+    const seen = await w.call('/api/notify/handoffs?slug=plan', { cookie: w.ann.cookie });
+    const card = seen.body.handoffs.find((h) => h.handoff_id === sent.body.handoff_id);
+    assert(card && card.delivery.status === 'failed' && card.delivery.error === 'access_lost', `Ann's card: ${seen.text}`);
+    assert(!JSON.parse(await w.env.META.get(`local-pending:${conn.account_id}`)).length, 'off the queue');
+    const again = await w.call('/api/notify/local/pending', { token: conn.token });
+    assert(!again.body.pending.length, `served again: ${again.text}`);
+  });
+
   await t('a failed read during a team agent\'s poll keeps its handoff too', async () => {
     const w = await world();
     const added = (await w.call('/api/team/agents', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { id: w.team.id, name: 'bot' } })).body;
