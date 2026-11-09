@@ -101,6 +101,22 @@ floor) and let it reflow on a phone. **Before writing a deck, read
 `$SKILL_DIR/authoring/structure/slides.md`**: the frame, design rules, layouts,
 and the 1280px + 390px check before publishing.
 
+### Sheets
+
+When the content is records people will search, filter or sort (a tracker,
+an inventory, a budget, a contact list, rows from a CSV or Excel file), write
+a sheet: one `<table data-tdoc-sheet data-name="Tab">` per tab, each
+`<th data-type="text|number|date|tags|checkbox|url">`, tag cells as
+`<span data-tag>` items, a `data-row="r1"` id on every body row and a
+`data-key="c1"` on every header (keep both when you edit; comments on a cell
+hang on them). The reader shows it as a
+spreadsheet grid with tabs, search, per-column filters and sort; without the
+viewer it is a plain table. For a file, `tdoc-new --slug <slug> --from-csv
+<file>` (or `--from-tsv`, `--from-xlsx`) writes the markup with column types
+inferred. **Before writing or editing a sheet, read
+`$SKILL_DIR/authoring/structure/sheets.md`**: the markup, the types, tag
+colours, row ids and the size limit.
+
 ### Existing documents and comment handoff
 
 The handoff line a reader copies from a published doc is:

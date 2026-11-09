@@ -21,6 +21,8 @@ const OFFLINE = [
   'thread-seen-api.test.js',   // server read state: authorized like reading the comments, no cross-doc reads, no thread-id leaks
   'feedback-team-agents.test.js', // the widget's @ lists team agents (answer only) only through tdoc's own-origin token door
   'version-diff.test.js', // bounded block matching and Unicode edits
+  'sheets.test.js',            // sheets: view query (search/filter/sort/URL), CSV parsing + type inference, markup round trip
+  'sheets-size.test.js',       // sheets: 8 MB sheet cap on every write path (not for prose or a token sheet), history row-count summary, sheet anchors never lost to the aid reconcile
   'version-history.test.js', // history rows: same writer within 30 min grouped, paged, what changed cached, access, Restore
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
@@ -217,6 +219,8 @@ const BROWSER = [
   'visual-viewer.test.js', // visual expansion preserves interactive state and reading mode
   'slides-scale.test.js', // slide view scales cards once: cqw type the same in WebKit and Chromium, desktop and phone
   'slides-mode.test.js', // data-tdoc-slide decks present one slide at a time, fitted, and restore on exit
+  'landing-sheets-ui.test.js', // the homepage's live sample sheet: viewer fetched only for it; search, tag filter, sort, comment composer on a cell, desktop + phone, nothing written
+  'sheets-ui.test.js', // data-tdoc-sheet: grid, search/filter/sort/tags, view in #hash, cell comments, Edit + Save, CSV/XLSX import, CLI, 10k rows, phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers

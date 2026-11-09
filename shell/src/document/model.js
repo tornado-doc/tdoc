@@ -100,6 +100,17 @@ function upstreamAvatarFor(author) {
   return 'https://github.com/openai.png';
 }
 
+// A sheet cell's identity beside its selector: table name, row id, column
+// key (server/sheets-viewer.js hooks.anchor). Only short strings pass.
+function sheetIdentity(sheet) {
+  if (!sheet || typeof sheet !== 'object') return null;
+  const out = {};
+  for (const k of ['table', 'row', 'key']) {
+    if (typeof sheet[k] === 'string' && sheet[k].length <= 200) out[k] = sheet[k];
+  }
+  return 'table' in out ? out : null;
+}
+
 export function anchorFromSelection(selection) {
   if (selection.kind === 'document') return null;
   if (selection.kind === 'element') {
@@ -107,6 +118,7 @@ export function anchorFromSelection(selection) {
       kind: 'element',
       selector: selection.selector,
       label: selection.label,
+      ...(sheetIdentity(selection.sheet) ? { sheet: sheetIdentity(selection.sheet) } : {}),
     };
   }
   return {

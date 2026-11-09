@@ -127,7 +127,7 @@ async function startServer(worker, env) {
       await v.page.goto(`${base}/d/${slug}?edit=1`);
       const para = v.page.frameLocator('iframe').locator('#a');
       await para.waitFor({ timeout: 15000 });
-      await v.page.route(/\/api\/doc\/versions$/, (r) => r.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'save_in_progress', latestVersion: 2 }) }));
+      await v.page.route(/\/api\/doc\/versions(\?|$)/, (r) => r.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'save_in_progress', latestVersion: 2 }) }));
       await para.click();
       await para.fill('A draft worth keeping.');
       const save = v.page.getByRole('button', { name: 'Save', exact: true });

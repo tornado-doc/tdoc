@@ -30,6 +30,9 @@ const shellMod = fs.readFileSync(path.join(skill, 'server/shell.js'), 'utf8');
 // declarations there.
 const notificationText = fs.readFileSync(path.join(skill, 'shell/src/notification-text.js'), 'utf8').replace(/^export /gm, '');
 const frameProbe = require(path.join(skill, 'server/frame-probe-source.js'))();
+const sheetsSource = require(path.join(skill, 'server/sheets-source.js'));
+const sheetsViewerJs = sheetsSource.sheetsViewerSource();
+const sheetsViewerVersion = sheetsSource.sheetsViewerVersion(sheetsViewerJs);
 const readerCss = fs.readFileSync(path.join(skill, 'server/reader.css'), 'utf8');
 const runtimeManifest = JSON.parse(fs.readFileSync(path.join(skill, 'server/runtime/manifest.json'), 'utf8'));
 const runtimeEntry = Object.values(runtimeManifest).find((item) => item && item.isEntry);
@@ -95,7 +98,7 @@ const git = (...args) => {
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
-const bundleSha = sha(Buffer.concat([Buffer.from([bundlerSource, worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewValidator, htmlParser, versionDiffJs, JSON.stringify(previewCoverage), JSON.stringify(authoringGuides)].join('\0')), previewWasm, ...previewFonts]));
+const bundleSha = sha(Buffer.concat([Buffer.from([bundlerSource, worker, shellMod, notificationText, frameProbe, sheetsViewerJs, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewValidator, htmlParser, versionDiffJs, JSON.stringify(previewCoverage), JSON.stringify(authoringGuides)].join('\0')), previewWasm, ...previewFonts]));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -126,6 +129,8 @@ replaced = mustReplace(replaced, /const SHELL_RUNTIME_CSS_PATH = "__TDOC_SHELL_R
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;/, 'const SHELL_RUNTIME_CSS = ' + JSON.stringify(runtimeCss) + ';', 'SHELL_RUNTIME_CSS');
 replaced = mustReplace(replaced, /const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;/, 'const FEEDBACK_JS = ' + JSON.stringify(feedbackJs) + ';', 'FEEDBACK_JS');
 replaced = mustReplace(replaced, /const PUSH_SW_JS = `__TDOC_PUSH_SW_JS__`;/, 'const PUSH_SW_JS = ' + JSON.stringify(pushSwJs) + ';', 'PUSH_SW_JS');
+replaced = mustReplace(replaced, /const SHEETS_VIEWER_JS = `__TDOC_SHEETS_VIEWER_JS__`;/, 'const SHEETS_VIEWER_JS = ' + JSON.stringify(sheetsViewerJs) + ';', 'SHEETS_VIEWER_JS');
+replaced = mustReplace(replaced, /const SHEETS_VIEWER_VERSION = "__TDOC_SHEETS_VIEWER_VERSION__";/, 'const SHEETS_VIEWER_VERSION = ' + JSON.stringify(sheetsViewerVersion) + ';', 'SHEETS_VIEWER_VERSION');
 
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";/, 'const SHELL_RUNTIME_EXTRA_ASSETS = ' + JSON.stringify(extraAssets) + ';', 'SHELL_RUNTIME_EXTRA_ASSETS');
 replaced = mustReplace(replaced, /const PREVIEW_RENDERER = "__TDOC_PREVIEW_RENDERER__";/,

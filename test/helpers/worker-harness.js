@@ -199,6 +199,10 @@ async function loadWorker({ previewRenderer = false } = {}) {
   src = src.replace('/* __TDOC_HTML_PARSER__ */', () => fs.readFileSync(path.join(root, 'server', 'html-parser', 'parse5.js'), 'utf8'));
   src = src.replace('/* __TDOC_VERSION_DIFF__ */', () => fs.readFileSync(path.join(root, 'server', 'version-diff.js'), 'utf8'));
   src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
+  const sheets = require(path.join(root, 'server', 'sheets-source.js'));
+  const sheetsJs = sheets.sheetsViewerSource();
+  src = src.replace(/const SHEETS_VIEWER_JS = `__TDOC_SHEETS_VIEWER_JS__`;/, () => 'const SHEETS_VIEWER_JS = ' + JSON.stringify(sheetsJs) + ';');
+  src = src.replace(/const SHEETS_VIEWER_VERSION = "__TDOC_SHEETS_VIEWER_VERSION__";/, () => 'const SHEETS_VIEWER_VERSION = ' + JSON.stringify(sheets.sheetsViewerVersion(sheetsJs)) + ';');
   const guides = require(path.join(root, 'server', 'authoring-guides.js')).loadAuthoringGuides(root);
   src = src.replace(/const AUTHORING_GUIDES = "__TDOC_AUTHORING_GUIDES__";/, 'const AUTHORING_GUIDES = ' + JSON.stringify(guides) + ';');
   if (previewRenderer) {

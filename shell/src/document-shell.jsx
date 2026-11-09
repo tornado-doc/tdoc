@@ -88,6 +88,7 @@ import { useCommentArea, useCommentListPrefs } from './comments/core/comment-are
 import { filterOptions, groupBy, matchesFilter, sortThreads } from './comments/core/comment-query.js';
 import { useCommentFeed } from './comments/core/use-comment-feed.js';
 import { useNarrowViewport } from './comments/core/narrow.js';
+import { useSheetView } from './document/sheet-view.js';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
 import { useMyAgent } from './document/my-agent.js';
@@ -537,7 +538,11 @@ export function DocumentShell({ boot, config }) {
     setComposer(selection);
   }, [comments.moveAnchor, config.canComment, config.signInToComment]);
 
+  const sendToFrame = useCallback((message) => bridgeRef.current?.(message), []);
+  // The signed-out homepage remembers nothing about a visitor's view.
+  const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity) });
   const bridge = useFrameBridge({
+    ...sheetHandlers,
     'tdoc:demoRewriteDone': (message) => {
       const pending = demoRewriteWait.current;
       if (pending && pending.id === message.id) pending.resolve(message.ok === true);

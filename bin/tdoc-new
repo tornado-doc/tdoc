@@ -25,6 +25,12 @@
 #                              files; copied to v1/widgets/<name>.html.
 #   --preview-file <path>      optional 1200×630 SVG share card; copied to
 #                              v<n>/preview.svg and uploaded with the version.
+#     OR, instead of HTML, a spreadsheet that becomes a sheet doc:
+#   --from-csv <path>          one tab; column types (number, date, tags,
+#   --from-tsv <path>          checkbox, link, text) inferred from the values.
+#   --from-xlsx <path>         one tab per worksheet (needs SheetJS: npm ci).
+#                              --title defaults to the file name. Implies
+#                              --custom-template (a sheet is a wide page).
 #
 # Optional:
 #   --prompt "<one-line>"      prompt-of-record stored in meta.json (defaults
@@ -76,6 +82,8 @@ SLUG=""
 TITLE=""
 HTML_FILE=""
 HTML_STDIN=0
+FROM_SHEET=""
+FROM_KIND=""
 WIDGETS_DIR=""
 PREVIEW_FILE=""
 PROMPT=""
@@ -102,6 +110,8 @@ while [ $# -gt 0 ]; do
     --title)      TITLE="${2:-}"; shift 2 ;;
     --html-file)  HTML_FILE="${2:-}"; shift 2 ;;
     --html-stdin) HTML_STDIN=1; shift ;;
+    --from-csv|--from-tsv|--from-xlsx)
+      FROM_KIND="${1#--from-}"; FROM_SHEET="${2:-}"; [ -n "$FROM_SHEET" ] || die "$1 needs a file"; shift 2 ;;
     --widgets-dir) WIDGETS_DIR="${2:-}"; shift 2 ;;
     --preview-file) PREVIEW_FILE="${2:-}"; shift 2 ;;
     --prompt)     PROMPT="${2:-}"; shift 2 ;;
@@ -116,7 +126,7 @@ while [ $# -gt 0 ]; do
     --first-doc)  FIRST_DOC=1; shift ;;
     --no-server)  NO_SERVER=1; shift ;;   # scaffold only — skip serving (CI / programmatic callers)
     -h|--help)
-      sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,55p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -130,6 +140,29 @@ done
 # it; doctor uses --json). `tail -n 1` / `tail -n 2` stay URL-only.
 if [ "$QUIET" != "1" ]; then
   bash "$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
+fi
+
+# A spreadsheet becomes the v1 HTML before anything else looks at it.
+SHEET_HTML=""
+if [ -n "$FROM_SHEET" ]; then
+  if [ -n "$HTML_FILE" ] || [ "$HTML_STDIN" = "1" ]; then
+    die "--from-$FROM_KIND replaces --html-file / --html-stdin; use one"
+  fi
+  [ -f "$FROM_SHEET" ] || die "--from-$FROM_KIND file not found: $FROM_SHEET"
+  if [ -z "$TITLE" ]; then
+    TITLE="$(basename "$FROM_SHEET")"
+    TITLE="${TITLE%.*}"
+  fi
+  SHEET_HTML="$(mktemp "${TMPDIR:-/tmp}/tdoc-sheet.XXXXXX")"
+  SHEET_ARGS=(--kind "$FROM_KIND" --title "$TITLE")
+  if [ "$QUIET" = "1" ]; then SHEET_ARGS+=(--quiet); fi
+  if ! node "$(cd "$(dirname "$0")" && pwd)/lib/sheet-from-file.mjs" "${SHEET_ARGS[@]}" "$FROM_SHEET" > "$SHEET_HTML"; then
+    rm -f "$SHEET_HTML"
+    exit 1
+  fi
+  HTML_FILE="$SHEET_HTML"
+  # A sheet is a wide, self-styled page; the house column would squeeze it.
+  if [ "$STYLE" = "default" ]; then CUSTOM_TEMPLATE=1; fi
 fi
 
 [ -n "$SLUG" ]  || die "--slug required"
@@ -221,7 +254,7 @@ fi
 # `rm -rf "$DOC_DIR"` BEFORE validating, so empty stdin / a failed cp / markdown
 # passed by mistake permanently destroyed the prior doc's versions + comments.
 STAGE_DIR="$(mktemp -d "${TDOC_DIR}/.stage-${SLUG}.XXXXXX")"
-cleanup_stage() { rm -rf "$STAGE_DIR" 2>/dev/null || true; }
+cleanup_stage() { rm -rf "$STAGE_DIR" 2>/dev/null || true; [ -z "$SHEET_HTML" ] || rm -f "$SHEET_HTML"; }
 trap cleanup_stage EXIT
 mkdir -p "$STAGE_DIR/v$VERSION_N"
 STAGE_HTML="$STAGE_DIR/v$VERSION_N/index.html"

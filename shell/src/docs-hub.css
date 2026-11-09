@@ -923,3 +923,32 @@
 /* /f/<share>: the folder icon sits on the title's baseline. */
 .tdoc-folder-share-icon { vertical-align: -4px; margin-right: 8px; }
 .tdoc-folder-share-meta { margin-top: 0; }
+
+/* Sheets (flagged): a spreadsheet dragged over My docs, and the import dialog. */
+.sheet-drop-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--td-accent-tint, #e8eeff) 82%, transparent);
+  border: 2px dashed var(--td-accent, #1652f0);
+  pointer-events: none;
+}
+.sheet-drop-hint > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 24px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .12);
+  color: var(--td-ink, #111);
+}
+.sheet-drop-hint b { font-size: 16px; }
+.sheet-drop-hint span { color: var(--td-muted, #666); font-size: 13px; }
+.sheet-import-file { margin: 0 0 8px; overflow-wrap: anywhere; }
+.sheet-import-error { margin: 0; color: var(--td-danger, #b42318); }

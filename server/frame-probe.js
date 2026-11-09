@@ -665,6 +665,27 @@
   //     overlay COMMENTABLE set + hover affordance; the marquee sub-region
   //     gesture is a follow-on slice. ---
   var COMMENTABLE = 'img, svg, canvas, video, pre, figure, iframe[src], section, aside, blockquote, table, details, [data-tdoc-artifact], [class*="tdoc-artifact"]';
+  // A provider viewer that hides author elements and draws them itself (the
+  // sheets viewer: a <table data-tdoc-sheet> becomes a grid) stands in for
+  // them here. Every hook is optional:
+  //   selector(el) -> a stable anchor selector for el, or null for cssPath's
+  //   proxy(el)    -> the visible element to measure in el's place, or null
+  //   reveal(el)   -> bring el into view (switch tab, scroll its row in)
+  //   anchor(el)   -> extra identity stored with the anchor ({ table, row,
+  //                   key } for a sheet cell), or null
+  //   resolve(anchor) -> the element that identity names now, null if it is
+  //                   gone, undefined to fall back to the selector
+  var elementHooks = window.__tdocElementHooks = window.__tdocElementHooks || {};
+  function hookCall(name, el) { try { return typeof elementHooks[name] === 'function' ? elementHooks[name](el) : null; } catch (x) { return null; } }
+  function visibleFor(el) { return hookCall('proxy', el) || el; }
+  function resolveElementAnchor(anchor) {
+    if (anchor.sheet && typeof elementHooks.resolve === 'function') {
+      var found;
+      try { found = elementHooks.resolve(anchor); } catch (x) { found = undefined; }
+      if (found !== undefined) return found;
+    }
+    try { return document.querySelector(anchor.selector); } catch (x) { return null; }
+  }
   var UI_SEL = '.tdoc-hover-outline, .tdoc-comment-pill, [data-tdoc-provider]';
   function isProbeUI(el) { return !!(el && el.closest && el.closest(UI_SEL)); }
   function artifactFor(node) {
@@ -676,6 +697,8 @@
   // enough to re-find the element for a pin; the worker's aid stamping is the
   // durable cross-version identity (a later slice).
   function cssPath(el) {
+    var stable = hookCall('selector', el);
+    if (stable) return stable;
     if (el.id) { try { if (document.querySelectorAll('#' + (window.CSS && CSS.escape ? CSS.escape(el.id) : el.id)).length === 1) return '#' + el.id; } catch (x) {} }
     var parts = [];
     while (el && el.nodeType === 1 && el !== document.body && parts.length < 8) {
@@ -733,27 +756,30 @@
     hoverPill.style.left = (r.right + sx - 34) + 'px'; hoverPill.style.top = (r.top + sy + 6) + 'px';
   }
   function hideHover() { hoverEl = null; if (hoverOutline) hoverOutline.style.display = 'none'; if (hoverPill) hoverPill.style.display = 'none'; }
-  function commentOnElement(el, near) {
-    var r = clipRect(el);   // visible box — the raw rect of a scroll-container child can be miles wide
-    var label = el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('data-tdoc-artifact') || el.tagName.toLowerCase();
+  function commentOnElement(el, near, named) {
+    var r = clipRect(visibleFor(el));   // visible box — the raw rect of a scroll-container child can be miles wide
+    var label = named || el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('data-tdoc-artifact') || el.tagName.toLowerCase();
     // Anchor the composer to the PILL the user just clicked (element top-right),
     // not the element box — a tall section would otherwise park the composer
     // below the whole box, far from the click.
     var pr = (hoverPill && hoverPill.style.display !== 'none') ? hoverPill.getBoundingClientRect() : null;
     var ar = near || (pr && (pr.width || pr.height) ? pr : null) || { top: r.top, left: Math.max(r.left, r.right - 40), bottom: r.top + 36, right: r.right, width: 30, height: 30 };
+    var identity = hookCall('anchor', el);
     post({
       type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: cssPath(el),
+      sheet: identity && typeof identity === 'object' ? identity : undefined,
       text: '', context_before: '', context_after: '',
       rect: { top: ar.top, left: ar.left, bottom: ar.bottom, right: ar.right, width: ar.width, height: ar.height },
     });
     hideHover();
   }
   // The slides presenter's "Comment on this slide" asks for a whole-element
-  // comment the same way the hover pill does.
+  // comment the same way the hover pill does; the sheets viewer asks for a
+  // cell, column or sheet, and names it ("Budget!C12 · Amount").
   document.addEventListener('tdoc:comment-element', function (e) {
     var d = e.detail || {};
     if (!d.el || !d.el.isConnected) return;
-    hideHover(); commentOnElement(d.el, d.rect || null);
+    hideHover(); commentOnElement(d.el, d.rect || null, typeof d.label === 'string' ? d.label.slice(0, 80) : null);
   });
   document.addEventListener('mousemove', function (e) {
     if (interactionMode !== 'comment' || !elementComment || visualViewerOpen()) { if (hoverEl) hideHover(); return; }
@@ -1168,7 +1194,8 @@
     if (!target) return;
     if (HL && target.range) CSS.highlights.set('tdoc-anchor-active', new Highlight(target.range));
     if (!scroll) return;
-    var rect = target.range ? target.range.getBoundingClientRect() : target.element.getBoundingClientRect();
+    if (target.element) hookCall('reveal', target.element);
+    var rect = target.range ? target.range.getBoundingClientRect() : visibleFor(target.element).getBoundingClientRect();
     var top = rect.top + (window.scrollY || 0) - Math.max(80, window.innerHeight / 3);
     var before = window.scrollY || 0;
     try { window.scrollTo(0, Math.max(0, top)); } catch (e) {}
@@ -1176,9 +1203,9 @@
     // frame to its content and scrolls the page instead), scrollTo is a no-op;
     // scrollIntoView reaches whichever box actually scrolls.
     var after = window.scrollY || 0;
-    var r2 = target.range ? target.range.getBoundingClientRect() : target.element.getBoundingClientRect();
+    var r2 = target.range ? target.range.getBoundingClientRect() : visibleFor(target.element).getBoundingClientRect();
     if (Math.abs(after - before) < 1 && (r2.top < 0 || r2.bottom > window.innerHeight)) {
-      var node = target.element || (target.range.startContainer.nodeType === 1 ? target.range.startContainer : target.range.startContainer.parentElement);
+      var node = (target.element && visibleFor(target.element)) || (target.range.startContainer.nodeType === 1 ? target.range.startContainer : target.range.startContainer.parentElement);
       try { node.scrollIntoView({ block: 'center' }); } catch (e) {}
     }
     flashActiveAnchor(id);
@@ -1253,10 +1280,10 @@
         return;
       }
       if (c.anchor.kind === 'element' && c.anchor.selector) {
-        var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
+        var eel = resolveElementAnchor(c.anchor);
         if (eel) {
           _anchorTargets[c.id] = { element: eel };
-          var er = eel.getBoundingClientRect();
+          var er = visibleFor(eel).getBoundingClientRect();
           pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
         } else seat(c);
         return;
@@ -1300,6 +1327,9 @@
   var _geoTimer = null;
   function rereportPins() { if (_geoTimer) clearTimeout(_geoTimer); _geoTimer = setTimeout(function () { _view = null; _rangeCache = {}; reportPins(_lastComments); }, 150); }
   window.addEventListener('load', rereportPins);
+  // A provider viewer moved what anchors are drawn on (the sheets grid
+  // scrolled, sorted, or switched tab): place the pins again.
+  document.addEventListener('tdoc:relayout', rereportPins);
   // The provider owns table readability for old and newly-authored versions.
   // Recompute from content/fonts/container geometry, not only window width:
   // a reader width toggle, an opened <details>, or an edit can change it.
@@ -1546,6 +1576,14 @@
       rereportPins();
     }, 350);
   }
+  // The sheets viewer writes a cell edit into the author's table itself; it
+  // tells the editor here, and the draft, dirty state and Save follow the
+  // same path as typing in the page.
+  document.addEventListener('tdoc:sheet-edit', function () {
+    if (interactionMode !== 'edit') return;
+    setDirty(true, true);
+    reportDraft();
+  });
   function markdownCtx() {
     return { root: findEditRoot(), atomicSelector: ATOMIC + ',[data-tdoc-editor-atomic]' };
   }

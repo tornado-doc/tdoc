@@ -68,6 +68,26 @@ t('hero shows a real doc, no iframe or author script', () => {
   assert(!/@keyframes\s+glide/.test(html), 'host CSS still has the sprite @keyframes glide');
 });
 
+t('has a live sample sheet, not a picture of one, and lists Sheets in Features', () => {
+  // The reader draws <table data-tdoc-sheet> as a spreadsheet (search,
+  // filter, sort, comment on a cell); the viewer loads only for a page that
+  // holds one, so the rest of the homepage pays nothing for it.
+  const at = html.indexOf('<section id="sheets">');
+  assert(at !== -1, 'no #sheets section');
+  const section = html.slice(at, html.indexOf('</section>', at));
+  assert(/<p class="eyebrow">Sheets<\/p>/.test(section) && /<h2>[^<]+<\/h2>/.test(section), 'section follows the page\'s eyebrow + h2 pattern');
+  const table = (section.match(/<table data-tdoc-sheet data-name="[^"]+">[\s\S]*?<\/table>/) || [])[0];
+  assert(table, 'the section holds a sheet table');
+  const ths = table.match(/<th [^>]*>/g) || [];
+  assert(ths.length >= 5 && ths.every((th) => /data-key="c\d+"/.test(th) && /data-type="(text|number|date|tags|checkbox|url)"/.test(th)), 'typed headers with stable keys');
+  assert(['text', 'number', 'date', 'tags'].every((type) => ths.some((th) => th.includes(`data-type="${type}"`))), 'shows several column types');
+  assert(/data-palette="[^"]*Shipped:green/.test(table), 'a tag palette');
+  const rows = table.match(/<tr data-row="r\d+">/g) || [];
+  assert(rows.length >= 20, `enough rows to search, filter and sort: ${rows.length}`);
+  assert(!/<img\b/i.test(section), 'not a screenshot');
+  assert(/<p class="sm-label">04 \/ Sheets<\/p>[\s\S]{0,600}href="#sheets"/.test(html), 'the Features list has a Sheets card that points at the live sheet');
+});
+
 t('carries the SEO head', () => {
   assert(/<title>[^<]*(tdoc|Tornado)[^<]*<\/title>/i.test(html), 'title does not name the product');
   // Upper bound is Google's snippet truncation (~160 chars) — a longer one is

@@ -38,6 +38,11 @@ const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;
 // The push service worker (shell/src/push-sw.js → server/runtime/tdoc-sw.js),
 // served at /tdoc-sw.js. See "web push" below.
 const PUSH_SW_JS = `__TDOC_PUSH_SW_JS__`;
+// The sheets viewer (server/sheets-source.js: shared/sheet-*.mjs +
+// server/sheets-viewer.js), fetched at /sheets-viewer.js?v=<hash> only by a
+// doc frame that holds a <table data-tdoc-sheet> (server/sheets-loader.js).
+const SHEETS_VIEWER_JS = `__TDOC_SHEETS_VIEWER_JS__`;
+const SHEETS_VIEWER_VERSION = "__TDOC_SHEETS_VIEWER_VERSION__";
 const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
 
 const TDOC_ONBOARDING_URL = 'https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md';
@@ -2605,9 +2610,16 @@ function stripClosedHtmlComments(html) {
 function aidFor(tag, innerHtml, openAttrs) {
   // Keep author-meaningful intrinsics (viewBox / src / alt / aria-label /
   // title) as part of identity — they're what makes a `<svg>` *this* svg.
-  const intrinsics = ['viewBox','src','alt','aria-label','title']
-    .map(a => {
-      const m = new RegExp('\\b' + a + '\\s*=\\s*"([^"]*)"', 'i').exec(openAttrs || '');
+  // The patterns are compiled once (per element they were most of the cost
+  // of stamping a page of many small tables); the result is unchanged.
+  const res = aidFor.intrinsicRes || (aidFor.intrinsicRes = ['viewBox','src','alt','aria-label','title']
+    .map(a => [a, a.toLowerCase(), new RegExp('\\b' + a + '\\s*=\\s*"([^"]*)"', 'i')]));
+  const attrs = openAttrs || '';
+  const lower = attrs.toLowerCase();
+  const intrinsics = res
+    .map(([a, low, re]) => {
+      if (lower.indexOf(low) === -1) return '';
+      const m = re.exec(attrs);
       return m ? a + '=' + m[1] : '';
     })
     .filter(Boolean).join('|');
@@ -2645,10 +2657,12 @@ function attrAwareOpenTagEnd(html, lt) {
 function skipRawTextBodyAt(html, openTag, attrs, openEnd) {
   if (!RAW_TEXT_TAGS.includes(openTag)) return null;
   if (/\/\s*$/.test(attrs)) return openEnd; // self-closed (rare/invalid) — nothing to skip
-  const closeRe = new RegExp(`</${openTag}\\s*>`, 'i');
+  // Searched in place from openEnd: slicing the rest of the document per
+  // raw-text element made a page of many <style>s quadratic.
+  const closeRe = new RegExp(`</${openTag}\\s*>`, 'gi');
   closeRe.lastIndex = openEnd;
-  const m = closeRe.exec(html.slice(openEnd));
-  return m ? openEnd + m.index + m[0].length : html.length;
+  const m = closeRe.exec(html);
+  return m ? m.index + m[0].length : html.length;
 }
 
 // A heading label is plain text. Skip complete nested tags once and discard
@@ -2704,158 +2718,6 @@ function headingsFromHtml(html) {
   return headings;
 }
 
-// --- #24 dry-run instrumentation -------------------------------------------
-// The hardened stampAids() above fixes real regex bugs (`>` in an attribute,
-// `</tag>` inside <script>/<style>). For ORDINARY HTML it produces aids
-// identical to the legacy parser; it differs ONLY on the edge-case HTML the
-// legacy parser mis-parsed (those inputs are valid HTML but rare). Because `aid`
-// is the anchor key for stored comments, we MEASURE the blast radius before
-// assuming it's safe: compute the aid SETS with both parsers and report how many
-// live comments anchor to an aid the legacy parser produced but the hardened one
-// no longer does (set membership — never an index-paired old→new map, which
-// could mis-pair when the parsers diverge). This logs only — it never mutates
-// (it folds deep copies). (Design: docs/DESIGN-aid-migration.md. Empirically 0
-// across current docs.)
-function stampAidsLegacy(rawHtml) {
-  const headings = headingsFromHtml(rawHtml);
-  function nearestHeadingAt(idx) {
-    let best = null;
-    // Use <= so a heading whose close tag ends exactly at the next
-    // element's open (no whitespace between) is still "before" it.
-    for (const h of headings) { if (h.end <= idx) best = h.text; else break; }
-    return best;
-  }
-  // Find every open tag of every stampable kind in document order.
-  // For non-void tags, find its matching close (same-tag depth count).
-  // Collect [openStart, openEnd, closeEnd, tag, attrs, innerHtml] per element.
-  const elements = [];
-  const seenOpens = new Set();   // dedupe across passes (tag pass + opt-in pass)
-  function harvest(openStart, openEnd, tagLower, attrs) {
-    if (seenOpens.has(openStart)) return;
-    const isVoid = /^(img|iframe)$/i.test(tagLower) || /\/\s*$/.test(attrs);
-    let closeEnd = openEnd, innerHtml = '';
-    if (!isVoid) {
-      const closeRe = new RegExp(`</${tagLower}\\s*>|<${tagLower}\\b[^>]*>`, 'gi');
-      closeRe.lastIndex = openEnd;
-      let depth = 1, c;
-      while ((c = closeRe.exec(rawHtml))) {
-        if (c[0][1] === '/') { depth--; if (depth === 0) { closeEnd = c.index + c[0].length; break; } }
-        else depth++;
-      }
-      innerHtml = rawHtml.slice(openEnd, closeEnd - (`</${tagLower}>`.length));
-    }
-    seenOpens.add(openStart);
-    elements.push({ openStart, openEnd, closeEnd, tag: tagLower, attrs, innerHtml, isVoid });
-  }
-  // Pass 1: every known stampable tag.
-  for (const tag of STAMPABLE_TAGS) {
-    const openRe = new RegExp(`<${tag}\\b([^>]*)>`, 'gi');
-    let m;
-    while ((m = openRe.exec(rawHtml))) harvest(m.index, m.index + m[0].length, tag, m[1] || '');
-  }
-  // Pass 2: opt-in markers (any tag with data-tdoc-artifact or class
-  // containing `tdoc-artifact`). Authors mark composed cards/widgets this
-  // way so they're commentable as a unit.
-  const optInRe = /<([a-z][\w-]*)\b/gi;
-  let om;
-  while ((om = optInRe.exec(rawHtml))) {
-    const tagLower = om[1].toLowerCase();
-    // Keep the legacy `>` boundary for the dry-run comparison, but do not
-    // retry the rest of an unclosed tag at every nested `<script` opener.
-    const end = rawHtml.indexOf('>', om.index + om[0].length);
-    if (end === -1) break;
-    const attrs = rawHtml.slice(om.index + om[0].length, end);
-    optInRe.lastIndex = end + 1;
-    if (/\bdata-tdoc-artifact\b/i.test(attrs) || /class\s*=\s*"[^"]*\btdoc-artifact\b[^"]*"/i.test(attrs)) {
-      harvest(om.index, end + 1, tagLower, attrs);
-    }
-  }
-  // Compute aid per element (uses cleaned attrs + inner content with any
-  // existing data-tdoc-aid stripped, so re-stamping is idempotent).
-  const aids = [];
-  for (const e of elements) {
-    const cleanedAttrs = e.attrs.replace(/\s+data-tdoc-aid\s*=\s*"[^"]*"/gi, '');
-    // For nested commentables we hash the OUTER's content even though it
-    // contains an inner commentable — that's correct, "outer artifact" is
-    // a different identity than "inner artifact". We just strip any
-    // data-tdoc-aid attributes from the inner before hashing so the
-    // hash is stable across re-stampings.
-    const cleanedInner = e.innerHtml.replace(/\sdata-tdoc-aid\s*=\s*"[^"]*"/gi, '');
-    e._cleanedAttrs = cleanedAttrs;
-    e._aid = aidFor(e.tag, cleanedInner, cleanedAttrs);
-    aids.push({
-      aid: e._aid, tag: e.tag,
-      head: e.innerHtml.slice(0, 80),
-      heading: nearestHeadingAt(e.openStart),
-    });
-  }
-  // Apply stamps in REVERSE order so earlier offsets stay valid as we mutate.
-  elements.sort((a, b) => b.openStart - a.openStart);
-  let out = rawHtml;
-  for (const e of elements) {
-    const stampedOpen = e.isVoid
-      ? `<${e.tag}${e._cleanedAttrs} data-tdoc-aid="${e._aid}"${/\/\s*$/.test(e.attrs) ? '/' : ''}>`
-      : `<${e.tag}${e._cleanedAttrs} data-tdoc-aid="${e._aid}">`;
-    out = out.slice(0, e.openStart) + stampedOpen + out.slice(e.openEnd);
-  }
-  return { html: out, aids };
-}
-
-// Returns { changed, affectedComments, samples } describing aid drift between
-// the legacy and current parser for this HTML, scoped to comments whose LIVE
-// anchor target disappears under the hardened parser. Pure measurement; no
-// mutation.
-//
-// Pairing-free by design: we do NOT try to build an old→new aid map by index
-// (the two parsers can emit different element counts/order on exactly the edge-
-// case HTML this measures, which would fabricate wrong mappings). Instead we use
-// SET MEMBERSHIP, which can't mis-pair:
-//   - legacySet = aids the legacy parser produced for this HTML (what stored
-//     comments were anchored against).
-//   - currentSet = aids the hardened parser produces now.
-//   - A comment is "at risk" iff its live element aid is in legacySet but NOT in
-//     currentSet — i.e. the fix made its anchor target's aid vanish, so reconcile
-//     will have to rebind it. (If the aid is still present, the fix didn't move
-//     that comment's target — safe.)
-function measureAidDrift(rawHtml, comments) {
-  let legacy, current;
-  try { legacy = stampAidsLegacy(rawHtml).aids; } catch { return { changed: 0, affectedComments: 0, samples: [] }; }
-  try { current = stampAids(rawHtml).aids; } catch { return { changed: 0, affectedComments: 0, samples: [] }; }
-  const legacySet = new Set(legacy.map(a => a.aid));
-  const currentSet = new Set(current.map(a => a.aid));
-  // count of legacy aids that no longer exist under the hardened parser
-  let changed = 0;
-  for (const aid of legacySet) if (!currentSet.has(aid)) changed++;
-
-  let affected = 0; const samples = [];
-  for (const c of (Array.isArray(comments) ? comments : [])) {
-    // Use the LIVE folded anchor (after replaying anchor_changed events), not the
-    // raw created-event anchor — a comment already re-anchored must not be
-    // counted against its stale original aid.
-    //
-    // CRITICAL: snapshotAt → ensureEventLog backfills eids IN PLACE, so we fold a
-    // DEEP COPY. This keeps measureAidDrift strictly read-only — it must never
-    // mutate the caller's list (the upload handler diffs before/after and would
-    // otherwise persist an incidental eid-backfill from this log-only check).
-    let anchor = null;
-    try {
-      if (Array.isArray(c && c.events)) {
-        const copy = JSON.parse(JSON.stringify(c));
-        anchor = snapshotAt(copy, Infinity)?.anchor || null;
-      } else {
-        anchor = c && c.anchor;
-      }
-    } catch { anchor = c && c.anchor; }
-    const aid = anchor && anchor.kind === 'element' ? (anchor.aid || null) : null;
-    // At risk iff its target existed under legacy but is gone under the fix.
-    if (aid && legacySet.has(aid) && !currentSet.has(aid)) {
-      affected++;
-      if (samples.length < 5) samples.push({ id: c.id, lostAid: aid });
-    }
-  }
-  return { changed, affectedComments: affected, samples };
-}
-// ---------------------------------------------------------------------------
 
 
 // Walk the HTML and stamp `data-tdoc-aid` on every commentable element.
@@ -2866,127 +2728,236 @@ function measureAidDrift(rawHtml, comments) {
 // regex walking skipped past the inner element's close tag. We now run
 // SEPARATE passes per tag, so an svg inside a figure gets stamped just
 // like a free-standing svg. Both are valid anchor targets.
+// Linear in the document, whatever it holds (#973 delta review: one close
+// search per element ran to the end of the document, and the stamps were
+// applied by re-slicing the whole document per element; 60k small tables
+// took 79s). The matching, inner HTML and aid of every element are those of
+// the earlier per-element scan (test/fixtures/stampaids-reference.js;
+// test/stampaids.test.js holds the two equal on every repo document and on
+// fuzzed markup); what changed is how they are found:
+//   - each tag's opens and closes, and the raw-text opens and closes, are
+//     found once and looked up by binary search;
+//   - an element's close is found by the same traversal (raw-text bodies
+//     skipped, same-tag opens counted, attribute-aware tag ends), with the
+//     result for a nested start memoized, so a run of nested elements is
+//     walked once;
+//   - headings by binary search, stamps applied in one join.
+// Two bounds keep it linear on adversarial input: an element nested more
+// than STAMP_MAX_DEPTH stampable elements deep gets no aid (its ancestors'
+// aids hash its content; real docs nest a handful), and an open tag that
+// starts inside another open tag (in an attribute value, so not an element
+// at all) gets none. And only the first STAMP_MAX_ELEMENTS elements in
+// document order are stamped: a real doc has hundreds; 2 MB of bare
+// `<section>` has 220,000, and each costs a hash.
+const STAMP_MAX_DEPTH = 16;
+const STAMP_MAX_ELEMENTS = 20000;
 function stampAids(rawHtml) {
-  const headings = headingsFromHtml(rawHtml);
+  const html = rawHtml;
+  const n = html.length;
+  const headings = headingsFromHtml(html);
   function nearestHeadingAt(idx) {
-    let best = null;
-    // Use <= so a heading whose close tag ends exactly at the next
-    // element's open (no whitespace between) is still "before" it.
-    for (const h of headings) { if (h.end <= idx) best = h.text; else break; }
-    return best;
+    // The last heading whose close ends at or before idx (ends ascend).
+    let lo = 0, hi = headings.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (headings[mid].end <= idx) lo = mid + 1; else hi = mid; }
+    return lo ? headings[lo - 1].text : null;
   }
-  // Find every open tag of every stampable kind in document order.
-  // For non-void tags, find its matching close (same-tag depth count).
-  // Collect [openStart, openEnd, closeEnd, tag, attrs, innerHtml] per element.
+  // The matches of `re`, found lazily and in order, as parallel start/end
+  // arrays: typed, and found with test(), so a page of 200,000 matches
+  // allocates no match objects, and only as far into the document as a
+  // lookup needs. The start is the last '<' at or before the match's end:
+  // every pattern here begins with '<' and holds no other.
+  function allMatches(re) {
+    re.lastIndex = 0;
+    return { re, starts: new Int32Array(64), ends: new Int32Array(64), count: 0, done: false };
+  }
+  function grow(set) {
+    if (set.done) return false;
+    if (!set.re.test(html)) { set.done = true; return false; }
+    const end = set.re.lastIndex;
+    if (set.count === set.starts.length) {
+      const s2 = new Int32Array(set.count * 2); s2.set(set.starts); set.starts = s2;
+      const e2 = new Int32Array(set.count * 2); e2.set(set.ends); set.ends = e2;
+    }
+    set.starts[set.count] = html.lastIndexOf('<', end - 1);
+    set.ends[set.count] = end;
+    set.count++;
+    return true;
+  }
+  // The first match at or after pos, as its position in the arrays, or -1.
+  function lowerBound(set, pos) {
+    if (pos >= n) return -1;
+    while ((set.count === 0 || set.starts[set.count - 1] < pos) && grow(set));
+    let lo = 0, hi = set.count;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (set.starts[mid] < pos) lo = mid + 1; else hi = mid; }
+    return lo < set.count ? lo : -1;
+  }
+  // The k-th match, or -1 past the last.
+  function nth(set, k) {
+    while (set.count <= k && grow(set));
+    return k < set.count ? set.starts[k] : -1;
+  }
+  // attrAwareOpenTagEnd, memoized; nothing after the last '>' can end.
+  const lastGt = html.lastIndexOf('>');
+  const tagEndMemo = new Map();
+  function tagEnd(lt) {
+    if (lt > lastGt) return -1;
+    let v = tagEndMemo.get(lt);
+    if (v === undefined) { v = attrAwareOpenTagEnd(html, lt); tagEndMemo.set(lt, v); }
+    return v;
+  }
+  // Raw-text opens (<script>, <style>, …) and, per raw tag, its closes.
+  const rawOpens = allMatches(new RegExp(`<(${RAW_TEXT_TAGS.join('|')})\\b`, 'gi'));
+  const rawCloses = new Map();
+  const rawSkipMemo = new Map();
+  function rawSkip(at) {
+    // skipRawTextBodyAt, with the close looked up instead of searched.
+    const index = rawOpens.starts[at];
+    let v = rawSkipMemo.get(index);
+    if (v !== undefined) return v;
+    const rEnd = tagEnd(index);
+    if (rEnd < 0) v = -1;
+    // As before: the test sees the open tag with its '>', so `<script src=x />`
+    // stays an open raw-text element, as a browser reads it.
+    else if (/\/\s*$/.test(html.slice(index, rEnd))) v = rEnd;
+    else {
+      const name = html.slice(index + 1, rawOpens.ends[at]).toLowerCase();
+      if (!rawCloses.has(name)) rawCloses.set(name, allMatches(new RegExp(`</${name}\\s*>`, 'gi')));
+      const set = rawCloses.get(name), c = lowerBound(set, rEnd);
+      v = c >= 0 ? set.ends[c] : n;
+    }
+    rawSkipMemo.set(index, v);
+    return v;
+  }
+  const byTag = new Map();
+  function eventsFor(tag) {
+    let ev = byTag.get(tag);
+    if (!ev) {
+      const esc = tag.replace(/[^\w-]/g, '');
+      ev = { opens: allMatches(new RegExp(`<${esc}\\b`, 'gi')), closes: allMatches(new RegExp(`</${esc}\\s*>`, 'gi')), memo: new Map(), openLen: 1 + tag.length };
+      byTag.set(tag, ev);
+    }
+    return ev;
+  }
+  // The close of the element whose content starts at `start`: depth-count
+  // same-tag opens and closes from there, leaping raw-text bodies. Nested
+  // starts are frames on an explicit stack (no recursion), each memoized.
+  function closeEndFrom(tag, start) {
+    const ev = eventsFor(tag);
+    if (ev.memo.has(start)) return ev.memo.get(start);
+    const stack = [{ start, pos: start }];
+    const fail = () => { for (const f of stack) ev.memo.set(f.start, -1); stack.length = 0; };
+    while (stack.length) {
+      const top = stack[stack.length - 1];
+      const mc = lowerBound(ev.closes, top.pos);
+      const mo = lowerBound(ev.opens, top.pos);
+      const mr = lowerBound(rawOpens, top.pos);
+      const ci = mc >= 0 ? ev.closes.starts[mc] : Infinity;
+      const oi = mo >= 0 ? ev.opens.starts[mo] : Infinity;
+      const ri = mr >= 0 ? rawOpens.starts[mr] : Infinity;
+      // The earliest; on a tie, close before open before raw (as before).
+      let kind = ci === Infinity && oi === Infinity && ri === Infinity ? '' : 'close', at = ci;
+      if (oi < at) { kind = 'open'; at = oi; }
+      if (ri < at) { kind = 'raw'; at = ri; }
+      if (!kind) { fail(); break; }
+      if (kind === 'raw') {
+        const to = rawSkip(mr);
+        if (to < 0) { fail(); break; }
+        top.pos = to;
+      } else if (kind === 'close') {
+        const closeEnd = ev.closes.ends[mc];
+        ev.memo.set(top.start, closeEnd);
+        stack.pop();
+        if (stack.length) stack[stack.length - 1].pos = closeEnd;
+      } else {
+        const oEnd = tagEnd(oi);
+        const childStart = oEnd < 0 ? oi + ev.openLen : oEnd;
+        if (ev.memo.has(childStart)) {
+          const v = ev.memo.get(childStart);
+          if (v < 0) { fail(); break; }
+          top.pos = v;
+        } else {
+          stack.push({ start: childStart, pos: childStart });
+        }
+      }
+    }
+    return ev.memo.get(start);
+  }
   const elements = [];
-  const seenOpens = new Set();   // dedupe across passes (tag pass + opt-in pass)
+  const seenOpens = new Set();
   function harvest(openStart, openEnd, tagLower, attrs) {
     if (seenOpens.has(openStart)) return;
     const isVoid = /^(img|iframe)$/i.test(tagLower) || /\/\s*$/.test(attrs);
     let closeEnd = openEnd, innerHtml = '';
     if (!isVoid) {
-      // Depth-count matching open/close tags of THIS tag name, but:
-      //  - skip over raw-text element bodies (<script>/<style>/...) so their
-      //    unescaped content can't contain a fake close tag, and
-      //  - resolve each open tag's end attribute-aware (a `>` inside an
-      //    attribute value isn't the tag end).
-      const openSameRe = new RegExp(`<${tagLower}\\b`, 'gi');
-      const closeSameRe = new RegExp(`</${tagLower}\\s*>`, 'gi');
-      const rawOpenRe = new RegExp(`<(${RAW_TEXT_TAGS.join('|')})\\b`, 'gi');
-      let depth = 1, scan = openEnd, foundCloseEnd = -1;
-      while (scan < rawHtml.length) {
-        closeSameRe.lastIndex = scan;
-        openSameRe.lastIndex = scan;
-        rawOpenRe.lastIndex = scan;
-        const mc = closeSameRe.exec(rawHtml);
-        const mo = openSameRe.exec(rawHtml);
-        const mr = rawOpenRe.exec(rawHtml);
-        // pick the earliest of: a close, a nested same-tag open, a raw-text open
-        const next = [mc, mo, mr].filter(Boolean).sort((a, b) => a.index - b.index)[0];
-        if (!next) break;
-        if (next === mr) {
-          // leap over the raw-text body so its content can't desync depth
-          const rTag = mr[1].toLowerCase();
-          const rEnd = attrAwareOpenTagEnd(rawHtml, mr.index);
-          if (rEnd < 0) break;
-          const skipTo = skipRawTextBodyAt(rawHtml, rTag, rawHtml.slice(mr.index, rEnd), rEnd);
-          scan = skipTo != null ? skipTo : rEnd;
-          continue;
-        }
-        if (next === mc) {
-          depth--; if (depth === 0) { foundCloseEnd = mc.index + mc[0].length; break; }
-          scan = mc.index + mc[0].length;
-        } else { // nested same-tag open
-          depth++;
-          const oEnd = attrAwareOpenTagEnd(rawHtml, mo.index);
-          scan = oEnd < 0 ? mo.index + mo[0].length : oEnd;
-        }
-      }
-      if (foundCloseEnd >= 0) closeEnd = foundCloseEnd;
-      innerHtml = rawHtml.slice(openEnd, closeEnd - (`</${tagLower}>`.length));
+      const found = closeEndFrom(tagLower, openEnd);
+      if (found >= 0) closeEnd = found;
+      innerHtml = html.slice(openEnd, closeEnd - (`</${tagLower}>`.length));
     }
     seenOpens.add(openStart);
     elements.push({ openStart, openEnd, closeEnd, tag: tagLower, attrs, innerHtml, isVoid });
   }
-  // Pass 1: every known stampable tag. Find the `<tag\b` start, then resolve
-  // the open tag's true end attribute-aware so a `>` inside an attribute value
-  // doesn't truncate the attrs (which would corrupt the stamp + the aid).
+  // Pass 1: every known stampable tag, its open tag's end attribute-aware.
   for (const tag of STAMPABLE_TAGS) {
-    const openRe = new RegExp(`<${tag}\\b`, 'gi');
-    let m;
-    while ((m = openRe.exec(rawHtml))) {
-      const end = attrAwareOpenTagEnd(rawHtml, m.index);
+    const opens = eventsFor(tag).opens;
+    let nextFrom = 0;
+    for (let k = 0; nth(opens, k) >= 0; k++) {
+      const index = opens.starts[k];
+      if (index < nextFrom) continue;
+      const end = attrAwareOpenTagEnd(html, index);
       if (end < 0) break;
-      openRe.lastIndex = end;
-      const attrs = rawHtml.slice(m.index + 1 + tag.length, end - 1);
-      harvest(m.index, end, tag, attrs);
+      nextFrom = end;
+      harvest(index, end, tag, html.slice(index + 1 + tag.length, end - 1));
     }
   }
-  // Pass 2: opt-in markers (any tag with data-tdoc-artifact or class
-  // containing `tdoc-artifact`). Authors mark composed cards/widgets this
-  // way so they're commentable as a unit. Match the tag name + a quick
-  // attribute presence check, then resolve the real end attribute-aware.
+  // Pass 2: opt-in markers (data-tdoc-artifact, class ~ tdoc-artifact).
   const optInProbe = /<([a-z][\w-]*)\b/gi;
   let om;
-  while ((om = optInProbe.exec(rawHtml))) {
+  while ((om = optInProbe.exec(html))) {
     const tagLower = om[1].toLowerCase();
-    const end = attrAwareOpenTagEnd(rawHtml, om.index);
+    const end = attrAwareOpenTagEnd(html, om.index);
     if (end < 0) break;
     optInProbe.lastIndex = end;
-    const attrs = rawHtml.slice(om.index + 1 + om[1].length, end - 1);
+    const attrs = html.slice(om.index + 1 + om[1].length, end - 1);
     if (/\bdata-tdoc-artifact\b/i.test(attrs) || /class\s*=\s*"[^"]*\btdoc-artifact\b[^"]*"/i.test(attrs)) {
       harvest(om.index, end, tagLower, attrs);
     }
   }
-  // Compute aid per element (uses cleaned attrs + inner content with any
-  // existing data-tdoc-aid stripped, so re-stamping is idempotent).
+  // Depth among stampable elements, and open tags inside another open tag.
+  const byStart = elements.slice().sort((a, b) => a.openStart - b.openStart);
+  const open = [];
+  let prevOpenEnd = -1;
+  for (const e of byStart) {
+    while (open.length && open[open.length - 1] <= e.openStart) open.pop();
+    e.depth = open.length;
+    e.insideTag = e.openStart < prevOpenEnd;
+    if (!e.insideTag) prevOpenEnd = e.openEnd;
+    if (e.closeEnd > e.openEnd) open.push(e.closeEnd);
+  }
+  const kept = byStart.filter((e) => e.depth < STAMP_MAX_DEPTH && !e.insideTag).slice(0, STAMP_MAX_ELEMENTS);
+  // aids in the order the elements were found, as before.
+  const order = new Map(elements.map((e, i) => [e, i]));
+  kept.sort((a, b) => order.get(a) - order.get(b));
   const aids = [];
-  for (const e of elements) {
-    const cleanedAttrs = e.attrs.replace(/\s+data-tdoc-aid\s*=\s*"[^"]*"/gi, '');
-    // For nested commentables we hash the OUTER's content even though it
-    // contains an inner commentable — that's correct, "outer artifact" is
-    // a different identity than "inner artifact". We just strip any
-    // data-tdoc-aid attributes from the inner before hashing so the
-    // hash is stable across re-stampings.
-    const cleanedInner = e.innerHtml.replace(/\sdata-tdoc-aid\s*=\s*"[^"]*"/gi, '');
+  for (const e of kept) {
+    const cleanedAttrs = e.attrs.indexOf('data-tdoc-aid') === -1 ? e.attrs : e.attrs.replace(/\s+data-tdoc-aid\s*=\s*"[^"]*"/gi, '');
+    const cleanedInner = e.innerHtml.indexOf('data-tdoc-aid') === -1 ? e.innerHtml : e.innerHtml.replace(/\sdata-tdoc-aid\s*=\s*"[^"]*"/gi, '');
     e._cleanedAttrs = cleanedAttrs;
     e._aid = aidFor(e.tag, cleanedInner, cleanedAttrs);
-    aids.push({
-      aid: e._aid, tag: e.tag,
-      head: e.innerHtml.slice(0, 80),
-      heading: nearestHeadingAt(e.openStart),
-    });
+    aids.push({ aid: e._aid, tag: e.tag, head: e.innerHtml.slice(0, 80), heading: nearestHeadingAt(e.openStart) });
   }
-  // Apply stamps in REVERSE order so earlier offsets stay valid as we mutate.
-  elements.sort((a, b) => b.openStart - a.openStart);
-  let out = rawHtml;
-  for (const e of elements) {
-    const stampedOpen = e.isVoid
+  // Stamps, in document order, joined once.
+  kept.sort((a, b) => a.openStart - b.openStart);
+  const parts = [];
+  let pos = 0;
+  for (const e of kept) {
+    parts.push(html.slice(pos, e.openStart));
+    parts.push(e.isVoid
       ? `<${e.tag}${e._cleanedAttrs} data-tdoc-aid="${e._aid}"${/\/\s*$/.test(e.attrs) ? '/' : ''}>`
-      : `<${e.tag}${e._cleanedAttrs} data-tdoc-aid="${e._aid}">`;
-    out = out.slice(0, e.openStart) + stampedOpen + out.slice(e.openEnd);
+      : `<${e.tag}${e._cleanedAttrs} data-tdoc-aid="${e._aid}">`);
+    pos = e.openEnd;
   }
-  return { html: out, aids };
+  parts.push(html.slice(pos));
+  return { html: parts.join(''), aids };
 }
 
 // Reconcile open comment anchors against the freshly-stamped artifact set.
@@ -3012,6 +2983,10 @@ function stampAids(rawHtml) {
 // resolve to X on v5/v6 (via its `created` event) and to Y on v7+ (via the
 // new `anchor_changed` event). This replaces aid_history.
 function reconcileAnchors(comments, aidsInVersion, V) {
+  // Self-contained (test/reconcile.test.js runs this function on its own).
+  // Only an anchor that names its column by key (a.sheet.key) is the
+  // reader's to resolve; a positional sheet anchor reconciles like any other.
+  const isSheetAnchor = (a) => !!(a && a.sheet && typeof a.sheet === 'object' && typeof a.sheet.key === 'string' && /^[\w-]{1,40}$/.test(a.sheet.key));
   if (!Array.isArray(comments)) return comments;
   ensureMigrated(comments);
   const byAid = new Map(aidsInVersion.map(a => [a.aid, a]));
@@ -3028,6 +3003,11 @@ function reconcileAnchors(comments, aidsInVersion, V) {
     // so once lost they were orphaned forever even when the target came back.
     // (text anchors are resolved client-side, not here.)
     if (!a || (a.kind !== 'element' && a.kind !== 'lost')) continue;
+    // A sheet cell or column anchored by its column key is resolved in the
+    // reader by table name, row id and key (sheets-viewer.js), never by aid:
+    // it has no aid to keep, and rebinding it by tag would point it at
+    // another element or mark it lost on every new version.
+    if (isSheetAnchor(a)) continue;
 
     const knownAid = a.aid
       || (a.selector && /\[data-tdoc-aid="([\w]+)"\]/.exec(a.selector || '')?.[1]);
@@ -3240,6 +3220,18 @@ function wrapBareTables(html) {
 // text-size-adjust: iOS Safari otherwise "autosizes" long text blocks, so
 // on a phone some table columns rendered huge next to short ones (Julie,
 // 2026-10-13; diagnosed by research-claw). Applied to every doc at serve time.
+// Sheets: while the sheets viewer is on its way, only the first 200 rows of a
+// <table data-tdoc-sheet> are laid out; laying out all of a 10,000-row table
+// first took the frame 7 seconds. A provider style baked into a sheet doc's
+// frame only, removed by server/sheets-loader.js in compare mode (no viewer
+// there) or when the viewer fails, and by the viewer once it is mounted, so
+// no row is ever lost to it. Kept byte-identical in server.js and worker.js
+// (test/sheets-size.test.js).
+const SHEETS_PENDING_STYLE = '<style id="tdoc-sheets-pending" data-tdoc-provider>table[data-tdoc-sheet]>tbody>tr:nth-child(n+201){display:none}</style>';
+function withSheetsPending(body) {
+  if (body.indexOf('data-tdoc-sheet') === -1 || body.indexOf('id="tdoc-sheets-pending"') !== -1) return body;
+  return /<head[^>]*>/i.test(body) ? body.replace(/<head[^>]*>/i, (open) => `${open}${SHEETS_PENDING_STYLE}`) : SHEETS_PENDING_STYLE + body;
+}
 const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 function hasReaderBlock(html) {
   return READER_BLOCK_RE.test(html);
@@ -3253,7 +3245,7 @@ function hasReaderBlock(html) {
 // the documents that followed the contract, and :where() zero-specificity
 // makes the injection harmless to a document that styles itself.
 function bakeFrameBody(raw) {
-  let body = forceWidgetSandbox(raw);
+  let body = withSheetsPending(forceWidgetSandbox(raw));
   if (!hasReaderBlock(body)) {
     const rcss = readerCssSource();
     if (rcss) {
@@ -9357,9 +9349,219 @@ function browserSaveHtmlRefusal(doc) {
   return inlineMediaRejection(doc);
 }
 
-function hostedMaxUploadBytes(env) {
+// One version's byte cap. A sheet (rows in <table data-tdoc-sheet>) may be
+// larger: its tables can bring a version up to SHEET_MAX_DOC_BYTES (or
+// TDOC_HOSTED_MAX_SHEET_BYTES), while everything outside them still has to
+// fit the ordinary cap, so an empty sheet does not buy room for anything
+// else. Every write path (upload/CLI, MCP, browser save, restore, accepted
+// suggestions, duplicate) passes the HTML it is about to store.
+// sheetScan is duplicated in server/server.js; test/sheets-size.test.js
+// holds the two together.
+const SHEET_MAX_DOC_BYTES = 8 * 1024 * 1024;
+// Sheet content in a document: { bytes, rows, tables }. `bytes` is what a
+// sheet's larger size cap may count: the text in sheet cells (each cell to
+// SHEET_SCAN_CELL_CHARS, the importer's limit) and the sheet markup itself
+// (each tag to 256 bytes, so a long attribute counts as ordinary bytes). It
+// is 0 when there are more than SHEET_SCAN_MAX_TABLES sheet tables (an
+// import makes at most 20 tabs). One pass; every index only moves forward
+// and nothing is re-scanned, so the time is linear in the input whatever it
+// holds. Comments, bogus comments (<!x>, <?x>, CDATA) and raw-text elements
+// are skipped the way a browser skips them, and nothing after <plaintext>
+// counts. A sheet table gets no allowance when it holds anything else (an
+// image, a script, a style, a comment, a data: or javascript: URL, a nested
+// table, a tag outside the list below, a quoted attribute running over a
+// '<'), or when it sits inside <template>, <svg> or <math>.
+var SHEET_SCAN_TAGS = new Set(['table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'span', 'a', 'b', 'i', 'em', 'strong', 'code', 'br', 'wbr', 's', 'u', 'small', 'sub', 'sup', 'mark']);
+var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript']);
+var SHEET_SCAN_MAX_TABLES = 20;
+var SHEET_SCAN_CELL_CHARS = 10000;
+// Every tag name the scan acts on, found by a hash of its lower-cased letters
+// and then compared, so naming a tag builds no string: its class (below) or
+// 0 for a name the scan does not act on.
+var SHEET_SCAN_OTHER = 0, SHEET_SCAN_TABLE = 1, SHEET_SCAN_TR = 2, SHEET_SCAN_CELL = 3, SHEET_SCAN_SECTION = 4,
+  SHEET_SCAN_INLINE = 5, SHEET_SCAN_RAWTAG = 6, SHEET_SCAN_TEMPLATE = 7, SHEET_SCAN_PLAINTEXT = 8,
+  SHEET_SCAN_SVG = 9, SHEET_SCAN_MATH = 10;
+var SHEET_SCAN_NAMES = (function () {
+  var byHash = new Map();
+  var put = function (name, cls) {
+    var h = 0;
+    for (var k = 0; k < name.length; k++) h = (h * 31 + name.charCodeAt(k)) | 0;
+    var list = byHash.get(h) || [];
+    list.push({ name: name, cls: cls });
+    byHash.set(h, list);
+  };
+  SHEET_SCAN_TAGS.forEach(function (name) {
+    put(name, name === 'table' ? SHEET_SCAN_TABLE : name === 'tr' ? SHEET_SCAN_TR : name === 'td' || name === 'th' ? SHEET_SCAN_CELL
+      : name === 'tbody' || name === 'thead' || name === 'tfoot' ? SHEET_SCAN_SECTION : SHEET_SCAN_INLINE);
+  });
+  SHEET_SCAN_RAW.forEach(function (name) { put(name, SHEET_SCAN_RAWTAG); });
+  put('template', SHEET_SCAN_TEMPLATE); put('svg', SHEET_SCAN_SVG); put('math', SHEET_SCAN_MATH);
+  put('plaintext', SHEET_SCAN_PLAINTEXT);
+  return byHash;
+})();
+function sheetScanClass(html, from, to) {
+  if (to - from > 9) return SHEET_SCAN_OTHER;
+  var h = 0;
+  for (var k = from; k < to; k++) { var c = html.charCodeAt(k); if (c >= 65 && c <= 90) c += 32; h = (h * 31 + c) | 0; }
+  var list = SHEET_SCAN_NAMES.get(h);
+  if (!list) return SHEET_SCAN_OTHER;
+  for (var x = 0; x < list.length; x++) {
+    var name = list[x].name;
+    if (name.length !== to - from) continue;
+    var same = true;
+    for (var y = 0; y < name.length && same; y++) { var cc = html.charCodeAt(from + y); if (cc >= 65 && cc <= 90) cc += 32; same = cc === name.charCodeAt(y); }
+    if (same) return list[x].cls;
+  }
+  return SHEET_SCAN_OTHER;
+}
+function sheetScan(html) {
+  var out = { bytes: 0, rows: 0, tables: 0 };
+  if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return out;
+  var n = html.length, i = 0, sheet = null, sheetCount = 0;
+  // Open <template>, <svg> and <math>, each counted on its own: a stray
+  // </svg> inside a template does not end the template.
+  var inTemplate = 0, inSvg = 0, inMath = 0;
+  var len, room;
+  // Where the next '"', "'" and ':' are: looked up again only once passed,
+  // so these searches cover the document once in all.
+  var nextDq = -1, nextSq = -1, nextColon = -1;
+  while (i < n) {
+    var lt = html.indexOf('<', i);
+    if (lt === -1) break;
+    var c1 = html.charCodeAt(lt + 1);
+    var closing = c1 === 47;
+    var c2 = closing ? html.charCodeAt(lt + 2) : c1;
+    var letter = (c2 >= 97 && c2 <= 122) || (c2 >= 65 && c2 <= 90);
+    if (!letter && c1 !== 33 && c1 !== 63 && !closing) {
+      // A run of '<' that opens no tag is text: take it whole.
+      var k = lt + 1;
+      while (k < n && html.charCodeAt(k) === 60) {
+        var d1 = html.charCodeAt(k + 1);
+        if ((d1 >= 97 && d1 <= 122) || (d1 >= 65 && d1 <= 90) || d1 === 47 || d1 === 33 || d1 === 63) break;
+        k++;
+      }
+      // k is the first char after the run that is not a bare '<' (or a '<'
+      // that opens something): the text runs from i to k.
+      if (sheet) {
+        len = k - i;
+        if (!sheet.inCell) sheet.bytes += len < 256 ? len : 256;
+        else { room = SHEET_SCAN_CELL_CHARS - sheet.cell; if (room > 0) { if (len > room) len = room; sheet.cell += len; sheet.bytes += len; } }
+      }
+      i = k;
+      continue;
+    }
+    if (sheet && lt > i) {
+      len = lt - i;
+      if (!sheet.inCell) sheet.bytes += len < 256 ? len : 256;
+      else { room = SHEET_SCAN_CELL_CHARS - sheet.cell; if (room > 0) { if (len > room) len = room; sheet.cell += len; sheet.bytes += len; } }
+    }
+    if (c1 === 33 || c1 === 63) { // <! or <?: a comment, doctype, CDATA or bogus comment
+      var isComment = c1 === 33 && html.startsWith('<!--', lt);
+      var end = isComment ? html.indexOf('-->', lt + 4) : html.indexOf('>', lt + 2);
+      if (sheet) sheet.ok = false;
+      if (end === -1) break;
+      i = end + (isComment ? 3 : 1);
+      continue;
+    }
+    if (closing && !letter) { // </ followed by no name: a bogus comment to the next '>'
+      var be = html.indexOf('>', lt + 2);
+      if (sheet) sheet.ok = false;
+      if (be === -1) break;
+      i = be + 1;
+      continue;
+    }
+    var j = closing ? lt + 2 : lt + 1;
+    var nameStart = j;
+    while (j < n) {
+      var c = html.charCodeAt(j);
+      if ((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c === 45) j++; else break;
+    }
+    var nameEnd = j;
+    var quote = 0, colon = false, quotedLt = false;
+    // Most tags hold no quote: their end is the next '>'.
+    var gt = html.indexOf('>', j);
+    if (gt === -1) break; // an unterminated tag: what follows is not sheet content
+    if (nextDq !== n && nextDq < j) { nextDq = html.indexOf('"', j); if (nextDq === -1) nextDq = n; }
+    if (nextSq !== n && nextSq < j) { nextSq = html.indexOf("'", j); if (nextSq === -1) nextSq = n; }
+    if (nextDq > gt && nextSq > gt) {
+      if (nextColon !== n && nextColon < j) { nextColon = html.indexOf(':', j); if (nextColon === -1) nextColon = n; }
+      colon = nextColon < gt;
+      j = gt;
+    }
+    while (j < n) {
+      var d = html.charCodeAt(j);
+      if (quote) { if (d === quote) quote = 0; else if (d === 58) colon = true; else if (d === 60) quotedLt = true; }
+      else if (d === 34 || d === 39) quote = d;
+      else if (d === 62) break;
+      else if (d === 58) colon = true;
+      j++;
+    }
+    if (j >= n) break; // an unterminated tag: what follows is not sheet content
+    var tagEnd = j + 1, tagLen = tagEnd - lt;
+    var cls = sheetScanClass(html, nameStart, nameEnd);
+    if (!closing && cls === SHEET_SCAN_PLAINTEXT) { if (sheet) sheet.ok = false; break; } // the rest is text
+    if (!closing && cls === SHEET_SCAN_RAWTAG) {
+      // Raw text runs to its own end tag, whatever it holds (</table> too).
+      var close = new RegExp('</' + html.slice(nameStart, nameEnd).toLowerCase() + '[\\s/>]', 'ig');
+      close.lastIndex = tagEnd;
+      var m = close.exec(html);
+      if (sheet) sheet.ok = false;
+      if (!m) break;
+      var re = html.indexOf('>', m.index);
+      i = re === -1 ? n : re + 1;
+      continue;
+    }
+    if (!sheet) {
+      if (cls === SHEET_SCAN_TEMPLATE) inTemplate += closing ? (inTemplate > 0 ? -1 : 0) : 1;
+      else if (cls === SHEET_SCAN_SVG) inSvg += closing ? (inSvg > 0 ? -1 : 0) : 1;
+      else if (cls === SHEET_SCAN_MATH) inMath += closing ? (inMath > 0 ? -1 : 0) : 1;
+      if (!closing && cls === SHEET_SCAN_TABLE && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) {
+        sheetCount++;
+        sheet = { bytes: tagLen < 256 ? tagLen : 256, rows: 0, ok: inTemplate === 0 && inSvg === 0 && inMath === 0 && !quotedLt, depth: 1, inCell: false, cell: 0 };
+      }
+    } else if (closing && cls === SHEET_SCAN_TABLE && sheet.depth === 1) {
+      if (sheet.ok) { out.bytes += sheet.bytes + (tagLen < 256 ? tagLen : 256); out.rows += Math.max(0, sheet.rows - 1); out.tables++; }
+      sheet = null;
+    } else {
+      if (cls === SHEET_SCAN_OTHER || cls >= SHEET_SCAN_RAWTAG || cls === SHEET_SCAN_TABLE) sheet.ok = false;
+      if (cls === SHEET_SCAN_TABLE) sheet.depth += closing ? -1 : 1;
+      if (quotedLt) sheet.ok = false;
+      if (colon && /(data|javascript|vbscript)\s*:/i.test(html.slice(lt, tagEnd))) sheet.ok = false;
+      if (cls === SHEET_SCAN_TR && !closing) sheet.rows++;
+      if (cls === SHEET_SCAN_CELL) { sheet.inCell = !closing; sheet.cell = 0; }
+      else if (cls === SHEET_SCAN_TR || cls === SHEET_SCAN_SECTION) sheet.inCell = false;
+      sheet.bytes += tagLen < 256 ? tagLen : 256;
+    }
+    i = tagEnd;
+  }
+  // More sheet tables than an import makes: no allowance (rows still count).
+  if (sheetCount > SHEET_SCAN_MAX_TABLES) out.bytes = 0;
+  return out;
+}
+function hostedBaseUploadBytes(env) {
   const n = Number(env && env.TDOC_HOSTED_MAX_UPLOAD_BYTES);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 2 * 1024 * 1024;
+}
+function hostedSheetUploadBytes(env) {
+  const n = Number(env && env.TDOC_HOSTED_MAX_SHEET_BYTES);
+  return Math.max(hostedBaseUploadBytes(env), Number.isFinite(n) && n > 0 ? Math.floor(n) : SHEET_MAX_DOC_BYTES);
+}
+// The cap for `html`; without it, the ordinary cap. hostedUploadCeiling is
+// the most any version may be, for checks made before the body is read.
+function hostedMaxUploadBytes(env, html) {
+  const base = hostedBaseUploadBytes(env);
+  if (typeof html !== 'string') return base;
+  // Under the ordinary cap there is nothing to decide, and nothing to scan.
+  const size = utf8ByteLength(html);
+  if (size <= base) return base;
+  const sheet = sheetScan(html).bytes;
+  if (!sheet) return base;
+  // Characters, not bytes, inside the sheet: counting the rest as total bytes
+  // minus sheet characters can only overstate it.
+  return size - sheet <= base ? hostedSheetUploadBytes(env) : base;
+}
+function hostedUploadCeiling(env) {
+  return hostedSheetUploadBytes(env);
 }
 
 function latestVersionNumber(meta) {
@@ -9535,7 +9737,7 @@ async function createDocForSession(env, req, session, { html, meta, version, tea
   // else: BYOK operator with no hosted registry keeps the old unlimited path.
 
   if (actor.kind === 'hosted') {
-    const maxBytes = hostedMaxUploadBytes(env);
+    const maxBytes = hostedMaxUploadBytes(env, html);
     const size = utf8ByteLength(html);
     if (size > maxBytes) return { ok: false, response: json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 }) };
     const limit = await hostedMaxDocsFor(env, actor.account_id);
@@ -17078,7 +17280,13 @@ function historyBlocks(html) {
 function historyChangeSummary(beforeHtml, afterHtml) {
   const engine = globalThis.TdocVersionDiff;
   if (!engine || typeof TdocParse5 === 'undefined') return null;
-  if (String(beforeHtml || '').length > HISTORY_SUMMARY_MAX_HTML || String(afterHtml || '').length > HISTORY_SUMMARY_MAX_HTML) return { places: null, sections: [] };
+  if (String(beforeHtml || '').length > HISTORY_SUMMARY_MAX_HTML || String(afterHtml || '').length > HISTORY_SUMMARY_MAX_HTML) {
+    // A big sheet is not parsed and diffed here (a 10,000-row sheet is
+    // megabytes): its rows are counted instead.
+    const after = sheetScan(afterHtml);
+    if (after.tables) return { places: null, sections: [], rows: [sheetScan(beforeHtml || '').rows, after.rows] };
+    return { places: null, sections: [] };
+  }
   const before = beforeHtml ? historyBlocks(beforeHtml) : [];
   const after = historyBlocks(afterHtml);
   let places = 0, inRun = false;
@@ -17265,7 +17473,7 @@ async function handleVersionRestore(env, req, url, slug, n) {
   const obj = await env.DOCS.get(`docs/${slug}/v${target}/index.html`);
   if (!obj) return json({ error: 'version_not_found' }, { status: 404 });
   const html = await obj.text();
-  if (utf8ByteLength(html) > hostedMaxUploadBytes(env)) return json({ error: 'payload_too_large' }, { status: 413 });
+  if (utf8ByteLength(html) > hostedMaxUploadBytes(env, html)) return json({ error: 'payload_too_large' }, { status: 413 });
   // The browser save's own checks: an old version written by an upload may
   // hold what a person's save may not.
   const docRefusal = browserSaveHtmlRefusal(html);
@@ -20308,7 +20516,7 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
       return json({ error: 'unsafe_edit', message: 'This suggestion cannot be applied safely.', suggestion: view(marked.ok ? marked.set : set) }, { status: 409 });
     }
     // The browser save's own checks, for the version this would make.
-    if (utf8ByteLength(nextHtml) > hostedMaxUploadBytes(env)) return json({ error: 'payload_too_large' }, { status: 413 });
+    if (utf8ByteLength(nextHtml) > hostedMaxUploadBytes(env, nextHtml)) return json({ error: 'payload_too_large' }, { status: 413 });
     if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(nextHtml) && !/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(html)) return json({ error: 'provider_markup_forbidden' }, { status: 400 });
     const who = set.agent && set.agent.name ? set.agent.name : 'AI';
     // Named from what changed, not from words the model chose.
@@ -22748,7 +22956,7 @@ function mcpWritingGuide(style, kind) {
   const name = MCP_STYLES.includes(style) ? style : 'default';
   const hs = mcpHouseStyle(name);
   const parts = [
-    `# Writing a tdoc (style: ${name}${kind === 'slides' ? ', slides' : ''})`,
+    `# Writing a tdoc (style: ${name}${kind === 'slides' || kind === 'sheets' ? `, ${kind}` : ''})`,
     'Follow this, then publish: with a shell, write the file and use create_upload + curl + commit_upload; without one, create_doc / update_doc. Send the body as html (a fragment is fine) with style: "' + name + '"; tdoc wraps a fragment in this style and the reading column. A page that brings its own page-level CSS is kept as written.',
     '## Voice',
     '- Say the thing, then stop. Lead with the answer; every sentence carries a fact, number, mechanism or judgment. If a sentence survives deletion, delete it.',
@@ -22781,6 +22989,13 @@ function mcpWritingGuide(style, kind) {
     parts.push('## Slides', 'A deck is a sequence of <section class="slide" data-tdoc-slide> cards, one idea each. Full guide: tdoc://authoring/structure/slides.md');
     if (frame) parts.push(frame.replace(/^## The frame\n+/, ''));
     if (rules) parts.push(rules.replace(/^## Design rules\n+/, '**Design rules**\n'));
+  }
+  if (kind === 'sheets') {
+    const md = mcpAuthoringGuides()['structure/sheets.md'];
+    const markup = mcpGuideSection(md, 'The markup');
+    parts.push('## Sheets', 'Records people search, filter and sort: one <table data-tdoc-sheet data-name="Tab"> per tab, drawn by the reader as a spreadsheet grid. Full guide: tdoc://authoring/structure/sheets.md');
+    if (markup) parts.push(markup.replace(/^## The markup\n+/, '').replace(/^[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*\n\n/, ''));
+    parts.push('Keep every data-row id and th data-key when editing (cell comments hang on them); a new row or column takes the next number. data-palette colours: gray red orange yellow green teal blue purple pink. Several tables are tabs of one grid. A sheet doc may be up to 8 MB (10,000 rows × 20 columns fits).');
   }
   return parts.join('\n\n') + '\n';
 }
@@ -23206,19 +23421,19 @@ const MCP_RAFT_AGENT_PARAM = { type: 'string', description: 'Agents on Raft pass
 const MCP_TOOLS = {
   get_writing_guide: {
     title: 'How to write a tdoc',
-    description: 'Voice, visuals, components and house style CSS for a tdoc (slide rules for kind "slides"). Call it before writing.',
+    description: 'Voice, visuals, components and house style CSS for a tdoc (slide/sheet rules by kind). Call it before writing.',
     inputSchema: {
       type: 'object',
       properties: {
         style: MCP_STYLE_PARAM,
-        kind: { type: 'string', enum: ['doc', 'slides'] },
+        kind: { type: 'string', enum: ['doc', 'slides', 'sheets'] },
       },
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     async run(call, args) {
       const style = MCP_STYLES.includes(args.style) ? args.style : 'default';
-      const kind = args.kind === 'slides' ? 'slides' : 'doc';
+      const kind = args.kind === 'slides' || args.kind === 'sheets' ? args.kind : 'doc';
       const text = mcpWritingGuide(style, kind);
       return mcpToolResult(text, { ok: true, style, kind });
     },
@@ -23403,10 +23618,15 @@ const MCP_TOOLS = {
       const files = Array.isArray(args.files) ? args.files : [];
       if (!files.length || files.length > MCP_UPLOAD_MAX_FILES) return mcpToolError('invalid_arguments', `Pass 1 to ${MCP_UPLOAD_MAX_FILES} files.`);
       const seen = new Set();
+      // The HTML is not read yet: the version as a whole may be a sheet's
+      // size, but inlined images sit outside any sheet table and so must
+      // fit the ordinary cap. commit_upload checks the real document.
+      const ceiling = hostedUploadCeiling(call.env);
       const max = hostedMaxUploadBytes(call.env);
       let html = 0;
       let total = 0;
       let published = 0;
+      let htmlBytes = 0;
       for (const f of files) {
         const name = f && f.name;
         if (!mcpUploadNameOk(name)) return mcpToolError('invalid_arguments', `Bad file name ${JSON.stringify(String(name).slice(0, 80))}: letters, digits, . _ - and up to three folders, no "..".`);
@@ -23418,13 +23638,13 @@ const MCP_TOOLS = {
         if (!Number.isInteger(f.size) || f.size < 1) return mcpToolError('invalid_arguments', `${name}: size is the file's byte count.`);
         if (f.size > MCP_UPLOAD_FILE_MAX) return mcpToolError('quota_upload_bytes', `${name} is over ${MCP_UPLOAD_FILE_MAX / 1048576} MB.`, { limit: MCP_UPLOAD_FILE_MAX });
         total += f.size;
-        if (f.type === 'text/html') { html++; published += f.size; } else published += Math.ceil(f.size / 3) * 4 + 32;
+        if (f.type === 'text/html') { html++; published += f.size; htmlBytes += f.size; } else published += Math.ceil(f.size / 3) * 4 + 32;
       }
       if (html !== 1) return mcpToolError('invalid_arguments', 'Exactly one file must be the HTML document (text/html).');
       if (total > MCP_UPLOAD_TOTAL_MAX) return mcpToolError('quota_upload_bytes', `The files add up to over ${MCP_UPLOAD_TOTAL_MAX / 1048576} MB.`, { limit: MCP_UPLOAD_TOTAL_MAX });
       // Images go inside the published HTML (base64), and one version is
       // capped at `max` bytes: refuse now, not after the upload.
-      if (published > max) {
+      if (published - htmlBytes > max || published > ceiling) {
         return mcpToolError('quota_upload_bytes', `With its images inlined the document would be about ${Math.ceil(published / 1024)} KB; one version holds ${Math.floor(max / 1024)} KB. Shrink or drop images (compress, smaller dimensions, SVG for charts).`, { limit: max, size: published });
       }
       let slug = null;
@@ -23522,7 +23742,7 @@ const MCP_TOOLS = {
           }
         }
         if (!htmlText || !htmlText.trim()) return mcpToolError('invalid_arguments', 'The HTML file is empty.');
-        const max = hostedMaxUploadBytes(call.env);
+        const max = hostedMaxUploadBytes(call.env, htmlText);
         const inlined = mcpInlineUploadedImages(htmlText, images, max);
         if (inlined.over) {
           return mcpToolError('quota_upload_bytes', `With its images inlined at every reference the document is over ${Math.floor(max / 1024)} KB, the size of one version. Reference each large image once, or shrink it.`, { limit: max });
@@ -25535,6 +25755,20 @@ const tdocHandlers = {
         },
       });
     }
+    if (p === '/sheets-viewer.js' && (method === 'GET' || method === 'HEAD')) {
+      // The loader names the version it was built with. That URL never
+      // changes content, so it is cached for a year; any other asks again.
+      const current = url.searchParams.get('v') === SHEETS_VIEWER_VERSION;
+      return new Response(method === 'HEAD' ? null : SHEETS_VIEWER_JS, {
+        headers: {
+          'Content-Type': 'text/javascript; charset=utf-8',
+          'Cache-Control': current ? 'public, max-age=31536000, immutable' : 'public, max-age=300',
+          'X-Content-Type-Options': 'nosniff',
+          // Fetched by the sandboxed (opaque-origin) doc frame.
+          'Cross-Origin-Resource-Policy': 'cross-origin',
+        },
+      });
+    }
     if (p === '/feedback.js' && (method === 'GET' || method === 'HEAD')) {
       return new Response(method === 'HEAD' ? null : FEEDBACK_JS, {
         headers: {
@@ -26148,7 +26382,7 @@ const tdocHandlers = {
         return json({ error: 'account_copy_unavailable' }, { status: 403 });
       }
       if (actor.kind === 'hosted') {
-        const maxBytes = hostedMaxUploadBytes(env);
+        const maxBytes = hostedMaxUploadBytes(env, rawHtml);
         const size = utf8ByteLength(rawHtml);
         if (size > maxBytes) {
           return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
@@ -29803,33 +30037,55 @@ const tdocHandlers = {
     // ---- explicit browser save (owner/latest only in the shell) ----
     if (p === '/api/doc/versions' && method === 'POST') {
       if (!env.COMMENTS) return json({ error: 'version_store_unavailable' }, { status: 503 });
-      const maxBytes = hostedMaxUploadBytes(env);
-      const contentLength = Number(req.headers.get('content-length') || 0);
-      if (contentLength && (!Number.isFinite(contentLength) || contentLength > maxBytes + 64 * 1024)) {
-        return json({ error: 'payload_too_large', limit: maxBytes }, { status: 413 });
+      // The browser editor's save, and only that: it is recorded as a
+      // person's edit (source: browser), which authorship trusts. An upload
+      // or agent token publishes through /api/upload, where authorship and
+      // answer-only locks apply.
+      if (req.headers.get('authorization')) return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
+      // Order matters: the doc's edit right is checked before the body is
+      // read, and size work happens only after. The shell names the doc in
+      // the query (?slug=) so that check can come first; a request without
+      // it (an older shell) is held to the ordinary cap until authorized.
+      const base = hostedMaxUploadBytes(env);
+      const named = url.searchParams.get('slug');
+      let auth = null;
+      if (named != null) {
+        if (!isValidSlug(named)) return json({ error: 'invalid_slug' }, { status: 400 });
+        auth = await authorizeDocEdit(req, env, named);
+        if (!auth.ok) return auth.response;
+        if (auth.actor.kind !== 'owner_session' && auth.actor.kind !== 'team_member') {
+          return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
+        }
       }
+      // JSON escaping grows HTML, hence the slack over the cap.
+      const readCap = (auth ? Math.ceil(hostedUploadCeiling(env) * 1.25) : base) + 64 * 1024;
+      const contentLength = Number(req.headers.get('content-length') || 0);
+      if (contentLength && (!Number.isFinite(contentLength) || contentLength > readCap)) {
+        return json({ error: 'payload_too_large', limit: auth ? hostedUploadCeiling(env) : base }, { status: 413 });
+      }
+      const raw = await mcpReadCapped(req, readCap);
+      if (!raw) return json({ error: 'payload_too_large', limit: auth ? hostedUploadCeiling(env) : base }, { status: 413 });
       let body = {};
-      try { body = await req.json(); } catch {}
+      try { body = JSON.parse(new TextDecoder().decode(raw)); } catch {}
       const slug = body && body.slug;
       const baseVersion = Number(body && body.baseVersion);
       const doc = body && body.html;
       if (!isValidSlug(slug) || !Number.isInteger(baseVersion) || baseVersion < 1 || typeof doc !== 'string') {
         return json({ error: 'slug, baseVersion, html required' }, { status: 400 });
       }
+      if (named != null && slug !== named) return json({ error: 'slug_mismatch' }, { status: 400 });
+      if (!auth) {
+        auth = await authorizeDocEdit(req, env, slug);
+        if (!auth.ok) return auth.response;
+        if (auth.actor.kind !== 'owner_session' && auth.actor.kind !== 'team_member') {
+          return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
+        }
+      }
       const size = utf8ByteLength(doc);
+      const maxBytes = hostedMaxUploadBytes(env, doc);
       if (size > maxBytes) return json({ error: 'payload_too_large', limit: maxBytes, size }, { status: 413 });
       const docRefusal = browserSaveHtmlRefusal(doc);
       if (docRefusal) return docRefusal;
-      // The browser editor's save, and only that: it is recorded as a
-      // person's edit (source: browser), which authorship trusts. An upload
-      // or agent token publishes through /api/upload, where authorship and
-      // answer-only locks apply.
-      if (req.headers.get('authorization')) return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
-      const auth = await authorizeDocEdit(req, env, slug);
-      if (!auth.ok) return auth.response;
-      if (auth.actor.kind !== 'owner_session' && auth.actor.kind !== 'team_member') {
-        return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
-      }
       const result = await createBrowserVersion(env, slug, {
         baseVersion,
         html: doc,
@@ -30068,7 +30324,7 @@ const tdocHandlers = {
         auth.actor && auth.actor.kind === 'hosted' && !writeGate.meta && verNum === 1
       );
       if (auth.actor && auth.actor.kind === 'hosted') {
-        const maxBytes = hostedMaxUploadBytes(env);
+        const maxBytes = hostedMaxUploadBytes(env, doc);
         const size = utf8ByteLength(doc);
         if (size > maxBytes) {
           return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
@@ -30515,21 +30771,6 @@ const tdocHandlers = {
       // agent honesty required, no silent re-anchoring to wrong artifacts.
       let mergedLocal = 0;
       try {
-        // #24 dry-run (read-only logging): measure how many live comments anchor
-        // to an aid the hardened parser changes vs the legacy parser. >0 on a
-        // real doc → that doc needs the aid migration in docs/DESIGN-aid-
-        // migration.md. Reads its own copy, never mutates. Empirically 0.
-        try {
-          const drift = measureAidDrift(doc, await readComments(env, slug));
-          if (drift.affectedComments > 0) {
-            console.warn(`[aid-drift] slug=${slug} v=${version} changedAids=${drift.changed} affectedComments=${drift.affectedComments} samples=${JSON.stringify(drift.samples)} — these anchors will rebind via reconcile; see docs/DESIGN-aid-migration.md`);
-          } else {
-            console.log(`[aid-drift] slug=${slug} v=${version} changedAids=${drift.changed} affectedComments=0 (safe)`);
-          }
-        } catch (e) {
-          console.error('[aid-drift] measurement failed (non-fatal):', e.message);
-        }
-
         // Serialized merge + reconcile + compact through the per-slug DO. The
         // merge is non-destructive (add-by-id-if-absent; never overwrite/delete
         // worker comments), mirroring tdoc-pull so round-trips converge.

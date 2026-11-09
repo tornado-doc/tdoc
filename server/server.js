@@ -37,6 +37,7 @@ function childEnv() {
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const frameProbeSource = require('./frame-probe-source');
+const { sheetsViewerSource, sheetsViewerVersion } = require('./sheets-source');
 // Shared shell builder keeps local and production boot markup identical.
 const SHELL = require('./shell.js');
 const { loadRuntimeAssets } = require('./runtime-assets.js');
@@ -530,6 +531,198 @@ function localMentionable(comments) {
 // Cap request bodies so a hostile/buggy client can't OOM the local server.
 const MAX_BODY_BYTES = 1 << 20; // 1 MiB — comments are small
 const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
+// A sheet may be larger: its <table data-tdoc-sheet> tables can bring a doc
+// up to SHEET_MAX_DOC_BYTES while the rest still fits MAX_DOCUMENT_BYTES.
+// The worker applies the same rule (hostedMaxUploadBytes);
+// test/sheets-size.test.js holds sheetScan identical in both.
+const SHEET_MAX_DOC_BYTES = 8 * 1024 * 1024;
+// Sheet content in a document: { bytes, rows, tables }. `bytes` is what a
+// sheet's larger size cap may count: the text in sheet cells (each cell to
+// SHEET_SCAN_CELL_CHARS, the importer's limit) and the sheet markup itself
+// (each tag to 256 bytes, so a long attribute counts as ordinary bytes). It
+// is 0 when there are more than SHEET_SCAN_MAX_TABLES sheet tables (an
+// import makes at most 20 tabs). One pass; every index only moves forward
+// and nothing is re-scanned, so the time is linear in the input whatever it
+// holds. Comments, bogus comments (<!x>, <?x>, CDATA) and raw-text elements
+// are skipped the way a browser skips them, and nothing after <plaintext>
+// counts. A sheet table gets no allowance when it holds anything else (an
+// image, a script, a style, a comment, a data: or javascript: URL, a nested
+// table, a tag outside the list below, a quoted attribute running over a
+// '<'), or when it sits inside <template>, <svg> or <math>.
+var SHEET_SCAN_TAGS = new Set(['table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'span', 'a', 'b', 'i', 'em', 'strong', 'code', 'br', 'wbr', 's', 'u', 'small', 'sub', 'sup', 'mark']);
+var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript']);
+var SHEET_SCAN_MAX_TABLES = 20;
+var SHEET_SCAN_CELL_CHARS = 10000;
+// Every tag name the scan acts on, found by a hash of its lower-cased letters
+// and then compared, so naming a tag builds no string: its class (below) or
+// 0 for a name the scan does not act on.
+var SHEET_SCAN_OTHER = 0, SHEET_SCAN_TABLE = 1, SHEET_SCAN_TR = 2, SHEET_SCAN_CELL = 3, SHEET_SCAN_SECTION = 4,
+  SHEET_SCAN_INLINE = 5, SHEET_SCAN_RAWTAG = 6, SHEET_SCAN_TEMPLATE = 7, SHEET_SCAN_PLAINTEXT = 8,
+  SHEET_SCAN_SVG = 9, SHEET_SCAN_MATH = 10;
+var SHEET_SCAN_NAMES = (function () {
+  var byHash = new Map();
+  var put = function (name, cls) {
+    var h = 0;
+    for (var k = 0; k < name.length; k++) h = (h * 31 + name.charCodeAt(k)) | 0;
+    var list = byHash.get(h) || [];
+    list.push({ name: name, cls: cls });
+    byHash.set(h, list);
+  };
+  SHEET_SCAN_TAGS.forEach(function (name) {
+    put(name, name === 'table' ? SHEET_SCAN_TABLE : name === 'tr' ? SHEET_SCAN_TR : name === 'td' || name === 'th' ? SHEET_SCAN_CELL
+      : name === 'tbody' || name === 'thead' || name === 'tfoot' ? SHEET_SCAN_SECTION : SHEET_SCAN_INLINE);
+  });
+  SHEET_SCAN_RAW.forEach(function (name) { put(name, SHEET_SCAN_RAWTAG); });
+  put('template', SHEET_SCAN_TEMPLATE); put('svg', SHEET_SCAN_SVG); put('math', SHEET_SCAN_MATH);
+  put('plaintext', SHEET_SCAN_PLAINTEXT);
+  return byHash;
+})();
+function sheetScanClass(html, from, to) {
+  if (to - from > 9) return SHEET_SCAN_OTHER;
+  var h = 0;
+  for (var k = from; k < to; k++) { var c = html.charCodeAt(k); if (c >= 65 && c <= 90) c += 32; h = (h * 31 + c) | 0; }
+  var list = SHEET_SCAN_NAMES.get(h);
+  if (!list) return SHEET_SCAN_OTHER;
+  for (var x = 0; x < list.length; x++) {
+    var name = list[x].name;
+    if (name.length !== to - from) continue;
+    var same = true;
+    for (var y = 0; y < name.length && same; y++) { var cc = html.charCodeAt(from + y); if (cc >= 65 && cc <= 90) cc += 32; same = cc === name.charCodeAt(y); }
+    if (same) return list[x].cls;
+  }
+  return SHEET_SCAN_OTHER;
+}
+function sheetScan(html) {
+  var out = { bytes: 0, rows: 0, tables: 0 };
+  if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return out;
+  var n = html.length, i = 0, sheet = null, sheetCount = 0;
+  // Open <template>, <svg> and <math>, each counted on its own: a stray
+  // </svg> inside a template does not end the template.
+  var inTemplate = 0, inSvg = 0, inMath = 0;
+  var len, room;
+  // Where the next '"', "'" and ':' are: looked up again only once passed,
+  // so these searches cover the document once in all.
+  var nextDq = -1, nextSq = -1, nextColon = -1;
+  while (i < n) {
+    var lt = html.indexOf('<', i);
+    if (lt === -1) break;
+    var c1 = html.charCodeAt(lt + 1);
+    var closing = c1 === 47;
+    var c2 = closing ? html.charCodeAt(lt + 2) : c1;
+    var letter = (c2 >= 97 && c2 <= 122) || (c2 >= 65 && c2 <= 90);
+    if (!letter && c1 !== 33 && c1 !== 63 && !closing) {
+      // A run of '<' that opens no tag is text: take it whole.
+      var k = lt + 1;
+      while (k < n && html.charCodeAt(k) === 60) {
+        var d1 = html.charCodeAt(k + 1);
+        if ((d1 >= 97 && d1 <= 122) || (d1 >= 65 && d1 <= 90) || d1 === 47 || d1 === 33 || d1 === 63) break;
+        k++;
+      }
+      // k is the first char after the run that is not a bare '<' (or a '<'
+      // that opens something): the text runs from i to k.
+      if (sheet) {
+        len = k - i;
+        if (!sheet.inCell) sheet.bytes += len < 256 ? len : 256;
+        else { room = SHEET_SCAN_CELL_CHARS - sheet.cell; if (room > 0) { if (len > room) len = room; sheet.cell += len; sheet.bytes += len; } }
+      }
+      i = k;
+      continue;
+    }
+    if (sheet && lt > i) {
+      len = lt - i;
+      if (!sheet.inCell) sheet.bytes += len < 256 ? len : 256;
+      else { room = SHEET_SCAN_CELL_CHARS - sheet.cell; if (room > 0) { if (len > room) len = room; sheet.cell += len; sheet.bytes += len; } }
+    }
+    if (c1 === 33 || c1 === 63) { // <! or <?: a comment, doctype, CDATA or bogus comment
+      var isComment = c1 === 33 && html.startsWith('<!--', lt);
+      var end = isComment ? html.indexOf('-->', lt + 4) : html.indexOf('>', lt + 2);
+      if (sheet) sheet.ok = false;
+      if (end === -1) break;
+      i = end + (isComment ? 3 : 1);
+      continue;
+    }
+    if (closing && !letter) { // </ followed by no name: a bogus comment to the next '>'
+      var be = html.indexOf('>', lt + 2);
+      if (sheet) sheet.ok = false;
+      if (be === -1) break;
+      i = be + 1;
+      continue;
+    }
+    var j = closing ? lt + 2 : lt + 1;
+    var nameStart = j;
+    while (j < n) {
+      var c = html.charCodeAt(j);
+      if ((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c === 45) j++; else break;
+    }
+    var nameEnd = j;
+    var quote = 0, colon = false, quotedLt = false;
+    // Most tags hold no quote: their end is the next '>'.
+    var gt = html.indexOf('>', j);
+    if (gt === -1) break; // an unterminated tag: what follows is not sheet content
+    if (nextDq !== n && nextDq < j) { nextDq = html.indexOf('"', j); if (nextDq === -1) nextDq = n; }
+    if (nextSq !== n && nextSq < j) { nextSq = html.indexOf("'", j); if (nextSq === -1) nextSq = n; }
+    if (nextDq > gt && nextSq > gt) {
+      if (nextColon !== n && nextColon < j) { nextColon = html.indexOf(':', j); if (nextColon === -1) nextColon = n; }
+      colon = nextColon < gt;
+      j = gt;
+    }
+    while (j < n) {
+      var d = html.charCodeAt(j);
+      if (quote) { if (d === quote) quote = 0; else if (d === 58) colon = true; else if (d === 60) quotedLt = true; }
+      else if (d === 34 || d === 39) quote = d;
+      else if (d === 62) break;
+      else if (d === 58) colon = true;
+      j++;
+    }
+    if (j >= n) break; // an unterminated tag: what follows is not sheet content
+    var tagEnd = j + 1, tagLen = tagEnd - lt;
+    var cls = sheetScanClass(html, nameStart, nameEnd);
+    if (!closing && cls === SHEET_SCAN_PLAINTEXT) { if (sheet) sheet.ok = false; break; } // the rest is text
+    if (!closing && cls === SHEET_SCAN_RAWTAG) {
+      // Raw text runs to its own end tag, whatever it holds (</table> too).
+      var close = new RegExp('</' + html.slice(nameStart, nameEnd).toLowerCase() + '[\\s/>]', 'ig');
+      close.lastIndex = tagEnd;
+      var m = close.exec(html);
+      if (sheet) sheet.ok = false;
+      if (!m) break;
+      var re = html.indexOf('>', m.index);
+      i = re === -1 ? n : re + 1;
+      continue;
+    }
+    if (!sheet) {
+      if (cls === SHEET_SCAN_TEMPLATE) inTemplate += closing ? (inTemplate > 0 ? -1 : 0) : 1;
+      else if (cls === SHEET_SCAN_SVG) inSvg += closing ? (inSvg > 0 ? -1 : 0) : 1;
+      else if (cls === SHEET_SCAN_MATH) inMath += closing ? (inMath > 0 ? -1 : 0) : 1;
+      if (!closing && cls === SHEET_SCAN_TABLE && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) {
+        sheetCount++;
+        sheet = { bytes: tagLen < 256 ? tagLen : 256, rows: 0, ok: inTemplate === 0 && inSvg === 0 && inMath === 0 && !quotedLt, depth: 1, inCell: false, cell: 0 };
+      }
+    } else if (closing && cls === SHEET_SCAN_TABLE && sheet.depth === 1) {
+      if (sheet.ok) { out.bytes += sheet.bytes + (tagLen < 256 ? tagLen : 256); out.rows += Math.max(0, sheet.rows - 1); out.tables++; }
+      sheet = null;
+    } else {
+      if (cls === SHEET_SCAN_OTHER || cls >= SHEET_SCAN_RAWTAG || cls === SHEET_SCAN_TABLE) sheet.ok = false;
+      if (cls === SHEET_SCAN_TABLE) sheet.depth += closing ? -1 : 1;
+      if (quotedLt) sheet.ok = false;
+      if (colon && /(data|javascript|vbscript)\s*:/i.test(html.slice(lt, tagEnd))) sheet.ok = false;
+      if (cls === SHEET_SCAN_TR && !closing) sheet.rows++;
+      if (cls === SHEET_SCAN_CELL) { sheet.inCell = !closing; sheet.cell = 0; }
+      else if (cls === SHEET_SCAN_TR || cls === SHEET_SCAN_SECTION) sheet.inCell = false;
+      sheet.bytes += tagLen < 256 ? tagLen : 256;
+    }
+    i = tagEnd;
+  }
+  // More sheet tables than an import makes: no allowance (rows still count).
+  if (sheetCount > SHEET_SCAN_MAX_TABLES) out.bytes = 0;
+  return out;
+}
+function maxDocumentBytes(html) {
+  const size = Buffer.byteLength(html, 'utf8');
+  if (size <= MAX_DOCUMENT_BYTES) return MAX_DOCUMENT_BYTES;
+  const sheet = sheetScan(html).bytes;
+  if (!sheet) return MAX_DOCUMENT_BYTES;
+  return size - sheet <= MAX_DOCUMENT_BYTES ? SHEET_MAX_DOC_BYTES : MAX_DOCUMENT_BYTES;
+}
 function readBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let b = '', size = 0;
@@ -956,6 +1149,18 @@ function wrapBareTables(html) {
   return out.join('');
 }
 
+// Sheets: while the sheets viewer is on its way, only the first 200 rows of a
+// <table data-tdoc-sheet> are laid out; laying out all of a 10,000-row table
+// first took the frame 7 seconds. A provider style baked into a sheet doc's
+// frame only, removed by server/sheets-loader.js in compare mode (no viewer
+// there) or when the viewer fails, and by the viewer once it is mounted, so
+// no row is ever lost to it. Kept byte-identical in server.js and worker.js
+// (test/sheets-size.test.js).
+const SHEETS_PENDING_STYLE = '<style id="tdoc-sheets-pending" data-tdoc-provider>table[data-tdoc-sheet]>tbody>tr:nth-child(n+201){display:none}</style>';
+function withSheetsPending(body) {
+  if (body.indexOf('data-tdoc-sheet') === -1 || body.indexOf('id="tdoc-sheets-pending"') !== -1) return body;
+  return /<head[^>]*>/i.test(body) ? body.replace(/<head[^>]*>/i, (open) => `${open}${SHEETS_PENDING_STYLE}`) : SHEETS_PENDING_STYLE + body;
+}
 const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
@@ -1360,6 +1565,18 @@ const server = http.createServer(async (req, res) => {
       'X-Content-Type-Options': 'nosniff',
     });
   }
+  // The sheets viewer, fetched by a doc frame that holds a sheet
+  // (server/sheets-loader.js). Read per request so an edit shows on reload;
+  // the hashed URL is what the worker caches for a year.
+  if (p === '/sheets-viewer.js' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const source = sheetsViewerSource();
+    return send(res, 200, req.method === 'HEAD' ? '' : source, {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Tdoc-Sheets-Version': sheetsViewerVersion(source),
+    });
+  }
   if (p === '/feedback.js' && (req.method === 'GET' || req.method === 'HEAD')) {
     const file = path.join(__dirname, 'runtime', 'feedback.js');
     if (!fs.existsSync(file)) return send(res, 404, 'feedback client is not built: npm run build:feedback');
@@ -1701,6 +1918,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
       body = wrapBareTables(body);
+      body = withSheetsPending(body);
       if (body.indexOf('id="tdoc-reader-patch"') === -1) {
         const ptag = `<style id="tdoc-reader-patch">${READER_PATCH_CSS}</style>`;
         // Anchor on the OPENING tag — see the matching comment in worker.js:
@@ -1832,15 +2050,16 @@ const server = http.createServer(async (req, res) => {
   // the only local-browser path that creates a full document snapshot.
   if (p === '/api/doc/versions' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
-    const body = await readBody(req, MAX_DOCUMENT_BYTES + 64 * 1024);
+    // JSON escaping grows the HTML; the exact cap is checked once decoded.
+    const body = await readBody(req, SHEET_MAX_DOC_BYTES * 1.25 + 64 * 1024);
     const slug = safeSlug(body.slug);
     const baseVersion = Number(body.baseVersion);
     const doc = body.html;
     if (!slug || !Number.isInteger(baseVersion) || baseVersion < 1 || typeof doc !== 'string') {
       return json(res, 400, { error: 'slug, baseVersion, html required' });
     }
-    if (Buffer.byteLength(doc, 'utf8') > MAX_DOCUMENT_BYTES) {
-      return json(res, 413, { error: 'payload_too_large', limit: MAX_DOCUMENT_BYTES });
+    if (Buffer.byteLength(doc, 'utf8') > maxDocumentBytes(doc)) {
+      return json(res, 413, { error: 'payload_too_large', limit: maxDocumentBytes(doc) });
     }
     if (!/<html[\s>]/i.test(doc) || !/<body[\s>]/i.test(doc)) {
       return json(res, 400, { error: 'invalid_document_html' });

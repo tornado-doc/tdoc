@@ -7,3 +7,6 @@ a style swappable rather than a rewrite.
 
 Document shape is not kept here. Which sections a doc has is decided by the
 prompt and the material, per doc.
+
+`slides.md` and `sheets.md` are the two document shapes the reader draws
+itself: a deck (`data-tdoc-slide`) and a spreadsheet (`data-tdoc-sheet`).
