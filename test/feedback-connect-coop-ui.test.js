@@ -84,7 +84,9 @@ function listen(handler, port) {
       return res.end();
     }
     const chunks = [];
-    for await (const chunk of request) chunks.push(chunk);
+    // A browser closing mid-request aborts its body; unguarded, that rejection
+    // ends the whole test process ("Error: aborted").
+    try { for await (const chunk of request) chunks.push(chunk); } catch { return; }
     const headers = { ...request.headers, host: 'tdoc.dev' };
     // The worker sees its own pages as https://tdoc.dev; the app keeps its own Origin.
     if (headers.origin === tdocBase) headers.origin = 'https://tdoc.dev';
