@@ -38,6 +38,7 @@ const O = { Origin: 'https://tdoc.dev' };
   for (let r = 0; r < 10000; r++) lines.push(Array.from({ length: 20 }, (_, c) => [`Customer ${r}`, `user${r}@example.com`, ((r * 13.37) % 9999).toFixed(2), `2026-0${1 + (r % 9)}-1${r % 9}`, ['open', 'won', 'lost'][r % 3], ['Ann', 'Bo', 'Cy'][r % 3], ['EMEA', 'APAC', 'NA'][r % 3], String(r % 100), `Follow up about order ${r}`, `https://example.com/o/${r}`][c % 10]).join(','));
   const big = (await importSheetFile({ name: 'customers.csv', text: lines.join('\n') })).html;
   const MB = 1024 * 1024;
+  const utf8Bytes = (s) => Buffer.byteLength(s, 'utf8');
   const prose = (bytes) => `<!doctype html><html><head><title>Long</title></head><body><main><h1>Long</h1>${'<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>'.repeat(Math.ceil(bytes / 62))}</main></body></html>`;
   const upload = (slug, html, version = 1) => call('/api/upload', { method: 'POST', token: julie.token, body: { slug, version, html, meta: { title: slug } } });
   // The shell names the doc in the query so the edit right is checked
@@ -98,12 +99,30 @@ const O = { Origin: 'https://tdoc.dev' };
       'a long attribute': sheetOf(cell(`<span title="${'x'.repeat(3 * MB)}">y</span>`)),
       'a comment-wrapped fake table': `<!doctype html><html><head><title>x</title></head><body><main><h1>x</h1><!-- <table data-tdoc-sheet data-name="F"><tbody>${cell('x'.repeat(3 * MB))}</tbody></table> --><table data-tdoc-sheet data-name="T"><tbody>${cell('ok')}</tbody></table></main></body></html>`,
       'a table inside a style': `<!doctype html><html><head><title>x</title><style>/* <table data-tdoc-sheet><tr><td>${'x'.repeat(3 * MB)}</td></tr></table> */</style></head><body><main><table data-tdoc-sheet data-name="T"><tbody>${cell('ok')}</tbody></table></main></body></html>`,
+      '60k one-cell sheet tables': `<!doctype html><html><head><title>x</title></head><body><main>${`<table data-tdoc-sheet><tbody>${cell('x'.repeat(60))}</tbody></table>`.repeat(60000)}</main></body></html>`,
+      'one cell past the 10,000-character cell limit': sheetOf(cell('x'.repeat(3 * MB))),
+      'a sheet inside an svg': `<!doctype html><html><body><svg><table data-tdoc-sheet><tbody>${cell('x'.repeat(9000)).repeat(330)}</tbody></table></svg></body></html>`,
+      'a sheet inside a template': `<!doctype html><html><body><template><table data-tdoc-sheet><tbody>${cell('x'.repeat(9000)).repeat(330)}</tbody></table></template></body></html>`,
+      'a sheet inside math': `<!doctype html><html><body><math><table data-tdoc-sheet><tbody>${cell('x'.repeat(9000)).repeat(330)}</tbody></table></math></body></html>`,
+      'CDATA in a sheet': sheetOf(cell('x'.repeat(9000)).repeat(330) + cell('<![CDATA[ x ]]>')),
+      'a quoted attribute running over a <': sheetOf(cell('x'.repeat(9000)).repeat(330) + `<tr data-row="r9"><td title="a<b">y</td></tr>`),
     };
     for (const [what, html] of Object.entries(cases)) {
+      assert(utf8Bytes(html) > 2 * MB && utf8Bytes(html) < 8 * MB, `${what}: fixture is ${utf8Bytes(html)} bytes`);
       const r = await upload(`bypass-${Object.keys(cases).indexOf(what)}`, html);
       assert.equal(r.status, 413, `${what}: ${r.status}`);
       assert.equal(r.body.limit, 2 * MB, `${what}: held to 2 MB`);
     }
+  });
+
+  await t('twenty sheet tables get the allowance, twenty-one do not', async () => {
+    const tables = (k) => `<!doctype html><html><body><main>${Array.from({ length: k }, (_, t) => `<table data-tdoc-sheet data-name="T${t}"><tbody>${`<tr data-row="r1"><td>${'x'.repeat(9000)}</td></tr>`.repeat(Math.ceil(330 / k) + 1)}</tbody></table>`).join('')}</main></body></html>`;
+    const ok = tables(20), over = tables(21);
+    assert(utf8Bytes(ok) > 2 * MB && utf8Bytes(over) > 2 * MB);
+    assert.equal((await upload('tables-20', ok)).status, 200);
+    const r = await upload('tables-21', over);
+    assert.equal(r.status, 413);
+    assert.equal(r.body.limit, 2 * MB);
   });
 
   await t('browser save: no session, no right to edit, or no named doc means no large body is read', async () => {
@@ -114,8 +133,11 @@ const O = { Origin: 'https://tdoc.dev' };
     assert(r.status === 401 || r.status === 403 || r.status === 404, `not an editor: ${r.status} ${r.text.slice(0, 120)}`);
     r = await save('big-sheet', 2, edited, julie, false);
     assert.equal(r.status, 413, 'without ?slug= the body is held to the ordinary cap before authorization');
-    r = await call('/api/doc/versions?slug=other-doc', { method: 'POST', cookie: julie.cookie, headers: O, body: { slug: 'big-sheet', baseVersion: 2, html: '<!doctype html><html><body>x</body></html>' } });
-    assert(r.status >= 400 && r.status < 500, `a body for another doc than the one authorized is refused: ${r.status}`);
+    // Two docs Julie may edit: authorized for one, the body names the other.
+    assert.equal((await upload('other-sheet', '<!doctype html><html><body><p>other</p></body></html>')).status, 200);
+    r = await call('/api/doc/versions?slug=other-sheet', { method: 'POST', cookie: julie.cookie, headers: O, body: { slug: 'big-sheet', baseVersion: 2, html: '<!doctype html><html><body>x</body></html>' } });
+    assert.equal(r.status, 400, r.text);
+    assert.equal(r.body.error, 'slug_mismatch');
   });
 
   await t('the size scan is linear: adversarial 2 MB inputs take under 50 ms', async () => {

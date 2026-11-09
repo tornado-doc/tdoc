@@ -9,8 +9,9 @@
 // inserts may run.
 (function () {
   'use strict';
-  if (window === window.parent) return;
   var clear = function () { var held = document.getElementById('tdoc-sheets-pending'); if (held) held.remove(); };
+  // Opened on its own (not in the reader's frame): no viewer, so no hold.
+  if (window === window.parent) { clear(); return; }
   if (new URLSearchParams(location.search).get('tdoc_compare') === '1' || !document.querySelector('table[data-tdoc-sheet]')) { clear(); return; }
   var s = document.createElement('script');
   s.src = '/sheets-viewer.js?v=__TDOC_SHEETS_VERSION__';

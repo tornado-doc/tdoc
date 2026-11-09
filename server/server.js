@@ -537,30 +537,47 @@ const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
 // test/sheets-size.test.js holds sheetScan identical in both.
 const SHEET_MAX_DOC_BYTES = 8 * 1024 * 1024;
 // Sheet content in a document: { bytes, rows, tables }. `bytes` is what a
-// sheet's larger size cap may count: the text in sheet cells and the cell
-// markup itself (each tag to 256 bytes, so a long attribute counts as
-// ordinary bytes). One pass; every index only moves forward and nothing is
-// re-scanned, so the time is linear in the input whatever it holds. Comments,
-// bogus comments (<!x>, <?x>) and raw-text elements are skipped the way a
-// browser skips them. A sheet table that holds anything else (an image, a
-// script, a style, a comment, a data: or javascript: URL, a nested table, a
-// tag outside the list below) gets no allowance at all.
+// sheet's larger size cap may count: the text in sheet cells (each cell to
+// SHEET_SCAN_CELL_CHARS, the importer's limit) and the sheet markup itself
+// (each tag to 256 bytes, so a long attribute counts as ordinary bytes). It
+// is 0 when there are more than SHEET_SCAN_MAX_TABLES sheet tables (an
+// import makes at most 20 tabs). One pass; every index only moves forward
+// and nothing is re-scanned, so the time is linear in the input whatever it
+// holds. Comments, bogus comments (<!x>, <?x>, CDATA) and raw-text elements
+// are skipped the way a browser skips them, and nothing after <plaintext>
+// counts. A sheet table gets no allowance when it holds anything else (an
+// image, a script, a style, a comment, a data: or javascript: URL, a nested
+// table, a tag outside the list below, a quoted attribute running over a
+// '<'), or when it sits inside <template>, <svg> or <math>.
 var SHEET_SCAN_TAGS = new Set(['table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'span', 'a', 'b', 'i', 'em', 'strong', 'code', 'br', 'wbr', 's', 'u', 'small', 'sub', 'sup', 'mark']);
-var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript', 'plaintext']);
+var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript']);
+var SHEET_SCAN_FOREIGN = new Set(['template', 'svg', 'math']);
+var SHEET_SCAN_MAX_TABLES = 20;
+var SHEET_SCAN_CELL_CHARS = 10000;
 function sheetScan(html) {
   var out = { bytes: 0, rows: 0, tables: 0 };
   if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return out;
-  var n = html.length, i = 0, sheet = null;
+  var n = html.length, i = 0, sheet = null, foreign = 0, sheetCount = 0;
+  // Text in a sheet: counted per cell, each cell to its cap.
+  var addText = function (len) {
+    if (!sheet || len <= 0) return;
+    if (!sheet.inCell) { sheet.bytes += Math.min(len, 256); return; }
+    var room = SHEET_SCAN_CELL_CHARS - sheet.cell;
+    var take = len < room ? len : room > 0 ? room : 0;
+    sheet.cell += take;
+    sheet.bytes += take;
+  };
   while (i < n) {
     var lt = html.indexOf('<', i);
     if (lt === -1) break;
-    if (sheet) sheet.bytes += lt - i;
+    addText(lt - i);
     var c1 = html.charCodeAt(lt + 1);
-    if (c1 === 33 || c1 === 63) { // <! or <?: a comment, doctype or bogus comment
-      var end = html.startsWith('<!--', lt) ? html.indexOf('-->', lt + 4) : html.indexOf('>', lt + 2);
+    if (c1 === 33 || c1 === 63) { // <! or <?: a comment, doctype, CDATA or bogus comment
+      var isComment = html.startsWith('<!--', lt);
+      var end = isComment ? html.indexOf('-->', lt + 4) : html.indexOf('>', lt + 2);
       if (sheet) sheet.ok = false;
       if (end === -1) break;
-      i = end + (html.startsWith('<!--', lt) ? 3 : 1);
+      i = end + (isComment ? 3 : 1);
       continue;
     }
     var j = lt + 1, closing = c1 === 47;
@@ -578,15 +595,15 @@ function sheetScan(html) {
         i = be + 1;
         continue;
       }
-      if (sheet) sheet.bytes += 1; // a bare '<' is text
+      addText(1); // a bare '<' is text
       i = lt + 1;
       continue;
     }
     var name = html.slice(nameStart, j).toLowerCase();
-    var quote = 0, colon = false;
+    var quote = 0, colon = false, quotedLt = false;
     while (j < n) {
       var d = html.charCodeAt(j);
-      if (quote) { if (d === quote) quote = 0; else if (d === 58) colon = true; }
+      if (quote) { if (d === quote) quote = 0; else if (d === 58) colon = true; else if (d === 60) quotedLt = true; }
       else if (d === 34 || d === 39) quote = d;
       else if (d === 62) break;
       else if (d === 58) colon = true;
@@ -594,6 +611,7 @@ function sheetScan(html) {
     }
     if (j >= n) break; // an unterminated tag: what follows is not sheet content
     var tagEnd = j + 1, tagLen = tagEnd - lt;
+    if (!closing && name === 'plaintext') { if (sheet) sheet.ok = false; break; } // the rest is text
     if (!closing && SHEET_SCAN_RAW.has(name)) {
       // Raw text runs to its own end tag, whatever it holds (</table> too).
       var close = new RegExp('</' + name + '[\\s/>]', 'ig');
@@ -606,19 +624,28 @@ function sheetScan(html) {
       continue;
     }
     if (!sheet) {
-      if (!closing && name === 'table' && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) sheet = { bytes: 0, rows: 0, ok: true, depth: 1 };
+      if (SHEET_SCAN_FOREIGN.has(name)) foreign += closing ? (foreign > 0 ? -1 : 0) : 1;
+      if (!closing && name === 'table' && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) {
+        sheetCount++;
+        sheet = { bytes: Math.min(tagLen, 256), rows: 0, ok: foreign === 0 && !quotedLt, depth: 1, inCell: false, cell: 0 };
+      }
     } else if (closing && name === 'table' && sheet.depth === 1) {
       if (sheet.ok) { out.bytes += sheet.bytes + Math.min(tagLen, 256); out.rows += Math.max(0, sheet.rows - 1); out.tables++; }
       sheet = null;
     } else {
       if (!SHEET_SCAN_TAGS.has(name) || name === 'table') sheet.ok = false;
       if (name === 'table') sheet.depth += closing ? -1 : 1;
+      if (quotedLt) sheet.ok = false;
       if (colon && /(data|javascript|vbscript)\s*:/i.test(html.slice(lt, tagEnd))) sheet.ok = false;
       if (!closing && name === 'tr') sheet.rows++;
+      if (name === 'td' || name === 'th') { sheet.inCell = !closing; sheet.cell = 0; }
+      else if (name === 'tr' || name === 'tbody' || name === 'thead' || name === 'tfoot') sheet.inCell = false;
       sheet.bytes += Math.min(tagLen, 256);
     }
     i = tagEnd;
   }
+  // More sheet tables than an import makes: no allowance (rows still count).
+  if (sheetCount > SHEET_SCAN_MAX_TABLES) out.bytes = 0;
   return out;
 }
 function maxDocumentBytes(html) {
