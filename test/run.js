@@ -18,6 +18,7 @@ const OFFLINE = [
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
   'version-diff.test.js', // bounded block matching and Unicode edits
+  'sheets.test.js',            // sheets: view query (search/filter/sort/URL), CSV parsing + type inference, markup round trip
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
