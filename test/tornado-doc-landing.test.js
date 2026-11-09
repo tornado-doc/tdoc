@@ -58,12 +58,12 @@ t('hero demo is a static mock, no iframe or author script', () => {
   // The demo used to frame live widget islands. It is a refined STATIC mock
   // now (crafted SVG/CSS charts), because the job is to sell the value-prop
   // loop, not to rebuild the product. So: no iframe, no author <script>.
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
   assert(demo.length > 1000, 'the hd demo block is missing');
   assert(!/<iframe/i.test(html), 'the page frames an iframe; the demo is a static mock now');
   assert(!/<script\b/i.test(html), 'a published tdoc runs no author script');
-  assert(/class="hd-bars"/.test(demo) && /class="hd-scatter"/.test(demo) && /class="hd-stack"/.test(demo),
-    'each demo window needs its crafted artifact (bars / scatter / stack)');
+  assert(/class="hd-bars"/.test(demo) && /class="hd-hbars"/.test(demo),
+    'the demo needs its crafted charts (v1 bars, v2 cost bars)');
   // The old CSS-sprite glider workaround must stay gone from the host.
   assert(!/<g class="glider"/.test(html), 'CSS-sprite glider group still present');
   assert(!/@keyframes\s+glide/.test(html), 'host CSS still has the sprite @keyframes glide');
@@ -141,7 +141,7 @@ t('has an entry to the feedback tool in a section of its own', () => {
 
 t('demo doc and thread are siblings, not nested', () => {
   // Nesting the thread inside the doc collapses the two-column canvas.
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
   const iDoc = demo.indexOf('<div class="hd-doc">');
   const iAside = demo.indexOf('<aside class="hd-notes">');
   assert(iDoc >= 0 && iAside > iDoc, 'missing hd-doc or hd-notes');
@@ -200,10 +200,10 @@ t('phone rules override the headline, and no redundant Star pill in the doc', ()
     `last h1.tagline media query is ${last && last[1]}px; 640 must come last so phones do not inherit the 840px size`);
 });
 
-t('each demo thread is one comment with one agent reply', () => {
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+t('the demo thread is one comment with one agent reply', () => {
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
   const threads = demo.match(/<aside class="hd-notes">[\s\S]*?<\/aside>/g) || [];
-  assert(threads.length === 3, `expected 3 threads, found ${threads.length}`);
+  assert(threads.length === 1, `expected 1 thread, found ${threads.length}`);
   for (const th of threads) {
     const humans = (th.match(/<b>Jesse Pollak<\/b>/g) || []).length;
     const replies = (th.match(/<div class="hd-reply">/g) || []).length;
@@ -215,10 +215,9 @@ t('each demo thread is one comment with one agent reply', () => {
 t('agent avatars are filled brand discs, not hollow glyphs', () => {
   // The sunburst is hollow; on a transparent disc it reads as a broken image.
   // Each agent mark sits filled-white on its own brand-coloured disc.
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
   assert(/background:#d97757"><svg[^>]*><use href="#hd-claude"/.test(demo),
     'Claude reply needs a terracotta disc with the claude mark');
-  assert(/#hd-openai/.test(demo) && /#hd-x/.test(demo), 'Codex and Grok marks must be present');
   assert(/#hd-claude"[\s\S]*?fill="#fff"/.test(html), 'the claude mark must be white on its disc');
 });
 
