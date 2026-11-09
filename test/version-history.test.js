@@ -7,6 +7,11 @@
 //   - what changed: computed only when asked, a few per call, then cached.
 //   - access: only people who may list the history (history_visibility, the
 //     owner's token, team members); a private doc's stranger gets nothing.
+//     Names only for the owner, the team and the invited.
+//   - writing needs reading: a member a private team doc leaves out cannot
+//     save, publish, hand off, react to or change comments on it.
+//   - summaries: the anonymous budget counts summaries; rows past the cache's
+//     window are not computed for them and never written.
 //   - Restore: the owner's browser session saves an old version's bytes as a
 //     new version; tokens, strangers and cross-origin posts are refused.
 // Run with: node test/version-history.test.js
@@ -312,7 +317,7 @@ const page = (sections) => `<!doctype html><html><head><title>Plan</title></head
     assert.deepEqual(JSON.parse(env.META.map.get(`history-summary:${bslug}`)).rows['1-1'], after.body.summaries['1-1']);
   });
 
-  await t('public history: a reader who is not signed in sees "Someone" and "Agent", never names', async () => {
+  await t('public history: names only for the owner, the team and the invited; anyone else sees "Someone" and "Agent"', async () => {
     const m = meta();
     m.access = { ...(m.access || {}), visibility: 'unlisted', history_visibility: 'public' };
     await env.META.put(`meta:${slug}`, JSON.stringify(m));
@@ -324,10 +329,35 @@ const page = (sections) => `<!doctype html><html><head><title>Plan</title></head
         else assert.deepEqual(row.who, { kind: 'agent', name: 'Agent', owner: null });
       }
       assert.ok(!/julie/.test(anon.text), anon.text);
+      // Signed in is not enough: a stranger to the doc sees no names either.
       const signed = await call(`/api/docs/${slug}/history`, { cookie: stranger.cookie });
-      assert.ok(signed.body.rows.some((r) => r.who.name === 'julie'));
+      assert.equal(signed.status, 200, signed.text);
+      assert.ok(!/julie/.test(signed.text), signed.text);
+      assert.ok(signed.body.rows.every((r) => r.who.name === 'Someone' || r.who.name === 'Agent'));
+      // The owner does.
+      const own = await call(`/api/docs/${slug}/history`, { cookie: julie.cookie });
+      assert.ok(own.body.rows.some((r) => r.who.name === 'julie'));
+      // Somebody the doc invites does.
+      await env.META.put(`meta:${slug}`, JSON.stringify({ ...m, access: { ...m.access, allowed_users: ['stranger'] } }));
+      const invited = await call(`/api/docs/${slug}/history`, { cookie: stranger.cookie });
+      assert.ok(invited.body.rows.some((r) => r.who.name === 'julie'), invited.text);
+      // A team member does, on the team's doc.
+      const tm = JSON.parse(env.META.map.get('meta:history-team'));
+      const tAccess = tm.access;
+      tm.access = { ...(tm.access || {}), visibility: 'unlisted', history_visibility: 'public', team: false, allowed_users: [] };
+      await env.META.put('meta:history-team', JSON.stringify(tm));
+      try {
+        const member = await call('/api/docs/history-team/history', { cookie: min.cookie });
+        assert.equal(member.status, 200, member.text);
+        assert.ok(member.body.rows.some((r) => r.who.name === 'julie' || r.who.name === 'minchen'), member.text);
+        const outsider = await call('/api/docs/history-team/history', { cookie: stranger.cookie });
+        assert.ok(!/julie|minchen/.test(outsider.text), outsider.text);
+      } finally {
+        tm.access = tAccess;
+        await env.META.put('meta:history-team', JSON.stringify(tm));
+      }
     } finally {
-      m.access = { ...m.access, history_visibility: 'owner' };
+      m.access = { ...m.access, allowed_users: [], history_visibility: 'owner' };
       await env.META.put(`meta:${slug}`, JSON.stringify(m));
     }
   });
@@ -371,6 +401,125 @@ const page = (sections) => `<!doctype html><html><head><title>Plan</title></head
     const list = await call(`/api/docs/${xslug}/history`, { cookie: julie.cookie });
     assert.ok(list.body.rows.some((x) => x.from === 1), JSON.stringify(list.body.rows));
     assert.ok(!list.body.rows.some((x) => x.who.kind === 'person'), 'no row reads as the owner herself');
+  });
+
+  await t('write endpoints also require read access: a member the private team doc leaves out writes nothing', async () => {
+    const tslug = 'history-team';
+    const read = () => JSON.parse(env.META.map.get(`meta:${tslug}`));
+    const setAccess = async (access) => { const m = read(); m.access = access; await env.META.put(`meta:${tslug}`, JSON.stringify(m)); };
+    // While the team may read it, min comments (so there is something of
+    // theirs to change later) and julie comments too.
+    await setAccess({ visibility: 'private', team: true, allowed_users: [] });
+    const latest = () => Math.max(...read().versions.map((v) => v.n));
+    const mine = await call('/api/comments', { method: 'POST', cookie: min.cookie, headers: O, body: { slug: tslug, version: latest(), text: 'Mine.' } });
+    assert.equal(mine.status, 200, mine.text);
+    const hers = await call('/api/comments', { method: 'POST', cookie: julie.cookie, headers: O, body: { slug: tslug, version: latest(), text: 'Hers.' } });
+    assert.equal(hers.status, 200, hers.text);
+    const idOf = (r) => (r.body.comment || r.body).id || r.body.id;
+    const mineId = idOf(mine), hersId = idOf(hers);
+    assert.ok(mineId && hersId, mine.text);
+    // Now the doc leaves the team out.
+    await setAccess({ visibility: 'private', team: false, allowed_users: [] });
+    const count = read().versions.length;
+    const denied = (r) => { assert.equal(r.status, 403, r.text); assert.equal(r.body && r.body.error, 'access_denied', r.text); };
+    // The browser save.
+    const save = await call('/api/doc/versions', { method: 'POST', cookie: min.cookie, headers: O, body: { slug: tslug, baseVersion: latest(), html: page({ Overwritten: ['By someone who cannot read it.'] }) } });
+    denied(save);
+    // A publish through min's own token.
+    const up = await call('/api/upload', { method: 'POST', token: min.token, body: { slug: tslug, version: latest() + 1, html: page({ Overwritten: ['Agent.'] }), meta: { title: 'T' } } });
+    denied(up);
+    // Handing comments to an agent.
+    const handoff = await call('/api/notify/handoff', { method: 'POST', cookie: min.cookie, headers: O, body: { slug: tslug, comment_ids: [mineId] } });
+    denied(handoff);
+    denied(await call(`/api/notify/targets?slug=${tslug}`, { cookie: min.cookie }));
+    // Comments: react, resolve, move, delete -- even their own.
+    denied(await call('/api/reactions', { method: 'POST', cookie: min.cookie, headers: O, body: { slug: tslug, comment_id: hersId, emoji: '👍', version: latest() } }));
+    denied(await call('/api/comments', { method: 'PATCH', cookie: min.cookie, headers: O, body: { slug: tslug, id: mineId, resolved: true, version: latest() } }));
+    denied(await call('/api/comments', { method: 'PATCH', cookie: min.cookie, headers: O, body: { slug: tslug, id: mineId, anchor: { quote: 'Plan' }, version: latest() } }));
+    denied(await call(`/api/comments?slug=${tslug}&id=${mineId}`, { method: 'DELETE', cookie: min.cookie, headers: O }));
+    // A stranger, who could never read it, cannot react either.
+    denied(await call('/api/reactions', { method: 'POST', cookie: stranger.cookie, headers: O, body: { slug: tslug, comment_id: hersId, emoji: '👍', version: latest() } }));
+    assert.equal(read().versions.length, count, 'no version was written');
+    // Invited by name, min may save again; the owner always may.
+    await setAccess({ visibility: 'private', team: false, allowed_users: ['minchen'] });
+    const ok = await call('/api/doc/versions', { method: 'POST', cookie: min.cookie, headers: O, body: { slug: tslug, baseVersion: latest(), html: page({ Allowed: ['Invited.'] }) } });
+    assert.equal(ok.status, 200, ok.text);
+    const reacted = await call('/api/reactions', { method: 'POST', cookie: min.cookie, headers: O, body: { slug: tslug, comment_id: hersId, emoji: '👍', version: latest() } });
+    assert.equal(reacted.status, 200, reacted.text);
+    await setAccess({ visibility: 'private', team: false, allowed_users: [] });
+    const owner = await call('/api/doc/versions', { method: 'POST', cookie: julie.cookie, headers: O, body: { slug: tslug, baseVersion: latest(), html: page({ Owner: ['Still mine.'] }) } });
+    assert.equal(owner.status, 200, owner.text);
+    // Shared with the team again, the member writes as before.
+    await setAccess({ visibility: 'private', team: true, allowed_users: [] });
+    const back = await call('/api/doc/versions', { method: 'POST', cookie: min.cookie, headers: O, body: { slug: tslug, baseVersion: latest(), html: page({ Team: ['Back.'] }) } });
+    assert.equal(back.status, 200, back.text);
+  });
+
+  // A doc with more rows than the summary cache keeps: 405 saves, each its
+  // own row (two hours apart), so rows 1-1 .. 5-5 are past the newest 400.
+  const lslug = 'history-long';
+  const LONG = 405;
+  await t('setup: a doc with 405 rows and public history', async () => {
+    assert.equal((await call('/api/upload', { method: 'POST', token: julie.token, body: { slug: lslug, version: 1, html: page({ S: ['v1'] }), meta: { title: 'L' } } })).status, 200);
+    const m = JSON.parse(env.META.map.get(`meta:${lslug}`));
+    const base = m.versions[0];
+    m.versions = [];
+    for (let n = 1; n <= LONG; n++) {
+      m.versions.push({ ...base, n, created: at(n * 120) });
+      await env.DOCS.put(`docs/${lslug}/v${n}/index.html`, page({ S: [`v${n}`] }));
+    }
+    m.access = { ...(m.access || {}), visibility: 'unlisted', history_visibility: 'public' };
+    await env.META.put(`meta:${lslug}`, JSON.stringify(m));
+    const r = await call(`/api/docs/${lslug}/history?limit=100`, { cookie: julie.cookie });
+    assert.equal(r.body.rows.length, 100);
+    assert.equal(r.body.rows[0].from, LONG);
+  });
+
+  await t('summaries: the anonymous limit counts summaries computed, not requests (10 per doc per minute)', async () => {
+    // Stay inside one rate-limit minute.
+    const into = Date.now() % 60000;
+    if (into > 55000) await new Promise((r) => setTimeout(r, 60000 - into + 50));
+    const ids = (from) => Array.from({ length: 6 }, (_, i) => `${from - i}-${from - i}`).join(',');
+    const a = await call(`/api/docs/${lslug}/history/summaries?rows=${ids(LONG)}`);
+    assert.equal(a.status, 200, a.text);
+    assert.equal(Object.keys(a.body.summaries).length, 6);
+    const b = await call(`/api/docs/${lslug}/history/summaries?rows=${ids(LONG - 6)}`);
+    assert.equal(Object.keys(b.body.summaries).length, 4, b.text);
+    const c = await call(`/api/docs/${lslug}/history/summaries?rows=${ids(LONG - 12)}`);
+    assert.equal(Object.keys(c.body.summaries).length, 0, c.text);
+    // Cached ones are still served.
+    const d = await call(`/api/docs/${lslug}/history/summaries?rows=${ids(LONG)}`);
+    assert.equal(Object.keys(d.body.summaries).length, 6);
+  });
+
+  await t('summaries past the cached window: not computed for a signed-out caller, not written for anyone', async () => {
+    const realGet = env.DOCS.get.bind(env.DOCS);
+    const realPut = env.META.put.bind(env.META);
+    let reads = 0;
+    const puts = [];
+    env.DOCS.get = (...args) => { reads++; return realGet(...args); };
+    env.META.put = (k, ...rest) => { puts.push(k); return realPut(k, ...rest); };
+    const before = env.META.map.get(`history-summary:${lslug}`);
+    try {
+      // Rows 1-1..5-5 are outside the newest 400; the anonymous budget is
+      // spent too, but these are refused before it is asked.
+      const anon = await call(`/api/docs/${lslug}/history/summaries?rows=5-5,4-4,1-1`);
+      assert.equal(anon.status, 200, anon.text);
+      assert.deepEqual(anon.body.summaries, {});
+      assert.equal(reads, 0);
+      assert.ok(!puts.some((k) => k.startsWith('rl:')), 'the budget is not touched');
+      // Signed in: shown, but not cached (the write would evict it at once).
+      const own = await call(`/api/docs/${lslug}/history/summaries?rows=5-5,1-1`, { cookie: julie.cookie });
+      assert.ok(own.body.summaries['5-5'] && own.body.summaries['1-1'], own.text);
+      assert.ok(!puts.includes(`history-summary:${lslug}`), puts.join(','));
+      assert.equal(env.META.map.get(`history-summary:${lslug}`), before);
+      // A row inside the window is cached as before.
+      const inside = await call(`/api/docs/${lslug}/history/summaries?rows=6-6`, { cookie: julie.cookie });
+      assert.ok(inside.body.summaries['6-6']);
+      assert.ok(puts.includes(`history-summary:${lslug}`));
+      const cached = JSON.parse(env.META.map.get(`history-summary:${lslug}`)).rows;
+      assert.ok(cached['6-6'] && !cached['5-5'] && !cached['1-1']);
+    } finally { env.DOCS.get = realGet; env.META.put = realPut; }
   });
 
   await t('the purge clears the cached summaries (deleteDocEverywhere)', async () => {

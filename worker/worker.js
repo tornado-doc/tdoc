@@ -14289,6 +14289,29 @@ async function teamWriteAccess(env, actor, meta) {
   return { ok: true, meta, teamDoc: true, teamAdmin: role === 'admin' };
 }
 
+// A token writing a team doc must also be able to read it: a member's
+// connection (or the team's agent) is refused a doc whose sharing leaves the
+// team out and does not invite that person. Admins own the doc and read it.
+async function teamDocWriteAccess(env, actor, meta) {
+  const team = await teamWriteAccess(env, actor, meta);
+  if (!team.ok || team.teamAdmin) return team;
+  const reader = {
+    login: actor.github_login || '',
+    email: actor.email || '',
+    account_id: actor.account_id,
+    linked_account_ids: actor.linked_account_ids || [],
+    linked_actor_keys: actor.linked_actor_keys || [],
+    team_ids: [meta.workspace_id],
+    team_admin_ids: [],
+    reborn: Array.isArray(actor.reborn) ? actor.reborn : [],
+    ...(actor.scope ? { scope: actor.scope } : {}),
+  };
+  if (!canReadDoc(accessFromMeta(meta), reader, env, meta)) {
+    return { ok: false, response: json({ error: 'access_denied' }, { status: 403 }) };
+  }
+  return team;
+}
+
 // A feedback space holds the comments left on an app. Its page is that list,
 // and an agent's fix lands on the app, not here. A version published to one
 // would replace the page behind "Open as a document" and the list's title, with
@@ -14374,7 +14397,7 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
       return { ok: true, meta: null };
     }
     if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
-    if (meta.workspace_id) return teamWriteAccess(env, actor, meta);
+    if (meta.workspace_id) return teamDocWriteAccess(env, actor, meta);
     if (!sessionOwnsAccount(actor, accountId)) {
       return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
     }
@@ -14384,7 +14407,7 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   }
   if (!meta) return { ok: false, response: json({ error: 'not_found' }, { status: 404 }) };
   if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
-  if (meta.workspace_id) return teamWriteAccess(env, actor, meta);
+  if (meta.workspace_id) return teamDocWriteAccess(env, actor, meta);
   if (!sessionOwnsAccount(actor, accountId)) return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
   const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: accountId });
   if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
@@ -14592,11 +14615,18 @@ async function authorizeOwnerMutation(req, env, slug, opts = {}) {
 
 // Editing a doc and driving an agent on it. On a team doc every current
 // member may; sharing, delete and rename stay with authorizeOwnerMutation.
+//
+// Editing is also reading: a member whom the doc's sharing leaves out (a
+// private team doc with access.team off that does not invite them) may not
+// write it either. The owner (an admin, on a team doc) always reads.
 async function authorizeDocEdit(req, env, slug) {
   const session = await getSession(env, req);
   const meta = slug ? await loadDocMeta(env, slug) : null;
   if (meta && meta.workspace_id && !feedbackScopeDenied(session, slug)
       && await isTeamMemberSession(env, session, meta.workspace_id)) {
+    if (!canReadDoc(accessFromMeta(meta), session, env, meta)) {
+      return { ok: false, response: json({ error: 'access_denied' }, { status: 403 }) };
+    }
     return { ok: true, session, actor: { kind: 'team_member' }, meta };
   }
   return authorizeOwnerMutation(req, env, slug);
@@ -16864,6 +16894,19 @@ async function canListHistory(env, gate, teamMember = null) {
   try { return await isTeamMemberSession(env, session, gate.meta.workspace_id); } catch { return false; }
 }
 
+// Whose names a history shows: the owner (and the owner's token), the doc's
+// team members, and the people it invites. Anyone else a public history lets
+// in -- signed in or not -- sees "Someone" and "Agent": no address's local
+// part, no agent connection's name.
+async function historyShowsNames(env, gate) {
+  if (gate.ownerToken) return true;
+  const session = gate.session;
+  if (!sessionPrincipal(session) || session.feedback) return false;
+  if (isAllowlisted(gate.access, session, env, gate.meta)) return true;
+  if (!gate.meta || !gate.meta.workspace_id) return false;
+  try { return await isTeamMemberSession(env, session, gate.meta.workspace_id); } catch { return false; }
+}
+
 // Who wrote one version, as docLastWriter reads the latest: a team agent, a
 // person in the browser (an edit, an accepted suggestion, a restore, a blank
 // doc's scaffold, a duplicate), an account's own agent or CLI, or -- on a
@@ -17050,10 +17093,9 @@ async function handleHistoryList(env, req, url, slug) {
   const before = Number(url.searchParams.get('before'));
   const limit = Math.max(1, Math.min(HISTORY_PAGE_MAX, Number(url.searchParams.get('limit')) || HISTORY_PAGE_ROWS));
   const { rows, next } = historyRows(gate.meta, { before: Number.isInteger(before) && before > 0 ? before : Infinity, limit });
-  // A public history's anonymous readers see that a person or an agent saved,
-  // not who: no agent connection's name, no address's local part.
-  const anonymous = !sessionPrincipal(gate.session) && !gate.ownerToken;
-  const names = anonymous
+  // Outside the owner, the team and the invited, a public history says that
+  // a person or an agent saved, not who (historyShowsNames).
+  const names = !(await historyShowsNames(env, gate))
     ? new Map(rows.map((r) => [r.writer.key, r.writer.kind === 'person'
       ? { kind: 'person', name: 'Someone', login: null }
       : { kind: 'agent', name: 'Agent', owner: null }]))
@@ -17093,8 +17135,13 @@ async function handleHistorySummaries(env, req, url, slug) {
   if (!gate.ok) return json({ error: gate.gone ? 'not_found' : 'access_denied' }, { status: gate.gone ? 404 : (gate.response.status || 403) });
   if (!gate.meta || !Array.isArray(gate.meta.versions)) return json({ error: 'not_found' }, { status: 404 });
   if (!(await canListHistory(env, gate))) return json({ error: 'history_hidden' }, { status: 403 });
-  const rowIds = new Set(historyRows(gate.meta, { limit: Infinity }).rows
-    .map((r) => `${Number(r.saves[r.saves.length - 1].n)}-${Number(r.saves[0].n)}`));
+  const allRows = historyRows(gate.meta, { limit: Infinity }).rows
+    .map((r) => `${Number(r.saves[r.saves.length - 1].n)}-${Number(r.saves[0].n)}`);
+  const rowIds = new Set(allRows);
+  // The cache keeps the newest rows' summaries (HISTORY_SUMMARY_CACHE_MAX),
+  // so a row past those would be computed and thrown away on every call.
+  const cacheable = new Set(allRows.slice(0, HISTORY_SUMMARY_CACHE_MAX));
+  const signedIn = !!sessionPrincipal(gate.session) || !!gate.ownerToken;
   const wanted = [...new Set(String(url.searchParams.get('rows') || '').split(','))]
     .filter((id) => rowIds.has(id)).slice(0, HISTORY_SUMMARIES_PER_CALL)
     .map((id) => id.split('-').map(Number));
@@ -17105,7 +17152,8 @@ async function handleHistorySummaries(env, req, url, slug) {
   let failed = null;
   const now = Date.now();
   const out = {};
-  let wrote = false, newFailure = false, allowed = null;
+  let newFailure = false;
+  const added = [];
   const read = async (n) => {
     const obj = await env.DOCS.get(`docs/${slug}/v${n}/index.html`);
     return obj ? obj.text() : null;
@@ -17117,13 +17165,14 @@ async function handleHistorySummaries(env, req, url, slug) {
       try { failed = JSON.parse((await env.META.get(failedKey)) || '{}') || {}; } catch { failed = {}; }
     }
     if (Number(failed[id]) > now) continue;
-    // Computing reads two versions and diffs them: anyone signed in may ask;
-    // the anonymous readers of a public history share a small budget per doc.
-    if (allowed === null) {
-      allowed = !!sessionPrincipal(gate.session) || !!gate.ownerToken
-        || !(await rateLimited(env, `history-summary:${slug}`, HISTORY_SUMMARY_ANON_PER_MIN, 60));
+    // Computing reads two versions and diffs them: anyone signed in may ask.
+    // The anonymous readers of a public history get only rows the cache
+    // keeps (so their work is not thrown away), and share a small budget per
+    // doc, counted per summary computed, not per request.
+    if (!signedIn) {
+      if (!cacheable.has(id)) continue;
+      if (await rateLimited(env, `history-summary:${slug}`, HISTORY_SUMMARY_ANON_PER_MIN, 60)) break;
     }
-    if (!allowed) break;
     // The row's changes are against the save before it: v<a-1> to v<b>.
     // A previous number may be missing from a doc's record (a gap); then
     // the nearest earlier version is "before".
@@ -17146,17 +17195,25 @@ async function handleHistorySummaries(env, req, url, slug) {
     // (_saveVersion), so a summary that read it would go stale: not cached.
     const scaffold = [prev, ...known.filter((n) => n >= a && n <= b)].some((n) => n && byNumber.get(n) && byNumber.get(n).blank);
     if (scaffold) continue;
+    // A row past the newest HISTORY_SUMMARY_CACHE_MAX would be evicted by the
+    // write below: shown, not cached.
+    if (!cacheable.has(id)) continue;
     cache[id] = summary;
-    wrote = true;
+    added.push(id);
   }
-  if (wrote) {
+  if (added.length) {
+    // Rows the list no longer has (a save joined them) are never asked for again.
+    for (const id of Object.keys(cache)) if (!rowIds.has(id)) delete cache[id];
     const ids = Object.keys(cache);
     // Keep the newest rows' summaries (higher numbers) when the cache is full.
     if (ids.length > HISTORY_SUMMARY_CACHE_MAX) {
       ids.sort((x, y) => Number(y.split('-')[1]) - Number(x.split('-')[1]));
       for (const id of ids.slice(HISTORY_SUMMARY_CACHE_MAX)) delete cache[id];
     }
-    try { await env.META.put(historySummaryKey(slug), JSON.stringify({ rows: cache })); } catch {}
+    // Nothing new survived the eviction: the stored value would not change.
+    if (added.some((id) => cache[id])) {
+      try { await env.META.put(historySummaryKey(slug), JSON.stringify({ rows: cache })); } catch {}
+    }
   }
   if (newFailure) {
     for (const id of Object.keys(failed)) if (!(Number(failed[id]) > now)) delete failed[id];
@@ -28368,6 +28425,7 @@ const tdocHandlers = {
         if (!target) return json({ error: 'not_found' }, { status: 404 });
         const docMeta = await loadDocMeta(env, slug);
         if (!canMutate(target, s, env, docMeta)) return json({ error: 'not_author' }, { status: 403 });
+        if (!canReadDoc(accessFromMeta(docMeta || {}), s, env, docMeta)) return json({ error: 'access_denied' }, { status: 403 });
         const V = coerceBodyVersion(version, target.created_in || 1);
         const res = await mutateComments(env, slug, {
           kind: 'set_status', slug, id, resolved: body.resolved, version: V, actor: { login: s.login },
@@ -28405,6 +28463,7 @@ const tdocHandlers = {
       if (!target) return json({ error: 'not_found' }, { status: 404 });
       const meta = await loadDocMeta(env, slug);
       if (!canMutate(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
+      if (!canReadDoc(accessFromMeta(meta || {}), s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       const V = coerceBodyVersion(version, target.created_in || 1);
       const res = await mutateComments(env, slug, {
         kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: actorKey(s) },
@@ -28473,6 +28532,7 @@ const tdocHandlers = {
       if (!target) return json({ error: 'not_found' }, { status: 404 });
       const meta = await loadDocMeta(env, slug);
       if (!mayDelete(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
+      if (!canReadDoc(accessFromMeta(meta || {}), s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       const res = await mutateComments(env, slug, {
         kind: 'delete', slug, id, version: stampVersion, actor: { login: actorKey(s) },
       });
@@ -28498,10 +28558,13 @@ const tdocHandlers = {
       // would resolve to Object.prototype members (e.g. `valueOf`, `toString`,
       // `__proto__`) and throw or pollute when read as a reaction bucket.
       if (RESERVED_OBJECT_KEYS.has(emoji)) return json({ error: 'invalid_emoji' }, { status: 400 });
+      // Any signed-in reader may react; somebody the doc does not let read
+      // it may not.
+      const reactMeta = await loadDocMeta(env, slug);
+      if (!canReadDoc(accessFromMeta(reactMeta || {}), s, env, reactMeta)) return json({ error: 'access_denied' }, { status: 403 });
       const V = coerceBodyVersion(version);
       // No upstream read: the toggle (add vs remove) is decided inside the
-      // serialized write so concurrent toggles can't both add. Any signed-in
-      // user may react, so there's no author check to do here.
+      // serialized write so concurrent toggles can't both add.
       const res = await mutateComments(env, slug, {
         kind: 'react', slug, comment_id, emoji, by: actorKey(s), version: V,
       });
