@@ -136,7 +136,7 @@ const OFFLINE = [
   'tdoc-start.test.js',
   'tdoc-privacy.test.js', // public /privacy page is served from its landing doc
   'tdoc-pricing.test.js', // public /pricing page matches the limits the worker enforces
-  'landing-demo-loop.test.js', // the homepage demo: one doc, one comment-to-v2 loop
+  'landing-real-doc.test.js', // the homepage hero: a screenshot of a real doc
   'signin-github-tab.test.js', // #179: GitHub opens in a new tab, never this one // #142 onboarding: /start page + the modal served with it
   'web-oauth.test.js',        // web redirect flow: sanitizeReturn open-redirect guard + flow wiring + device fallback
   'browser-free-cli.test.js', // clean skill install, write/edit/preview/publish without browser dependencies
