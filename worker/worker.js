@@ -14303,11 +14303,18 @@ async function teamDocWriteAccess(env, actor, meta) {
     linked_actor_keys: actor.linked_actor_keys || [],
     team_ids: [meta.workspace_id],
     team_admin_ids: [],
-    reborn: Array.isArray(actor.reborn) ? actor.reborn : [],
+    // The account's reborn records, loaded as sessionFromHostedBearer does,
+    // so this matches the read check the same token gets.
+    reborn: await loadReborn(env, [
+      ...(Array.isArray(actor.reborn) ? actor.reborn : []),
+      actor.github_login,
+      normalizeEmail(actor.email) ? `email:${normalizeEmail(actor.email)}` : '',
+      ...(actor.linked_actor_keys || []),
+    ]),
     ...(actor.scope ? { scope: actor.scope } : {}),
   };
   if (!canReadDoc(accessFromMeta(meta), reader, env, meta)) {
-    return { ok: false, response: json({ error: 'access_denied' }, { status: 403 }) };
+    return { ok: false, accessLost: true, response: json({ error: 'access_denied' }, { status: 403 }) };
   }
   return team;
 }
@@ -29347,16 +29354,30 @@ const tdocHandlers = {
               cache.set(`seat:${e.slug}`, seat);
             } catch { keep.push(e); continue; }
           }
-          if (!cache.get(`seat:${e.slug}`)) {
+          const accessLost = async () => {
             await putHandoff(env, e.slug, { ...h, delivery: { status: 'failed', error: 'access_lost', at: new Date().toISOString() } });
-            continue;
-          }
+            await releaseAnswerLock(env, e.slug, h.handoff_id);
+          };
+          if (!cache.get(`seat:${e.slug}`)) { await accessLost(); continue; }
           // A token limited to some workspaces runs only what it can reach:
           // a team agent, its own team's docs. Kept, not dropped: the same
           // account's wider token may still run it.
           if (auth.actor.scope) {
             if (!metas.has(e.slug)) metas.set(e.slug, await loadDocMeta(env, e.slug));
             if (!metas.get(e.slug) || !tokenScopeAllows(auth.actor, metas.get(e.slug))) { keep.push(e); continue; }
+          }
+          // Still on the team, but the doc's sharing no longer lets this token
+          // read it: its ack, pull and fail would all be refused
+          // (teamDocWriteAccess), so it is failed here, the lock released, and
+          // the card offers Resend instead of the daemon retrying it forever.
+          const seatRecord = cache.get(`record:${e.slug}`);
+          if (seatRecord && seatRecord.workspace_id && !isTrashedMeta(seatRecord)) {
+            if (!cache.has(`teamread:${e.slug}`)) {
+              let lost = false;
+              try { lost = !!(await teamDocWriteAccess(env, auth.actor, seatRecord)).accessLost; } catch {}
+              cache.set(`teamread:${e.slug}`, lost);
+            }
+            if (cache.get(`teamread:${e.slug}`)) { await accessLost(); continue; }
           }
           keep.push(e);
           // Kept but not run while its doc is in Trash: a restore brings the
