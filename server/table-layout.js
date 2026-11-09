@@ -66,7 +66,17 @@ function layoutTables({ apply = true } = {}) {
   const natural = records.map(r => `${r.selector}{table-layout:auto!important;width:max-content!important;min-width:0!important;max-width:none!important}` +
     r.cells.map(c => `${c.selector}{width:auto!important;min-width:0!important;max-width:none!important;white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important}`).join('')).join('');
   const errors = [], adjustments = [];
-  let rules = '.tdoc-table-scroll{min-width:0;max-width:100%;overflow-x:auto}';
+  // The wrapper's own scrollbar is styled so it is drawn whenever the table
+  // overflows. With overlay scrollbars (macOS/iOS default) a wide table was cut
+  // at the column edge with nothing on screen saying it scrolls, and a mouse had
+  // no bar to drag: readers reported such tables as not scrolling at all.
+  // ::-webkit-scrollbar only (Chromium, Safari): setting scrollbar-width or
+  // scrollbar-color would make Chromium ignore it and fall back to overlay.
+  const bar = '.tdoc-table-scroll::-webkit-scrollbar';
+  let rules = '.tdoc-table-scroll{min-width:0;max-width:100%;overflow-x:auto}' +
+    `${bar}{height:10px;width:10px;background:transparent}${bar}-track{background:transparent}` +
+    `${bar}-thumb{background-color:rgba(128,128,128,.45);border:2px solid transparent;border-radius:5px;background-clip:padding-box}` +
+    `${bar}-thumb:hover{background-color:rgba(128,128,128,.7)}`;
   try {
     // A synchronous counterfactual layout measures each cell's own ink, not
     // the width allotted to it by competing columns. Explicit <br> stays a
