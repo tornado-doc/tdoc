@@ -985,6 +985,42 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       assert((await page.locator('#tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area').count()) === 0, 'Area tool shown with the flag off');
     });
 
+    // The flag follows the signed-in viewer's tdoc dev mode: the session
+    // answer names the dev flags on for the person behind the token (worker
+    // feedbackDevFlags; feedback.test.js covers who gets them). Nothing is
+    // pinned here: the page sees exactly what the server says.
+    for (const [who, devFlags, expectArea] of [
+      ['a signed-in viewer with dev mode on gets area select', ['feedbackAreaSelect'], true],
+      ['a signed-in viewer without dev mode does not', [], false],
+    ]) {
+      await test(who, async () => {
+        const p = await context.newPage();
+        await p.setViewportSize({ width: 1200, height: 800 });
+        p.on('pageerror', (error) => consoleErrors.push(error.message));
+        await p.route(`${tdocBase}/api/feedback/session`, async (route) => {
+          const res = await route.fetch();
+          const body = await res.json();
+          await route.fulfill({ response: res, json: { ...body, dev_flags: devFlags } });
+        });
+        try {
+          const answered = p.waitForResponse(`${tdocBase}/api/feedback/session`, { timeout: 5000 });
+          await p.goto(`${appBase}/libraries`);
+          await p.addScriptTag({ url: `${tdocBase}/feedback.js` });
+          await answered;
+          await p.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor({ timeout: 5000 });
+          await startPicking(p);
+          const banner = await p.locator('#tdoc-feedback-root .tdoc-fb-banner').innerText();
+          assert(banner.includes('drag a box') === expectArea, `banner: ${banner}`);
+          const chart = await boxOf(p, '#page-chart');
+          await mouseDrag(p, [chart.x + 30, chart.y + 15], [chart.x + 150, chart.y + 75]);
+          const label = await composerLabel(p);
+          assert(label.startsWith('Area 120×60') === expectArea, `drag across the chart made ${label}`);
+          if (expectArea) await shot(p, 'devmode-on');
+          await p.keyboard.press('Escape');
+        } finally { await p.close(); }
+      });
+    }
+
     let areaId = null;
     let areaExpected = null;
     await test('a drag across a chart comments on that area: a live box, then the box, its container and what is under it are stored', async () => {
@@ -1066,26 +1102,35 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       } finally { await p.close(); }
     });
 
-    await test('Option-drag and the dock Area tool draw a box even over text', async () => {
+    await test('one rule: where a drag starts decides; Option changes nothing and there is no Area tool', async () => {
       const p = await areaPage();
       try {
+        assert((await p.locator('#tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area').count()) === 0, 'the dock still has an Area tool');
         await startPicking(p);
+        assert((await p.locator('#tdoc-feedback-root .tdoc-fb-banner').innerText()).startsWith('Click an element, or drag a box from an empty spot'), 'banner does not say the one rule');
         const h1 = await boxOf(p, 'h1');
-        await mouseDrag(p, [h1.x + 5, h1.y + 4], [h1.x + 140, h1.y + h1.height - 4], { alt: true });
-        assert((await composerLabel(p)).startsWith('Area 135×'), `Option-drag did not draw a box: ${await composerLabel(p)}`);
+        // Option held over text: still picks the element, no box.
+        await mouseDrag(p, [h1.x + 5, h1.y + h1.height / 2], [h1.x + 140, h1.y + h1.height / 2 + 2], { alt: true });
+        assert((await composerLabel(p)) === 'h1 · “Real modal libraries”', `Option-drag over text drew a box: ${await composerLabel(p)}`);
         await p.keyboard.press('Escape');
+        // The same heading, from the blank space right of its words: a box.
+        const words = await p.evaluate(() => { const r = document.createRange(); r.selectNodeContents(document.querySelector('h1')); return r.getBoundingClientRect().right; });
+        const from = [Math.round(words + 40), Math.round(h1.y + 4)];
+        await mouseDrag(p, from, [from[0] + 90, from[1] + h1.height]);
+        assert((await composerLabel(p)).startsWith('Area 90×'), `a drag from blank space did not draw a box: ${await composerLabel(p)}`);
         await p.keyboard.press('Escape');
-        const tool = p.locator('#tdoc-feedback-root .tdoc-feedback-dock button.tdoc-fb-area');
-        await tool.click();
-        assert((await tool.getAttribute('aria-pressed')) === 'true', 'Area tool did not turn on');
-        assert((await p.locator('#tdoc-feedback-root .tdoc-fb-banner').innerText()).startsWith('Drag a box around the area'), 'banner does not say Area mode');
-        await shot(p, 'tool');
-        await mouseDrag(p, [h1.x + 5, h1.y + 4], [h1.x + 100, h1.y + h1.height - 4]);
-        const label = await composerLabel(p);
-        assert(label.startsWith('Area 95×') && label.includes('Real modal'), `Area tool drag: ${label}`);
+        // Text nobody can select (user-select: none) is not text: a box.
+        await p.evaluate(() => {
+          const el = document.createElement('div');
+          el.id = 'unselectable'; el.textContent = 'Unselectable label text here';
+          el.style.cssText = 'user-select:none;-webkit-user-select:none;font-size:20px;width:max-content';
+          document.querySelector('h1').after(el);
+        });
+        const u = await boxOf(p, '#unselectable');
+        await mouseDrag(p, [u.x + 5, u.y + u.height / 2], [u.x + 105, u.y + u.height / 2 + 30]);
+        assert((await composerLabel(p)).startsWith('Area 100×'), `a drag on unselectable text did not draw a box: ${await composerLabel(p)}`);
+        await shot(p, 'blank');
         await p.keyboard.press('Escape');
-        await p.keyboard.press('Escape');
-        assert((await tool.getAttribute('aria-pressed')) === 'false', 'Area tool stayed on after pick mode ended');
       } finally { await p.close(); }
     });
 
@@ -1110,20 +1155,15 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       } finally { await p.close(); }
     });
 
-    await test('C starts and stops picking, but never while typing in the app', async () => {
+    await test('C belongs to the app: the layer takes no C', async () => {
       const p = await areaPage();
       try {
-        await p.evaluate(() => { const i = document.createElement('input'); i.id = 'host-input'; document.querySelector('main').prepend(i); window.__hostKeys = 0; document.addEventListener('keydown', () => window.__hostKeys++); });
+        await p.evaluate(() => { window.__hostKeys = 0; document.addEventListener('keydown', (e) => { if (e.key === 'c') window.__hostKeys++; }); });
         await p.locator('h1').click();
         await p.keyboard.press('c');
-        await p.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor({ timeout: 2000 });
-        await p.keyboard.press('c');
-        await p.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor({ state: 'detached', timeout: 2000 });
-        assert(await p.evaluate(() => window.__hostKeys === 0), 'the app also got the C');
-        await p.locator('#host-input').click();
-        await p.keyboard.type('cc');
-        assert((await p.locator('#host-input').inputValue()) === 'cc', 'C was taken from a text field');
-        assert(await p.locator('#tdoc-feedback-root .tdoc-fb-banner').count() === 0, 'typing c in the app started picking');
+        await p.waitForTimeout(200);
+        assert(await p.evaluate(() => window.__hostKeys === 1), 'the app did not get its C');
+        assert(await p.locator('#tdoc-feedback-root .tdoc-fb-banner').count() === 0, 'C started picking');
       } finally { await p.close(); }
     });
 
@@ -1155,8 +1195,9 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
           assert(await p.locator(box).isVisible(), `${name}: picking closed it`);
           await p.keyboard.press('Escape');
           assert(await p.locator(box).isVisible(), `${name}: Escape on the composer closed it`);
+          // From a spot with no text (a chart, a menu's or popover's padding).
           const c = await boxOf(p, chart);
-          await mouseDrag(p, [c.x + 4, c.y + 4], [c.x + Math.min(c.width - 4, 100), c.y + Math.min(c.height - 4, 50)], { alt: true });
+          await mouseDrag(p, [c.x + 4, c.y + 4], [c.x + Math.min(c.width - 4, 100), c.y + Math.min(c.height - 4, 50)]);
           assert((await composerLabel(p)).startsWith('Area'), `${name}: drag did not make an area`);
           if (name === 'fixed overlay with a backdrop') await shot(p, 'modal-overlay');
           if (name === 'Radix Dialog') await shot(p, 'modal-radix');
@@ -1221,10 +1262,9 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
           await p.goto(`${appBase}/libraries`);
           await p.addScriptTag({ url: `${tdocBase}/feedback.js` });
           await p.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor({ timeout: 5000 });
-          const tool = p.locator('#tdoc-feedback-root .tdoc-feedback-dock button.tdoc-fb-area');
-          assert(await tool.isVisible() && !(await tool.locator('.tdoc-fb-area-label').isVisible()), 'phone Area tool should be icon only');
+          assert(await p.locator('#tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area').count() === 0, 'phone dock still has an Area tool');
           const dock = await p.locator('#tdoc-feedback-root .tdoc-feedback-dock').boundingBox();
-          assert(dock.x >= 0 && dock.x + dock.width <= 390, `dock with the Area tool runs off a 390 screen: ${JSON.stringify(dock)}`);
+          assert(dock.x >= 0 && dock.x + dock.width <= 390, `dock runs off a 390 screen: ${JSON.stringify(dock)}`);
           await p.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').tap();
           const banner = p.locator('#tdoc-feedback-root .tdoc-fb-banner');
           await banner.waitFor({ timeout: 3000 });
