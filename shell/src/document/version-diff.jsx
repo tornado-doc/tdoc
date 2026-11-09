@@ -4,7 +4,10 @@ import './version-diff.css';
 const empty = { units: [], styles: '', duration: 0, animationCount: 0, unsupported: false };
 const send = (frame, data) => frame?.contentWindow?.postMessage({ source: 'tdoc-compare-shell', ...data }, '*');
 
-function ComparisonFrames({ slug, before, after, narrow, theme }) {
+// `bare`: the history panel's view, one column with no pane labels -- the
+// panel row already says whose change it is and when, and normal mode shows
+// no version numbers.
+export function ComparisonFrames({ slug, before, after, narrow, theme, bare = false }) {
   const refs = useRef({});
   const models = useRef(before ? {} : { before: empty });
   const applied = useRef(false);
@@ -90,13 +93,13 @@ function ComparisonFrames({ slug, before, after, narrow, theme }) {
     {!ready && !error ? <p role="status">Loading versions…</p> : null}
     {error ? <p role="alert">{error}</p> : null}
     {result && !error ? <p className="tdoc-diff-summary ui-sr-only" role="status">{result.count ? `${result.count} changed blocks` : 'No text or markup changes detected'}</p> : null}
-    <div className={`tdoc-diff-frames${narrow ? ' is-narrow' : ''}${!before ? ' is-first' : ''}${motionPreview ? ' is-motion' : ''}`}>
+    <div className={`tdoc-diff-frames${narrow ? ' is-narrow' : ''}${!before ? ' is-first' : ''}${motionPreview ? ' is-motion' : ''}${bare ? ' is-bare' : ''}`}>
       <section className="tdoc-diff-pane is-before" aria-hidden={!before || (narrow && !motionPreview)} inert={!before || (narrow && !motionPreview)}>
-        <div className="tdoc-diff-pane-label">{before ? `v${before} · Before` : 'First version'}</div>
+        {bare ? null : <div className="tdoc-diff-pane-label">{before ? `v${before} · Before` : 'First version'}</div>}
         {before ? <iframe ref={(node) => { refs.current.before = node; }} aria-label="Previous version" sandbox="allow-scripts" src={src(before)} onLoad={() => init('before')} /> : <p className="tdoc-diff-empty">All content is shown as added.</p>}
       </section>
       <section className="tdoc-diff-pane is-after">
-        <div className="tdoc-diff-pane-label">v{after} · After</div>
+        {bare ? null : <div className="tdoc-diff-pane-label">v{after} · After</div>}
         <iframe ref={(node) => { refs.current.after = node; }} aria-label="New version" sandbox="allow-scripts" src={src(after)} onLoad={() => init('after')} />
       </section>
     </div>

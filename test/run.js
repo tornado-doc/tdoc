@@ -18,6 +18,7 @@ const OFFLINE = [
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
   'version-diff.test.js', // bounded block matching and Unicode edits
+  'version-history.test.js', // history rows: same writer within 30 min grouped, paged, what changed cached, access, Restore
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
@@ -197,6 +198,7 @@ const BROWSER = [
   'diagram-controls-ui.test.js', // authored map SVG sizing cannot stretch provider controls
   'reply-activity-ui.test.js', // v2 receives v3 reply status without navigation or pulsing
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
+  'version-history-ui.test.js', // Edited opens the history panel: grouped rows, Show changes on/off remembered, Share this version, Restore, phone drawer, dev-mode numbers, suggestions row, flag off, earlier-version comment
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments
   'profile-picks-ui.test.js', // /@handle owner removes picks: card control + Undo, every pin in the picker, errors shown

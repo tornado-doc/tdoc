@@ -75,6 +75,9 @@ const previewValidator = fs.readFileSync(path.join(previewDir, 'validate-svg.js'
 // parse5 (MIT), one vendored file: the worker reads a doc as a browser does
 // before an AI suggestion may change its text (npm run build:parser).
 const htmlParser = fs.readFileSync(path.join(skill, 'server/html-parser/parse5.js'), 'utf8');
+// The version compare's block matching, shared with the reader frame: the
+// history panel's change summaries match blocks the same way.
+const versionDiffJs = fs.readFileSync(path.join(skill, 'server/version-diff.js'), 'utf8');
 // The authoring guides, served to AI apps as MCP resources.
 const authoringGuides = require(path.join(skill, 'server/authoring-guides.js')).loadAuthoringGuides(skill);
 const bundlerSource = fs.readFileSync(__filename, 'utf8');
@@ -92,7 +95,7 @@ const git = (...args) => {
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
-const bundleSha = sha(Buffer.concat([Buffer.from([bundlerSource, worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewValidator, htmlParser, JSON.stringify(previewCoverage), JSON.stringify(authoringGuides)].join('\0')), previewWasm, ...previewFonts]));
+const bundleSha = sha(Buffer.concat([Buffer.from([bundlerSource, worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewValidator, htmlParser, versionDiffJs, JSON.stringify(previewCoverage), JSON.stringify(authoringGuides)].join('\0')), previewWasm, ...previewFonts]));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -135,6 +138,7 @@ replaced = mustReplace(replaced, /const PREVIEW_FONT_COVERAGE = "__TDOC_PREVIEW_
   'const PREVIEW_FONT_COVERAGE = ' + JSON.stringify(previewCoverage) + ';', 'PREVIEW_FONT_COVERAGE');
 replaced = mustReplace(replaced, '/* __TDOC_PREVIEW_VALIDATOR__ */', previewValidator, 'PREVIEW_VALIDATOR');
 replaced = mustReplace(replaced, '/* __TDOC_HTML_PARSER__ */', htmlParser, 'HTML_PARSER');
+replaced = mustReplace(replaced, '/* __TDOC_VERSION_DIFF__ */', versionDiffJs, 'VERSION_DIFF');
 replaced = mustReplace(replaced, /const AUTHORING_GUIDES = "__TDOC_AUTHORING_GUIDES__";/, 'const AUTHORING_GUIDES = ' + JSON.stringify(authoringGuides) + ';', 'AUTHORING_GUIDES');
 
 let withBuild = replaced.replace(

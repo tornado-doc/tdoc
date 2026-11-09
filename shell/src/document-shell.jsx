@@ -58,6 +58,9 @@ import {
 import { copyText, isDocumentComment, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
 import { readStored, writeStored } from './safe-storage.js';
 import { isFeatureOn } from './feature-flags.js';
+import { readDevMode } from './dev-mode.js';
+import { VersionHistory } from './document/version-history.jsx';
+import { CommentDocVersionContext } from './document/comment-card.jsx';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
@@ -195,11 +198,29 @@ export function DocumentShell({ boot, config }) {
     history.pushState(null, '', url);
     setComparing(next);
   };
+  // Version history (flag versionHistory): "Edited …" opens the history
+  // panel for whoever may list the doc's history (cfg.historyVisible);
+  // ?history=1 is the panel open, so Back closes it.
+  const [historyFlag] = useState(() => isFeatureOn('versionHistory'));
+  const historyEnabled = historyFlag && config.mode === 'published' && !config.isLanding && Boolean(config.historyVisible);
+  const [historyOpen, setHistoryOpen] = useState(() => historyEnabled && new URLSearchParams(location.search).get('history') === '1');
+  const changeHistory = (next) => {
+    if (next === historyOpen) return;
+    const url = new URL(location.href);
+    if (next) url.searchParams.set('history', '1'); else url.searchParams.delete('history');
+    history.pushState(null, '', url);
+    setHistoryOpen(next);
+  };
   useEffect(() => {
-    const restore = () => setComparing(new URLSearchParams(location.search).get('compare') === '1');
+    const restore = () => {
+      const query = new URLSearchParams(location.search);
+      setComparing(query.get('compare') === '1');
+      setHistoryOpen(historyEnabled && query.get('history') === '1');
+    };
     window.addEventListener('popstate', restore);
     return () => window.removeEventListener('popstate', restore);
-  }, []);
+  }, [historyEnabled]);
+  const [historyDevMode] = useState(() => Boolean(readDevMode()?.on));
   const narrow = useNarrowViewport();
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
@@ -1634,7 +1655,9 @@ export function DocumentShell({ boot, config }) {
   const shareUrl = config.isLanding
     ? `${location.origin}/`
     : `${location.origin}/d/${encodeURIComponent(config.slug)}`;
-  const versionUrl = config.isLanding ? null : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
+  // With version history the link to one version lives in the panel (Share
+  // this version), not under Share.
+  const versionUrl = config.isLanding || historyEnabled ? null : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
 
   // While the owner waits on their agent, ask the server every few seconds
   // what it has done: read the comments (the card flips to "reading"), then
@@ -2125,6 +2148,7 @@ export function DocumentShell({ boot, config }) {
       <HandoffSendTransport.Provider value={demoBackend ? demoBackend.postNotifyHandoff : null}>
       <AgentMentionContext.Provider value={agentMentions}>
       <SuggestContext.Provider value={suggestContext}>
+      <CommentDocVersionContext.Provider value={historyFlag && config.mode === 'published' ? Number(config.version) : null}>
       <TopBar
         identity={config.identity}
         onboardingTest={config.debug ? {
@@ -2144,7 +2168,13 @@ export function DocumentShell({ boot, config }) {
           <LandingActions stars={config.stars} />
         </> : (
           !comparing && <>
-            <DocumentEdited config={config} onCompare={() => changeComparison(true)} />
+            <DocumentEdited
+              config={config}
+              onCompare={() => changeComparison(true)}
+              onHistory={historyEnabled ? () => changeHistory(!historyOpen) : null}
+              historyOpen={historyOpen}
+              disabled={editor.mode === 'edit' && editor.dirty}
+            />
             {askAiAction}
             <DocumentModeControl
               mode={editor.mode}
@@ -2174,6 +2204,7 @@ export function DocumentShell({ boot, config }) {
             onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
             onCompare={() => changeComparison(true)}
+            onHistory={historyEnabled ? () => changeHistory(true) : null}
           />
         )}
         onThemeChange={(nextTheme) => {
@@ -2216,6 +2247,17 @@ export function DocumentShell({ boot, config }) {
         {guestInviteStatus ? <span>{guestInviteStatus}</span> : null}
       </div> : null}
       {comparing ? <VersionDiffView config={config} theme={theme} narrow={narrow} onClose={() => changeComparison(false)} /> : null}
+      {historyOpen && !comparing ? (
+        <VersionHistory
+          config={config}
+          narrow={narrow}
+          theme={theme}
+          devMode={historyDevMode}
+          suggestions={suggestOn ? suggestions : null}
+          onClose={() => changeHistory(false)}
+          onToast={showToast}
+        />
+      ) : null}
 
       <DiagramDialog diagram={diagram} canApply={Boolean(config.canEdit)} onClose={() => setDiagram(null)}
         onApply={async (json, svg) => {
@@ -2230,7 +2272,7 @@ export function DocumentShell({ boot, config }) {
           setDiagram(null);
           showToast(`${diagram.isNew ? 'Diagram inserted' : 'Diagram applied'}. Save the document to publish a new version.`);
         }} />
-      <div className="tdoc-reader-surface" hidden={comparing}>
+      <div className="tdoc-reader-surface" hidden={comparing || historyOpen}>
       <OldVersionNotice value={boot.oldVersion || (liveLatest > Number(config.version) ? {
         current: Number(config.version),
         latest: liveLatest,
@@ -2306,7 +2348,7 @@ export function DocumentShell({ boot, config }) {
 
       <DocumentFooter visible={bridge.layout.footerVisible} />
 
-      {!narrow && commentFilterControl && !comparing ? (
+      {!narrow && commentFilterControl && !comparing && !historyOpen ? (
         <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.min(pinLeft - 4, window.innerWidth - 250) }}>
           <CommentListControls filter={commentFilterControl}
             unreadCount={autoReadEnabled ? unreadAgentReplies : 0}
@@ -2333,7 +2375,7 @@ export function DocumentShell({ boot, config }) {
         {demoBar && !drawerOpen ? <DemoRewriteBar state={demoRewriteState} agent={DEMO_AGENT.handle} onUndo={undoDemoRewrite} /> : null}
         <MobileCommentDrawer
           filter={commentFilterControl}
-          open={drawerOpen && !comparing}
+          open={drawerOpen && !comparing && !historyOpen}
           openCount={openCount}
           unread={mobileUnread}
           unreadCount={autoReadEnabled ? unreadAgentReplies : 0}
@@ -2525,14 +2567,15 @@ export function DocumentShell({ boot, config }) {
           {toast.text}
         </div>
       ) : null}
-      {suggestOn && !(narrow && (drawerOpen || composer)) && !comparing ? <SuggestReviewBar suggestions={suggestions} narrow={narrow} /> : null}
-      {suggestOn && suggestions.rect && !narrow && !comparing && !composer ? (() => {
+      {suggestOn && !(narrow && (drawerOpen || composer)) && !comparing && !historyOpen ? <SuggestReviewBar suggestions={suggestions} narrow={narrow} /> : null}
+      {suggestOn && suggestions.rect && !narrow && !comparing && !historyOpen && !composer ? (() => {
         const frameBox = bridge.frameRef.current?.getBoundingClientRect();
         const top = (frameBox?.top || frameTop) + suggestions.rect.docY - bridge.layout.scrollY + 6;
         if (top < (frameBox?.top || frameTop) || top > window.innerHeight - 120) return null;
         const left = Math.min(window.innerWidth - 120, (frameBox?.left || 0) + suggestions.rect.right - 40);
         return <SuggestInlineChip suggestions={suggestions} style={{ top, left }} />;
       })() : null}
+      </CommentDocVersionContext.Provider>
       </SuggestContext.Provider>
       </AgentMentionContext.Provider>
       </HandoffSendTransport.Provider>

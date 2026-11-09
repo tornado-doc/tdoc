@@ -67,7 +67,7 @@ const TEAMS = [
             await page.getByRole('menuitem', { name: /Switch space/ }).waitFor({ timeout: 5000 });
             // The local server publishes; tdoc.dev shares. Either is the doc's
             // way out, and both live in ⋯ on a phone. The modes head it.
-            for (const name of [/^(Share|Publish)/, /Versions/, /Switch space/, /My account/, /Dark mode|Light mode/]) {
+            for (const name of [/^(Share|Publish)/, /^(Versions|Version history)/, /Switch space/, /My account/, /Dark mode|Light mode/]) {
               const item = page.getByRole('menuitem', { name }).first();
               assert(await item.isVisible(), `${name} is in ⋯`);
             }
