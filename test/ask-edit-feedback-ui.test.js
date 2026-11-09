@@ -189,7 +189,8 @@ async function startServer(worker, env) {
       const id = v.sends[0].body.comment_ids[0];
       const answered = await api('/api/agent/reply', { method: 'POST', token, body: { slug: SLUG, parent_id: id, text: 'It already reads that way.', status: 'answered', agent_login: 'claude', agent_name: 'claude' } });
       assert.equal(answered.status, 200, JSON.stringify(answered.body));
-      await working().waitFor({ state: 'detached', timeout: 15000 });
+      // The answer arrives with the next comment read: up to one 15 s feed tick.
+      await working().waitFor({ state: 'detached', timeout: 25000 });
       const proposed = await api(`/api/docs/${SLUG}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'two renewals', replace: 'three renewals' }] } });
       assert.equal(proposed.status, 200, JSON.stringify(proposed.body));
       await v.page.frameLocator('iframe').locator('ins.tdoc-diff-ins', { hasText: 'three' }).waitFor({ timeout: 10000 });
