@@ -165,7 +165,7 @@ async function startServer(worker, env) {
             await menu.locator('.tdoc-mention-agent', { hasText: 'bencher' }).first().click();
             await box.press('End');
             await box.type('can you check this?');
-            await page.locator('.tdoc-ask-only-label').first().waitFor();
+            await page.locator('.tdoc-ask-only [role=checkbox][aria-checked="true"][data-disabled]').first().waitFor();
             assert.equal(await page.locator('.tdoc-only-me').count(), 0, 'Only me shows where no private answer can');
             await shot(page, `${tag}-space-page-joiner-picked`);
             await page.locator('.tdoc-reply-form .tdoc-reply-submit.ui-btn-primary').first().click();
@@ -205,7 +205,7 @@ async function startServer(worker, env) {
             await menu.locator('.tdoc-mention-agent', { hasText: 'bencher' }).first().click();
             await box.press('End');
             await box.type('can you check this?');
-            await root.locator('.tdoc-ask-only-label').first().waitFor();
+            await root.locator('.tdoc-ask-only [role=checkbox][aria-checked="true"][data-disabled]').first().waitFor();
             await root.locator('.tdoc-reply-form .tdoc-reply-submit.ui-btn-primary').first().click();
             await expectAsk(w, w.space.slug);
             // What happened is said on screen, inside it (phone: over the panel).
