@@ -182,6 +182,51 @@ const LOCKED = 'answer_only_run';
     assert(lock && !lock.agent_only && lock.ids.includes(bob.account_id), JSON.stringify(lock));
   });
 
+  // Security review of #969: the ways round the hold that name the agent.
+  const askA = async () => {
+    const slug = await newDoc();
+    const c = await comment(slug);
+    const sent = await handOff(slug, { ask_only: true, comment_id: c, recipient: agentA });
+    assert(sent.status === 200 && sent.body.ask, sent.text);
+    return { slug, c };
+  };
+  const mcp = async (args) => {
+    env.TDOC_REMOTE_MCP = '1';
+    const r = await worker.fetch(new Request('https://tdoc.dev/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${alice.token}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'propose_edits', arguments: args } }),
+    }), env, {});
+    return r.text();
+  };
+
+  await t('MCP propose_edits takes raft_agent: the agent asked is refused; another agent is not', async () => {
+    const { slug } = await askA();
+    const edits = [{ find: 'Sentence one', replace: 'Line one' }];
+    const held = await mcp({ slug, edits, raft_agent: `${SERVER}/agent-a` });
+    assert(/answer_only_run/.test(held), held.slice(0, 400));
+    const other = await mcp({ slug, edits, raft_agent: `${SERVER}/agent-b` });
+    assert(!/answer_only_run/.test(other) && /Suggested 1 edit/.test(other), other.slice(0, 400));
+  });
+
+  await t('a Raft claim on the held agent\'s server whose name cannot be resolved is held until it says its name', async () => {
+    const { slug } = await askA();
+    const r = await publish(slug, { 'X-Tdoc-Raft-Agent': `${SERVER}/agent-z` });
+    assert(r.status === 403 && r.body.error === LOCKED && r.body.reason === 'agent_unresolved' && /name/.test(r.body.message), `${r.status} ${r.text}`);
+    const p = await propose(slug, { 'X-Tdoc-Raft-Agent': `${SERVER}/agent-z` });
+    assert(p.status === 403 && p.body.reason === 'agent_unresolved', `${p.status} ${p.text}`);
+    landed(await publish(slug, { 'X-Tdoc-Raft-Agent': 'server-9/agent-z' }), 'a claim on another server');
+  });
+
+  await t('a held agent cannot hand the comment to a sibling agent with its token; the owner can, in the browser or the terminal', async () => {
+    const { slug, c } = await askA();
+    const viaToken = (headers) => call('/api/notify/handoff', { method: 'POST', token: alice.token, headers, body: { slug, comment_ids: [c], recipient: agentB } });
+    const held = await viaToken({ 'X-Tdoc-Raft-Agent': `${SERVER}/agent-a` });
+    assert(held.status === 403 && held.body.error === LOCKED, `${held.status} ${held.text}`);
+    const terminal = await viaToken({});
+    assert(terminal.status === 200, `the owner's terminal: ${terminal.status} ${terminal.text}`);
+  });
+
   await t('tdoc AI: Ask only answers in the thread, opens no hand-off, suggests nothing; it can never be asked to edit', async () => {
     const slug = await newDoc();
     const c = await comment(slug, 'Why billing first? @tdoc AI');
