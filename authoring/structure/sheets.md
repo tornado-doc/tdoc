@@ -18,12 +18,12 @@ header row is the last row of `<thead>`; each `<th>` declares its column type.
 <div class="tdoc-table-scroll">
 <table data-tdoc-sheet data-name="Tasks">
   <thead><tr>
-    <th data-type="text">Task</th>
-    <th data-type="number">Points</th>
-    <th data-type="date">Due</th>
-    <th data-type="tags" data-palette="blocked:red, done:green">Status</th>
-    <th data-type="checkbox">Shipped</th>
-    <th data-type="url">Link</th>
+    <th data-key="c1" data-type="text">Task</th>
+    <th data-key="c2" data-type="number">Points</th>
+    <th data-key="c3" data-type="date">Due</th>
+    <th data-key="c4" data-type="tags" data-palette="blocked:red, done:green">Status</th>
+    <th data-key="c5" data-type="checkbox">Shipped</th>
+    <th data-key="c6" data-type="url">Link</th>
   </tr></thead>
   <tbody>
     <tr data-row="r1"><td>Billing export</td><td>5</td><td>2026-03-01</td><td><span data-tag>blocked</span> <span data-tag>q1</span></td><td>✓</td><td><a href="https://example.com/1">example.com/1</a></td></tr>
@@ -44,10 +44,13 @@ header row is the last row of `<thead>`; each `<th>` declares its column type.
 
 ## Rows, tags, tabs
 
-- **Row ids.** Give every body row a `data-row` id (`r1`, `r2`, …) and keep it
-  when you edit: comments on a cell anchor to its row id and column, so they
-  survive sorting, filtering and rows added elsewhere. A new row takes the
-  next unused number. Never renumber.
+- **Row ids and column keys.** Give every body row a `data-row` id (`r1`,
+  `r2`, …) and every header a `data-key` (`c1`, `c2`, …), and keep both when
+  you edit: a comment on a cell anchors to its row id and column key, so it
+  survives sorting, filtering, and rows or columns added or removed
+  elsewhere. A new row or column takes the next unused number; renaming or
+  retyping a column keeps its key; a deleted id is never reused. Never
+  renumber.
 - **Tag colours.** `data-palette` on the `<th>` names a colour per tag:
   `gray`, `red`, `orange`, `yellow`, `green`, `teal`, `blue`, `purple`, `pink`.
   A tag the palette does not name gets a stable colour of its own.
@@ -62,9 +65,10 @@ header row is the last row of `<thead>`; each `<th>` declares its column type.
 
 ## Size
 
-A doc is at most 2 MB of HTML, about 5,000-8,000 rows of 20 short columns.
-The grid stays smooth at 10,000 rows. Beyond that, split the data into
-several docs or summarise it.
+A doc whose bulk is sheet tables may be up to 8 MB of HTML (10,000 rows of
+20 columns is about 3-6 MB); everything outside the sheet tables still has
+to fit the ordinary 2 MB. The grid stays smooth at 10,000 rows. Beyond that,
+split the data into several docs or summarise it.
 
 ## From a file
 

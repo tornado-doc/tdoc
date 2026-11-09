@@ -107,8 +107,9 @@ When the content is records people will search, filter or sort (a tracker,
 an inventory, a budget, a contact list, rows from a CSV or Excel file), write
 a sheet: one `<table data-tdoc-sheet data-name="Tab">` per tab, each
 `<th data-type="text|number|date|tags|checkbox|url">`, tag cells as
-`<span data-tag>` items, and a `data-row="r1"` id on every body row (keep the
-ids when you edit; comments on a cell hang on them). The reader shows it as a
+`<span data-tag>` items, a `data-row="r1"` id on every body row and a
+`data-key="c1"` on every header (keep both when you edit; comments on a cell
+hang on them). The reader shows it as a
 spreadsheet grid with tabs, search, per-column filters and sort; without the
 viewer it is a plain table. For a file, `tdoc-new --slug <slug> --from-csv
 <file>` (or `--from-tsv`, `--from-xlsx`) writes the markup with column types
