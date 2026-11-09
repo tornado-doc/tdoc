@@ -3017,6 +3017,8 @@ function stampAids(rawHtml) {
 // resolve to X on v5/v6 (via its `created` event) and to Y on v7+ (via the
 // new `anchor_changed` event). This replaces aid_history.
 function reconcileAnchors(comments, aidsInVersion, V) {
+  // Self-contained (test/reconcile.test.js runs this function on its own).
+  const isSheetAnchor = (a) => !!(a && ((a.sheet && typeof a.sheet === 'object') || /^table\[data-tdoc-sheet\]/.test(String(a.selector || ''))));
   if (!Array.isArray(comments)) return comments;
   ensureMigrated(comments);
   const byAid = new Map(aidsInVersion.map(a => [a.aid, a]));
@@ -3033,6 +3035,11 @@ function reconcileAnchors(comments, aidsInVersion, V) {
     // so once lost they were orphaned forever even when the target came back.
     // (text anchors are resolved client-side, not here.)
     if (!a || (a.kind !== 'element' && a.kind !== 'lost')) continue;
+    // A sheet cell, column or sheet is resolved in the reader by table name,
+    // row id and column key (sheets-viewer.js), never by aid: a sheet anchor
+    // has no aid to keep, and rebinding it by tag would point it at another
+    // element or mark it lost on every new version.
+    if (isSheetAnchor(a)) continue;
 
     const knownAid = a.aid
       || (a.selector && /\[data-tdoc-aid="([\w]+)"\]/.exec(a.selector || '')?.[1]);
@@ -9365,9 +9372,51 @@ function browserSaveHtmlRefusal(doc) {
   return inlineMediaRejection(doc);
 }
 
-function hostedMaxUploadBytes(env) {
+// One version's byte cap. A sheet (rows in <table data-tdoc-sheet>) may be
+// larger: its tables can bring a version up to SHEET_MAX_DOC_BYTES (or
+// TDOC_HOSTED_MAX_SHEET_BYTES), while everything outside them still has to
+// fit the ordinary cap, so an empty sheet does not buy room for anything
+// else. Every write path (upload/CLI, MCP, browser save, restore, accepted
+// suggestions, duplicate) passes the HTML it is about to store.
+// sheetMarkupLength is duplicated in server/server.js;
+// test/sheets-size.test.js holds the two together.
+const SHEET_MAX_DOC_BYTES = 8 * 1024 * 1024;
+function sheetMarkupLength(html) {
+  if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return 0;
+  const open = /<table\b[^>]*\sdata-tdoc-sheet[\s=>/][^>]*>/gi;
+  const close = /<\/table\s*>/gi;
+  let total = 0, m;
+  while ((m = open.exec(html))) {
+    // A sheet holds no nested table, so its end is the next </table>.
+    close.lastIndex = open.lastIndex;
+    const end = close.exec(html);
+    if (!end) break;
+    total += close.lastIndex - m.index;
+    open.lastIndex = close.lastIndex;
+  }
+  return total;
+}
+function hostedBaseUploadBytes(env) {
   const n = Number(env && env.TDOC_HOSTED_MAX_UPLOAD_BYTES);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 2 * 1024 * 1024;
+}
+function hostedSheetUploadBytes(env) {
+  const n = Number(env && env.TDOC_HOSTED_MAX_SHEET_BYTES);
+  return Math.max(hostedBaseUploadBytes(env), Number.isFinite(n) && n > 0 ? Math.floor(n) : SHEET_MAX_DOC_BYTES);
+}
+// The cap for `html`; without it, the ordinary cap. hostedUploadCeiling is
+// the most any version may be, for checks made before the body is read.
+function hostedMaxUploadBytes(env, html) {
+  const base = hostedBaseUploadBytes(env);
+  if (typeof html !== 'string') return base;
+  const sheet = sheetMarkupLength(html);
+  if (!sheet) return base;
+  // Characters, not bytes, inside the sheet: counting the rest as total bytes
+  // minus sheet characters can only overstate it.
+  return utf8ByteLength(html) - sheet <= base ? hostedSheetUploadBytes(env) : base;
+}
+function hostedUploadCeiling(env) {
+  return hostedSheetUploadBytes(env);
 }
 
 function latestVersionNumber(meta) {
@@ -9543,7 +9592,7 @@ async function createDocForSession(env, req, session, { html, meta, version, tea
   // else: BYOK operator with no hosted registry keeps the old unlimited path.
 
   if (actor.kind === 'hosted') {
-    const maxBytes = hostedMaxUploadBytes(env);
+    const maxBytes = hostedMaxUploadBytes(env, html);
     const size = utf8ByteLength(html);
     if (size > maxBytes) return { ok: false, response: json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 }) };
     const limit = await hostedMaxDocsFor(env, actor.account_id);
@@ -17027,10 +17076,35 @@ function historyBlocks(html) {
 
 // What changed between two versions' bytes: how many places (runs of changed
 // blocks, as the compare marks them) and in which sections, in order.
+// Body rows in a doc's sheet tables, by a linear scan (no parse): the
+// summary a sheet too big to diff gets instead.
+function sheetRowCount(html) {
+  if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return 0;
+  const open = /<table\b[^>]*\sdata-tdoc-sheet[\s=>/][^>]*>/gi;
+  const close = /<\/table\s*>/gi;
+  const tr = /<tr\b/gi;
+  let rows = 0, m;
+  while ((m = open.exec(html))) {
+    close.lastIndex = open.lastIndex;
+    const end = close.exec(html);
+    if (!end) break;
+    tr.lastIndex = open.lastIndex;
+    let n = 0, t;
+    while ((t = tr.exec(html)) && t.index < end.index) n++;
+    rows += Math.max(0, n - 1); // less the header row
+    open.lastIndex = close.lastIndex;
+  }
+  return rows;
+}
 function historyChangeSummary(beforeHtml, afterHtml) {
   const engine = globalThis.TdocVersionDiff;
   if (!engine || typeof TdocParse5 === 'undefined') return null;
-  if (String(beforeHtml || '').length > HISTORY_SUMMARY_MAX_HTML || String(afterHtml || '').length > HISTORY_SUMMARY_MAX_HTML) return { places: null, sections: [] };
+  if (String(beforeHtml || '').length > HISTORY_SUMMARY_MAX_HTML || String(afterHtml || '').length > HISTORY_SUMMARY_MAX_HTML) {
+    // A big sheet is not parsed and diffed here (a 10,000-row sheet is
+    // megabytes): its rows are counted instead.
+    if (sheetMarkupLength(afterHtml)) return { places: null, sections: [], rows: [sheetRowCount(beforeHtml || ''), sheetRowCount(afterHtml)] };
+    return { places: null, sections: [] };
+  }
   const before = beforeHtml ? historyBlocks(beforeHtml) : [];
   const after = historyBlocks(afterHtml);
   let places = 0, inRun = false;
@@ -17203,7 +17277,7 @@ async function handleVersionRestore(env, req, url, slug, n) {
   const obj = await env.DOCS.get(`docs/${slug}/v${target}/index.html`);
   if (!obj) return json({ error: 'version_not_found' }, { status: 404 });
   const html = await obj.text();
-  if (utf8ByteLength(html) > hostedMaxUploadBytes(env)) return json({ error: 'payload_too_large' }, { status: 413 });
+  if (utf8ByteLength(html) > hostedMaxUploadBytes(env, html)) return json({ error: 'payload_too_large' }, { status: 413 });
   // The browser save's own checks: an old version written by an upload may
   // hold what a person's save may not.
   const docRefusal = browserSaveHtmlRefusal(html);
@@ -20099,7 +20173,7 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
       return json({ error: 'unsafe_edit', message: 'This suggestion cannot be applied safely.', suggestion: view(marked.ok ? marked.set : set) }, { status: 409 });
     }
     // The browser save's own checks, for the version this would make.
-    if (utf8ByteLength(nextHtml) > hostedMaxUploadBytes(env)) return json({ error: 'payload_too_large' }, { status: 413 });
+    if (utf8ByteLength(nextHtml) > hostedMaxUploadBytes(env, nextHtml)) return json({ error: 'payload_too_large' }, { status: 413 });
     if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(nextHtml) && !/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(html)) return json({ error: 'provider_markup_forbidden' }, { status: 400 });
     const who = set.agent && set.agent.name ? set.agent.name : 'AI';
     // Named from what changed, not from words the model chose.
@@ -22576,7 +22650,7 @@ function mcpWritingGuide(style, kind) {
     const markup = mcpGuideSection(md, 'The markup');
     parts.push('## Sheets', 'Records people search, filter and sort: one <table data-tdoc-sheet data-name="Tab"> per tab, drawn by the reader as a spreadsheet grid. Full guide: tdoc://authoring/structure/sheets.md');
     if (markup) parts.push(markup.replace(/^## The markup\n+/, '').replace(/^[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*\n\n/, ''));
-    parts.push('Keep every data-row id when editing (cell comments hang on it); a new row takes the next number. data-palette colours: gray red orange yellow green teal blue purple pink. Several tables are tabs of one grid. A doc is at most 2 MB (about 5,000-8,000 rows of 20 short columns).');
+    parts.push('Keep every data-row id and th data-key when editing (cell comments hang on them); a new row or column takes the next number. data-palette colours: gray red orange yellow green teal blue purple pink. Several tables are tabs of one grid. A sheet doc may be up to 8 MB (10,000 rows × 20 columns fits).');
   }
   return parts.join('\n\n') + '\n';
 }
@@ -23199,10 +23273,15 @@ const MCP_TOOLS = {
       const files = Array.isArray(args.files) ? args.files : [];
       if (!files.length || files.length > MCP_UPLOAD_MAX_FILES) return mcpToolError('invalid_arguments', `Pass 1 to ${MCP_UPLOAD_MAX_FILES} files.`);
       const seen = new Set();
+      // The HTML is not read yet: the version as a whole may be a sheet's
+      // size, but inlined images sit outside any sheet table and so must
+      // fit the ordinary cap. commit_upload checks the real document.
+      const ceiling = hostedUploadCeiling(call.env);
       const max = hostedMaxUploadBytes(call.env);
       let html = 0;
       let total = 0;
       let published = 0;
+      let htmlBytes = 0;
       for (const f of files) {
         const name = f && f.name;
         if (!mcpUploadNameOk(name)) return mcpToolError('invalid_arguments', `Bad file name ${JSON.stringify(String(name).slice(0, 80))}: letters, digits, . _ - and up to three folders, no "..".`);
@@ -23214,13 +23293,13 @@ const MCP_TOOLS = {
         if (!Number.isInteger(f.size) || f.size < 1) return mcpToolError('invalid_arguments', `${name}: size is the file's byte count.`);
         if (f.size > MCP_UPLOAD_FILE_MAX) return mcpToolError('quota_upload_bytes', `${name} is over ${MCP_UPLOAD_FILE_MAX / 1048576} MB.`, { limit: MCP_UPLOAD_FILE_MAX });
         total += f.size;
-        if (f.type === 'text/html') { html++; published += f.size; } else published += Math.ceil(f.size / 3) * 4 + 32;
+        if (f.type === 'text/html') { html++; published += f.size; htmlBytes += f.size; } else published += Math.ceil(f.size / 3) * 4 + 32;
       }
       if (html !== 1) return mcpToolError('invalid_arguments', 'Exactly one file must be the HTML document (text/html).');
       if (total > MCP_UPLOAD_TOTAL_MAX) return mcpToolError('quota_upload_bytes', `The files add up to over ${MCP_UPLOAD_TOTAL_MAX / 1048576} MB.`, { limit: MCP_UPLOAD_TOTAL_MAX });
       // Images go inside the published HTML (base64), and one version is
       // capped at `max` bytes: refuse now, not after the upload.
-      if (published > max) {
+      if (published - htmlBytes > max || published > ceiling) {
         return mcpToolError('quota_upload_bytes', `With its images inlined the document would be about ${Math.ceil(published / 1024)} KB; one version holds ${Math.floor(max / 1024)} KB. Shrink or drop images (compress, smaller dimensions, SVG for charts).`, { limit: max, size: published });
       }
       let slug = null;
@@ -23318,7 +23397,7 @@ const MCP_TOOLS = {
           }
         }
         if (!htmlText || !htmlText.trim()) return mcpToolError('invalid_arguments', 'The HTML file is empty.');
-        const max = hostedMaxUploadBytes(call.env);
+        const max = hostedMaxUploadBytes(call.env, htmlText);
         const inlined = mcpInlineUploadedImages(htmlText, images, max);
         if (inlined.over) {
           return mcpToolError('quota_upload_bytes', `With its images inlined at every reference the document is over ${Math.floor(max / 1024)} KB, the size of one version. Reference each large image once, or shrink it.`, { limit: max });
@@ -25958,7 +26037,7 @@ const tdocHandlers = {
         return json({ error: 'account_copy_unavailable' }, { status: 403 });
       }
       if (actor.kind === 'hosted') {
-        const maxBytes = hostedMaxUploadBytes(env);
+        const maxBytes = hostedMaxUploadBytes(env, rawHtml);
         const size = utf8ByteLength(rawHtml);
         if (size > maxBytes) {
           return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
@@ -29587,10 +29666,12 @@ const tdocHandlers = {
     // ---- explicit browser save (owner/latest only in the shell) ----
     if (p === '/api/doc/versions' && method === 'POST') {
       if (!env.COMMENTS) return json({ error: 'version_store_unavailable' }, { status: 503 });
-      const maxBytes = hostedMaxUploadBytes(env);
+      const ceiling = hostedUploadCeiling(env);
       const contentLength = Number(req.headers.get('content-length') || 0);
-      if (contentLength && (!Number.isFinite(contentLength) || contentLength > maxBytes + 64 * 1024)) {
-        return json({ error: 'payload_too_large', limit: maxBytes }, { status: 413 });
+      // The HTML arrives JSON-escaped (every attribute quote grows): leave
+      // room here; the exact cap is checked on the decoded HTML below.
+      if (contentLength && (!Number.isFinite(contentLength) || contentLength > ceiling * 1.25 + 64 * 1024)) {
+        return json({ error: 'payload_too_large', limit: ceiling }, { status: 413 });
       }
       let body = {};
       try { body = await req.json(); } catch {}
@@ -29601,6 +29682,7 @@ const tdocHandlers = {
         return json({ error: 'slug, baseVersion, html required' }, { status: 400 });
       }
       const size = utf8ByteLength(doc);
+      const maxBytes = hostedMaxUploadBytes(env, doc);
       if (size > maxBytes) return json({ error: 'payload_too_large', limit: maxBytes, size }, { status: 413 });
       const docRefusal = browserSaveHtmlRefusal(doc);
       if (docRefusal) return docRefusal;
@@ -29852,7 +29934,7 @@ const tdocHandlers = {
         auth.actor && auth.actor.kind === 'hosted' && !writeGate.meta && verNum === 1
       );
       if (auth.actor && auth.actor.kind === 'hosted') {
-        const maxBytes = hostedMaxUploadBytes(env);
+        const maxBytes = hostedMaxUploadBytes(env, doc);
         const size = utf8ByteLength(doc);
         if (size > maxBytes) {
           return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });

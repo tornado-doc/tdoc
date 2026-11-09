@@ -531,6 +531,31 @@ function localMentionable(comments) {
 // Cap request bodies so a hostile/buggy client can't OOM the local server.
 const MAX_BODY_BYTES = 1 << 20; // 1 MiB — comments are small
 const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
+// A sheet may be larger: its <table data-tdoc-sheet> tables can bring a doc
+// up to SHEET_MAX_DOC_BYTES while the rest still fits MAX_DOCUMENT_BYTES.
+// The worker applies the same rule (hostedMaxUploadBytes);
+// test/sheets-size.test.js holds sheetMarkupLength identical in both.
+const SHEET_MAX_DOC_BYTES = 8 * 1024 * 1024;
+function sheetMarkupLength(html) {
+  if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return 0;
+  const open = /<table\b[^>]*\sdata-tdoc-sheet[\s=>/][^>]*>/gi;
+  const close = /<\/table\s*>/gi;
+  let total = 0, m;
+  while ((m = open.exec(html))) {
+    // A sheet holds no nested table, so its end is the next </table>.
+    close.lastIndex = open.lastIndex;
+    const end = close.exec(html);
+    if (!end) break;
+    total += close.lastIndex - m.index;
+    open.lastIndex = close.lastIndex;
+  }
+  return total;
+}
+function maxDocumentBytes(html) {
+  const sheet = sheetMarkupLength(html);
+  if (!sheet) return MAX_DOCUMENT_BYTES;
+  return Buffer.byteLength(html, 'utf8') - sheet <= MAX_DOCUMENT_BYTES ? SHEET_MAX_DOC_BYTES : MAX_DOCUMENT_BYTES;
+}
 function readBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let b = '', size = 0;
@@ -1845,15 +1870,16 @@ const server = http.createServer(async (req, res) => {
   // the only local-browser path that creates a full document snapshot.
   if (p === '/api/doc/versions' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
-    const body = await readBody(req, MAX_DOCUMENT_BYTES + 64 * 1024);
+    // JSON escaping grows the HTML; the exact cap is checked once decoded.
+    const body = await readBody(req, SHEET_MAX_DOC_BYTES * 1.25 + 64 * 1024);
     const slug = safeSlug(body.slug);
     const baseVersion = Number(body.baseVersion);
     const doc = body.html;
     if (!slug || !Number.isInteger(baseVersion) || baseVersion < 1 || typeof doc !== 'string') {
       return json(res, 400, { error: 'slug, baseVersion, html required' });
     }
-    if (Buffer.byteLength(doc, 'utf8') > MAX_DOCUMENT_BYTES) {
-      return json(res, 413, { error: 'payload_too_large', limit: MAX_DOCUMENT_BYTES });
+    if (Buffer.byteLength(doc, 'utf8') > maxDocumentBytes(doc)) {
+      return json(res, 413, { error: 'payload_too_large', limit: maxDocumentBytes(doc) });
     }
     if (!/<html[\s>]/i.test(doc) || !/<body[\s>]/i.test(doc)) {
       return json(res, 400, { error: 'invalid_document_html' });

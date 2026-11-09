@@ -21,10 +21,10 @@ export const LIMITS = Object.freeze({
   columns: 200,
   sheets: 20,
   cellChars: 10_000,
-  // A doc is at most 2 MB of HTML (the save and publish limit, both hosts).
-  // That is the cap that usually binds: about 5,000-8,000 rows of 20 short
-  // columns.
-  htmlBytes: 2 * 1024 * 1024,
+  // A sheet doc is at most 8 MB of HTML (the save and publish limit for a
+  // doc whose bulk is sheet tables, on both hosts; other docs keep 2 MB).
+  // 10,000 rows of 20 typical columns is about 3-4 MB.
+  htmlBytes: 8 * 1024 * 1024,
 });
 
 export class SheetImportError extends Error {

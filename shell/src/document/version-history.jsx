@@ -48,6 +48,12 @@ export function historyWhat(row) {
   if (row.created_doc) return 'Created the document';
   const s = row.summary;
   if (!s) return null;
+  // A sheet too big to diff: how its row count moved.
+  if (Array.isArray(s.rows) && s.rows.length === 2) {
+    const [was, now] = s.rows.map((n) => Number(n) || 0);
+    const rows = (n) => `${n.toLocaleString('en-US')} ${n === 1 ? 'row' : 'rows'}`;
+    return was === now ? `Edited the sheet · ${rows(now)}` : `Sheet: ${was.toLocaleString('en-US')} → ${rows(now)}`;
+  }
   if (s.places === null || s.places === undefined) return 'Edited';
   if (!s.places) return 'No text changes';
   const where = s.sections && s.sections.length
