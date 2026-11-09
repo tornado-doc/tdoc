@@ -136,7 +136,7 @@ const OFFLINE = [
   'tdoc-start.test.js',
   'tdoc-privacy.test.js', // public /privacy page is served from its landing doc
   'tdoc-pricing.test.js', // public /pricing page matches the limits the worker enforces
-  'landing-demo-tabs.test.js', // the homepage demo: four stages, one reader
+  'landing-demo-loop.test.js', // the homepage demo: one doc, one comment-to-v2 loop
   'signin-github-tab.test.js', // #179: GitHub opens in a new tab, never this one // #142 onboarding: /start page + the modal served with it
   'web-oauth.test.js',        // web redirect flow: sanitizeReturn open-redirect guard + flow wiring + device fallback
   'browser-free-cli.test.js', // clean skill install, write/edit/preview/publish without browser dependencies
@@ -207,6 +207,7 @@ const BROWSER = [
   'agent-view-ui.test.js', // doc text for agents: no visible space without JS, removed once the app starts
   'layout-preflight.test.js', // development-only Raft geometry audit
   'table-layout.test.js', // provider table protection
+  'table-scroll-ui.test.js', // wide tables draw a scrollbar and scroll sideways in their own box (bar, wheel, swipe), page still scrolls over them, desktop + phone
   'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior
   'custom-design-theme.test.js', // custom palettes opt out of house styles and theme inversion
   'visual-viewer.test.js', // visual expansion preserves interactive state and reading mode
