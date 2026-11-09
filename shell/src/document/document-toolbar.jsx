@@ -108,10 +108,21 @@ export function DocumentBreadcrumbs({ config, title, onRename }) {
 
 // "Edited 3m ago", muted, on the right: the version on screen. A click lists
 // the versions and View changes (it was the v1 chip beside the title).
-export function DocumentEdited({ config, onCompare }) {
+// With version history (flag versionHistory) and a viewer who may list it,
+// the same words open the history panel instead (`onHistory`).
+export function DocumentEdited({ config, onCompare, onHistory = null, historyOpen = false, disabled = false }) {
   if (config.isLanding || config.mode === 'local') return null;
   const current = (config.versions || []).find((v) => Number(v.n) === Number(config.version)) || null;
-  const words = editedAgo(current?.created) || `v${config.version}`;
+  const words = editedAgo(current?.created) || 'Version history';
+  if (onHistory) {
+    return (
+      <button id="tdoc-version-toggle" type="button" className="tdoc-edited" aria-expanded={historyOpen}
+        aria-label={`${words}. Version history`} title={disabled ? 'Save or discard your edits first' : 'Version history'}
+        disabled={disabled} onClick={onHistory}>
+        {words}
+      </button>
+    );
+  }
   return (
     <AppMenu
       align="end"
@@ -248,6 +259,9 @@ export function DocumentOverflowActions({
   onMoveDocument,
   onDelete,
   onCompare,
+  // Version history (flag versionHistory): one row that opens the panel, in
+  // place of View changes and the Versions list.
+  onHistory = null,
   // Read / Comment / Edit, at the top of ⋯ with the current one ticked
   // (it was a dropdown in the bar): { modes: [{ value, label, Icon }], value, onChange }.
   mode = null,
@@ -277,9 +291,15 @@ export function DocumentOverflowActions({
           <AppMenuSeparator />
         </>
       ) : null}
-      <AppMenuItem className="tdoc-action-menu-item" data-action="compare" onClick={onCompare}>
-        <History size={15} /> View changes
-      </AppMenuItem>
+      {onHistory ? (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="history" onClick={onHistory}>
+          <History size={15} /> Version history
+        </AppMenuItem>
+      ) : (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="compare" onClick={onCompare}>
+          <History size={15} /> View changes
+        </AppMenuItem>
+      )}
       {config.mode === 'local' ? (
         <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="publish" onClick={onPublish}>
           <Upload size={15} /> Publish
@@ -289,7 +309,7 @@ export function DocumentOverflowActions({
           <Share2 size={15} /> Share
         </AppMenuItem>
       )}
-      {(config.versions || []).length > 1 ? (
+      {!onHistory && (config.versions || []).length > 1 ? (
         <AppSubmenu
           className="tdoc-action-menu-item tdoc-version-submenu-trigger"
           popupClassName="tdoc-version-submenu"

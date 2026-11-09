@@ -31,6 +31,28 @@ async function request(path, options) {
   return body;
 }
 
+// Version history (worker handleHistoryList): grouped rows, newest first, a
+// page at a time; `before` continues from the last page's oldest save.
+export function getHistory(slug, before) {
+  const query = before ? `?${new URLSearchParams({ before: String(before) })}` : '';
+  return request(`/api/docs/${encodeURIComponent(slug)}/history${query}`);
+}
+
+// What changed in those rows ("<from>-<to>"), computed on the server and cached.
+export function getHistorySummaries(slug, rows) {
+  const query = new URLSearchParams({ rows: rows.join(',') });
+  return request(`/api/docs/${encodeURIComponent(slug)}/history/summaries?${query}`);
+}
+
+// Restore: the version's bytes saved again as a new version, as this person.
+export function restoreVersion(slug, n) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/versions/${encodeURIComponent(String(n))}/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+}
+
 export function listComments(slug, version) {
   const query = new URLSearchParams({ slug, version: String(version) });
   return request(`/api/comments?${query}`);

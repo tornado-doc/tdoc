@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreHorizontal, SmilePlus } from 'lucide-react';
@@ -646,6 +646,12 @@ function ProductWhere({ anchor, origin }) {
     : <span className="tdoc-product-where">{label}</span>;
 }
 
+// The version the doc page shows (version history). A comment that lost its
+// place and was written on an older version says so: its text is gone from
+// this one, which is why it sits apart. Surfaces without versions (the
+// feedback overlay) provide nothing and the line never shows.
+export const CommentDocVersionContext = createContext(null);
+
 export function CommentCard({
   comment,
   currentUser,
@@ -692,6 +698,9 @@ export function CommentCard({
   const suggest = useContext(SuggestContext);
   const canReview = Boolean(suggest?.enabled) && !comment.resolved && comment.status !== 'applied' && !comment.deleted
     && suggest.pendingFor(comment.id);
+  const docVersion = useContext(CommentDocVersionContext);
+  const earlierVersion = Boolean(unanchored && docVersion && comment.anchor?.kind !== 'document'
+    && Number(comment.created_in) > 0 && Number(comment.created_in) < Number(docVersion));
   const thinkingId = asking?.thinking?.id;
   const askingHere = Boolean(thinkingId) && (thinkingId === comment.id || (comment.replies || []).some((r) => r.id === thinkingId));
   useEffect(() => { if (askingHere) setRepliesOpen(true); }, [askingHere]);
@@ -945,6 +954,7 @@ export function CommentCard({
         </div>
       </header>
       <ProductWhere anchor={comment.anchor} origin={productLinkOrigin} />
+      {earlierVersion ? <p className="tdoc-cc-earlier">Commented on an earlier version</p> : null}
       {editTarget === comment.id ? (
         <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />
       ) : (
