@@ -889,8 +889,11 @@
         var t = null;
         [lo, hi].forEach(function (inp) {
           inp.addEventListener('input', function () { clearTimeout(t); t = setTimeout(apply, 250); });
-          inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); apply(); closePop(true); } });
+          inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(t); apply(); closePop(true); } });
         });
+        // A debounced apply still pending when the panel closes would put
+        // back a filter removed a moment later from its chip.
+        p.onClose = function () { if (t !== null) { clearTimeout(t); t = null; apply(); } };
       } else if (col.type === 'checkbox') {
         var seg = h('div', 'ts-seg');
         [['All', null], ['Checked', true], ['Not checked', false]].forEach(function (o) {
