@@ -150,6 +150,21 @@ export function toggleReaction(payload) {
   });
 }
 
+// This person's "seen up to" per thread on this doc (thread-seen.js), kept
+// on the server so every surface — doc page, space page, the widget on an
+// app's own origin — agrees on what is unread. Read like the comments are.
+export function getThreadSeen(slug) {
+  return request(`/api/comments/seen?${new URLSearchParams({ slug })}`);
+}
+
+export function postThreadSeen(slug, seen) {
+  return request('/api/comments/seen', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, seen }),
+  });
+}
+
 export function setDocumentStar(slug, starred) {
   return request('/api/star', {
     method: 'POST',

@@ -3,9 +3,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { deliveryErrorText, readableHandle, resendResultText } from './notify-handoff.jsx';
 import { compactHandoffText } from './handoff-status-line.jsx';
 import { resendNotifyHandoff } from './api.js';
-import { isThreadUnread } from './thread-seen.js';
-import { handoffActivityAt, handoffWaitState, shortCommentPreview, summarizeHandoffSurfaces } from './handoff-state.js';
-import { observeVisibleRead } from './visible-read.js';
+import { isThreadUnread } from '../comments/core/thread-seen.js';
+import { handoffActivityAt, handoffWaitState, shortCommentPreview, summarizeHandoffSurfaces } from '../comments/core/handoff-state.js';
+import { observeVisibleRead } from '../comments/core/visible-read.js';
 
 function latestAgentReply(comment) {
   return [...(comment.replies || [])].reverse().find((reply) =>

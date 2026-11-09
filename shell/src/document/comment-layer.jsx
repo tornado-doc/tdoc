@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { CommentIcon } from '../ui/comment-icon.jsx';
+import { AppButton } from '../ui/button.jsx';
+import { AppSelect } from '../ui/select.jsx';
+import { SORT_OPTIONS } from '../comments/core/comment-query.js';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AskIcon } from '../ui/ask-icon.jsx';
 import { Drawer } from '@base-ui/react/drawer';
@@ -8,14 +12,38 @@ import { CommentThreadList } from './comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from './comment-pin.jsx';
 import { isDocumentComment, TOP_BAR_HEIGHT } from './model.js';
 
-export function CommentListControls({ filter, unreadCount = 0, onMarkAllRead = null }) {
+// The list header, the same rule on every comment surface: the filter with
+// its counts, Refresh, and Mark all as read whenever something is unread
+// (comment-area.js). Where the threads are a list (the phone drawer), also
+// search and the order (`list`).
+export function CommentListControls({ filter, unreadCount = 0, onMarkAllRead = null, onRefresh = null, refreshing = false, list = null }) {
   if (!filter && !(unreadCount && onMarkAllRead)) return null;
-  return <div className={`tdoc-comment-filter-row${unreadCount > 0 && onMarkAllRead ? ' has-mark-all' : ''}`}>
-    {filter}
-    {unreadCount > 0 && onMarkAllRead ? (
-      <button type="button" className="tdoc-comment-mark-all" onClick={() => onMarkAllRead()}>Mark all as read</button>
-    ) : null}
-  </div>;
+  return <>
+    <div className={`tdoc-comment-filter-row${unreadCount > 0 && onMarkAllRead ? ' has-mark-all' : ''}`}>
+      {filter}
+      {onRefresh ? (
+        <AppButton variant="icon" size="s" className="tdoc-comment-refresh" aria-label="Refresh comments" title="Refresh comments"
+          aria-busy={refreshing ? 'true' : 'false'} onClick={() => onRefresh()}>
+          <RefreshCw size={14} aria-hidden="true" />
+        </AppButton>
+      ) : null}
+      {unreadCount > 0 && onMarkAllRead ? (
+        <button type="button" className="tdoc-comment-mark-all" onClick={() => onMarkAllRead()}>Mark all as read</button>
+      ) : null}
+    </div>
+    {list ? <CommentListQuery {...list} /> : null}
+  </>;
+}
+
+// Search (text, author:name, agent:name) and order, over the shared query.
+export function CommentListQuery({ search = '', onSearch, sort, onSort }) {
+  return (
+    <div className="tdoc-comment-query">
+      <input type="search" className="tdoc-comment-search" placeholder="Search comments" aria-label="Search comments"
+        value={search} onChange={(event) => onSearch(event.target.value)} />
+      <AppSelect className="tdoc-comment-sort" ariaLabel="Order" value={sort} onChange={onSort} options={SORT_OPTIONS} />
+    </div>
+  );
 }
 
 function Pin({
@@ -255,6 +283,9 @@ export function MobileCommentDrawer({
   onSendHandoffElsewhere = null,
   onMarkRead = null,
   onMarkAllRead = null,
+  onRefresh = null,
+  refreshing = false,
+  listQuery = null,
   // Unified entry: the same drawer also holds the Ask AI panel, one tab away.
   askAi = null,
   tab = 'comments',
@@ -309,8 +340,10 @@ export function MobileCommentDrawer({
             </div> : null}
             {showAsk ? <div className="tdoc-drawer-ask">{askAi}</div> : (
             <Drawer.Content className="tdoc-drawer-list">
-              <CommentListControls filter={filter} unreadCount={unreadCount} onMarkAllRead={onMarkAllRead} />
-              {!comments.length ? <EmptyCommentsHowTo
+              <CommentListControls filter={filter} unreadCount={unreadCount} onMarkAllRead={onMarkAllRead}
+                onRefresh={onRefresh} refreshing={refreshing} list={listQuery} />
+              {!comments.length && listQuery?.search ? <p className="tdoc-comment-query-empty">No comments match.</p> : null}
+              {!comments.length && !listQuery?.search ? <EmptyCommentsHowTo
                 onAskAi={askAi && onTab ? () => onTab('ask') : onAskAi ? () => { onOpenChange(false); onAskAi(); } : null}
               /> : null}
               <CommentThreadList

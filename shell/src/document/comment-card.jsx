@@ -16,9 +16,9 @@ import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-ans
 import { avatarFor, avatarInitial, QUICK_REACTIONS, tdocUrl } from './model.js';
 import { AuthorFace } from './author-face.jsx';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
-import { canSeeHandoff } from './handoff-state.js';
+import { canSeeHandoff } from '../comments/core/handoff-state.js';
 import { productPageUrl } from './product-url.js';
-import { observeVisibleRead } from './visible-read.js';
+import { observeVisibleRead } from '../comments/core/visible-read.js';
 import { clearReplyDraft, readReplyDraft, writeReplyDraft } from './reply-draft.js';
 
 const AUTHOR_FACE_SIZE = { width: 24, height: 24, maxWidth: 24, maxHeight: 24 };

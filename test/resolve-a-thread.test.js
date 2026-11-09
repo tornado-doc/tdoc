@@ -103,8 +103,10 @@ t('the resolve gate matches the worker: owner, or the author under any linked ke
 });
 
 t('resolved visibility governs selection without deleting stored comments', () => {
-  const model = read('shell/src/document/comment-area.js');
-  assert(model.includes("filterMode === 'resolution' && filter === 'open' && phase(comment) !== 'resolved'"),
+  const model = read('shell/src/comments/core/comment-area.js');
+  const query = read('shell/src/comments/core/comment-query.js');
+  assert(/case 'resolved': return isResolvedThread\(comment\);[\s\S]*default: return !isResolvedThread\(comment\);/.test(query)
+    && model.includes('queryThreads(all,'),
     'resolved threads should not be sent as anchors');
   assert(!/comment\.id === (openCommentId|deepTarget)/.test(model),
     'selection or a notification link must not bypass the visibility switch');
@@ -117,18 +119,21 @@ t('resolved visibility governs selection without deleting stored comments', () =
     'hiding must not discard the stored comment');
 });
 
-t('resolved visibility is a filter in the comments area (Open / Resolved / All), All by default', () => {
+t('resolved visibility is a filter in the comments area (Open / Replied / Resolved / All), Open by default, per doc', () => {
   const seg = read('shell/src/ui/segmented-control.jsx');
+  const query = read('shell/src/comments/core/comment-query.js');
+  const model = read('shell/src/comments/core/comment-area.js');
   assert(seg.includes('role="radiogroup"') && seg.includes('role="radio"'),
     'the filter should lean on the primitive for its semantics, not fake them');
   assert(/className="tdoc-comment-filter"/.test(shell), 'there is no comments filter');
-  assert(/label: `Resolved \(\$\{resolvedCount\}\)`/.test(shell), 'the filter should say how many are resolved');
+  assert(shell.includes('options={filterOptions(commentArea.counts)') && /label: `\$\{FILTER_LABELS\[value\]\} \(\$\{counts\[value\] \|\| 0\}\)`/.test(query),
+    'the filter should say how many each choice shows');
   assert(/const commentFilterControl = comments\.comments\.length \? \(/.test(shell), 'the filter should appear when there are comments to filter');
   assert(!/<AppSwitch\s*\n\s*id="tdoc-show-resolved"/.test(shell), 'the bar switch is back');
-  // Show all threads by default; only an explicitly saved choice narrows them.
-  assert(/return v === '0' \? 'open' : v === 'resolved' \? 'resolved' : 'all';\s*\n\s*\} catch \{ return 'all'; \}/.test(shell),
-    'default All, including when storage is unavailable');
-  assert(/localStorage\.setItem\(RESOLVED_KEY/.test(shell), 'the choice should survive a reload');
+  // Open by default (resolved threads hidden); the choice is kept per doc.
+  assert(query.includes("export const DEFAULT_FILTER = 'open';"), 'default Open');
+  assert(model.includes('const filterKey = (slug) => `tdoc.comment-filter.${slug}`;') && /writeStored\(filterKey\(slug\), value\)/.test(model),
+    'the choice should survive a reload, per doc');
 });
 
 t('on a phone the filter heads the comments drawer, and ⋯ no longer carries it', () => {
@@ -140,7 +145,7 @@ t('on a phone the filter heads the comments drawer, and ⋯ no longer carries it
 t('resolving closes the card it was pressed on', () => {
   const start = shell.indexOf('const resolveComment = async');
   const block = shell.slice(start, shell.indexOf('\n  const ', start + 20));
-  assert(/if \(\(resolved && commentFilter === 'open'\) \|\| \(!resolved && commentFilter === 'resolved'\)\) setOpenCommentId\(null\)/.test(block),
+  assert(/if \(commentFilter !== 'all' && \(resolved \? commentFilter !== 'resolved' : commentFilter === 'resolved'\)\) setOpenCommentId\(null\)/.test(block),
     'the card has to go with the thread, or it is pinned to nothing');
 });
 

@@ -6,7 +6,7 @@ const fs = require('fs');
 
 // Load the ESM module via dynamic import from a tiny loader.
 async function load() {
-  const file = path.join(__dirname, '../shell/src/document/handoff-state.js');
+  const file = path.join(__dirname, '../shell/src/comments/core/handoff-state.js');
   // Node can import .js ESM if package says type module; tdoc root is CJS.
   // Read + eval as ESM through data URL.
   const src = fs.readFileSync(file, 'utf8');

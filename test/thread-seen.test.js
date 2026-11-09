@@ -5,10 +5,10 @@ const path = require('path');
 const fs = require('fs');
 
 async function load() {
-  const file = path.join(__dirname, '../shell/src/document/thread-seen.js');
+  const file = path.join(__dirname, '../shell/src/comments/core/thread-seen.js');
   let src = fs.readFileSync(file, 'utf8');
   src = src.replace(
-    "import { readStored, writeStored } from '../safe-storage.js';",
+    "import { readStored, writeStored } from '../../safe-storage.js';",
     `const store = (globalThis.__tdocSeenStore = globalThis.__tdocSeenStore || new Map());
      const readStored = (k, f) => (store.has(k) ? store.get(k) : f);
      const writeStored = (k, v) => { store.set(k, v); return true; };`,
@@ -20,7 +20,7 @@ async function load() {
 (async () => {
   globalThis.__tdocSeenStore = new Map();
   const {
-    latestAgentActivityAt, isThreadUnread, markThreadSeen, readSeenMap,
+    latestAgentActivityAt, isThreadUnread, markThreadSeen, readSeenMap, mergeSeenMap, reconcileSeenMap,
   } = await load();
   let pass = 0;
   const ok = (n) => { console.log(`  ✓ ${n}`); pass += 1; };
@@ -68,6 +68,22 @@ async function load() {
   ok('an unread agent resolution is still an unread reply');
   assert.strictEqual(isThreadUnread({ ...base, status: 'applied', resolved_by: 'julie' }, {}), false);
   ok('a person resolving the thread has seen the reply');
+
+  // Read state at rest writes nothing: a thread no agent spoke in is never marked.
+  assert.strictEqual(markThreadSeen('quiet', { id: 'h1', replies: [{ author: { kind: 'human', login: 'julie' }, created: '2026-01-01T02:00:00Z' }] }), false);
+  assert.deepStrictEqual(readSeenMap('quiet'), {});
+  ok('a human-only thread is never marked (no stamp, no write)');
+
+  // After a POST: unknown threads leave, a lowered stamp is taken only while
+  // the cache still holds what was sent, a merely-not-kept id stays.
+  globalThis.__tdocSeenStore.set('tdoc.thread-seen.r', JSON.stringify({ gone: 5, ahead: 9000, newer: 700, capped: 40 }));
+  const sent = { gone: 5, ahead: 9000, newer: 600, capped: 40 };
+  reconcileSeenMap('r', sent, { ahead: 8000, newer: 500 }, ['gone']);
+  assert.deepStrictEqual(readSeenMap('r'), { ahead: 8000, newer: 700, capped: 40 });
+  ok('reconcile: unknown dropped, clamp only the stamp sent, newer local and capped ids kept');
+  const { ahead } = mergeSeenMap('r', { ahead: 8000, newer: 700 });
+  assert.deepStrictEqual(ahead, { capped: 40 });
+  ok('a capped id is the only thing still ahead of the server');
 
   console.log(`\n${pass} passed`);
 })().catch((e) => {

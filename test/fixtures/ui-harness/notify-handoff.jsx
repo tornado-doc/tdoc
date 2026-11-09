@@ -10,9 +10,9 @@ import { HandoffStatusChips } from '../../../shell/src/document/handoff-status-l
 import { DocumentSendAgentAction } from '../../../shell/src/document/document-toolbar.jsx';
 import { HandoffDetailsPanel } from '../../../shell/src/document/handoff-details.jsx';
 import { AskAiPanel } from '../../../shell/src/document/ask-ai-panel.jsx';
-import { useCommentArea } from '../../../shell/src/document/comment-area.js';
-import { summarizeHandoffSurfaces } from '../../../shell/src/document/handoff-state.js';
-import { isThreadUnread } from '../../../shell/src/document/thread-seen.js';
+import { useCommentArea } from '../../../shell/src/comments/core/comment-area.js';
+import { summarizeHandoffSurfaces } from '../../../shell/src/comments/core/handoff-state.js';
+import { isThreadUnread } from '../../../shell/src/comments/core/thread-seen.js';
 import { DesktopCommentLayer, MobileCommentDrawer } from '../../../shell/src/document/comment-layer.jsx';
 import { CommentComposer } from '../../../shell/src/document/comment-composer.jsx';
 import { AgentMentionContext } from '../../../shell/src/document/mention-field.jsx';

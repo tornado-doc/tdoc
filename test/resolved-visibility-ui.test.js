@@ -56,7 +56,7 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
       await drawer.waitFor();
       return drawer.getByRole('radio', { name });
     };
-    const allShown = async () => (await filterRadio(/^All$/)).getAttribute('aria-checked');
+    const allShown = async () => (await filterRadio(/^All/)).getAttribute('aria-checked');
     const toggle = async () => {
       const on = (await allShown()) === 'true';
       // Keyboard activation keeps the selected card open until the filter
@@ -65,7 +65,7 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
       // was replaced under us.
       for (let attempt = 0; ; attempt++) {
         try {
-          const control = await filterRadio(on ? /^Open/ : /^All$/);
+          const control = await filterRadio(on ? /^Open/ : /^All/);
           await control.focus({ timeout: 3000 });
           break;
         } catch (error) {
@@ -76,7 +76,11 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
       await page.keyboard.press('Enter');
       if (await page.locator('#tdoc-comment-layer .tdoc-comment-filter').isVisible().catch(() => false)) await page.keyboard.press('Escape');
     };
-    assert.equal(await allShown(), 'true', 'fresh document defaults to showing all comments');
+    // Open is the default on every comment surface: resolved threads hidden.
+    assert.equal(await allShown(), 'false', 'fresh document defaults to Open');
+    assert.equal(await (await filterRadio(/^Open/)).getAttribute('aria-checked'), 'true', 'Open is the default');
+    await settled(false);
+    await toggle();
     await settled(true);
     // The painted underline has no DOM hover target. Moving across its range
     // still highlights the corresponding margin avatar, without a text label.
@@ -143,7 +147,8 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     await reloaded.waitForFunction(() => CSS.highlights.get('tdoc-anchor')?.size === 2);
     await toggle();
     await reloaded.waitForFunction(() => CSS.highlights.get('tdoc-anchor')?.size === 1);
-    assert.equal(await page.evaluate(() => localStorage.getItem('tdoc-show-resolved')), '0');
+    // Remembered per doc, under the doc's own key.
+    assert.deepEqual(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tdoc.comment-filter.')).map((k) => localStorage.getItem(k))), ['open']);
 
     await page.setViewportSize({ width: 1600, height: 1000 });
     await toggle();

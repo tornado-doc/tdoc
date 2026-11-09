@@ -11,10 +11,12 @@ import { MoveToTeamDialog } from './docs-hub/teams.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { composerAgents } from './document/ai-answerer.js';
 import { composerDefault } from './document/agent-choices.js';
-import { askOwnAgent, ownAgentPick, useMyAgent } from './document/my-agent.js';
+import { askOwnAgent, threadAskPick, useMyAgent } from './document/my-agent.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
-import { useCommentArea } from './document/comment-area.js';
-import { summarizeHandoffSurfaces, threadPhase } from './document/handoff-state.js';
+import { CommentListControls } from './document/comment-layer.jsx';
+import { useCommentArea, useCommentListPrefs } from './comments/core/comment-area.js';
+import { filterOptions, groupBy } from './comments/core/comment-query.js';
+import { useCommentFeed } from './comments/core/use-comment-feed.js';
 import {
   createComment, listComments, listMentionableUsers, listTeams, moveDocsToTeam, removeComment,
   setCommentResolved, toggleReaction, updateCommentText,
@@ -36,7 +38,9 @@ export function FeedbackSpace({ boot }) {
   const [joined, setJoined] = useState(Boolean(boot.joined));
   const [comments, setComments] = useState(null);
   const [mentionable, setMentionable] = useState([]);
-  const [filter, setFilter] = useState('open');
+  // Open by default; the choice remembered per space, as in the widget.
+  const listPrefs = useCommentListPrefs(slug);
+  const { filter, setFilter } = listPrefs;
   const [openId, setOpenId] = useState(null);
   const [notice, setNotice] = useState('');
   const [notifyIds, setNotifyIds] = useState(null);
@@ -62,27 +66,29 @@ export function FeedbackSpace({ boot }) {
   // and never edit (my-agent.js), as on a doc page.
   const myAgent = useMyAgent(slug, Boolean(identity && joined && !isOwner));
   // Replies here use the same @ picker as the document: the owner's agents
-  // (may edit), else the replier's own (answer only). No tdoc AI or team
-  // agent here, and no private answer: nothing on this page shows one.
+  // (may edit), else the replier's own and, on a team's space, the team's
+  // (answer only, in the thread). No tdoc AI here, and no private answer:
+  // nothing on this page shows one.
   const agentChoices = useMemo(() => composerAgents({
     canSendToAgent,
     notifyTargets: notify,
-    mine: !isOwner && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: [], tdoc_ai: false } : null,
+    mine: !isOwner && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: myAgent.state.team_agents || [], tdoc_ai: false } : null,
   }), [canSendToAgent, notify.default, notify.candidates, notify.fallback, isOwner, myAgent.state]);
   const agentMentions = useMemo(() => ({
     choices: agentChoices,
     preselected: canSendToAgent ? composerDefault(agentChoices, { orTop: true }) : null,
     privateAskSupported: false,
-    teamAskSupported: false,
     fixesTheApp: true,
   }), [agentChoices, canSendToAgent]);
 
   // Which threads this tab shows: the same area the doc page and the widget
   // use, so a card being typed in stays put the same way everywhere.
   const viewerKeys = useMemo(() => [(identity && identity.login) || 'anon', ...((identity && identity.linked_actor_keys) || [])], [identity]);
+  // Read state too: a reply read in the widget is read here (the server
+  // keeps it per person), and the reverse.
   const area = useCommentArea({
-    comments: comments || [], slug, selectedId: openId, filter, filterMode: 'phase',
-    handoffViewer: viewerKeys, isOwner: Boolean(isOwner), autoMarkSelected: false,
+    comments: comments || [], slug, selectedId: openId, filter, sort: listPrefs.sort, search: listPrefs.search,
+    handoffViewer: viewerKeys, isOwner: Boolean(isOwner), syncSeen: Boolean(identity),
   });
 
   const refresh = useCallback(async () => {
@@ -91,11 +97,13 @@ export function FeedbackSpace({ boot }) {
       setComments(Array.isArray(list) ? list : []);
     } catch (err) {
       setNotice(err.message || 'Could not load comments');
-      setComments([]);
+      setComments((prev) => prev || []);
     }
   }, [slug, version]);
 
   useEffect(() => { refresh(); }, [refresh]);
+  // Kept current like the doc page and the widget (use-comment-feed.js).
+  const feed = useCommentFeed({ load: refresh, enabled: comments !== null });
   // An answer from the replier's agent arrives as a reply: read the list
   // again when one of their questions here is answered.
   const answered = (myAgent.state?.asks || []).filter((a) => a.answer).length;
@@ -150,15 +158,10 @@ export function FeedbackSpace({ boot }) {
 
   const live = (comments || []).filter((c) => !c.deleted);
   const shown = area.shown;
-  const groups = new Map();
-  for (const c of shown) {
-    const key = (c.anchor && c.anchor.url) || '';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(c);
-  }
-  const ready = summarizeHandoffSurfaces(live).ready;
-  const openCount = live.filter((c) => threadPhase(c) === 'open').length;
-  const repliedCount = live.filter((c) => threadPhase(c) === 'replied').length;
+  // By app page (comment-query.js groupBy), as in the widget.
+  const groups = groupBy(shown, (c) => (c.anchor && c.anchor.url) || '');
+  const ready = area.handoffBuckets.ready;
+  const unreadIds = new Set(area.unread.map((c) => c.id));
 
   return (
     <AgentMentionContext.Provider value={agentMentions}>
@@ -173,7 +176,7 @@ export function FeedbackSpace({ boot }) {
         <p className="muted" style={{ marginTop: 0 }}>
           Comments left on <a href={origin} target="_blank" rel="noopener noreferrer">{host}</a>
           {boot.teamManage?.team && !boot.teamManage.guest ? <> · <span className="tdoc-fbspace-team">In <a href={`/me?team=${encodeURIComponent(boot.teamManage.team.id)}&view=comments`}>{boot.teamManage.team.name}</a></span></> : null}
-          {' '}· {openCount} open · {repliedCount} replied
+          {' '}· {area.openCount} open · {area.waitingCount} waiting on you
         </p>
         <div className="tdoc-fbspace-actions">
           <a className="ui-btn ui-btn-secondary ui-btn-m" href={origin} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> Open the app</a>
@@ -215,21 +218,29 @@ export function FeedbackSpace({ boot }) {
         ) : null}
 
         <div className="tdoc-fbspace-filter">
-          <SegmentedControl
-            ariaLabel="Show"
-            value={filter}
-            onChange={setFilter}
-            options={[{ value: 'open', label: 'Open' }, { value: 'replied', label: 'Replied' }, { value: 'resolved', label: 'Resolved' }, { value: 'all', label: 'All' }]}
+          <CommentListControls
+            filter={<SegmentedControl
+              className="tdoc-comment-filter"
+              ariaLabel="Show"
+              value={filter}
+              onChange={setFilter}
+              options={filterOptions(area.counts).map(({ value, label }) => ({ value, label }))}
+            />}
+            unreadCount={area.unreadCount}
+            onMarkAllRead={area.markAllRead}
+            onRefresh={feed.refresh}
+            refreshing={feed.refreshing}
+            list={{ search: listPrefs.search, onSearch: listPrefs.setSearch, sort: listPrefs.sort, onSort: listPrefs.setSort }}
           />
         </div>
 
         {notice ? <p className="muted" role="status">{notice}</p> : null}
         {comments === null ? <p className="muted">Loading…</p> : null}
         {comments !== null && !shown.length ? (
-          <p className="empty">{filter === 'all' ? 'No comments yet.' : `Nothing ${filter}.`}</p>
+          <p className="empty">{listPrefs.search ? 'No comments match.' : filter === 'all' ? 'No comments yet.' : `Nothing ${filter}.`}</p>
         ) : null}
 
-        {[...groups.entries()].map(([url, list]) => (
+        {groups.map(({ key: url, items: list }) => (
           <section key={url} className="tdoc-fbspace-group">
             <h2 title={url}>{url ? <a href={url} target="_blank" rel="noopener noreferrer">{pathOf(url)}</a> : 'Elsewhere'}</h2>
             <div className="tdoc-fbspace-list">
@@ -245,6 +256,9 @@ export function FeedbackSpace({ boot }) {
                   unanchored={false}
                   selected={openId === c.id}
                   expandReplies={openId === c.id}
+                  unread={unreadIds.has(c.id)}
+                  onSeen={area.onSeen}
+                  onMarkRead={area.markRead}
                   onActivate={(id) => setOpenId(id)}
                   onReply={async (parentId, text, opts = {}) => {
                     if (!canComment) { setNotice('Join to reply.'); return false; }
@@ -256,7 +270,7 @@ export function FeedbackSpace({ boot }) {
                     }
                     // Their own agent answers the reply they just wrote (only
                     // a comment of theirs may ask it).
-                    const own = ownAgentPick(opts);
+                    const own = threadAskPick(opts);
                     if (ok && own && made && made.id) {
                       const sent = await askOwnAgent(slug, made.id, own);
                       if (sent.ask) myAgent.addAsk(sent.ask);
