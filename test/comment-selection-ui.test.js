@@ -140,6 +140,9 @@ async function startServer(worker, env) {
         return { unique: r1.element === one && !r1.approximate, twice: Boolean(r2.element) && r2.approximate };
       });
       assert.deepEqual(byText, { unique: true, twice: true });
+      // A sheet's cells resolve through the registry: the frame registers the
+      // sheets viewer's hook as the 'sheet' adapter (sheets-ui covers the cells).
+      assert.equal(await frame.evaluate(() => Boolean(TdocSelection.adapterFor({ kind: 'element', sheet: { table: 'Budget', row: 'r1', key: 'amount' } }))), true);
       if (!phone) {
         const pin = page.locator(`.tdoc-pin[data-id="${id}"]`);
         await pin.waitFor({ timeout: 10000 });

@@ -732,7 +732,7 @@
     // fallback selector shape older anchors were written with.
     var described = TS.describeElement(el);
     post({
-      type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: described.selector || cssPath(el),
+      type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: hookCall('selector', el) || described.selector || cssPath(el),
       element: { tag: described.tag, text: described.text, accessible_name: described.accessible_name, container: described.container || null, container_is_target: !!described.container_is_target },
       sheet: identity && typeof identity === 'object' ? identity : undefined,
       text: '', context_before: '', context_after: '',
@@ -745,7 +745,7 @@
   function commentOnRegion(el, box) {
     var anchor = TS.regionOf(box, el, { exclude: isProbeUI });
     post({
-      type: 'tdoc:selection', kind: 'element', label: String(anchor.label || 'Area').slice(0, 80), selector: anchor.selector || cssPath(el),
+      type: 'tdoc:selection', kind: 'element', label: String(anchor.label || 'Area').slice(0, 80), selector: hookCall('selector', el) || anchor.selector || cssPath(el),
       element: { tag: anchor.tag, text: anchor.text, accessible_name: anchor.accessible_name, container: anchor.container || null, container_is_target: !!anchor.container_is_target },
       region: anchor.region,
       text: '', context_before: '', context_after: '',
