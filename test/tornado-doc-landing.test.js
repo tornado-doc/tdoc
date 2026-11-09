@@ -58,7 +58,7 @@ t('hero demo is a static mock, no iframe or author script', () => {
   // The demo used to frame live widget islands. It is a refined STATIC mock
   // now (crafted SVG/CSS charts), because the job is to sell the value-prop
   // loop, not to rebuild the product. So: no iframe, no author <script>.
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
   assert(demo.length > 1000, 'the hd demo block is missing');
   assert(!/<iframe/i.test(html), 'the page frames an iframe; the demo is a static mock now');
   assert(!/<script\b/i.test(html), 'a published tdoc runs no author script');
@@ -141,7 +141,7 @@ t('has an entry to the feedback tool in a section of its own', () => {
 
 t('demo doc and thread are siblings, not nested', () => {
   // Nesting the thread inside the doc collapses the two-column canvas.
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
   const iDoc = demo.indexOf('<div class="hd-doc">');
   const iAside = demo.indexOf('<aside class="hd-notes">');
   assert(iDoc >= 0 && iAside > iDoc, 'missing hd-doc or hd-notes');
@@ -201,7 +201,7 @@ t('phone rules override the headline, and no redundant Star pill in the doc', ()
 });
 
 t('the demo thread is one comment with one agent reply', () => {
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
   const threads = demo.match(/<aside class="hd-notes">[\s\S]*?<\/aside>/g) || [];
   assert(threads.length === 1, `expected 1 thread, found ${threads.length}`);
   for (const th of threads) {
@@ -215,7 +215,7 @@ t('the demo thread is one comment with one agent reply', () => {
 t('agent avatars are filled brand discs, not hollow glyphs', () => {
   // The sunburst is hollow; on a transparent disc it reads as a broken image.
   // Each agent mark sits filled-white on its own brand-coloured disc.
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
   assert(/background:#d97757"><svg[^>]*><use href="#hd-claude"/.test(demo),
     'Claude reply needs a terracotta disc with the claude mark');
   assert(/#hd-claude"[\s\S]*?fill="#fff"/.test(html), 'the claude mark must be white on its disc');

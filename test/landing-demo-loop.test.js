@@ -25,7 +25,7 @@ const latest = meta.versions[meta.versions.length - 1].n;
 const work = fs.readFileSync(path.join(root, 'landing', 'tornado-doc', `v${latest}`, 'index.html'), 'utf8');
 // The demo is the self-contained `.hd` block. Scope every check to it so a
 // stray match elsewhere on the page cannot pass a demo assertion.
-const demo = work.slice(work.indexOf('<div class="hd" style'), work.indexOf('<p class="hd-cap"'));
+const demo = work.slice(work.indexOf('<div class="hd" style'), work.indexOf('<!-- /hd demo -->'));
 const css = (work.match(/\/\* =+ tdoc demo \(hd-\) =+ \*\/([\s\S]*?)<\/style>/) || [])[1] || '';
 
 console.log('landing demo loop');
