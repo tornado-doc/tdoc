@@ -713,6 +713,8 @@ function feedbackSessionLocal(slug) {
   };
 }
 
+const LOCAL_THREAD_SEEN = new Map();
+
 function isLocalMutation(req) {
   const ct = (req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (ct !== 'application/json') return false;
@@ -2001,9 +2003,10 @@ const server = http.createServer(async (req, res) => {
     if (!fs.existsSync(path.join(ROOT, slug, 'meta.json'))) return json(res, 404, { error: 'access_denied' });
     const ident = e2eIdentity();
     if (!ident) return json(res, 401, { error: 'sign_in_required' });
-    const file = path.join(ROOT, slug, 'thread-seen.json');
-    const all = readJson(file, {});
-    const mine = all[ident.login] && typeof all[ident.login] === 'object' ? all[ident.login] : {};
+    // Kept in this process: read state is a convenience here, and the doc
+    // folder (a test fixture, a skill user's checkout) is not written for it.
+    const key = `${slug}\n${ident.login}`;
+    const mine = LOCAL_THREAD_SEEN.get(key) || {};
     if (req.method === 'GET') return json(res, 200, { seen: mine });
     const threads = new Set(readCommentFile(path.join(ROOT, slug, 'comments.json')).map((c) => c && c.id).filter(Boolean));
     const next = { ...mine };
@@ -2014,7 +2017,7 @@ const server = http.createServer(async (req, res) => {
       next[id] = stamp;
       changed = true;
     }
-    if (changed) writeJson(file, { ...all, [ident.login]: next });
+    if (changed) LOCAL_THREAD_SEEN.set(key, next);
     return json(res, 200, { ok: true, seen: next });
   }
 
