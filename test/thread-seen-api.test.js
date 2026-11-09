@@ -217,6 +217,29 @@ const OTHER_APP = 'http://localhost:5173';
     assert(sentBytes < 256 * 1024, `read ${sentBytes} bytes of a body past the cap`);
   });
 
+  await t('past 500 threads: the marks cut by the cap are named, and a POST that only adds cut marks writes nothing', async () => {
+    const { env, f, julie, space } = await setup();
+    const ids = [];
+    for (let i = 0; i < 501; i++) {
+      const c = await f('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text: `thread ${i}`, anchor: { kind: 'product', url: 'http://localhost:3000/', selector: '#x', tag: 'p', text: 'x' } } });
+      assert(c.status === 200 && c.body.id, `comment ${i}: ${c.status}`);
+      ids.push(c.body.id);
+    }
+    const full = Object.fromEntries(ids.slice(0, 500).map((id, i) => [id, 100000 + i]));
+    // Two writes, under the body cap.
+    const a = await seenPost(f, space.slug, Object.fromEntries(Object.entries(full).slice(0, 250)), { cookie: julie });
+    const b = await seenPost(f, space.slug, Object.fromEntries(Object.entries(full).slice(250)), { cookie: julie });
+    assert(a.status === 200 && b.status === 200 && Object.keys(b.body.seen).length === 500, `fill: ${a.status} ${b.status}`);
+    const put = env.META.put.bind(env.META);
+    let writes = 0;
+    env.META.put = async (key, ...rest) => { if (String(key).startsWith('thread-seen:')) writes++; return put(key, ...rest); };
+    const older = await seenPost(f, space.slug, { [ids[500]]: 5 }, { cookie: julie });
+    env.META.put = put;
+    assert(older.status === 200, `older: ${older.status} ${older.text}`);
+    assert(JSON.stringify(older.body.capped) === JSON.stringify([ids[500]]), `capped: ${JSON.stringify(older.body.capped)}`);
+    assert(!(ids[500] in older.body.seen) && writes === 0, `wrote ${writes} for a mark the cap cut`);
+  });
+
   console.log(`\n${fail ? 'FAIL' : 'PASS'} — ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
