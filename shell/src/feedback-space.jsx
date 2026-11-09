@@ -78,7 +78,6 @@ export function FeedbackSpace({ boot }) {
     choices: agentChoices,
     preselected: canSendToAgent ? composerDefault(agentChoices, { orTop: true }) : null,
     privateAskSupported: false,
-    teamAskSupported: false,
     fixesTheApp: true,
   }), [agentChoices, canSendToAgent]);
 

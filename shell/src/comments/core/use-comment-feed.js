@@ -67,7 +67,8 @@ export function useCommentFeed({ load, enabled = true, paused = false, interval 
   activeRef.current = active;
   const delay = useRef(0);
   const last = useRef(null);
-  // Something happened: read at the base pace again.
+  // A handoff going out (or settling) restarts the clock at the base pace:
+  // the poll below is rescheduled at once, not after a backed-off wait.
   useEffect(() => { delay.current = 0; }, [active]);
 
   useEffect(() => {
@@ -105,7 +106,7 @@ export function useCommentFeed({ load, enabled = true, paused = false, interval 
     schedule();
     document.addEventListener('visibilitychange', onVisible);
     return () => { stopped = true; if (timer) clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
-  }, [enabled, paused, interval, idleMax, refresh]);
+  }, [enabled, paused, interval, idleMax, active, refresh]);
 
   // Refresh pressed: back to the base pace.
   const refreshNow = useCallback(() => { delay.current = 0; return refresh(); }, [refresh]);

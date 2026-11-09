@@ -17769,12 +17769,36 @@ const THREAD_SEEN_WRITES_PER_HOUR = 240;
 // The person, by their account group's canonical id: the same person
 // through a linked identity is one record. A session with no account yet
 // falls back to its actor key.
+// The request body as text, or null once it passes `limit` bytes (the rest
+// is never read).
+async function readCapped(req, limit) {
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) { try { await reader.cancel(); } catch {} return null; }
+      chunks.push(value);
+    }
+  } catch { return ''; }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) { all.set(c, at); at += c.byteLength; }
+  return new TextDecoder().decode(all);
+}
+
 async function threadSeenWho(env, session) {
   const accountId = await sessionAccountId(env, session);
   if (accountId) {
     let group = null;
-    try { group = await accountGroup(env, accountId); } catch {}
-    return `a:${(group && group.canonical) || accountId}`;
+    try { group = await accountGroup(env, accountId); } catch { group = { unavailable: true }; }
+    // Not knowing which record is this person's is not "use another one".
+    if (!group || group.unavailable) return null;
+    return `a:${group.canonical || accountId}`;
   }
   return `k:${actorKey(session)}`;
 }
@@ -17801,9 +17825,9 @@ async function handleThreadSeen(env, req, url) {
     // Size first, before a byte is parsed.
     const declared = Number(req.headers.get('content-length'));
     if (Number.isFinite(declared) && declared > THREAD_SEEN_MAX_BODY) return json({ error: 'body_too_large', limit: THREAD_SEEN_MAX_BODY }, { status: 413 });
-    let text = '';
-    try { text = await req.text(); } catch { text = ''; }
-    if (text.length > THREAD_SEEN_MAX_BODY) return json({ error: 'body_too_large', limit: THREAD_SEEN_MAX_BODY }, { status: 413 });
+    // A chunked body names no length: read it with the cap, stopping there.
+    const text = await readCapped(req, THREAD_SEEN_MAX_BODY);
+    if (text === null) return json({ error: 'body_too_large', limit: THREAD_SEEN_MAX_BODY }, { status: 413 });
     try { body = JSON.parse(text); } catch { body = null; }
     if (!body || typeof body !== 'object') return json({ error: 'invalid_body' }, { status: 400 });
   }
@@ -17825,6 +17849,7 @@ async function handleThreadSeen(env, req, url) {
     return json({ error: 'feedback_token_scope' }, { status: 403 });
   }
   const who = await threadSeenWho(env, session);
+  if (!who) return json({ error: 'seen_unavailable' }, { status: 503, headers: { 'Retry-After': '30' } });
   const key = `thread-seen:${slug}:${who}`;
   let stored = {};
   try { stored = cleanThreadSeen(JSON.parse(await env.META.get(key) || '{}')); } catch { stored = {}; }
@@ -17842,8 +17867,11 @@ async function handleThreadSeen(env, req, url) {
   const threads = new Set(snapshotList(list, Infinity).map((c) => c.id));
   const next = cleanThreadSeen(stored, { allowed: threads });
   let changed = Object.keys(next).length !== Object.keys(stored).length;
+  // Named back to the caller, who may read every thread id anyway: the ids
+  // asked about that the doc does not hold, so its cache can drop them.
+  const unknown = [];
   for (const [id, stamp] of asked) {
-    if (!threads.has(id)) continue;
+    if (!threads.has(id)) { unknown.push(id); continue; }
     if (stamp > (next[id] || 0)) { next[id] = stamp; changed = true; }
   }
   // Newest marks first when there are more threads than the record keeps.
@@ -17857,7 +17885,7 @@ async function handleThreadSeen(env, req, url) {
       return json({ error: 'seen_unavailable' }, { status: 503, headers: { ...headers, 'Retry-After': '60' } });
     }
   }
-  return json({ ok: true, seen: kept }, { headers });
+  return json({ ok: true, seen: kept, unknown }, { headers });
 }
 
 const authoredBy = (keys, item) => {

@@ -403,6 +403,11 @@ ${uiCss}
       if (!(inner instanceof Node) || inner === host || inner === shield || !path.includes(host)) return;
       if (inner instanceof Element && inner.matches('.ui-dialog-backdrop, .ui-dialog-viewport')) return;
       if (e.type === 'click' && path.some((n) => n instanceof Element && n.localName === 'a' && n.hasAttribute('href'))) return;
+      // Our own code clicking one of our inputs (a Base UI checkbox forwards
+      // its press to its hidden <input>): cancelling that click and sending a
+      // copy toggled the box and then undid it, so Ask only never ticked.
+      // Let it run; the person's own press was already kept from the app.
+      if (e.type === 'click' && !e.isTrusted && inner instanceof Element && inner.localName === 'input') return;
       let event;
       try { event = copy(e); } catch (_) { return; }
       e.stopImmediatePropagation();
@@ -1512,7 +1517,9 @@ ${uiCss}
     // own agent is picked from the @ list, as on a doc page.
     const agentMentions = useMemo(() => ({
       choices: agentChoices, preselected: composerDefault(agentChoices, { orTop: true }),
-      ai: null, privateAskSupported: false, teamAskSupported: false,
+      // Own and team agents are asked through my-agent, which this token
+      // reaches only on tdoc's own pages (own_agent).
+      ai: null, privateAskSupported: false, teamAskSupported: Boolean(session?.own_agent),
       ownAskSupported: Boolean(session?.own_agent),
       fixesTheApp: true,
     }), [agentChoices, session?.own_agent]);

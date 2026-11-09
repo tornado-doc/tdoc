@@ -89,6 +89,10 @@ async function startServer(worker, env) {
   const julie = await person('julie', 'a');
   const eve = await person('eve', 'e');
   assert.equal((await call('/api/notify/local/register', { method: 'POST', token: julie.token, body: { device: 'mac-mini', clis: ['claude'] } })).status, 200);
+  // An agent of Julie's that may edit her space, reachable from the widget
+  // (a Raft one: the widget's list leaves her computer's CLIs out).
+  const RAFT = { provider: 'raft', server_id: 'srv-owner', agent_sub: 'fixer', server_slug: 'owner', agent_name: 'fixer-agent', last_touched: new Date().toISOString() };
+  await env.META.put(`account-notify:${julie.account_id}`, JSON.stringify([RAFT]));
   const space = (await call('/api/feedback/connect', { method: 'POST', cookie: julie.cookie, body: { origin: TDOC } })).body;
   assert.ok(space.slug && space.token, JSON.stringify(space));
 
@@ -317,6 +321,47 @@ async function startServer(worker, env) {
         assert.ok(posts.length <= 1, `sent ${posts.length} times: ${posts.join(' | ')}`);
         const cache = await page.evaluate((slug) => JSON.parse(localStorage.getItem(`tdoc.thread-seen.${slug}`) || '{}'), target.slug);
         assert.ok(!('c_gone_thread_1' in cache), `still cached: ${JSON.stringify(cache)}`);
+        assert.deepEqual(page.errors, []);
+        await ctx.close();
+      });
+    }
+
+    // Ask only on an agent that may edit (#969): the widget and the space
+    // page ask it, through my-agent, in the thread; nothing is handed off.
+    for (const where of ['widget', 'space']) {
+      await t(`${tag}: ${where}: Ask only on an agent that may edit asks it, and hands nothing off`, async () => {
+        const target = { slug: space.slug, version: 1, auth: { token: space.token }, session: space };
+        const anchor = { kind: 'product', url: `${base}/__page`, selector: '#x', tag: 'p', text: 'Something' };
+        const c = await call('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text: `Ask me ${tag} ${where}`, anchor } });
+        assert.equal(c.status, 200, JSON.stringify(c.body));
+        const ctx = await contextFor();
+        const page = await tracked(ctx);
+        const asks = [];
+        const handoffs = [];
+        page.on('request', (r) => {
+          if (r.method() !== 'POST') return;
+          if (r.url().includes(`/api/docs/${space.slug}/my-agent`)) asks.push(r.postDataJSON());
+          if (r.url().includes('/api/notify/handoff')) handoffs.push(r.url());
+        });
+        let root;
+        if (where === 'widget') { await ui.widget.open(page, target); root = await ui.widget.header(page); }
+        else { await page.goto(`${base}/d/${space.slug}`); root = page; }
+        const card = root.locator(`[data-comment-id="${c.body.id}"]`).first();
+        await card.waitFor({ timeout: 15000 });
+        await card.getByRole('button', { name: 'Reply', exact: true }).first().click();
+        const form = card.locator('.tdoc-reply-form').first();
+        await form.locator('textarea').fill('Why is it here?');
+        await form.locator('.tdoc-reply-agent').click();
+        await form.locator('.tdoc-agent-pill').waitFor({ timeout: 10000 });
+        const box = form.locator('.tdoc-ask-only [role=checkbox]');
+        assert.equal(await box.getAttribute('aria-checked'), 'false', 'Ask only is not offered, off, for an agent that may edit');
+        await form.locator('.tdoc-ask-only .ui-checkbox-label').click();
+        assert.equal(await box.getAttribute('aria-checked'), 'true', 'Ask only did not tick');
+        await form.getByRole('button', { name: 'Reply', exact: true }).click();
+        for (let i = 0; i < 40 && !asks.length; i++) await page.waitForTimeout(250);
+        assert.equal(asks.length, 1, 'nobody was asked');
+        assert.equal(asks[0].recipient && asks[0].recipient.agent_sub, RAFT.agent_sub, JSON.stringify(asks[0]));
+        assert.deepEqual(handoffs, [], 'handed off to edit');
         assert.deepEqual(page.errors, []);
         await ctx.close();
       });

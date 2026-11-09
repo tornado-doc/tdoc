@@ -108,21 +108,30 @@ export function mergeSeenMap(slug, remote) {
 }
 
 /**
- * After a POST, the server's answer is the truth for the ids that were sent:
- * an id it dropped (a deleted thread, one past its cap) leaves this cache,
- * and a stamp it lowered (a clock running ahead) takes its value, so the
- * cache never holds marks that would be sent again and again.
+ * After a POST, what the server said about the ids that were sent:
+ *  - `unknown` (threads the doc does not hold, e.g. deleted): they leave
+ *    this cache, so they are never sent again;
+ *  - a stamp lower than the one sent (a clock running ahead): the cache
+ *    takes it, but only if it still holds the stamp that was sent: a newer
+ *    mark made while the POST was on its way is kept.
+ * An id the server merely did not keep (its record holds the newest 500)
+ * stays here.
  */
-export function reconcileSeenMap(slug, sent, server) {
+export function reconcileSeenMap(slug, sent, server, unknown = []) {
   if (!slug || !sent) return false;
   const map = readSeenMap(slug);
   const answer = server && typeof server === 'object' && !Array.isArray(server) ? server : {};
+  const gone = new Set(Array.isArray(unknown) ? unknown : []);
   let changed = false;
-  for (const id of Object.keys(sent)) {
-    const theirs = cleanStamp(answer[id]);
+  for (const [id, value] of Object.entries(sent)) {
     const mine = cleanStamp(map[id]);
-    if (!theirs) { if (id in map) { delete map[id]; changed = true; } continue; }
-    if (mine !== theirs) { map[id] = theirs; changed = true; }
+    const asSent = mine === cleanStamp(value);
+    if (gone.has(id)) {
+      if (id in map && asSent) { delete map[id]; changed = true; }
+      continue;
+    }
+    const theirs = cleanStamp(answer[id]);
+    if (theirs && asSent && theirs < mine) { map[id] = theirs; changed = true; }
   }
   if (changed) writeStored(storageKey(slug), JSON.stringify(map));
   return changed;

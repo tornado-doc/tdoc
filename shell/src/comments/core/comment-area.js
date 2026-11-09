@@ -113,9 +113,9 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
     if (!syncSeen || !slug || !save || !Object.keys(entries).length) return;
     Promise.resolve(save(slug, entries)).then((body) => {
       if (!body?.seen) return;
-      // The answer is the truth for what was sent: no mark the server will
-      // not keep is sent again.
-      const reconciled = reconcileSeenMap(slug, entries, body.seen);
+      // What the server said about what was sent: a thread it does not hold
+      // leaves the cache, a stamp from a clock running ahead is lowered.
+      const reconciled = reconcileSeenMap(slug, entries, body.seen, body.unknown);
       const { changed } = mergeSeenMap(slug, body.seen);
       if (reconciled || changed) setSeenMap(readSeenMap(slug));
     }).catch(() => {});

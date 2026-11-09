@@ -174,6 +174,49 @@ const OTHER_APP = 'http://localhost:5173';
     assert(write.status === 403 && write.body.error === 'feedback_token_scope', `site POST: ${write.status} ${write.text}`);
   });
 
+  await t('a POST names the ids the doc does not hold, and only those', async () => {
+    const { f, julie, space, c1, c2 } = await setup();
+    const r = await seenPost(f, space.slug, { [c1]: 1000, [c2]: 1000, c_gone_x: 1000 }, { cookie: julie });
+    assert(r.status === 200, `post: ${r.status} ${r.text}`);
+    assert(JSON.stringify([...r.body.unknown].sort()) === JSON.stringify([c2, 'c_gone_x'].sort()), `unknown: ${r.text}`);
+    assert(r.body.seen[c1] === 1000, 'the real thread was not kept');
+  });
+
+  await t('when the account group cannot be read, the endpoint says 503, not another record', async () => {
+    const { env, f, julie, space, c1 } = await setup();
+    // A session tied to an account, whose group record cannot be read.
+    const sid = 'f'.repeat(32);
+    await env.META.put(`session:${sid}`, JSON.stringify({ ...JSON.parse(await env.META.get(`session:${julie.split('=')[1]}`)), account_id: 'acct_unreadable' }));
+    const get = env.META.get.bind(env.META);
+    let armed = false;
+    env.META.get = async (key, ...rest) => { if (armed && String(key).startsWith('account-group:acct_unreadable')) throw new Error('KV down'); return get(key, ...rest); };
+    armed = true;
+    const r = await seenGet(f, space.slug, { cookie: `tdoc_sid=${sid}` });
+    const w = await seenPost(f, space.slug, { [c1]: 1000 }, { cookie: `tdoc_sid=${sid}` });
+    env.META.get = get;
+    assert([r.status, w.status].every((s) => s === 503 || s === 401 || s === 403), `group unavailable: ${r.status} ${w.status} ${r.text}`);
+    assert(r.status !== 200 && w.status !== 200, 'answered from a record it could not be sure of');
+  });
+
+  await t('a chunked body past 64 KB is refused without being read to the end', async () => {
+    const { env, julie, space } = await setup();
+    const enc = new TextEncoder();
+    const head = enc.encode(`{"slug":"${space.slug}","seen":{"x":"`);
+    let sentBytes = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        if (sentBytes > 1024 * 1024) { controller.close(); return; }
+        const chunk = sentBytes === 0 ? head : new Uint8Array(16 * 1024).fill(97);
+        sentBytes += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+    });
+    const r = await worker.fetch(new Request('https://tdoc.dev/api/comments/seen', { method: 'POST', headers: { Cookie: julie, 'Content-Type': 'application/json' }, body: stream, duplex: 'half' }), env, {});
+    const body = await r.json();
+    assert(r.status === 413 && body.error === 'body_too_large', `chunked: ${r.status} ${JSON.stringify(body)}`);
+    assert(sentBytes < 256 * 1024, `read ${sentBytes} bytes of a body past the cap`);
+  });
+
   console.log(`\n${fail ? 'FAIL' : 'PASS'} — ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
