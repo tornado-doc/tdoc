@@ -319,15 +319,17 @@ t('LINEAR: same stamped HTML and aids on 3,000 fuzzed documents (nesting, raw te
 const time = (fn) => { let best = Infinity; for (let k = 0; k < 3; k++) { const t0 = process.hrtime.bigint(); fn(); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); } return best; };
 const MB = 1024 * 1024;
 
-t('LINEAR: 60k small sheet tables (~8 MB) through stampAids and prepareDocVersion stay near 200 ms', async () => {
+t('LINEAR: 60k small sheet tables (~8 MB) through stampAids: linear (about 100-200 ms on a laptop)', async () => {
   const html = '<!doctype html><html><head><title>t</title></head><body>' + `<table data-tdoc-sheet><tr><td>${'x'.repeat(95)}</td></tr></table>\n`.repeat(60000) + '</body></html>';
   assert(html.length > 7.5 * MB, `fixture ${html.length}`);
   const ms = time(() => stampLinear(html));
   console.log(`    (stampAids, ${(html.length / MB).toFixed(1)} MB, 60k tables: ${ms.toFixed(0)}ms)`);
-  assert(ms < 250, `stampAids took ${ms.toFixed(0)}ms`);
+  // ~100ms on a laptop; the bound leaves a shared CI runner room. The
+  // quadratic version took over a minute.
+  assert(ms < 600, `stampAids took ${ms.toFixed(0)}ms`);
 });
 
-t('LINEAR: the 2 MB worst cases that were possible before sheets stay near 200 ms', () => {
+t('LINEAR: the 2 MB worst cases possible before sheets: linear (55-170 ms on a laptop), and twice the input is about twice the time', () => {
   const cases = {
     'many small tables': '<html><body>' + '<table><tr><td>x</td></tr></table>'.repeat(60000) + '</body></html>',
     'bare unclosed sections': '<section>'.repeat(220000),
@@ -338,13 +340,20 @@ t('LINEAR: the 2 MB worst cases that were possible before sheets stay near 200 m
   };
   for (const [what, html] of Object.entries(cases)) {
     const ms = time(() => stampLinear(html));
-    assert(ms < 250, `${what}: ${ms.toFixed(0)}ms`);
+    // 55-170ms on a laptop; quadratic would be tens of seconds.
+    assert(ms < 600, `${what}: ${ms.toFixed(0)}ms`);
+  }
+  // Linear, not just fast here: twice the input is about twice the time.
+  for (const [what, unit, k] of [['small tables', '<table><tr><td>x</td></tr></table>', 15000], ['sections in a script', '<section>', 20000]]) {
+    const doc = (m) => (what === 'sections in a script' ? '<script>' + unit.repeat(m) + '</script>' : '<html><body>' + unit.repeat(m) + '</body></html>');
+    const one = time(() => stampLinear(doc(k))), two = time(() => stampLinear(doc(2 * k)));
+    assert(two < one * 3 + 5, `${what}: ${one.toFixed(1)}ms for ${k}, ${two.toFixed(1)}ms for ${2 * k}`);
   }
   // Deep nesting hashes each level's content (aids are content hashes), up
   // to STAMP_MAX_DEPTH levels: linear, with a larger constant.
   const deep = '<section>'.repeat(110000) + '</section>'.repeat(110000);
   const ms = time(() => stampLinear(deep));
-  assert(ms < 1000, `deep nesting: ${ms.toFixed(0)}ms`);
+  assert(ms < 2000, `deep nesting: ${ms.toFixed(0)}ms`);
 });
 
 (async () => {
@@ -355,7 +364,7 @@ t('LINEAR: the 2 MB worst cases that were possible before sheets stay near 200 m
   let best = Infinity;
   for (let k = 0; k < 3; k++) { const t0 = process.hrtime.bigint(); await prep(html); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); }
   console.log(`    (prepareDocVersion, ${(html.length / MB).toFixed(1)} MB, 60k tables: ${best.toFixed(0)}ms)`);
-  t('LINEAR: prepareDocVersion on the same 8 MB input stays near 200 ms', () => assert(best < 300, `prepareDocVersion took ${best.toFixed(0)}ms`));
+  t('LINEAR: prepareDocVersion on the same 8 MB input: linear (about 120-200 ms on a laptop)', () => assert(best < 700, `prepareDocVersion took ${best.toFixed(0)}ms`));
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
