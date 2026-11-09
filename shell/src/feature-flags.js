@@ -34,9 +34,11 @@ export const FLAGS = Object.freeze({
   // on in PR previews until approved.
   demoEditRewrite: Object.freeze({ label: 'Homepage demo: scripted Edit', owner: 'julie', added: '2026-11-01', default: true, preview: true }),
   // Feedback layer: drag a box to comment on an area (charts, canvases,
-  // iframes, tiny or overlapping elements), the dock's Area tool, the C
-  // shortcut and long-press-drag on phones. The client runs on other sites,
-  // so "preview" is the tdoc origin that served feedback.js, not the page.
+  // iframes, tiny or overlapping elements): a drag that starts where text
+  // can't be selected draws a box, long-press-drag on phones. The client
+  // runs on other sites, so "preview" is the tdoc origin that served
+  // feedback.js, not the page, and dev mode is the signed-in viewer's, sent
+  // with the widget's session (worker FEEDBACK_WIDGET_DEV_FLAGS).
   feedbackAreaSelect: Object.freeze({ label: 'Feedback: comment on an area', owner: 'julie', added: '2026-11-01', default: false, preview: true }),
   // Ask/Edit v2: one Ask AI input (tdoc AI answers a question, or proposes
   // edits that show in the doc as red/green suggestions to accept or

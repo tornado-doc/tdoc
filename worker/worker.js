@@ -10014,6 +10014,23 @@ async function createFeedbackSiteSpace(env, req, session, { origins, team, title
   return { ok: true, body: await feedbackSpaceResult(env, base, made.slug, made.meta, { origins }, team, true) };
 }
 
+// The feedback widget's dev-mode flags (shell/src/feature-flags.js, read by
+// feedback/src/main.jsx flagOn). The widget runs on other sites, where the
+// shell's boot (and its `devMode`) is not there, so it learns them from its
+// own authenticated session answers: the person behind the token, signed in
+// to tdoc, on the dev-mode list with the switch on, gets these names; anybody
+// else gets an empty list (sent, not omitted, so a stored session that had
+// them loses them when dev mode is turned off). Only flags the widget reads,
+// never the person's dev-mode status as such: the page holding the token
+// can read this answer. UI only -- nothing the server allows depends on it.
+const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['feedbackAreaSelect']);
+async function feedbackDevFlags(env, session) {
+  if (!session) return [];
+  let dev = null;
+  try { dev = await devModeState(env, session); } catch { return []; }
+  return dev && dev.on ? [...FEEDBACK_WIDGET_DEV_FLAGS] : [];
+}
+
 function feedbackSessionPayload(env, base, session, slug, meta, token = session && session.feedback) {
   const version = Math.max(1, latestVersionNumber(meta));
   return {
@@ -25504,6 +25521,8 @@ const tdocHandlers = {
       const feedbackConnected = async (payload, claimSpace) => {
         const wantsClaim = body.handoff === 'claim' && req.headers.get('origin') === url.origin;
         const filed = wantsClaim && await fillFeedbackClaim(env, req, origin, claimSpace, payload);
+        // The token is minted for this session: its person's dev flags.
+        payload = { ...payload, dev_flags: await feedbackDevFlags(env, s) };
         const out = json(filed ? { ...payload, claim_filed: true } : payload);
         if (filed) out.headers.append('Set-Cookie', await feedbackClaimCookie(origin, claimSpace, '', 0));
         return out;
@@ -25612,6 +25631,7 @@ const tdocHandlers = {
       return json({
         ...feedbackSessionPayload(env, url.origin, s, s.feedback.slug, meta),
         can_comment: canCommentOnDoc(access, s, env, meta),
+        dev_flags: await feedbackDevFlags(env, s),
         // The bookmarklet's space switcher and its one-time invite prompt.
         ...(s.feedback.site ? {} : await feedbackSpaceChoices(env, s, s.feedback.origin, s.feedback.slug)),
       });

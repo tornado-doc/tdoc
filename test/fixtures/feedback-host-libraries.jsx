@@ -88,7 +88,7 @@ function LibraryHost() {
     <RadixPopover.Root open={popoverOpen} onOpenChange={setPopoverOpen}>
       <RadixPopover.Trigger id="popover-open">Open Radix Popover</RadixPopover.Trigger>
       <RadixPopover.Portal>
-        <RadixPopover.Content id="radix-popover" sideOffset={6}>Non-modal popover content</RadixPopover.Content>
+        <RadixPopover.Content id="radix-popover" sideOffset={6} style={{ padding: 12, background: '#fff', border: '1px solid #ccc' }}>Non-modal popover content</RadixPopover.Content>
       </RadixPopover.Portal>
     </RadixPopover.Root>
     <RadixDialog.Root open={radixOpen} onOpenChange={setRadixOpen}>
