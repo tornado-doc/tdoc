@@ -2623,10 +2623,10 @@ function aidFor(tag, innerHtml, openAttrs) {
       return m ? a + '=' + m[1] : '';
     })
     .filter(Boolean).join('|');
-  let inner = innerHtml || '';
-  if (inner.indexOf('<!--') !== -1) inner = stripClosedHtmlComments(inner);
-  if (inner.indexOf('data-tdoc-') !== -1) inner = inner.replace(/\sdata-tdoc-[\w-]+\s*=\s*"[^"]*"/gi, '');
-  const norm = inner.replace(/\s+/g, ' ').trim();
+  const norm = stripClosedHtmlComments(innerHtml || '')
+    .replace(/\sdata-tdoc-[\w-]+\s*=\s*"[^"]*"/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return cyrb53(tag + '|' + intrinsics + '|' + norm);
 }
 // Elements whose body is raw text (CDATA-like): their content is NOT markup,
@@ -2913,18 +2913,40 @@ function stampAids(rawHtml) {
     while (lo < hi) { const mid = (lo + hi) >> 1; if (headings[mid].end <= idx) lo = mid + 1; else hi = mid; }
     return lo ? headings[lo - 1].text : null;
   }
-  // First entry of a sorted array of { index } at or after pos.
-  function lowerBound(arr, pos) {
-    let lo = 0, hi = arr.length;
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].index < pos) lo = mid + 1; else hi = mid; }
-    return lo < arr.length ? arr[lo] : null;
-  }
+  // The matches of `re`, found lazily and in order, as parallel start/end
+  // arrays: typed, and found with test(), so a page of 200,000 matches
+  // allocates no match objects, and only as far into the document as a
+  // lookup needs. The start is the last '<' at or before the match's end:
+  // every pattern here begins with '<' and holds no other.
   function allMatches(re) {
-    const out = [];
-    let m;
     re.lastIndex = 0;
-    while ((m = re.exec(html))) { out.push({ index: m.index, end: m.index + m[0].length, name: m[1] ? m[1].toLowerCase() : '' }); if (m[0].length === 0) re.lastIndex++; }
-    return out;
+    return { re, starts: new Int32Array(64), ends: new Int32Array(64), count: 0, done: false };
+  }
+  function grow(set) {
+    if (set.done) return false;
+    if (!set.re.test(html)) { set.done = true; return false; }
+    const end = set.re.lastIndex;
+    if (set.count === set.starts.length) {
+      const s2 = new Int32Array(set.count * 2); s2.set(set.starts); set.starts = s2;
+      const e2 = new Int32Array(set.count * 2); e2.set(set.ends); set.ends = e2;
+    }
+    set.starts[set.count] = html.lastIndexOf('<', end - 1);
+    set.ends[set.count] = end;
+    set.count++;
+    return true;
+  }
+  // The first match at or after pos, as its position in the arrays, or -1.
+  function lowerBound(set, pos) {
+    if (pos >= n) return -1;
+    while ((set.count === 0 || set.starts[set.count - 1] < pos) && grow(set));
+    let lo = 0, hi = set.count;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (set.starts[mid] < pos) lo = mid + 1; else hi = mid; }
+    return lo < set.count ? lo : -1;
+  }
+  // The k-th match, or -1 past the last.
+  function nth(set, k) {
+    while (set.count <= k && grow(set));
+    return k < set.count ? set.starts[k] : -1;
   }
   // attrAwareOpenTagEnd, memoized; nothing after the last '>' can end.
   const lastGt = html.lastIndexOf('>');
@@ -2939,19 +2961,21 @@ function stampAids(rawHtml) {
   const rawOpens = allMatches(new RegExp(`<(${RAW_TEXT_TAGS.join('|')})\\b`, 'gi'));
   const rawCloses = new Map();
   const rawSkipMemo = new Map();
-  function rawSkip(r) {
+  function rawSkip(at) {
     // skipRawTextBodyAt, with the close looked up instead of searched.
-    let v = rawSkipMemo.get(r.index);
+    const index = rawOpens.starts[at];
+    let v = rawSkipMemo.get(index);
     if (v !== undefined) return v;
-    const rEnd = tagEnd(r.index);
+    const rEnd = tagEnd(index);
     if (rEnd < 0) v = -1;
-    else if (/\/\s*$/.test(html.slice(r.index, rEnd - 1))) v = rEnd;
+    else if (/\/\s*$/.test(html.slice(index, rEnd - 1))) v = rEnd;
     else {
-      if (!rawCloses.has(r.name)) rawCloses.set(r.name, allMatches(new RegExp(`</${r.name}\\s*>`, 'gi')));
-      const c = lowerBound(rawCloses.get(r.name), rEnd);
-      v = c ? c.end : n;
+      const name = html.slice(index + 1, rawOpens.ends[at]).toLowerCase();
+      if (!rawCloses.has(name)) rawCloses.set(name, allMatches(new RegExp(`</${name}\\s*>`, 'gi')));
+      const set = rawCloses.get(name), c = lowerBound(set, rEnd);
+      v = c >= 0 ? set.ends[c] : n;
     }
-    rawSkipMemo.set(r.index, v);
+    rawSkipMemo.set(index, v);
     return v;
   }
   const byTag = new Map();
@@ -2977,22 +3001,26 @@ function stampAids(rawHtml) {
       const mc = lowerBound(ev.closes, top.pos);
       const mo = lowerBound(ev.opens, top.pos);
       const mr = lowerBound(rawOpens, top.pos);
+      const ci = mc >= 0 ? ev.closes.starts[mc] : Infinity;
+      const oi = mo >= 0 ? ev.opens.starts[mo] : Infinity;
+      const ri = mr >= 0 ? rawOpens.starts[mr] : Infinity;
       // The earliest; on a tie, close before open before raw (as before).
-      let next = mc, kind = 'close';
-      if (mo && (!next || mo.index < next.index)) { next = mo; kind = 'open'; }
-      if (mr && (!next || mr.index < next.index)) { next = mr; kind = 'raw'; }
-      if (!next) { fail(); break; }
+      let kind = ci === Infinity && oi === Infinity && ri === Infinity ? '' : 'close', at = ci;
+      if (oi < at) { kind = 'open'; at = oi; }
+      if (ri < at) { kind = 'raw'; at = ri; }
+      if (!kind) { fail(); break; }
       if (kind === 'raw') {
         const to = rawSkip(mr);
         if (to < 0) { fail(); break; }
         top.pos = to;
       } else if (kind === 'close') {
-        ev.memo.set(top.start, mc.end);
+        const closeEnd = ev.closes.ends[mc];
+        ev.memo.set(top.start, closeEnd);
         stack.pop();
-        if (stack.length) stack[stack.length - 1].pos = mc.end;
+        if (stack.length) stack[stack.length - 1].pos = closeEnd;
       } else {
-        const oEnd = tagEnd(mo.index);
-        const childStart = oEnd < 0 ? mo.index + ev.openLen : oEnd;
+        const oEnd = tagEnd(oi);
+        const childStart = oEnd < 0 ? oi + ev.openLen : oEnd;
         if (ev.memo.has(childStart)) {
           const v = ev.memo.get(childStart);
           if (v < 0) { fail(); break; }
@@ -3020,12 +3048,15 @@ function stampAids(rawHtml) {
   }
   // Pass 1: every known stampable tag, its open tag's end attribute-aware.
   for (const tag of STAMPABLE_TAGS) {
-    for (const m of eventsFor(tag).opens) {
-      if (m.index < (eventsFor(tag).nextFrom || 0)) continue;
-      const end = tagEnd(m.index);
+    const opens = eventsFor(tag).opens;
+    let nextFrom = 0;
+    for (let k = 0; nth(opens, k) >= 0; k++) {
+      const index = opens.starts[k];
+      if (index < nextFrom) continue;
+      const end = attrAwareOpenTagEnd(html, index);
       if (end < 0) break;
-      eventsFor(tag).nextFrom = end;
-      harvest(m.index, end, tag, html.slice(m.index + 1 + tag.length, end - 1));
+      nextFrom = end;
+      harvest(index, end, tag, html.slice(index + 1 + tag.length, end - 1));
     }
   }
   // Pass 2: opt-in markers (data-tdoc-artifact, class ~ tdoc-artifact).
@@ -3033,7 +3064,7 @@ function stampAids(rawHtml) {
   let om;
   while ((om = optInProbe.exec(html))) {
     const tagLower = om[1].toLowerCase();
-    const end = tagEnd(om.index);
+    const end = attrAwareOpenTagEnd(html, om.index);
     if (end < 0) break;
     optInProbe.lastIndex = end;
     const attrs = html.slice(om.index + 1 + om[1].length, end - 1);
