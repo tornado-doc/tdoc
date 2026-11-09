@@ -57,7 +57,9 @@ async function startServer(worker, env) {
       return res.end(fs.readFileSync(asset.file));
     }
     const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
+    // A browser closing mid-request aborts its body; unguarded, that rejection
+    // ends the whole test process ("Error: aborted").
+    try { for await (const chunk of req) chunks.push(chunk); } catch { return; }
     const headers = { ...req.headers, host: 'tdoc.dev' };
     if (headers.origin) headers.origin = 'https://tdoc.dev';
     delete headers.referer;

@@ -430,7 +430,12 @@ async function dragSelect(page, phrase) {
       await page.locator('#tdoc-send-agent-btn').click();
       const drawer = page.getByRole('dialog', { name: 'Ask AI' });
       await drawer.waitFor();
-      const clickedBackground = await page.locator('#tdoc-send-agent-btn').evaluate((el) => getComputedStyle(el).backgroundColor);
+      // The bar's buttons fade their background (.tdoc-bar button, .12s): read
+      // the colour it settles on, not one frame of the fade out of :active.
+      const clickedBackground = await page.locator('#tdoc-send-agent-btn').evaluate(async (el) => {
+        await Promise.all(el.getAnimations().map((a) => a.finished.catch(() => {})));
+        return getComputedStyle(el).backgroundColor;
+      });
       if (clickedBackground !== 'rgba(0, 0, 0, 0)') throw new Error(`Ask AI keeps a grey hover background after opening: ${clickedBackground}`);
       await drawer.getByRole('button', { name: 'Who should answer?' }).click();
       const menu = page.locator('.tdoc-agent-menu');
@@ -663,9 +668,17 @@ async function dragSelect(page, phrase) {
         await panel.getByText('Kept private').waitFor();
         await input.fill('What happens next?');
         await input.press('Enter');
-        await panel.getByText('Billing goes first.').last().waitFor();
-        // The first answer is already on screen: wait for the second one to fold it.
-        await panel.locator('.tdoc-ask-turn-summary').first().waitFor({ timeout: 10000 }).catch(() => {});
+        // Both answers read "Billing goes first.", so that text alone is the
+        // first answer, already on screen. Wait for the follow-up's own turn,
+        // answered, and for the first question to fold into its summary.
+        const followUp = panel.locator('.tdoc-ask-turn', { has: page.locator('.tdoc-ask-question', { hasText: 'What happens next?' }) });
+        const folded = panel.locator('.tdoc-ask-turn-summary', { hasText: 'What is the conclusion?' });
+        try {
+          await followUp.getByText('Billing goes first.').waitFor({ timeout: 10000 });
+          await folded.waitFor({ timeout: 2000 });
+        } catch {
+          throw new Error(`previous answer did not collapse: ${JSON.stringify({ input: await input.inputValue(), panel: (await panel.innerText()).slice(0, 400) })}`);
+        }
         if (await panel.locator('.tdoc-ask-turn').count() !== 1 || await panel.locator('.tdoc-ask-turn-summary').count() !== 1) throw new Error('previous answer did not collapse');
         await panel.locator('.tdoc-ask-turn-summary').click();
         if (!(await panel.locator('.tdoc-ask-turn').getByText('Kept private').isVisible())) throw new Error('previous answer did not expand');

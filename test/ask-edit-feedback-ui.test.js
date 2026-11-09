@@ -96,7 +96,14 @@ async function startServer(worker, env) {
     await ctx.addCookies([{ name: 'tdoc_sid', value: opts.sid || sid, domain: '127.0.0.1', path: '/' }]);
     await ctx.route(/api\.github\.com/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' }));
     if (opts.delayHandoff) await ctx.route(/\/(hand-off|api\/notify\/handoff)(\?|$)/, async (r) => { await new Promise((f) => setTimeout(f, opts.delayHandoff)); await r.continue(); });
-    if (opts.delayLists) await ctx.route(/\/api\/(notify\/targets|docs\/[^/]+\/my-agent)/, async (r) => { await new Promise((f) => setTimeout(f, opts.delayLists)); await r.continue(); });
+    // holdLists: the agent lists wait until the test calls releaseLists(), so
+    // "before they arrive" is a state the test controls, not a guess about
+    // how long opening the page takes (a 1.5s delay lost that race on CI).
+    let releaseLists = () => {};
+    if (opts.holdLists) {
+      const gate = new Promise((f) => { releaseLists = f; });
+      await ctx.route(/\/api\/(notify\/targets|docs\/[^/]+\/my-agent)/, async (r) => { await gate; await r.continue(); });
+    }
     const page = await ctx.newPage();
     const github = [];
     page.on('request', (r) => { if (r.url().includes('api.github.com')) github.push(r.url()); });
@@ -107,7 +114,7 @@ async function startServer(worker, env) {
     await page.goto(`${base}/d/${SLUG}`);
     await page.frameLocator('iframe').locator('h1').waitFor({ timeout: 15000 });
     await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
-    return { ctx, page, sends, errors, github, frame: page.frames().find((f) => f !== page.mainFrame()) };
+    return { ctx, page, sends, errors, github, releaseLists, frame: page.frames().find((f) => f !== page.mainFrame()) };
   };
   // The phone: drawer, Reply on the card, @, the agent picked by a tap.
   // On a thread with no replies yet (pass `id` for one made before the page loaded).
@@ -370,15 +377,18 @@ async function startServer(worker, env) {
     }));
 
     await t('desktop: same tag; the agent list arriving late still fills an untouched box, never one typed in', () => threadOf(async (id) => {
-      const ctxV = await open({ delayLists: 1500 });
+      const ctxV = await open({ holdLists: true });
       const a = await openReply(ctxV.page, false, id);
       assert.equal(await a.box.inputValue(), '');
+      ctxV.releaseLists();
       await a.card.locator('.tdoc-agent-pill').waitFor({ timeout: 8000 });
       await ctxV.ctx.close();
-      const typed = await open({ delayLists: 1500 });
+      const typed = await open({ holdLists: true });
       const b = await openReply(typed.page, false, id);
       await b.box.fill('my own words');
-      await typed.page.waitForTimeout(2500);
+      typed.releaseLists();
+      // The lists have arrived and been applied once the reply's @agent button shows.
+      await b.card.locator('.tdoc-reply-agent').waitFor({ timeout: 8000 });
       assert.equal(await b.box.inputValue(), 'my own words');
       await typed.ctx.close();
     }));
@@ -721,8 +731,9 @@ async function startServer(worker, env) {
       await post(v.page, { type: 'tdoc:suggestShow', items: ITEMS });
       await frame.waitForSelector('#long ins');
       await post(v.page, { type: 'tdoc:suggestFocus', id: 's:long', scroll: false });
-      // The focus arrives by postMessage: wait for it, not one tick.
-      await frame.waitForFunction(() => getComputedStyle(document.querySelector('#long ins')).outlineStyle === 'solid', null, { timeout: 5000 }).catch(() => {});
+      // A posted message reaches the frame as a task of its own, after this
+      // returns; reading styles straight away could beat it (WebKit, CI).
+      await frame.waitForFunction(() => document.querySelector('#long ins')?.closest('[data-tdoc-sugg-active]'));
       await shot(v.page, `blocks-${which === browser ? 'chromium' : 'webkit'}-${phone ? 390 : 1280}.png`);
       const seen = await frame.evaluate(() => {
         const css = (el) => getComputedStyle(el);
