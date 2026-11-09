@@ -1,11 +1,16 @@
 // "Ask only" in the comment composer and reply box (Julie, 2026-11-08):
 // ticked, the hand-off is answer only, and the server holds it, not the box.
-// The doc's own owner asking their own agent included (it used to be exempt):
-// from the moment the question is sent until its answer lands (or the asker
-// cancels), that agent's tokens may not publish, propose suggestions or mark
-// a comment applied on this doc. For each kind of recipient: Raft, webhook,
-// local daemon, and tdoc AI (which only ever answers, and never opens a
-// hand-off to edit). Ask only off is the control: the plain edit hand-off.
+// From the moment the question is sent until its answer lands (or the asker
+// cancels), the agent asked may not publish, propose suggestions or mark a
+// comment applied on this doc.
+//   - the doc's owner asking their own agent: held is the agent asked, as it
+//     names itself (X-Tdoc-Agent / X-Tdoc-Raft-Agent / MCP raft_agent). The
+//     owner's own terminal (a token naming no agent) and their other agents
+//     publish freely (Julie, 2026-11-09).
+//   - anybody else asking their own agent: every token of their account on
+//     this doc, as before.
+// Raft, webhook, local daemon; tdoc AI only ever answers and never opens a
+// hand-off to edit. Ask only off is the control: the plain edit hand-off.
 // Run with: node test/ask-only-lock.test.js
 const { loadWorker, makeEnv, req } = require('./helpers/worker-harness.js');
 
@@ -65,7 +70,8 @@ const LOCKED = 'answer_only_run';
 
   const alice = await person('alice');
   const agentA = { provider: 'raft', server_id: SERVER, server_slug: 'one', agent_sub: 'agent-a', agent_name: 'a' };
-  await env.META.put(`account-notify:${alice.account_id}`, JSON.stringify([agentA]));
+  const agentB = { provider: 'raft', server_id: SERVER, server_slug: 'one', agent_sub: 'agent-b', agent_name: 'b' };
+  await env.META.put(`account-notify:${alice.account_id}`, JSON.stringify([agentA, agentB]));
   const hookR = await call('/api/me/connectors/webhook', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { url: 'https://hook.test/in', label: 'hook' } });
   assert(hookR.status === 200 && hookR.body.target, `webhook ${hookR.status} ${hookR.text}`);
   const reg = await call('/api/notify/local/register', { method: 'POST', token: alice.token, body: { device: 'macbook', clis: ['claude'] } });
@@ -105,9 +111,10 @@ const LOCKED = 'answer_only_run';
 
   const cases = [
     ['Raft', () => agentA, { 'X-Tdoc-Raft-Agent': `${SERVER}/agent-a` }],
-    ['webhook', () => hook, {}],
+    ['webhook', () => hook, { 'X-Tdoc-Agent': `webhook/webhook/${hook.agent_sub}` }],
     ['local daemon', () => local, { 'X-Tdoc-Agent': 'local/macbook/macbook_claude' }],
   ];
+  const AS_B = { 'X-Tdoc-Raft-Agent': `${SERVER}/agent-b` };
 
   await t('the owner\'s own agents are offered (Raft, webhook, local)', async () => {
     assert(local && hook, JSON.stringify(mine));
@@ -121,11 +128,14 @@ const LOCKED = 'answer_only_run';
       assert(sent.status === 200 && sent.body.ask && sent.body.ask.ask_id, sent.text);
       assert(!(await handoffsOn(slug)).length, 'Ask only opened an edit hand-off');
       refused(await publish(slug, as), 'publish while asked');
-      refused(await publish(slug), 'publish by a nameless token of the account');
       refused(await propose(slug, as), 'propose_edits while asked');
       refused(await markApplied(slug, c, as), 'applied while asked');
+      // Only the agent asked: the owner's own terminal and another agent go on.
+      landed(await publish(slug), 'the owner\'s own terminal (names no agent)');
+      if (name !== 'Raft') landed(await publish(slug, { 'X-Tdoc-Raft-Agent': `${SERVER}/agent-a` }), 'another of the owner\'s agents');
+      else landed(await publish(slug, AS_B), 'another of the owner\'s agents');
       // The browser is never held.
-      const browser = await call('/api/doc/versions', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug, baseVersion: 1, html: `<!doctype html><html><head><title>Plan</title></head><body>${html(2)}</body></html>` } });
+      const browser = await call('/api/doc/versions', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug, baseVersion: versionOf(slug), html: `<!doctype html><html><head><title>Plan</title></head><body>${html(versionOf(slug) + 1)}</body></html>` } });
       landed(browser, 'the owner\'s browser save');
       // The answer itself goes, as a reply in the thread; then the hold lifts.
       const ans = await call('/api/agent/ask-reply', { method: 'POST', token: alice.token, headers: as, body: { slug, ask_id: sent.body.ask.ask_id, text: 'Invoices block renewals.', agent_login: 'a', agent_name: 'a' } });
@@ -139,18 +149,37 @@ const LOCKED = 'answer_only_run';
     const c = await comment(slug);
     const sent = await handOff(slug, { ask_only: true, comment_id: c, recipient: agentA });
     assert(sent.status === 200, sent.text);
-    refused(await publish(slug), 'held');
+    const AS_A = { 'X-Tdoc-Raft-Agent': `${SERVER}/agent-a` };
+    refused(await publish(slug, AS_A), 'held');
     landed(await call(`/api/docs/${slug}/my-agent/cancel`, { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { ask_id: sent.body.ask.ask_id } }), 'cancel');
-    landed(await publish(slug), 'after cancel');
+    landed(await publish(slug, AS_A), 'after cancel');
   });
 
   await t('Only me (and Ask AI) to the owner\'s own agent is held the same way', async () => {
     const slug = await newDoc();
     const sent = await handOff(slug, { ask_only: true, only_me: true, question: 'Private?', recipient: agentA });
     assert(sent.status === 200 && sent.body.ask, sent.text);
-    refused(await publish(slug), 'held');
+    const AS_A = { 'X-Tdoc-Raft-Agent': `${SERVER}/agent-a` };
+    refused(await publish(slug, AS_A), 'held');
+    landed(await publish(slug), 'the owner\'s terminal is not');
     landed(await call('/api/agent/ask-reply', { method: 'POST', token: alice.token, body: { slug, ask_id: sent.body.ask.ask_id, text: 'Yes.' } }), 'answer');
-    landed(await publish(slug), 'after the answer');
+    landed(await publish(slug, AS_A), 'after the answer');
+  });
+
+  await t('not the owner: a question to their own agent still holds every token of their account on the doc', async () => {
+    const slug = await newDoc();
+    const bob = await person('bob');
+    await env.META.put(`account-notify:${bob.account_id}`, JSON.stringify([{ ...agentA, server_id: 'server-2' }]));
+    const meta = JSON.parse(env.META.map.get(`meta:${slug}`));
+    meta.access = { visibility: 'public' };
+    env.META.map.set(`meta:${slug}`, JSON.stringify(meta));
+    const r = await call('/api/comments', { method: 'POST', cookie: bob.cookie, headers: ORIGIN, body: { slug, version: 1, text: 'Why?', anchor: { kind: 'text', text: 'Sentence one' } } });
+    assert(r.status === 200, r.text);
+    const sent = await call(`/api/docs/${slug}/hand-off`, { method: 'POST', cookie: bob.cookie, headers: ORIGIN, body: { ask_only: true, comment_id: r.body.id, recipient: { ...agentA, server_id: 'server-2' } } });
+    assert(sent.status === 200 && sent.body.ask, sent.text);
+    const locks = await (await env.COMMENTS.get(env.COMMENTS.idFromName(slug)).fetch('https://do/answer-locks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, op: { kind: 'list' } }) })).json();
+    const lock = locks.locks.find((l) => l.ask_id === sent.body.ask.ask_id);
+    assert(lock && !lock.agent_only && lock.ids.includes(bob.account_id), JSON.stringify(lock));
   });
 
   await t('tdoc AI: Ask only answers in the thread, opens no hand-off, suggests nothing; it can never be asked to edit', async () => {

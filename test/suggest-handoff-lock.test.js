@@ -653,7 +653,8 @@ const REFUSED = 'suggestions_only_run';
     const slug = await newDoc();
     const c = await comment(alice, slug);
     await handOff(alice, slug, [c], agentA);
-    // Plant an answer lock the way a question to this account's agent does.
+    // The owner asking their own agent takes no answer lock, so plant one the
+    // way a reader's question does.
     await env.COMMENTS.get(env.COMMENTS.idFromName(slug)).fetch('https://do/answer-locks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, op: { kind: 'add', id: 'q_1', lock: { ask_id: 'q_1', asker: alice.account_id, by: alice.account_id, ids: [alice.account_id], until: Date.now() + HOUR } } }) });
     const r = await publish(alice, slug, AS_A);
     assert(r.status === 403 && r.body.error === 'answer_only_run', r.text);

@@ -501,7 +501,8 @@ async function dragSelect(page, phrase) {
         if (!asks.length) throw new Error('no question queued');
         const edits = (await pending('juliesmac', julie.token)).filter((h) => h.kind !== 'ask').length;
         if (edits !== before) throw new Error(`Ask only handed it off to edit: ${edits - before}`);
-        const held = await api('/api/upload', { method: 'POST', token: julie.token, body: { slug: 'launch-plan', version: 99, html: '<h1>x</h1>', meta: { title: 'x' } } });
+        // The agent asked (as the daemon's scripts name it) is held.
+        const held = await api('/api/upload', { method: 'POST', token: julie.token, headers: julieAgent, body: { slug: 'launch-plan', version: 99, html: '<h1>x</h1>', meta: { title: 'x' } } });
         if (held.status !== 403 || held.body.error !== 'answer_only_run') throw new Error(`the agent was not held: ${held.status} ${JSON.stringify(held.body)}`);
         for (const a of asks) await api(`/api/docs/launch-plan/my-agent/cancel`, { method: 'POST', cookie: julie.cookie, body: { ask_id: a.ask_id || a.handoff_id } });
         await context.close();

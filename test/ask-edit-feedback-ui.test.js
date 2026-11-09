@@ -71,7 +71,7 @@ async function startServer(worker, env) {
   const cookie = `tdoc_sid=${sid}`;
   const minted = await (await worker.fetch(new Request('https://tdoc.dev/api/hosted/token', { method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ label: 'julie' }) }), env, {})).json();
   const api = async (p, o = {}) => {
-    const r = await worker.fetch(new Request(`https://tdoc.dev${p}`, { method: o.method || 'GET', headers: { ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}), ...(o.cookie ? { cookie: o.cookie, origin: 'https://tdoc.dev' } : {}), 'Content-Type': 'application/json' }, body: o.body ? JSON.stringify(o.body) : undefined }), env, {});
+    const r = await worker.fetch(new Request(`https://tdoc.dev${p}`, { method: o.method || 'GET', headers: { ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}), ...(o.cookie ? { cookie: o.cookie, origin: 'https://tdoc.dev' } : {}), 'Content-Type': 'application/json', ...o.headers }, body: o.body ? JSON.stringify(o.body) : undefined }), env, {});
     let body = null; try { body = await r.json(); } catch {} return { status: r.status, body };
   };
   const token = minted.token;
@@ -335,10 +335,12 @@ async function startServer(worker, env) {
         assert.equal(v.sends[0].path.endsWith('/hand-off'), true);
         assert.equal(v.sends[0].body.ask_only, true);
         assert.equal(v.sends[0].body.reply_as, undefined);
-        const up = await api('/api/upload', { method: 'POST', token, body: { slug: SLUG, version: 99, html: DOC, meta: { title: 'Plan' } } });
+        // The agent asked (it names itself, as the daemon's scripts do).
+        const asAgent = { 'X-Tdoc-Agent': 'local/mac-mini/mac-mini_claude' };
+        const up = await api('/api/upload', { method: 'POST', token, headers: asAgent, body: { slug: SLUG, version: 99, html: DOC, meta: { title: 'Plan' } } });
         assert.equal(up.status, 403, JSON.stringify(up.body));
         assert.equal(up.body.error, 'answer_only_run');
-        const prop = await api(`/api/docs/${SLUG}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'Billing ships first', replace: 'Billing ships second' }] } });
+        const prop = await api(`/api/docs/${SLUG}/suggestions`, { method: 'POST', token, headers: asAgent, body: { edits: [{ find: 'Billing ships first', replace: 'Billing ships second' }] } });
         assert.equal(prop.status, 403, JSON.stringify(prop.body));
         assert.equal(prop.body.error, 'answer_only_run');
         assert.equal((await api(`/api/docs/${SLUG}/my-agent/cancel`, { method: 'POST', cookie, body: { all: true } })).status, 200);

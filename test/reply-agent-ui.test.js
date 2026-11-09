@@ -73,7 +73,7 @@ async function dragSelect(page, phrase) {
   const reader = await issue(worker, env, 'reader');
   for (const who of [bob, reader]) await env.META.delete(`account-terminal:${who.account_id}`);
   const api = async (p, o = {}) => {
-    const r = await worker.fetch(new Request(`https://tdoc.dev${p}`, { method: o.method || 'GET', headers: { ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}), ...(o.cookie ? { cookie: o.cookie, origin: 'https://tdoc.dev' } : {}), 'Content-Type': 'application/json' }, body: o.body ? JSON.stringify(o.body) : undefined }), env, {});
+    const r = await worker.fetch(new Request(`https://tdoc.dev${p}`, { method: o.method || 'GET', headers: { ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}), ...(o.cookie ? { cookie: o.cookie, origin: 'https://tdoc.dev' } : {}), 'Content-Type': 'application/json', ...o.headers }, body: o.body ? JSON.stringify(o.body) : undefined }), env, {});
     let body = null; try { body = await r.json(); } catch {} return { status: r.status, body };
   };
   const up = (token, slug, v, title) => api('/api/upload', { method: 'POST', token, body: { slug, version: v, html: DOC(title), meta: { title } } });
@@ -184,7 +184,7 @@ async function dragSelect(page, phrase) {
       const asks = await until(page, async () => { const a = (await pending('juliesmac', julie.token)).filter((h) => h.kind === 'ask'); return a.length ? a : null; });
       if (!asks) throw new Error('no question queued');
       if ((await pending('juliesmac', julie.token)).filter((h) => h.kind !== 'ask').length !== edits) throw new Error('Ask only handed the thread off to edit');
-      const held = await api('/api/upload', { method: 'POST', token: julie.token, body: { slug: 'launch-plan', version: 2, html: DOC('x'), meta: { title: 'x' } } });
+      const held = await api('/api/upload', { method: 'POST', token: julie.token, headers: { 'X-Tdoc-Agent': 'local/juliesmac/juliesmac_claude' }, body: { slug: 'launch-plan', version: 2, html: DOC('x'), meta: { title: 'x' } } });
       if (held.status !== 403 || held.body.error !== 'answer_only_run') throw new Error(`the agent was not held: ${held.status} ${JSON.stringify(held.body)}`);
       for (const q of asks) await api('/api/docs/launch-plan/my-agent/cancel', { method: 'POST', cookie: julie.cookie, body: { ask_id: q.ask_id || q.handoff_id } });
       await context.close();

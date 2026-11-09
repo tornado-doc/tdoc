@@ -20174,7 +20174,7 @@ async function handleProposeEdits(env, req, url, slug) {
   if (!(await askEditV2Allowed(env, auth.actor.kind === 'hosted' ? auth.actor : null))) return new Response('Not found', { status: 404 });
   const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
   if (!writeGate.ok) return writeGate.response;
-  const answering = await answerLockRefusal(env, auth.actor, slug);
+  const answering = await answerLockRefusal(env, auth.actor, slug, req);
   if (answering) return answering;
   const spaceRefusal = feedbackSpaceVersionRefusal(writeGate.meta);
   if (spaceRefusal) return spaceRefusal;
@@ -20635,13 +20635,19 @@ async function handleMyAgent(env, req, url, slug) {
   const askId = `q_${Date.now()}_${rand(3)}`;
   const event = agentAskEvent({ slug, docTitle: meta.title, askId, question, passage: passage && passage.text, publicHost: env.PUBLIC_HOST, commentId });
   // Answer only, from now: the agent asked may not edit this doc until its
-  // answer lands (answerLockRefusal). The doc's owner asking their own agent
-  // too: a question (the composer's Ask only, Only me, Ask AI) is answer only
-  // because the server holds it, not because the box said so (Julie,
-  // 2026-11-08). The owner's browser is never held; their tokens are, until
-  // the answer, a cancel or ANSWER_LOCK_TTL_MS.
+  // answer lands (answerLockRefusal). Anyone but the doc's owner: every token
+  // of their account, doc-wide, as before. The doc's owner asking their own
+  // agent (the composer's Ask only, Only me, Ask AI): only the agent asked,
+  // as it names itself (X-Tdoc-Agent / X-Tdoc-Raft-Agent / MCP raft_agent,
+  // actingAgent); the owner's own terminal and their other agents publish
+  // freely (Julie, 2026-11-09). An agent that names nobody is not held: the
+  // question's instruction is what keeps it to answering.
+  const ownerAsks = !runner && Boolean(meta.hosted && meta.hosted.account_id && state.group.ids.concat(accountId).includes(meta.hosted.account_id));
+  const scope = runner ? { runner }
+    : ownerAsks ? { by: asker, ids: [...new Set(state.group.ids.concat(accountId))], agent_only: true, recipient: notifyTargetIdentity(target) }
+    : { by: asker, ids: [...new Set(state.group.ids.concat(accountId))] };
   try {
-    await answerLocks(env, slug, { kind: 'add', id: askId, lock: { ask_id: askId, asker, ...(runner ? { runner } : { by: asker, ids: [...new Set(state.group.ids.concat(accountId))] }), until: Date.now() + ANSWER_LOCK_TTL_MS } });
+    await answerLocks(env, slug, { kind: 'add', id: askId, lock: { ask_id: askId, asker, ...scope, until: Date.now() + ANSWER_LOCK_TTL_MS } });
   } catch {
     return json({ error: 'answer_lock_unavailable', message: 'Could not send the question right now; try again.' }, { status: 503 });
   }
@@ -20739,21 +20745,30 @@ function applyAnswerLockOp(current, op, now) {
 async function releaseAnswerLock(env, slug, askId) {
   try { await answerLocks(env, slug, { kind: 'remove', id: askId }); } catch {}
 }
-// null when this actor may write; else the refusal to send.
-async function answerLockRefusal(env, actor, slug) {
+// null when this actor may write; else the refusal to send. `req` names the
+// acting agent for an owner's agent-only lock; without it nobody is named,
+// and such a lock holds nobody.
+async function answerLockRefusal(env, actor, slug, req = null) {
   if (!actor || actor.kind !== 'hosted') return null;
-  let locks;
-  try { locks = await answerLocks(env, slug, { kind: 'list' }); } catch {
+  let held;
+  try { held = await answerLockHeld(env, req, actor, await answerLocks(env, slug, { kind: 'list' })); } catch {
     return json({ error: 'answer_lock_unavailable', message: 'Could not check whether this agent is answering a question on this doc; try again.' }, { status: 503 });
   }
-  return answerLockHeld(actor, locks) ? json(ANSWER_ONLY_RUN, { status: 403 }) : null;
+  return held ? json(ANSWER_ONLY_RUN, { status: 403 }) : null;
 }
-function answerLockHeld(actor, locks) {
+// A team agent: its own questions. Anyone else: a question their account
+// asked holds every token of it, except the owner's (agent_only), which holds
+// only the agent asked, when the caller names itself as that agent.
+async function answerLockHeld(env, req, actor, locks) {
   const teamAgentId = actor.team_agent && actor.team_agent.id;
   const ids = sessionAccountIds(actor);
-  return locks.some((l) => l && !isSuggestLock(l) && (teamAgentId
+  const mine = locks.filter((l) => l && !isSuggestLock(l) && (teamAgentId
     ? l.runner === teamAgentId
     : !l.runner && (Array.isArray(l.ids) ? l.ids : [l.by]).some((id) => ids.includes(id))));
+  if (mine.some((l) => !l.agent_only)) return true;
+  if (!mine.length || !req) return false;
+  const agent = await actingAgent(env, req, actor);
+  return Boolean(agent) && mine.some((l) => l.recipient && sameNotifyTarget(l.recipient, agent));
 }
 const ANSWER_ONLY_RUN = { error: 'answer_only_run', message: 'This agent was asked a question on this doc: it answers only (tdoc-agent-reply --ask), no edits or other replies here, until that answer is posted or the person who asked cancels it.' };
 
@@ -20816,7 +20831,7 @@ async function publishLockRefusal(env, req, actor, slug, meta) {
   let agent = null;
   try {
     locks = await answerLocks(env, slug, { kind: 'list' });
-    if (answerLockHeld(actor, locks)) return json(ANSWER_ONLY_RUN, { status: 403 });
+    if (await answerLockHeld(env, req, actor, locks)) return json(ANSWER_ONLY_RUN, { status: 403 });
     if (actor.team_agent || (meta && meta.workspace_id)) return null;
     locks = locks.filter(isSuggestLock);
     if (!locks.length) return null;
@@ -29372,7 +29387,7 @@ const tdocHandlers = {
       // edit's report: authorship decides, as for an upload. An answer is
       // not an edit. An agent holding an answer-only question here answers
       // through tdoc-agent-reply --ask only.
-      const answering = await answerLockRefusal(env, auth.actor, slug);
+      const answering = await answerLockRefusal(env, auth.actor, slug, req);
       if (answering) return answering;
       // Reopening a resolved comment (answered / question on an applied
       // thread) is a status change too.

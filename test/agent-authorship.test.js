@@ -158,22 +158,14 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   });
 
   // ---- what must keep working ----
-  // A question is answer only for the owner's own agent too (Ask only,
-  // Julie 2026-11-08): the server holds it on that doc until the answer lands
-  // or the owner cancels; their other docs, and new ones, are untouched.
-  await t('the owner publishes their own docs with their own token (team and personal); a question of their own holds that doc until answered', async () => {
+  await t('the owner publishes their own docs with their own token (team and personal), even with a question of their own open', async () => {
     assert((await upload(julie.token, 'julies-doc')).status === 200, 'team doc');
     assert((await upload(julie.token, 'personal')).status === 200, 'personal doc');
     const own = (await mine(julie, 'mine-doc')).agents[0];
     const sent = await handOff(julie, 'mine-doc', { ask_only: true, only_me: true, question: 'q?', recipient: own });
     assert(sent.status === 200, sent.text);
-    const held = await upload(julie.token, 'mine-doc');
-    assert(held.status === 403 && held.body.error === 'answer_only_run', `held while asked: ${held.status} ${held.text}`);
-    assert((await upload(julie.token, 'personal')).status === 200, 'another doc of theirs is not held');
+    assert((await upload(julie.token, 'mine-doc')).status === 200, 'the owner is not locked out of their own doc');
     assert((await upload(julie.token, 'brand-new')).status === 200, 'a new doc');
-    const answered = await call('/api/agent/ask-reply', { method: 'POST', token: julie.token, body: { slug: 'mine-doc', ask_id: sent.body.ask.ask_id, text: 'a.' } });
-    assert(answered.status === 200, answered.text);
-    assert((await upload(julie.token, 'mine-doc')).status === 200, 'free again once answered');
   });
 
   await t('a team doc a person last wrote in the browser: members\' agents and the team agent may edit', async () => {
