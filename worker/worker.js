@@ -22080,7 +22080,7 @@ function mcpWritingGuide(style, kind) {
   const name = MCP_STYLES.includes(style) ? style : 'default';
   const hs = mcpHouseStyle(name);
   const parts = [
-    `# Writing a tdoc (style: ${name}${kind === 'slides' ? ', slides' : ''})`,
+    `# Writing a tdoc (style: ${name}${kind === 'slides' || kind === 'sheets' ? `, ${kind}` : ''})`,
     'Follow this, then publish: with a shell, write the file and use create_upload + curl + commit_upload; without one, create_doc / update_doc. Send the body as html (a fragment is fine) with style: "' + name + '"; tdoc wraps a fragment in this style and the reading column. A page that brings its own page-level CSS is kept as written.',
     '## Voice',
     '- Say the thing, then stop. Lead with the answer; every sentence carries a fact, number, mechanism or judgment. If a sentence survives deletion, delete it.',
@@ -22113,6 +22113,13 @@ function mcpWritingGuide(style, kind) {
     parts.push('## Slides', 'A deck is a sequence of <section class="slide" data-tdoc-slide> cards, one idea each. Full guide: tdoc://authoring/structure/slides.md');
     if (frame) parts.push(frame.replace(/^## The frame\n+/, ''));
     if (rules) parts.push(rules.replace(/^## Design rules\n+/, '**Design rules**\n'));
+  }
+  if (kind === 'sheets') {
+    const md = mcpAuthoringGuides()['structure/sheets.md'];
+    const markup = mcpGuideSection(md, 'The markup');
+    parts.push('## Sheets', 'Records people search, filter and sort: one <table data-tdoc-sheet data-name="Tab"> per tab, drawn by the reader as a spreadsheet grid. Full guide: tdoc://authoring/structure/sheets.md');
+    if (markup) parts.push(markup.replace(/^## The markup\n+/, '').replace(/^[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*\n\n/, ''));
+    parts.push('Keep every data-row id when editing (cell comments hang on it); a new row takes the next number. data-palette colours: gray red orange yellow green teal blue purple pink. Several tables are tabs of one grid. A doc is at most 2 MB (about 5,000-8,000 rows of 20 short columns).');
   }
   return parts.join('\n\n') + '\n';
 }
@@ -22538,19 +22545,19 @@ const MCP_RAFT_AGENT_PARAM = { type: 'string', description: 'Agents on Raft pass
 const MCP_TOOLS = {
   get_writing_guide: {
     title: 'How to write a tdoc',
-    description: 'Voice, visuals, components and house style CSS for a tdoc (slide rules for kind "slides"). Call it before writing.',
+    description: 'Voice, visuals, components and house style CSS for a tdoc (slide/sheet rules by kind). Call it before writing.',
     inputSchema: {
       type: 'object',
       properties: {
         style: MCP_STYLE_PARAM,
-        kind: { type: 'string', enum: ['doc', 'slides'] },
+        kind: { type: 'string', enum: ['doc', 'slides', 'sheets'] },
       },
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     async run(call, args) {
       const style = MCP_STYLES.includes(args.style) ? args.style : 'default';
-      const kind = args.kind === 'slides' ? 'slides' : 'doc';
+      const kind = args.kind === 'slides' || args.kind === 'sheets' ? args.kind : 'doc';
       const text = mcpWritingGuide(style, kind);
       return mcpToolResult(text, { ok: true, style, kind });
     },

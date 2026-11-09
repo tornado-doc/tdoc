@@ -628,7 +628,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     for (const style of ['default', 'technical', 'paper', 'editorial']) {
       const md = fs.readFileSync(path.join(__dirname, '..', 'authoring', 'style', `${style}.md`), 'utf8');
       const css = [...md.matchAll(/```css\n([\s\S]*?)```/g)].map((m) => m[1]).find((c) => /Reading column/.test(c)).trim();
-      for (const kind of ['doc', 'slides']) {
+      for (const kind of ['doc', 'slides', 'sheets']) {
         const g = await tool(julieConn.access_token, 'get_writing_guide', { style, kind });
         const text = g.content[0].text;
         const bytes = Buffer.byteLength(text);
@@ -637,6 +637,8 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
         assert(text.includes(css), `${style}: carries the style's CSS block verbatim`);
         assert(/## Voice/.test(text) && /## Visuals/.test(text) && /diagram-box/.test(text), `${style}/${kind}: voice, visuals, components`);
         assert(/data-tdoc-slide/.test(text) === (kind === 'slides') && /Design rules/.test(text) === (kind === 'slides'), `${style}/${kind}: slide rules only for slides`);
+        assert(/data-tdoc-sheet/.test(text) === (kind === 'sheets') && /data-row="r1"/.test(text) === (kind === 'sheets'), `${style}/${kind}: sheet markup only for sheets`);
+        assert(g.structuredContent.kind === kind, `${style}/${kind}: kind echoed`);
       }
     }
     const fallback = await tool(julieConn.access_token, 'get_writing_guide', {});
