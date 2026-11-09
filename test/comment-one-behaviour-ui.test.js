@@ -552,7 +552,9 @@ async function startServer(worker, env) {
       const { card, box } = await openBox(surfaces.doc, page, id);
       await box.fill(DRAFT);
       await julieAgentAnswers(SLUG, id);
-      await card.locator('.tdoc-replies-toggle').waitFor({ timeout: 15000 });
+      // The next read of the list: one 15 s feed tick (the composer-free card
+      // does not pause it), as the resolve case below allows for.
+      await card.locator('.tdoc-replies-toggle').waitFor({ timeout: 40000 });
       assert.equal(await box.inputValue(), DRAFT);
       assert.deepEqual(page.errors, []);
       await ctx.close();
