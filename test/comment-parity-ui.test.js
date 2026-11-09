@@ -392,10 +392,11 @@ async function startServer(worker, env) {
         await page.keyboard.press('Alt');
         await page.keyboard.press('Alt');
         if (kind === 'doc') {
-          const composer = page.locator('.tdoc-popup textarea').first();
-          await composer.waitFor({ timeout: 8000 });
+          // A pick in the doc (selection/pick-gesture.js); Esc cancels it.
+          const frame = page.frameLocator('iframe');
+          await frame.locator('html[data-tdoc-picking]').waitFor({ timeout: 8000 });
           await page.keyboard.press('Escape');
-          await composer.waitFor({ state: 'detached', timeout: 8000 });
+          await frame.locator('html[data-tdoc-picking]').waitFor({ state: 'detached', timeout: 8000 });
         } else {
           // Picking: the dock's Comment is on, the list made way.
           const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');

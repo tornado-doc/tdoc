@@ -13,7 +13,9 @@ async function load() {
   const dir = path.join(__dirname, '../shell/src/comments/core');
   const url = (src) => `data:text/javascript;base64,${Buffer.from(src).toString('base64')}`;
   const handoff = url(fs.readFileSync(path.join(dir, 'handoff-state.js'), 'utf8'));
-  const query = fs.readFileSync(path.join(dir, 'comment-query.js'), 'utf8').replace("'./handoff-state.js'", `'${handoff}'`);
+  const container = url(fs.readFileSync(path.join(dir, '../selection/anchors/container.js'), 'utf8'));
+  const query = fs.readFileSync(path.join(dir, 'comment-query.js'), 'utf8').replace("'./handoff-state.js'", `'${handoff}'`)
+    .replace("'../selection/anchors/container.js'", `'${container}'`);
   return import(url(query));
 }
 

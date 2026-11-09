@@ -4,6 +4,7 @@
 // differ only in how they fetch them (use-comment-feed.js) and where they put
 // an anchor. Pure: no DOM, no React.
 import { lastAgentAt, lastHumanAt } from './handoff-state.js';
+import { containerKey } from '../selection/anchors/container.js';
 
 // Open (default): not resolved. Replied: not resolved, and an agent spoke
 // last. Resolved. All. Open is the default everywhere: resolved threads are
@@ -158,14 +159,10 @@ export function searchThreads(comments, query) {
 }
 
 // Where a thread lives: the whole document, a page of an app, a slide, later
-// a sheet tab. Surfaces may pass their own; this one knows product pages and
-// whole-document comments.
+// a sheet tab: one key per container (selection/anchors/container.js), the
+// same one the slide view counts "N comments on this slide" by.
 export function defaultContainerOf(comment) {
-  const anchor = comment?.anchor;
-  if (!anchor || anchor.kind === 'document') return 'document';
-  if (anchor.kind === 'product') return `page:${anchor.url || ''}`;
-  if (anchor.slide != null) return `slide:${anchor.slide}`;
-  return 'body';
+  return containerKey(comment?.anchor);
 }
 
 // Position inside a container: whatever the surface measures (a pin's y in

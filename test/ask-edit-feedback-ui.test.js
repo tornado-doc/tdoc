@@ -721,6 +721,8 @@ async function startServer(worker, env) {
       await post(v.page, { type: 'tdoc:suggestShow', items: ITEMS });
       await frame.waitForSelector('#long ins');
       await post(v.page, { type: 'tdoc:suggestFocus', id: 's:long', scroll: false });
+      // The focus arrives by postMessage: wait for it, not one tick.
+      await frame.waitForFunction(() => getComputedStyle(document.querySelector('#long ins')).outlineStyle === 'solid', null, { timeout: 5000 }).catch(() => {});
       await shot(v.page, `blocks-${which === browser ? 'chromium' : 'webkit'}-${phone ? 390 : 1280}.png`);
       const seen = await frame.evaluate(() => {
         const css = (el) => getComputedStyle(el);

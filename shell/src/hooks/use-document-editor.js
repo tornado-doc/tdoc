@@ -1,3 +1,4 @@
+import { isFeatureOn } from '../feature-flags.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveDocumentVersion } from '../document/api.js';
 import {
@@ -69,7 +70,7 @@ export function useDocumentEditor({
   const [staleDraft, setStaleDraft] = useState(null);
 
   useEffect(() => {
-    send({ type: 'tdoc:mode', mode, elementComment: !config.isLanding });
+    send({ type: 'tdoc:mode', mode, elementComment: !config.isLanding, areaSelect: !config.isLanding && isFeatureOn('feedbackAreaSelect') });
   }, [mode, send, config.isLanding]);
 
   useEffect(() => {

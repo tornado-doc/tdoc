@@ -286,24 +286,10 @@
     var b = range.getBoundingClientRect();
     return { top: b.top, left: b.left, bottom: b.bottom, right: b.right, width: b.width, height: b.height };
   }
-  function context(range, chars) {
-    try {
-      // Context must cross text-node boundaries. Reading only startContainer
-      // and endContainer leaves both sides empty when a user selects a whole
-      // table cell, heading, or inline run. That makes repeated labels
-      // impossible to disambiguate after reload.
-      var beforeRange = document.createRange();
-      beforeRange.selectNodeContents(document.body);
-      beforeRange.setEnd(range.startContainer, range.startOffset);
-      var afterRange = document.createRange();
-      afterRange.selectNodeContents(document.body);
-      afterRange.setStart(range.endContainer, range.endOffset);
-      var beforeText = beforeRange.toString(), afterText = afterRange.toString();
-      var before = beforeText.slice(Math.max(0, beforeText.length - chars));
-      var after = afterText.slice(0, chars);
-      return { before: before, after: after };
-    } catch (e) { return { before: '', after: '' }; }
-  }
+  // Text anchors live in the shared module (shell/src/comments/selection/
+  // anchors/text-range.js), bundled ahead of this file as TdocSelection.
+  var TS = TdocSelection;
+  function context(range, chars) { return TS.contextAround(range, chars); }
   // Which occurrence of this text the selection is, counted through the same
   // normalized view the resolver searches. Context disambiguates most repeats,
   // but not a short run inside a row that repeats verbatim — and a person who
@@ -317,43 +303,7 @@
   // probe <script> (which collectTextNodes rejects) and misses the virtual
   // space the view inserts at every <br> and block boundary. Measuring both
   // sides in one coordinate space is what makes the comparison mean anything.
-  function placeInView(range, text) {
-    try {
-      var view = docView();
-      var needle = normalizeNeedle(text);
-      if (!needle || !view.norm) return null;
-      // Where the selection starts, in raw view coordinates. A triple-click, or
-      // dragging across a whole table cell, leaves the range's endpoint on an
-      // ELEMENT rather than a text node — so matching on startContainer alone
-      // loses exact placement for exactly the selections people make fastest.
-      // The first text node the range touches is where its text begins.
-      var raw = -1;
-      for (var i = 0; i < view.nodes.length; i++) {
-        var node = view.nodes[i].node;
-        if (node === range.startContainer) { raw = view.nodes[i].start + range.startOffset; break; }
-        if (range.intersectsNode && range.intersectsNode(node)) { raw = view.nodes[i].start; break; }
-      }
-      if (raw < 0) return null;
-      // normToRaw ascends: the first norm index at or past this raw offset.
-      var lo = 0, hi = view.normToRaw.length - 1, at = view.normToRaw.length;
-      while (lo <= hi) {
-        var mid = (lo + hi) >> 1;
-        if (view.normToRaw[mid] >= raw) { at = mid; hi = mid - 1; } else lo = mid + 1;
-      }
-      var hits = [];
-      for (var j = 0; (j = view.norm.indexOf(needle, j)) !== -1; j += Math.max(1, needle.length)) hits.push(j);
-      var index = -1;
-      for (var k = 0; k < hits.length; k++) if (hits[k] >= at) { index = k; break; }
-      if (index === -1) index = hits.length ? hits.length - 1 : 0;
-      var start = hits.length ? hits[index] : at;
-      return {
-        occurrence: index,
-        occurrences: hits.length,
-        before: view.norm.slice(Math.max(0, start - 60), start),
-        after: view.norm.slice(start + needle.length, start + needle.length + 60)
-      };
-    } catch (e) { return null; }
-  }
+  function placeInView(range, text) { return TS.placeInView(range, text, docView()); }
 
   function postTextSelection(range, text) {
     var placed = placeInView(range, text);
@@ -678,13 +628,25 @@
   var elementHooks = window.__tdocElementHooks = window.__tdocElementHooks || {};
   function hookCall(name, el) { try { return typeof elementHooks[name] === 'function' ? elementHooks[name](el) : null; } catch (x) { return null; } }
   function visibleFor(el) { return hookCall('proxy', el) || el; }
+  // A sheet's cells resolve through the sheets viewer's hook, registered as
+  // the 'sheet' anchor adapter (selection/anchors/registry.js): any anchor
+  // carrying `sheet` ({ table, row, key }, data-key) is the viewer's to find.
+  TS.registerAnchorAdapter('sheet', {
+    match: function (anchor) { return !!(anchor && anchor.sheet && typeof anchor.sheet === 'object'); },
+    resolve: function (anchor) {
+      if (typeof elementHooks.resolve !== 'function') return undefined;
+      try { return elementHooks.resolve(anchor); } catch (x) { return undefined; }
+    },
+  });
+  // { element, approximate }: an adapter's answer when it has one, else the
+  // shared finder.
   function resolveElementAnchor(anchor) {
-    if (anchor.sheet && typeof elementHooks.resolve === 'function') {
-      var found;
-      try { found = elementHooks.resolve(anchor); } catch (x) { found = undefined; }
-      if (found !== undefined) return found;
+    var adapter = TS.adapterFor(anchor);
+    if (adapter) {
+      var found = adapter.resolve(anchor);
+      if (found !== undefined) return { element: found || null, approximate: false };
     }
-    try { return document.querySelector(anchor.selector); } catch (x) { return null; }
+    return TS.resolveElement(anchor, { exclude: isProbeUI });
   }
   var UI_SEL = '.tdoc-hover-outline, .tdoc-comment-pill, [data-tdoc-provider]';
   function isProbeUI(el) { return !!(el && el.closest && el.closest(UI_SEL)); }
@@ -765,11 +727,29 @@
     var pr = (hoverPill && hoverPill.style.display !== 'none') ? hoverPill.getBoundingClientRect() : null;
     var ar = near || (pr && (pr.width || pr.height) ? pr : null) || { top: r.top, left: Math.max(r.left, r.right - 40), bottom: r.top + 36, right: r.right, width: 30, height: 30 };
     var identity = hookCall('anchor', el);
+    // The shared description (selection/anchors/element.js): selector,
+    // what it shows, and its slide's stable id. cssPath stays only as the
+    // fallback selector shape older anchors were written with.
+    var described = TS.describeElement(el);
     post({
-      type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: cssPath(el),
+      type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: described.selector || cssPath(el),
+      element: { tag: described.tag, text: described.text, accessible_name: described.accessible_name, container: described.container || null, container_is_target: !!described.container_is_target },
       sheet: identity && typeof identity === 'object' ? identity : undefined,
       text: '', context_before: '', context_after: '',
       rect: { top: ar.top, left: ar.left, bottom: ar.bottom, right: ar.right, width: ar.width, height: ar.height },
+    });
+    hideHover();
+  }
+  // A box drawn on an artifact (a chart, an image, a diagram, a slide):
+  // the artifact's description plus where the box sits, as fractions.
+  function commentOnRegion(el, box) {
+    var anchor = TS.regionOf(box, el, { exclude: isProbeUI });
+    post({
+      type: 'tdoc:selection', kind: 'element', label: String(anchor.label || 'Area').slice(0, 80), selector: anchor.selector || cssPath(el),
+      element: { tag: anchor.tag, text: anchor.text, accessible_name: anchor.accessible_name, container: anchor.container || null, container_is_target: !!anchor.container_is_target },
+      region: anchor.region,
+      text: '', context_before: '', context_after: '',
+      rect: { top: box.top, left: box.left, bottom: box.bottom, right: box.right, width: box.width, height: box.height },
     });
     hideHover();
   }
@@ -790,6 +770,139 @@
     else if (hoverEl) hideHover();
   });
   window.addEventListener('scroll', function () { if (hoverEl) positionHover(hoverEl); }, { passive: true });
+
+  // ── Picking and drawing a box (selection/pick-gesture.js, shared with the
+  // feedback widget) ──────────────────────────────────────────────────────
+  // areaSelect: a drag that starts on an artifact (an image, a chart, a
+  // diagram, a slide) and not on its text draws a box (the feedbackAreaSelect
+  // rule, sent by the shell in tdoc:mode). picking: the shell's + Comment
+  // (tdoc:startPick): a click on an artifact comments on it, a drag over
+  // text quotes it, a box on an artifact comments on that area, and a click
+  // on nothing in particular asks the shell for a whole-document comment.
+  var areaSelect = false, picking = false, marquee = null, pressArtifact = null;
+  function showMarquee(box) {
+    if (!box) { if (marquee) marquee.style.display = 'none'; return; }
+    if (!marquee) {
+      marquee = document.createElement('div');
+      marquee.setAttribute('data-tdoc-provider', '');
+      marquee.className = 'tdoc-drag-marquee';
+      marquee.style.cssText = 'position:fixed;z-index:2147483646;pointer-events:none;border:2px solid ' + COMMENT_ACCENT + ';background:rgba(22,82,240,.08);border-radius:4px;';
+      document.documentElement.appendChild(marquee);
+    }
+    marquee.style.display = 'block';
+    marquee.style.left = box.left + 'px'; marquee.style.top = box.top + 'px';
+    marquee.style.width = box.width + 'px'; marquee.style.height = box.height + 'px';
+  }
+  function frameElementAt(x, y) {
+    var el = null; try { el = document.elementFromPoint(x, y); } catch (e) { el = null; }
+    return el && !isProbeUI(el) ? el : null;
+  }
+  function frameStartsOnText(x, y) {
+    try {
+      var node = null;
+      if (document.caretPositionFromPoint) { var c = document.caretPositionFromPoint(x, y); node = c && c.offsetNode; }
+      else if (document.caretRangeFromPoint) { var r0 = document.caretRangeFromPoint(x, y); node = r0 && r0.startContainer; }
+      if (!node || node.nodeType !== 3 || !node.textContent.trim()) return false;
+      var parent = node.parentElement;
+      if (!parent || parent.closest('svg') || isProbeUI(parent)) return false;
+      var range = document.createRange(); range.selectNodeContents(node);
+      var rects = range.getClientRects();
+      for (var i = 0; i < rects.length; i++) { var q = rects[i]; if (x >= q.left - 1 && x <= q.right + 1 && y >= q.top - 1 && y <= q.bottom + 1) return true; }
+      return false;
+    } catch (e) { return false; }
+  }
+  function endPick(cancelled) {
+    if (!picking) return;
+    picking = false;
+    document.documentElement.removeAttribute('data-tdoc-picking');
+    hideHover(); showMarquee(null);
+    if (cancelled) post({ type: 'tdoc:pickCancelled' });
+  }
+  var gestureOptions = {
+    areaSelect: false,
+    textSelect: false,
+    elementAt: frameElementAt,
+    startsOnText: frameStartsOnText,
+    onHover: function (el) {
+      if (!picking) return;
+      var art = el && artifactFor(el);
+      if (art) positionHover((hoverEl = art)); else hideHover();
+    },
+    onDrag: showMarquee,
+    onElement: function (el) {
+      if (!picking) return;
+      var art = el && artifactFor(el);
+      endPick(false);
+      if (art) commentOnElement(art);
+      else post({ type: 'tdoc:pickNothing' });
+    },
+    onText: function (a, b) {
+      if (!picking) return;
+      endPick(false);
+      var r = TS.rangeBetweenPoints(a, b);
+      var text = r ? String(r.toString()).trim() : '';
+      if (text) postTextSelection(r, text); else post({ type: 'tdoc:pickNothing' });
+    },
+    onBox: function (box) {
+      var art = pressArtifact;
+      endPick(false);
+      if (art) commentOnRegion(art, box);
+    },
+  };
+  var gesture = TS.createPickGesture(gestureOptions);
+  // A box is drawn on pictures: images, charts, diagrams, video, embedded
+  // frames, slides. Not on text blocks (a section, a quote, a table), where a
+  // press selects words or picks a suggestion.
+  var BOX_ON = 'img, svg, canvas, video, figure, iframe[src], [data-tdoc-slide], [data-tdoc-artifact], [data-tdoc-excalidraw]';
+  function boxTarget(node) {
+    var el = node && node.closest ? node.closest(BOX_ON) : null;
+    return el && !isProbeUI(el) ? el : null;
+  }
+  function gestureWanted(e) {
+    if (interactionMode === 'edit' || visualViewerOpen()) return false;
+    if (picking) return true;
+    if (!areaSelect || interactionMode !== 'comment' || !elementComment) return false;
+    // Only a press on a picture, off its text: text keeps selecting text.
+    return !!boxTarget(e.target) && !frameStartsOnText(e.clientX, e.clientY);
+  }
+  document.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (isProbeUI(e.target) || !gestureWanted(e)) return;
+    pressArtifact = picking ? artifactFor(e.target) : boxTarget(e.target);
+    gestureOptions.areaSelect = areaSelect && !!(boxTarget(e.target) || (picking && pressArtifact));
+    gestureOptions.textSelect = picking;
+    // A pick owns the press; outside a pick only a picture's own drag (an
+    // image's ghost) is held back, and the press still reaches the doc.
+    if (picking) { if (e.pointerType === 'mouse') e.preventDefault(); e.stopPropagation(); }
+    else if (e.pointerType === 'mouse' && /^(IMG|SVG|CANVAS|VIDEO)$/i.test(String(e.target.tagName || ''))) e.preventDefault();
+    gesture.down(e);
+  }, true);
+  document.addEventListener('pointermove', function (e) {
+    if (!gesture.pressing() && !picking) return;
+    gesture.move(e);
+  }, true);
+  document.addEventListener('pointerup', function (e) {
+    if (!gesture.pressing()) return;
+    if (picking || gesture.mode() === 'area') e.stopPropagation();
+    // Outside a pick, a press that did not draw a box was not ours.
+    if (!picking && gesture.mode() !== 'area') { gesture.cancel(); return; }
+    gesture.up(e);
+  }, true);
+  document.addEventListener('pointercancel', function () { gesture.cancel(true); }, true);
+  // A click that ended a pick or a box must not also select or open anything.
+  document.addEventListener('click', function (e) { if (picking) { e.preventDefault(); e.stopPropagation(); } }, true);
+  var pickStyle = null;
+  function startPick() {
+    if (interactionMode === 'edit') return;
+    if (!pickStyle) {
+      pickStyle = document.createElement('style');
+      pickStyle.setAttribute('data-tdoc-provider', '');
+      pickStyle.textContent = 'html[data-tdoc-picking],html[data-tdoc-picking] *{cursor:crosshair!important;}';
+      document.documentElement.appendChild(pickStyle);
+    }
+    picking = true;
+    document.documentElement.setAttribute('data-tdoc-picking', '');
+  }
 
   // --- data-tdoc-copy author buttons (port of overlay.js wireCopyTriggers) ---
   // A doc element with data-tdoc-copy becomes a click-to-copy trigger. The
@@ -851,253 +964,10 @@
   //     resolve, with context to disambiguate repeated text. The crude raw
   //     indexOf this replaces silently failed on any cross-block selection —
   //     which is why comments showed no pin/highlight. ---
-  function collectTextNodes() {
-    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-      acceptNode: function (n) {
-        if (!n.parentElement) return NodeFilter.FILTER_REJECT;
-        var tag = n.parentElement.tagName;
-        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEMPLATE' || tag === 'NOSCRIPT') return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    });
-    var nodes = [], total = '', norm = '', normToRaw = [], prevWasSpace = false, previousNode = null;
-    function hasLineBreakBetween(left, right) {
-      if (!left || !right) return false;
-      try {
-        var gap = document.createRange();
-        gap.setStartAfter(left);
-        gap.setEndBefore(right);
-        var fragment = gap.cloneContents();
-        return !!(fragment.querySelector && fragment.querySelector('br'));
-      } catch (e) { return false; }
-    }
-    // The nearest ancestor that lays out as a block. Cached: this runs once per
-    // text node while building the view, and the same few ancestors repeat.
-    var blockOf = new Map();
-    function nearestBlock(node) {
-      var el = node.parentElement;
-      while (el && el !== document.body) {
-        if (blockOf.has(el)) { var hit = blockOf.get(el); if (hit) return hit; }
-        var display = '';
-        try { display = window.getComputedStyle(el).display; } catch (e) { display = ''; }
-        if (display && display.indexOf('inline') !== 0 && display !== 'contents') {
-          blockOf.set(el, el);
-          return el;
-        }
-        blockOf.set(el, null);
-        el = el.parentElement;
-      }
-      return document.body;
-    }
-    // Two text nodes in different blocks read as separate lines, and
-    // Selection.toString() puts a newline between them — with no <br> and no
-    // whitespace node to show for it when the markup is written `</p><p>`.
-    // Without a boundary here the saved anchor carries a space the rebuilt
-    // text does not have, and a selection across two paragraphs can never be
-    // found again. #339 asked for exactly this alongside the <br> case.
-    function crossesBlock(left, right) {
-      if (!left || !right) return false;
-      try { return nearestBlock(left) !== nearestBlock(right); } catch (e) { return false; }
-    }
-    while (walker.nextNode()) {
-      var n = walker.currentNode, start = total.length, v = n.nodeValue;
-      // Selection.toString() represents <br> as a newline. Text-node walking
-      // used to erase it completely, so an anchor saved as "有\n可做到…"
-      // could never match the reconstructed "有可做到…" after submission.
-      // Add one normalized virtual space and map it to the next node boundary;
-      // Range creation can then still use real DOM offsets.
-      if (norm.length && !prevWasSpace && (hasLineBreakBetween(previousNode, n) || crossesBlock(previousNode, n))) {
-        norm += ' '; normToRaw.push(start); prevWasSpace = true;
-      }
-      nodes.push({ node: n, start: start, end: start + v.length });
-      total += v;
-      for (var i = 0; i < v.length; i++) {
-        var ch = v.charCodeAt(i);
-        var isWs = ch === 0x20 || ch === 0x09 || ch === 0x0a || ch === 0x0d || ch === 0xa0;
-        if (isWs) { if (!prevWasSpace && norm.length) { norm += ' '; normToRaw.push(start + i); prevWasSpace = true; } }
-        else { norm += v[i]; normToRaw.push(start + i); prevWasSpace = false; }
-      }
-      previousNode = n;
-    }
-    normToRaw.push(total.length);
-    return { nodes: nodes, total: total, norm: norm, normToRaw: normToRaw };
-  }
-  function normalizeNeedle(s) { return s ? s.replace(/\s+/g, ' ').trim() : ''; }
-  function normalizeContext(s) { return s ? s.replace(/\s+/g, ' ') : ''; }
-  function locateAt(nodes, off) {
-    var lo = 0, hi = nodes.length - 1;
-    while (lo <= hi) { var mid = (lo + hi) >> 1, n = nodes[mid];
-      if (off < n.start) hi = mid - 1; else if (off > n.end) lo = mid + 1; else return { node: n.node, offset: off - n.start }; }
-    return null;
-  }
-  function commonSuffixLen(a, b) { var i = 0, m = Math.min(a.length, b.length); while (i < m && a[a.length - 1 - i] === b[b.length - 1 - i]) i++; return i; }
-  function commonPrefixLen(a, b) { var i = 0, m = Math.min(a.length, b.length); while (i < m && a[i] === b[i]) i++; return i; }
-  function rangeFromNorm(view, normIdx, normLen) {
-    var rawStart = view.normToRaw[normIdx], rawEnd = view.normToRaw[normIdx + normLen];
-    if (rawEnd == null) rawEnd = view.total.length;
-    var s = locateAt(view.nodes, rawStart), e = locateAt(view.nodes, rawEnd);
-    if (!s || !e) return null;
-    try { var r = document.createRange(); r.setStart(s.node, s.offset); r.setEnd(e.node, e.offset); return r; } catch (x) { return null; }
-  }
-  // The anchor's own words are gone, but its neighbours may not be. Every field
-  // needed for this is already saved — context_before and context_after — and
-  // findTextRange only ever used them to break ties between several copies of
-  // the anchor text. When the text itself has been rewritten it returns null
-  // before it ever looks at them, and the comment loses its place entirely.
-  //
-  // The tail of context_before and the head of context_after are the parts that
-  // touched the anchor, so the longest surviving run of either is the closest
-  // thing to where the words used to be. Measured on a real document: five
-  // comments whose text was rewritten still had 9–59 characters of neighbouring
-  // context alive in the new version.
-  //
-  // Approximate on purpose. The caller marks these unanchored, so the card is
-  // dashed and offers Re-anchor — a guess that admits it is a guess, rather than
-  // a pin that claims to point at somebody else's sentence.
-  var NEAR_CONTEXT_MIN = 12;
-  function findNearContext(anchor, view) {
-    if (!anchor || !view || !view.norm) return null;
-    var before = normalizeContext(anchor.context_before).trim();
-    var after = normalizeContext(anchor.context_after).trim();
-    var best = null; // { at, len }
-
-    // Suffixes of context_before: the end of it sat against the anchor.
-    for (var lb = before.length; lb >= NEAR_CONTEXT_MIN; lb--) {
-      var tail = before.slice(before.length - lb);
-      var i = view.norm.indexOf(tail);
-      if (i !== -1 && view.norm.indexOf(tail, i + 1) === -1) { best = { at: i + lb, len: lb, side: 'before' }; break; }
-    }
-    // Prefixes of context_after: the start of it sat against the anchor. Only
-    // taken when it beats what the other side found — longer surviving run wins.
-    for (var la = after.length; la >= NEAR_CONTEXT_MIN; la--) {
-      if (best && la <= best.len) break;
-      var head = after.slice(0, la);
-      var j = view.norm.indexOf(head);
-      if (j !== -1 && view.norm.indexOf(head, j + 1) === -1) { best = { at: j, len: la, side: 'after' }; break; }
-    }
-    if (!best) return null;
-    // Land ON the surviving context, not on the position just past it. For a
-    // before-match that position is where the anchor used to begin, which after a
-    // rewrite is often the whitespace between two blocks — a text node with no
-    // layout, whose rect is 0x0 at the top of the document.
-    //
-    // Prefer the single character adjacent to where the anchor sat; if that one
-    // cannot be measured either, widen to the whole surviving run, which spans
-    // real rendered text by construction. Only give up when neither can be
-    // measured — a spot with no rect is not a spot, and pinning to it would drop
-    // the comment at the top of the page.
-    var start = best.side === 'before' ? best.at - best.len : best.at;
-    var adjacent = best.side === 'before' ? best.at - 1 : best.at;
-    var tries = [
-      [Math.max(0, Math.min(adjacent, view.norm.length - 1)), 1],
-      [Math.max(0, start), best.len]
-    ];
-    for (var t = 0; t < tries.length; t++) {
-      var candidate = rangeFromNorm(view, tries[t][0], tries[t][1]);
-      if (!candidate) continue;
-      var box = candidate.getBoundingClientRect();
-      if (box.width || box.height) { candidate.tdocSide = best.side; return candidate; }
-    }
-    return null;
-  }
-
-  // Partial rewrites often leave a phrase of the original selection alive even
-  // when the whole sentence no longer matches. Prefer a unique surviving run
-  // of the anchor text over dumping the comment at the foot of the page.
-  function findSurvivingFragment(anchor, view) {
-    if (!anchor || !view || !view.norm) return null;
-    var text = normalizeContext(anchor.text).trim();
-    if (text.length < NEAR_CONTEXT_MIN) return null;
-    var best = null;
-    for (var len = Math.min(text.length, 64); len >= NEAR_CONTEXT_MIN; len--) {
-      for (var start = 0; start + len <= text.length; start++) {
-        var slice = text.slice(start, start + len);
-        var i = view.norm.indexOf(slice);
-        if (i === -1) continue;
-        if (view.norm.indexOf(slice, i + 1) !== -1) continue;
-        best = { at: i, len: len };
-        break;
-      }
-      if (best) break;
-    }
-    if (!best) return null;
-    var candidate = rangeFromNorm(view, best.at, best.len);
-    if (!candidate) return null;
-    var box = candidate.getBoundingClientRect();
-    if (!(box.width || box.height)) return null;
-    candidate.tdocSide = 'after';
-    return candidate;
-  }
-
-  // The words a comment sat on are gone, but the block that replaced them is
-  // right there — after the surviving context_before, or before the surviving
-  // context_after. That block is what the comment is now about, so it gets a
-  // mark: "this was rewritten because of the thread beside it".
-  var MOVED_BLOCK_SEL = 'p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, td, th, dt, dd, figcaption';
-  var CONTENT_ROOT_SEL = '.wrap, main, article, .content, .container, body, html';
-  function blockForMoved(r) {
-    if (!r || !document.body) return null;
-    var after = r.tdocSide === 'after';
-    var node = after ? r.startContainer : r.endContainer;
-    var offset = after ? r.startOffset : r.endOffset;
-    var text = node && node.nodeType === 3 ? String(node.nodeValue || '') : '';
-    var here = after ? text.slice(0, offset) : text.slice(offset);
-    var t = null;
-    if (here.trim()) {
-      t = node; // the rewrite shares the block with the surviving context
-    } else {
-      var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      walker.currentNode = node;
-      var guard = 0;
-      do { t = after ? walker.previousNode() : walker.nextNode(); } while (t && !String(t.nodeValue || '').trim() && guard++ < 64);
-    }
-    if (!t) return null;
-    var el = t.nodeType === 1 ? t : t.parentElement;
-    var block = el && el.closest ? el.closest(MOVED_BLOCK_SEL) : null;
-    if (!block || block.matches(CONTENT_ROOT_SEL)) return null;
-    try { var out = document.createRange(); out.selectNodeContents(block); return out; } catch (x) { return null; }
-  }
-
-  function findTextRange(anchor, view) {
-    // No length floor. A one-character anchor used to be refused outright,
-    // which in CJK is an ordinary thing to want to comment on — and the
-    // composer accepted it anyway, so the comment was saved and then never
-    // drawn. Ambiguity is what the floor was really guarding against, and
-    // context plus `occurrence` below answer that directly.
-    if (!anchor || !anchor.text || !view.norm) return null;
-    var needleN = normalizeNeedle(anchor.text); if (!needleN) return null;
-    var hits = [];
-    for (var i = 0; (i = view.norm.indexOf(needleN, i)) !== -1; i += Math.max(1, needleN.length)) { hits.push(i); if (hits.length > 64) break; }
-    if (!hits.length) return null;
-    if (hits.length === 1) return rangeFromNorm(view, hits[0], needleN.length); // unique → accept
-    // The copy that was selected, when the document still has exactly the same
-    // copies it had then. This is exact where context is a guess, so it goes
-    // first: twelve identical rows give every candidate the same neighbourhood,
-    // and a score picks one of them at random-looking. If the count changed the
-    // document was regenerated around this text, the index no longer means what
-    // it meant, and context — which travels — takes over.
-    if (typeof anchor.occurrence === 'number' && anchor.occurrences === hits.length
-        && hits[anchor.occurrence] != null) {
-      return rangeFromNorm(view, hits[anchor.occurrence], needleN.length);
-    }
-    // Multiple occurrences: disambiguate by saved context; refuse if none clears.
-    var beforeN = normalizeContext(anchor.context_before), afterN = normalizeContext(anchor.context_after);
-    if (!beforeN && !afterN) return null;
-    var MIN = 4, L = 60;
-    var bTail = beforeN.slice(-Math.min(L, beforeN.length)), aHead = afterN.slice(0, Math.min(L, afterN.length));
-    var bestIdx = -1, bestScore = 0;
-    for (var k = 0; k < hits.length; k++) {
-      var h = hits[k];
-      var bScore = commonSuffixLen(view.norm.slice(Math.max(0, h - L), h), bTail);
-      var aScore = commonPrefixLen(view.norm.slice(h + needleN.length, h + needleN.length + L), aHead);
-      var score = (bScore >= MIN ? bScore : 0) + (aScore >= MIN ? aScore : 0);
-      if (score > bestScore) { bestScore = score; bestIdx = h; }
-    }
-    if (bestIdx !== -1 && bestScore > 0) return rangeFromNorm(view, bestIdx, needleN.length);
-    // Nothing decided. A stale index is worse than no pin: it looks anchored
-    // and points at somebody else's sentence.
-    return null;
-  }
+  function collectTextNodes() { return TS.collectTextNodes(document.body); }
+  var normalizeNeedle = TS.normalizeNeedle, normalizeContext = TS.normalizeContext, locateAt = TS.locateAt;
+  var rangeFromNorm = TS.rangeFromNorm, findNearContext = TS.findNearContext, findSurvivingFragment = TS.findSurvivingFragment;
+  var blockForMoved = TS.blockForMoved, findTextRange = TS.findTextRange;
   // Article right edge (page coords) so the shell can park pins/cards in the
   // gutter just right of the reading column — not pinned to the viewport edge.
   // Mirrors overlay.js getArticleMetrics: widest wrapper, else widest prose.
@@ -1279,12 +1149,20 @@
           resolved: c.status === 'applied', deleted: !!c.deleted });
         return;
       }
-      if (c.anchor.kind === 'element' && c.anchor.selector) {
-        var eel = resolveElementAnchor(c.anchor);
+      if (c.anchor.kind === 'element' && (c.anchor.selector || c.anchor.container || c.anchor.sheet)) {
+        // The anchor adapters (selection/anchors/): a sheet's cell through
+        // its registered adapter; otherwise the shared finder, where an old
+        // cssPath still resolves, a slide is found by its stable id wherever
+        // the deck put it, and a moved element by its words.
+        var hit = resolveElementAnchor(c.anchor);
+        var eel = hit.element;
         if (eel) {
-          _anchorTargets[c.id] = { element: eel };
-          var er = visibleFor(eel).getBoundingClientRect();
-          pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
+          var box = c.anchor.region ? TS.regionRect(c.anchor, eel) : null;
+          _anchorTargets[c.id] = { element: eel, region: box ? c.anchor.region : null };
+          var er = box || visibleFor(eel).getBoundingClientRect();
+          // A guess (twin slides, several elements showing its words) is
+          // drawn like a moved text anchor: dashed card, Re-anchor.
+          pins.push({ id: c.id, lost: hit.approximate || undefined, docY: er.top + (window.scrollY || 0), elementKey: box ? null : (c.anchor.selector || TS.containerKey(c.anchor)), elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
         } else seat(c);
         return;
       }
@@ -1682,6 +1560,8 @@
     if (interactionMode === 'edit' && next !== 'edit') disableEditing();
     interactionMode = next;
     if (opts && typeof opts.elementComment === 'boolean') elementComment = opts.elementComment;
+    if (opts && typeof opts.areaSelect === 'boolean') areaSelect = opts.areaSelect;
+    if (next === 'edit') endPick(true);
     document.documentElement.setAttribute('data-tdoc-interaction-mode', next);
     clearSelectingCursor();
     if (HL) {
@@ -2093,6 +1973,7 @@
   document.addEventListener('keydown', function (e) {
     var key = String(e.key || '');
     if (key !== 'Alt' && key !== 'Escape') return;
+    if (key === 'Escape' && (picking || gesture.pressing())) { gesture.cancel(); endPick(true); e.preventDefault(); return; }
     if (e.repeat || e.ctrlKey || e.metaKey || e.shiftKey || interactionMode === 'edit') return;
     var t = e.target;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(String(t.tagName || '')))) return;
@@ -2160,6 +2041,8 @@
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
     else if (d.type === 'tdoc:mode') setInteractionMode(d.mode, d);
+    else if (d.type === 'tdoc:startPick') startPick();
+    else if (d.type === 'tdoc:cancelPick') endPick(false);
     else if (d.type === 'tdoc:reanchorMode') {
       reanchorMode = !!d.active;
       document.documentElement.toggleAttribute('data-tdoc-reanchoring', reanchorMode);
