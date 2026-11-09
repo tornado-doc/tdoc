@@ -54,6 +54,12 @@ export const FLAGS = Object.freeze({
   // tdoc origin that served feedback.js.
   feedbackInvites: Object.freeze({ label: 'Feedback: share and invite from the widget', owner: 'julie', added: '2026-11-03', default: true }),
   askEditV2: Object.freeze({ label: 'Ask AI edits the doc (inline suggestions)', owner: 'julie', added: '2026-11-02', default: false, preview: true }),
+  // Sheets: import a .csv / .tsv / .xlsx as a sheet (Create a doc, or a file
+  // dropped on My docs) and edit a sheet's cells, rows, columns and tags in
+  // Edit mode. Reading a sheet (<table data-tdoc-sheet>: grid, search,
+  // filter, sort) does not depend on this flag. On in dev mode and PR
+  // previews until approved.
+  sheets: Object.freeze({ label: 'Sheets: import spreadsheets and edit cells', owner: 'julie', added: '2026-11-09', default: false, preview: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

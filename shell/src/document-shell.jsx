@@ -77,6 +77,7 @@ import { AskAiPanel, DemoRewriteBar, DemoRewriteCta } from './document/ask-ai-pa
 import { SuggestContext, useSuggestions } from './document/suggestions.js';
 import { SuggestInlineChip, SuggestReviewBar } from './document/suggest-review-bar.jsx';
 import { useCommentArea } from './document/comment-area.js';
+import { useSheetView } from './document/sheet-view.js';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
 import { useMyAgent } from './document/my-agent.js';
@@ -516,7 +517,10 @@ export function DocumentShell({ boot, config }) {
     setComposer(selection);
   }, [comments.moveAnchor, config.canComment, config.signInToComment]);
 
+  const sendToFrame = useCallback((message) => bridgeRef.current?.(message), []);
+  const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame });
   const bridge = useFrameBridge({
+    ...sheetHandlers,
     'tdoc:demoRewriteDone': (message) => {
       const pending = demoRewriteWait.current;
       if (pending && pending.id === message.id) pending.resolve(message.ok === true);

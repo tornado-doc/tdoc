@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppMenu, AppMenuItem } from './ui/menu.jsx';
-import { MessageSquare, SquarePen } from 'lucide-react';
+import { MessageSquare, SquarePen, Sheet } from 'lucide-react';
 import { copyText } from './document/model.js';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
@@ -30,7 +30,10 @@ import { DOC_SUBJECT_PLACEHOLDER, DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSub
 // involved" and nothing about which of these two answers you are picking.
 // Which agents is a separate question, answered by the marks at the end of
 // the row, where a list of what something works with belongs.
-export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuota, trigger }) {
+//
+// A third answer, behind the `sheets` flag: bring a spreadsheet. `onImport`
+// opens the hub's file chooser (sheet-import.jsx), which imports the file.
+export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuota, onImport, trigger }) {
   const [busy, setBusy] = useState(false);
   const startBlank = async () => {
     if (busy) return;
@@ -48,6 +51,15 @@ export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuo
           <span className="mk-text">
             <b>{busy ? 'Creating…' : 'Start from scratch'}</b>
             <em>A blank doc, open in edit mode.</em>
+          </span>
+        </AppMenuItem>
+      ) : null}
+      {canCreate && onImport ? (
+        <AppMenuItem onClick={onImport} className="mk-item">
+          <Sheet size={17} strokeWidth={1.75} aria-hidden="true" />
+          <span className="mk-text">
+            <b>Import a spreadsheet</b>
+            <em>A .csv, .tsv or .xlsx file becomes a sheet.</em>
           </span>
         </AppMenuItem>
       ) : null}

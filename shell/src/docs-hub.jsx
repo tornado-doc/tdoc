@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Folder, FolderPlus, LayoutGrid, List, Search, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
@@ -6,6 +6,7 @@ import { AppButton } from './ui/button.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
+import { SheetDropHint, SheetFilePicker, SheetImportDialog, isSheetFileName, useSheetFileDrop } from './sheet-import.jsx';
 import { DocList, DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { ConnectorsBody } from './connectors-page.jsx';
@@ -682,6 +683,18 @@ export function DocsHub({ boot }) {
   // Behind the fullTextSearch flag (dev mode only until approved): off, the
   // hook never asks and the section never shows.
   const [fullTextSearch] = useState(() => isFeatureOn('fullTextSearch'));
+  // Sheets (flagged): a spreadsheet chosen from Create a doc, or dropped on
+  // My docs, imports as a sheet doc in the workspace being looked at.
+  const [sheetsOn] = useState(() => isFeatureOn('sheets'));
+  const sheetPicker = useRef(null);
+  const dropSheet = useCallback((file) => {
+    if (!isSheetFileName(file.name)) {
+      hub.notify('Drop a .csv, .tsv or .xlsx file to import it as a sheet', true);
+      return;
+    }
+    setModal({ type: 'import-sheet', file, start: false });
+  }, [hub.notify]);
+  const draggingSheet = useSheetFileDrop({ enabled: sheetsOn && capabilities.create && view === 'docs' && !modal, onFile: dropSheet });
   const textSearch = useTextSearch(fullTextSearch && view === 'docs' ? hub.query : '', team ? team.id : '');
   // With no title match, the empty notice waits for the text results and
   // only shows when they found nothing either.
@@ -1041,6 +1054,7 @@ export function DocsHub({ boot }) {
                   canCreate={capabilities.create}
                   onAgent={openAgentRecipe}
                   onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
+                  onImport={sheetsOn ? () => sheetPicker.current?.click() : null}
                   trigger={<button className="mk-btn" type="button">Create a doc</button>}
                 />
               ) : null}
@@ -1317,6 +1331,11 @@ export function DocsHub({ boot }) {
         >
           <AgentRecipe />
         </HubDialog>
+      ) : null}
+      {sheetsOn ? <SheetFilePicker ref={sheetPicker} onFile={(file) => setModal({ type: 'import-sheet', file, start: true })} /> : null}
+      {draggingSheet ? <SheetDropHint /> : null}
+      {modal?.type === 'import-sheet' ? (
+        <SheetImportDialog file={modal.file} start={modal.start} team={team ? team.id : ''} onClose={closeModal} />
       ) : null}
       {modal?.type === 'quota-bump' ? (
         <QuotaBumpDialog
