@@ -103,6 +103,7 @@ const O = { Origin: 'https://tdoc.dev' };
       'one cell past the 10,000-character cell limit': sheetOf(cell('x'.repeat(3 * MB))),
       'a sheet inside an svg': `<!doctype html><html><body><svg><table data-tdoc-sheet><tbody>${cell('x'.repeat(9000)).repeat(330)}</tbody></table></svg></body></html>`,
       'a sheet inside a template': `<!doctype html><html><body><template><table data-tdoc-sheet><tbody>${cell('x'.repeat(9000)).repeat(330)}</tbody></table></template></body></html>`,
+      'a sheet inside a template after a stray </svg>': `<!doctype html><html><body><template></svg><table data-tdoc-sheet><tbody>${cell('x'.repeat(9000)).repeat(330)}</tbody></table></template></body></html>`,
       'a sheet inside math': `<!doctype html><html><body><math><table data-tdoc-sheet><tbody>${cell('x'.repeat(9000)).repeat(330)}</tbody></table></math></body></html>`,
       'CDATA in a sheet': sheetOf(cell('x'.repeat(9000)).repeat(330) + cell('<![CDATA[ x ]]>')),
       'a quoted attribute running over a <': sheetOf(cell('x'.repeat(9000)).repeat(330) + `<tr data-row="r9"><td title="a<b">y</td></tr>`),
@@ -180,6 +181,17 @@ const O = { Origin: 'https://tdoc.dev' };
     assert.equal(r.status, 200, r.text.slice(0, 200));
     assert(ms < 5000, `upload took ${ms}ms`);
     console.log(`    (${(html.length / MB).toFixed(1)} MB upload in process, aid stamping included: ${ms}ms)`);
+  });
+
+  await t('an upload with 20k images beside a 6 MB sheet stays bounded (no quadratic dry run)', async () => {
+    const html = big.replace('</main>', `${'<img src="i.png" alt="p">'.repeat(20000)}</main>`);
+    assert(html.length > 6 * MB && html.length < 8 * MB, `fixture ${html.length}`);
+    const t0 = Date.now();
+    const r = await upload('imgs-and-sheet', html);
+    const ms = Date.now() - t0;
+    assert.equal(r.status, 200, r.text.slice(0, 200));
+    console.log(`    (${(html.length / MB).toFixed(1)} MB with 20k images: upload ${ms}ms in process)`);
+    assert(ms < 5000, `upload took ${ms}ms`);
   });
 
   await t('history: a big sheet\'s summary is its row count, not a parse', async () => {

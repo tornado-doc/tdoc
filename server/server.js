@@ -551,14 +551,14 @@ const SHEET_MAX_DOC_BYTES = 8 * 1024 * 1024;
 // '<'), or when it sits inside <template>, <svg> or <math>.
 var SHEET_SCAN_TAGS = new Set(['table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'span', 'a', 'b', 'i', 'em', 'strong', 'code', 'br', 'wbr', 's', 'u', 'small', 'sub', 'sup', 'mark']);
 var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript']);
-var SHEET_SCAN_FOREIGN = new Set(['template', 'svg', 'math']);
 var SHEET_SCAN_MAX_TABLES = 20;
 var SHEET_SCAN_CELL_CHARS = 10000;
 // Every tag name the scan acts on, found by a hash of its lower-cased letters
 // and then compared, so naming a tag builds no string: its class (below) or
 // 0 for a name the scan does not act on.
 var SHEET_SCAN_OTHER = 0, SHEET_SCAN_TABLE = 1, SHEET_SCAN_TR = 2, SHEET_SCAN_CELL = 3, SHEET_SCAN_SECTION = 4,
-  SHEET_SCAN_INLINE = 5, SHEET_SCAN_RAWTAG = 6, SHEET_SCAN_FOREIGNTAG = 7, SHEET_SCAN_PLAINTEXT = 8;
+  SHEET_SCAN_INLINE = 5, SHEET_SCAN_RAWTAG = 6, SHEET_SCAN_TEMPLATE = 7, SHEET_SCAN_PLAINTEXT = 8,
+  SHEET_SCAN_SVG = 9, SHEET_SCAN_MATH = 10;
 var SHEET_SCAN_NAMES = (function () {
   var byHash = new Map();
   var put = function (name, cls) {
@@ -573,7 +573,7 @@ var SHEET_SCAN_NAMES = (function () {
       : name === 'tbody' || name === 'thead' || name === 'tfoot' ? SHEET_SCAN_SECTION : SHEET_SCAN_INLINE);
   });
   SHEET_SCAN_RAW.forEach(function (name) { put(name, SHEET_SCAN_RAWTAG); });
-  SHEET_SCAN_FOREIGN.forEach(function (name) { put(name, SHEET_SCAN_FOREIGNTAG); });
+  put('template', SHEET_SCAN_TEMPLATE); put('svg', SHEET_SCAN_SVG); put('math', SHEET_SCAN_MATH);
   put('plaintext', SHEET_SCAN_PLAINTEXT);
   return byHash;
 })();
@@ -595,7 +595,10 @@ function sheetScanClass(html, from, to) {
 function sheetScan(html) {
   var out = { bytes: 0, rows: 0, tables: 0 };
   if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return out;
-  var n = html.length, i = 0, sheet = null, foreign = 0, sheetCount = 0;
+  var n = html.length, i = 0, sheet = null, sheetCount = 0;
+  // Open <template>, <svg> and <math>, each counted on its own: a stray
+  // </svg> inside a template does not end the template.
+  var inTemplate = 0, inSvg = 0, inMath = 0;
   var len, room;
   // Where the next '"', "'" and ':' are: looked up again only once passed,
   // so these searches cover the document once in all.
@@ -687,10 +690,12 @@ function sheetScan(html) {
       continue;
     }
     if (!sheet) {
-      if (cls === SHEET_SCAN_FOREIGNTAG) foreign += closing ? (foreign > 0 ? -1 : 0) : 1;
+      if (cls === SHEET_SCAN_TEMPLATE) inTemplate += closing ? (inTemplate > 0 ? -1 : 0) : 1;
+      else if (cls === SHEET_SCAN_SVG) inSvg += closing ? (inSvg > 0 ? -1 : 0) : 1;
+      else if (cls === SHEET_SCAN_MATH) inMath += closing ? (inMath > 0 ? -1 : 0) : 1;
       if (!closing && cls === SHEET_SCAN_TABLE && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) {
         sheetCount++;
-        sheet = { bytes: tagLen < 256 ? tagLen : 256, rows: 0, ok: foreign === 0 && !quotedLt, depth: 1, inCell: false, cell: 0 };
+        sheet = { bytes: tagLen < 256 ? tagLen : 256, rows: 0, ok: inTemplate === 0 && inSvg === 0 && inMath === 0 && !quotedLt, depth: 1, inCell: false, cell: 0 };
       }
     } else if (closing && cls === SHEET_SCAN_TABLE && sheet.depth === 1) {
       if (sheet.ok) { out.bytes += sheet.bytes + (tagLen < 256 ? tagLen : 256); out.rows += Math.max(0, sheet.rows - 1); out.tables++; }
