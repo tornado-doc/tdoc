@@ -5,14 +5,16 @@
 
 const assert = require('assert');
 const path = require('path');
-const esbuild = require('esbuild');
+const fs = require('fs');
 
+// No bundler in the offline job: load handoff-state.js as its own data URL
+// and point comment-query.js's import at it.
 async function load() {
-  const out = await esbuild.build({
-    entryPoints: [path.join(__dirname, '../shell/src/comments/core/comment-query.js')],
-    bundle: true, write: false, format: 'esm', platform: 'neutral',
-  });
-  return import(`data:text/javascript;base64,${Buffer.from(out.outputFiles[0].contents).toString('base64')}`);
+  const dir = path.join(__dirname, '../shell/src/comments/core');
+  const url = (src) => `data:text/javascript;base64,${Buffer.from(src).toString('base64')}`;
+  const handoff = url(fs.readFileSync(path.join(dir, 'handoff-state.js'), 'utf8'));
+  const query = fs.readFileSync(path.join(dir, 'comment-query.js'), 'utf8').replace("'./handoff-state.js'", `'${handoff}'`);
+  return import(url(query));
 }
 
 const at = (m) => new Date(Date.UTC(2026, 0, 1, 0, m)).toISOString();
