@@ -10,6 +10,8 @@ function assert(value, message) { if (!value) throw new Error(message); }
 const root = path.join(__dirname, '..');
 const sources = [
   'server/frame-probe.js',
+  // The frame's text matcher lives in the shared selection module now.
+  'shell/src/comments/selection/anchors/text-range.js',
   'shell/src/document/model.js',
   'shell/src/sign-in-dialog.jsx',
   'shell/src/notification-text.js',

@@ -19,6 +19,8 @@
     window.parent.postMessage({ source: 'tdoc-frame', type: 'tdoc:presentState', open: open }, '*');
   }
   function postShell(msg) { msg.source = 'tdoc-frame'; window.parent.postMessage(msg, '*'); }
+  // The shared selection modules, read once (a doc's own script cannot swap them later).
+  var TSel = TdocSelection;
   // Threads per slide, from the probe's latest anchor resolution.
   var anchors = { targets: {}, ids: [] };
   document.addEventListener('tdoc:anchors-resolved', function (e) {
@@ -30,7 +32,14 @@
     return anchors.ids.filter(function (id) {
       var t = anchors.targets[id];
       if (!t) return false;
-      if (t.element) return el.contains(t.element) || t.element.contains(el) && t.element === el;
+      // One rule with the comment list's groups (selection/anchors/
+      // container.js): a thread belongs to the slide whose stable id its
+      // element sits under, wherever the deck has put that slide.
+      if (t.element) {
+        var c = TSel.containerFor(t.element), id = TSel.slideId(el);
+        if (c && id) return c.kind === 'slide' && c.id === id;
+        return el.contains(t.element) || t.element.contains(el) && t.element === el;
+      }
       // A text anchor can end just past its block (at the next slide's start),
       // so the slide that holds its first character owns it.
       var node = t.range && t.range.startContainer;

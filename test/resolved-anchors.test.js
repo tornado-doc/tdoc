@@ -11,7 +11,8 @@ function assert(value, message) { if (!value) throw new Error(message || 'assert
 const root = path.join(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const shell = read('shell/src/document-shell.jsx');
-const probe = read('server/frame-probe.js');
+// The frame's text matcher lives in the shared selection module now.
+const probe = read('server/frame-probe.js') + '\n' + read('shell/src/comments/selection/anchors/text-range.js');
 const chrome = read('server/chrome.css');
 
 console.log('resolved visibility and anchor fallback contracts');

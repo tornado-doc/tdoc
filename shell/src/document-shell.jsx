@@ -235,6 +235,13 @@ export function DocumentShell({ boot, config }) {
   const [visualOpen, setVisualOpen] = useState(false);
   // Slides presenting: full screen like a visual, but commenting stays on.
   const [presenting, setPresenting] = useState(false);
+  // + Comment and double-tap Option start a pick in the doc frame
+  // (selection/pick-gesture.js); the frame answers with a selection, a
+  // whole-document request, or a cancel.
+  const [docPicking, setDocPickingState] = useState(false);
+  const docPickingRef = useRef(false);
+  const setDocPicking = useCallback((on) => { docPickingRef.current = on; setDocPickingState(on); }, []);
+  const startDocumentCommentRef = useRef(null);
   const [composer, setComposer] = useState(null);
   // A visitor writes before signing in. Bring that draft and its quote back
   // after the auth redirect, so sending never discards the work they just did.
@@ -549,7 +556,17 @@ export function DocumentShell({ boot, config }) {
     },
     'tdoc:visualState': (message) => setVisualOpen(message.open === true),
     'tdoc:presentState': (message) => setPresenting(message.open === true),
-    'tdoc:selection': selectFromFrame,
+    'tdoc:selection': (message) => { setDocPicking(false); selectFromFrame(message); },
+    // A pick (+ Comment, double-tap Option) that landed on nothing in
+    // particular: a comment on the whole document. Nothing else is taken
+    // from the message (the doc's own scripts can post as the frame).
+    // Only while a pick this shell started is under way.
+    'tdoc:pickNothing': () => {
+      if (!docPickingRef.current) return;
+      setDocPicking(false);
+      startDocumentCommentRef.current?.(false);
+    },
+    'tdoc:pickCancelled': () => setDocPicking(false),
     'tdoc:diagramApplied': (message) => {
       const pending = diagramApplyRef.current;
       if (!pending || pending.id !== message.requestId) return;
@@ -582,7 +599,7 @@ export function DocumentShell({ boot, config }) {
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
       setTheme(nextTheme);
       if (message.supportsTheme === true) bridge.send({ type: 'tdoc:theme', theme: nextTheme });
-      bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding });
+      bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding, areaSelect: !config.isLanding && isFeatureOn('feedbackAreaSelect') });
       comments.refresh();
       suggestRef.current?.frameHandlers['tdoc:ready']();
     },
@@ -1871,6 +1888,7 @@ export function DocumentShell({ boot, config }) {
   // composer → open card or cluster → the side list. A key something else
   // took (an @ menu, a dialog, the phone sheet) is left alone.
   useEscapeLadder([
+    { active: docPicking, close: () => { setDocPicking(false); bridge.send({ type: 'tdoc:cancelPick' }); } },
     { active: Boolean(composer), close: () => closeComposer() },
     { active: !narrow && Boolean(openCommentId || openClusterKey), close: () => {
       setOpenCommentId(null);
@@ -1879,9 +1897,9 @@ export function DocumentShell({ boot, config }) {
     } },
     { active: sidePanelOpen, close: () => setSidePanel(false) },
   ], { enabled: !config.isLanding && !reanchorId });
-  // Double-tap Option starts a comment, as in the widget: here, one on the
-  // whole document (the frame forwards the key from inside the doc).
-  useDoubleTapOption(() => startDocumentComment(false), {
+  // Double-tap Option starts a comment, as in the widget: a pick in the
+  // doc (the frame forwards the key from inside the doc).
+  useDoubleTapOption(() => startPick(), {
     enabled: !config.isLanding && Boolean(config.canComment || config.signInToComment),
   });
   // What the document and its pins have to themselves.
@@ -1912,6 +1930,20 @@ export function DocumentShell({ boot, config }) {
     setDrawerOpen(false);
     const y = window.innerHeight - 80;
     setComposer({ kind: 'document', intent: askAi ? 'ask-ai' : 'comment', rect: { top: y, bottom: y, left: 16 } });
+  };
+  startDocumentCommentRef.current = startDocumentComment;
+  // + Comment: pick something in the doc (an artifact, a box on one, a run
+  // of text), or click on nothing in particular for the whole document.
+  const startPick = () => {
+    if (!config.canComment && !config.signInToComment) return;
+    if (editor.mode === 'edit') { startDocumentComment(false); return; }
+    if (editor.mode === 'read') editor.changeMode('comment');
+    setComposer(null);
+    setOpenCommentId(null);
+    setDrawerOpen(false);
+    setDocPicking(true);
+    bridge.send({ type: 'tdoc:startPick' });
+    showToast('Click what to comment on, drag over text, or click anywhere for the whole doc. Esc cancels.');
   };
   const closeAskAi = () => { setHandoffDetailsOpen(false); if (unifiedEntry) setDrawerOpen(false); };
   // A question typed before signing in comes back after it, in the open panel.
@@ -2449,7 +2481,7 @@ export function DocumentShell({ boot, config }) {
             prefs={listPrefs}
             groups={panelGroups}
             title="Comments"
-            onAdd={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
+            onAdd={config.canComment || config.signInToComment ? () => startPick() : null}
             onRefresh={commentFeed.refresh}
             refreshing={commentFeed.refreshing}
             onClose={() => setSidePanel(false)}

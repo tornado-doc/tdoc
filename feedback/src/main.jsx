@@ -11,6 +11,10 @@ import { CommentPanel } from '../../shell/src/comments/panel/comment-panel.jsx';
 import { CommentSheet, SheetContent } from '../../shell/src/comments/panel/comment-sheet.jsx';
 import { AgentActivityButton, agentActivitySummary } from '../../shell/src/comments/panel/agent-activity.jsx';
 import { useDoubleTapOption, useEscapeLadder } from '../../shell/src/comments/panel/keyboard.js';
+import { findElement, selectorFor as sharedSelectorFor } from '../../shell/src/comments/selection/anchors/element.js';
+import { enclosingFor as sharedEnclosingFor, regionOf, regionRect, toRect as sharedToRect } from '../../shell/src/comments/selection/anchors/region.js';
+import { captureTextAnchor, collectTextNodes, findTextRange } from '../../shell/src/comments/selection/anchors/text-range.js';
+import { createPickGesture, rangeBetweenPoints } from '../../shell/src/comments/selection/pick-gesture.js';
 import { useCommentFeed } from '../../shell/src/comments/core/use-comment-feed.js';
 import { isNarrowViewport } from '../../shell/src/comments/core/narrow.js';
 import { AppSelect } from '../../shell/src/ui/select.jsx';
@@ -688,26 +692,9 @@ ${uiCss}
     ? CSS.escape(value)
     : String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
 
-  function selectorFor(element) {
-    if (!(element instanceof Element)) return '';
-    if (element.id) return `#${cssEscape(element.id)}`;
-    const parts = [];
-    for (let current = element; current && current.nodeType === 1 && parts.length < 7; current = current.parentElement) {
-      let part = current.localName;
-      const stable = [...current.classList]
-        .filter((name) => !/^(active|hover|focus|selected|open|css-|sc-)/.test(name))
-        .slice(0, 2);
-      if (stable.length) part += stable.map((name) => `.${cssEscape(name)}`).join('');
-      const parent = current.parentElement;
-      if (parent) {
-        const peers = [...parent.children].filter((peer) => peer.localName === current.localName);
-        if (peers.length > 1) part += `:nth-of-type(${peers.indexOf(current) + 1})`;
-      }
-      parts.unshift(part);
-      if (current.matches('main,nav,header,footer,[role="main"]')) break;
-    }
-    return parts.join(' > ');
-  }
+  // Describing and finding elements, boxes and quotes: the shared selection
+  // modules (shell/src/comments/selection/), the same ones the doc frame runs.
+  const selectorFor = (element) => sharedSelectorFor(element);
 
   // Where in the app's state the element lived: an open dialog, the selected
   // tabs. A comment on a modal cannot be found once the modal is closed; this
@@ -757,39 +744,69 @@ ${uiCss}
     };
   }
 
-  // Finding a comment's element again. The selector is positional
-  // (nth-of-type), so a regenerated page — a dashboard rebuilt with one more
-  // card — can point it at a different element. In order of trust:
-  //   1. the selector's element, still showing the text it showed then;
-  //   2. any element of that tag showing that text (it moved);
-  //   3. the selector's element if it is still the same kind of element —
-  //      the text changed in place (a number updated), the spot did not.
+  // A comment on the page as a whole (S6): its address and state, no element.
+  function pageContext() {
+    return {
+      kind: 'product', page: true, url: canonical(), state: stateFor(document.body),
+      label: 'This page', text: '', tag: '',
+      viewport: { width: innerWidth, height: innerHeight, device_pixel_ratio: devicePixelRatio },
+    };
+  }
+
+  // Finding a comment's element again (selection/anchors/element.js): the
+  // selector's element still showing its text, else that text wherever it
+  // moved, else the selector's element if it is still the same kind.
   const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 500);
-  const shownText = (el) => norm(el.innerText || el.textContent);
+  // Cached per page state: `domEpoch` moves when the app's DOM changes (the
+  // mutation observer below), so a miss is not searched for again on every
+  // render, and a found element is kept while it is on the page.
+  let domEpoch = 0;
   const found = new Map();
   function elementFor(comment) {
     const anchor = comment && comment.anchor;
-    if (!anchor) return null;
-    // An area's `text` is what was under the box; its element is the
-    // container, found by the container's own text.
-    const want = norm(anchor.region ? anchor.region.container_text : anchor.text);
+    if (!anchor || anchor.page) return null;
     const cached = found.get(comment.id);
-    if (cached && cached.isConnected) return cached;
-    let bySelector = null;
-    try { bySelector = anchor.selector ? document.querySelector(anchor.selector) : null; } catch (_) { bySelector = null; }
-    let el = null;
-    if (bySelector && (!want || shownText(bySelector) === want)) el = bySelector;
-    if (!el && want) {
-      let candidates = [];
-      try { candidates = document.querySelectorAll(anchor.tag || '*'); } catch (_) { candidates = []; }
-      for (const node of candidates) {
-        if (node.closest('#tdoc-feedback-root')) continue;
-        if (shownText(node) === want) el = node; // keep the last (deepest) match
-      }
-    }
-    if (!el && bySelector && (!anchor.tag || bySelector.localName === anchor.tag)) el = bySelector;
-    if (el) found.set(comment.id, el); else found.delete(comment.id);
+    if (cached && cached.el && cached.el.isConnected) return cached.el;
+    if (cached && !cached.el && cached.epoch === domEpoch) return null;
+    const el = findElement(anchor, { exclude: (node) => isOurs(node) });
+    found.set(comment.id, { el, epoch: domEpoch });
     return el;
+  }
+  const QUOTE_RULE = '::highlight(tdoc-fb-quote){background-color:rgba(255,200,0,.32);}';
+  let quoteSheet = null;
+  function adoptQuoteStyle() {
+    try {
+      if (!quoteSheet && typeof CSSStyleSheet === 'function' && 'adoptedStyleSheets' in document) {
+        quoteSheet = new CSSStyleSheet();
+        quoteSheet.replaceSync(QUOTE_RULE);
+      }
+      if (quoteSheet) {
+        if (!document.adoptedStyleSheets.includes(quoteSheet)) document.adoptedStyleSheets = [...document.adoptedStyleSheets, quoteSheet];
+        return;
+      }
+    } catch (_) { quoteSheet = null; }
+    if (document.getElementById('tdoc-fb-quote-style')) return;
+    const style = document.createElement('style');
+    style.id = 'tdoc-fb-quote-style';
+    style.textContent = QUOTE_RULE;
+    document.head.appendChild(style);
+  }
+  // The text view of an element (the matcher's normalized text), per page state.
+  const views = new WeakMap();
+  function textViewOf(element) {
+    const cached = views.get(element);
+    if (cached && cached.epoch === domEpoch) return cached.view;
+    const view = collectTextNodes(element, (node) => isOurs(node));
+    views.set(element, { view, epoch: domEpoch });
+    return view;
+  }
+
+  // A quote (selection/anchors/text-range.js): the words, found again inside
+  // the element they were in, through the doc's own matcher.
+  function quoteRangeFor(comment, element) {
+    const quote = comment && comment.anchor && comment.anchor.quote;
+    if (!quote || !element) return null;
+    try { return findTextRange(quote, textViewOf(element)); } catch (_) { return null; }
   }
 
   // ---- Areas ---------------------------------------------------------------
@@ -847,112 +864,16 @@ ${uiCss}
     return null;
   }
 
-  const contains = (outer, inner, slack = 2) => inner.left >= outer.left - slack && inner.top >= outer.top - slack
-    && inner.right <= outer.right + slack && inner.bottom <= outer.bottom + slack;
-  const toRect = ({ left, top, width, height }) => ({ left, top, width, height, right: left + width, bottom: top + height });
-  const overlap = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
-    * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
-
-  // The smallest element on the page that holds the whole box: from what is
-  // under its middle, up. Inside a modal that is the modal (or a part of it).
-  function enclosingFor(box) {
-    let el = underPoint(box.left + box.width / 2, box.top + box.height / 2);
-    for (; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
-      if (!isOurs(el) && contains(el.getBoundingClientRect(), box)) return el;
-    }
-    return document.body;
-  }
-
-  const visibleText = (node) => {
-    const el = node.parentElement;
-    if (!el || isOurs(el) || el.closest('script,style,noscript,template')) return false;
-    return Boolean(node.textContent.trim());
-  };
-  // The words the box covers, in reading order.
-  function textUnder(box, container) {
-    const out = [];
-    let length = 0;
-    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-    const range = document.createRange();
-    for (let node = walker.nextNode(); node && length < 500; node = walker.nextNode()) {
-      if (!visibleText(node)) continue;
-      range.selectNodeContents(node);
-      if (![...range.getClientRects()].some((r) => overlap(toRect(r), box) > 0)) continue;
-      const words = node.textContent.replace(/\s+/g, ' ').trim();
-      out.push(words); length += words.length + 1;
-    }
-    return out.join(' ').slice(0, 500);
-  }
-
-  // The named things mostly inside the box: what an agent can look for in
-  // the code (a button, a chart canvas, an iframe), nearest the box first.
-  const MEANINGFUL = 'a,button,input,select,textarea,label,img,svg,canvas,video,iframe,h1,h2,h3,h4,h5,h6,li,td,th,[role],[id],[aria-label],[data-testid]';
-  function elementsUnder(box, container) {
-    const out = [];
-    const seen = new Set();
-    const nodes = [container, ...container.querySelectorAll(MEANINGFUL)].slice(0, 3000);
-    for (const el of nodes) {
-      if (out.length >= 8) break;
-      if (isOurs(el) || (el.closest && el.closest('svg') && el.localName !== 'svg')) continue;
-      const r = el.getBoundingClientRect();
-      const area = r.width * r.height;
-      if (!area || el === container) continue;
-      if (overlap(toRect(r), box) / area < 0.6) continue;
-      if ([...seen].some((parent) => parent.contains(el))) continue;
-      seen.add(el);
-      const text = norm(el.innerText || el.textContent).slice(0, 80);
-      out.push({
-        selector: selectorFor(el), tag: el.localName,
-        ...(text ? { text } : {}),
-        ...((el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('title')) ? { name: (el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('title')).slice(0, 80) } : {}),
-      });
-    }
-    return out;
-  }
-
-  const round4 = (n) => Math.round(n * 10000) / 10000;
-  // A comment on an area: the container's own anchor (selector, its text to
-  // find it again, the page state), the box relative to the container, in
-  // pixels and as fractions of its size (the container can be resized),
-  // where the page was scrolled, and a description of what is under the box.
-  // `text` is the text under the box: what every reader of an anchor shows.
+  const toRect = sharedToRect;
+  function enclosingFor(box) { return sharedEnclosingFor(box, underPoint); }
+  // A comment on an area (selection/anchors/region.js): the container's own
+  // anchor, the box in pixels and as fractions of the container, what is
+  // under it; plus where the page was (state, scroll).
   function regionContext(box, container = enclosingFor(box)) {
-    const base = contextFor(container);
-    const c = container.getBoundingClientRect();
-    const text = textUnder(box, container);
-    const elements = elementsUnder(box, container);
-    const rel = { x: Math.round(box.left - c.left), y: Math.round(box.top - c.top), width: Math.round(box.width), height: Math.round(box.height) };
-    const frac = c.width && c.height
-      ? { x: round4((box.left - c.left) / c.width), y: round4((box.top - c.top) / c.height), width: round4(box.width / c.width), height: round4(box.height / c.height) }
-      : null;
-    const what = text
-      ? `“${text.slice(0, 48)}${text.length > 48 ? '…' : ''}”`
-      : (elements[0] ? (elements[0].name || elements[0].tag) : (base.accessible_name || base.tag));
-    return {
-      ...base,
-      text,
-      label: `Area ${rel.width}×${rel.height} · ${what}`,
-      rect: { x: Math.round(box.left + scrollX), y: Math.round(box.top + scrollY), width: rel.width, height: rel.height },
-      region: {
-        container_text: base.text,
-        container_rect: base.rect,
-        rel, frac,
-        scroll: { x: Math.round(scrollX), y: Math.round(scrollY) },
-        elements,
-      },
-    };
-  }
-
-  // Where an area is on screen now: its fractions of the container's box.
-  function regionRect(anchor, el) {
-    const region = anchor && anchor.region;
-    if (!region || !el) return null;
-    const c = el.getBoundingClientRect();
-    if (region.frac) {
-      return toRect({ left: c.left + region.frac.x * c.width, top: c.top + region.frac.y * c.height, width: region.frac.width * c.width, height: region.frac.height * c.height });
-    }
-    const rel = region.rel || {};
-    return toRect({ left: c.left + (rel.x || 0), top: c.top + (rel.y || 0), width: rel.width || 0, height: rel.height || 0 });
+    const anchor = regionOf(box, container, { exclude: (node) => isOurs(node), describe: (el) => contextFor(el) });
+    anchor.rect = { x: Math.round(box.left + scrollX), y: Math.round(box.top + scrollY), width: anchor.region.rel.width, height: anchor.region.rel.height };
+    anchor.region.scroll = { x: Math.round(scrollX), y: Math.round(scrollY) };
+    return anchor;
   }
 
   async function loadSurface(session) {
@@ -1081,6 +1002,8 @@ ${uiCss}
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
   const labelOf = (anchor) => {
     const a = anchor || {};
+    if (a.page) return 'This page';
+    if (a.quote) return a.label || `“${String(a.quote.text || '').slice(0, 48)}”`;
     if (a.region) return a.label || 'Area';
     const text = String(a.text || '').trim();
     return a.accessible_name || (text ? `${a.tag || 'element'} · “${text.slice(0, 48)}${text.length > 48 ? '…' : ''}”` : (a.selector || 'element'));
@@ -1191,10 +1114,10 @@ ${uiCss}
         closeLabel="Close list"
         cardProps={cardProps}
         selectedId={area.selected?.id}
-        isAnchored={(c) => c.anchor.url !== pageUrl || Boolean(elementFor(c)) || Boolean(stateLabel(c.anchor))}
+        isAnchored={(c) => c.anchor.url !== pageUrl || Boolean(c.anchor.page) || Boolean(elementFor(c)) || Boolean(stateLabel(c.anchor))}
         onNavigate={(id) => { const c = area.byId.get(id); if (c) onOpen(c, c.anchor.url === pageUrl); }}
         contextLine={(c) => <button type="button" className="tdoc-cpanel-context" onClick={() => onOpen(c, c.anchor.url === pageUrl)}>
-          {c.anchor.url === pageUrl && !elementFor(c) ? 'Not on screen now · ' : ''}
+          {c.anchor.url === pageUrl && !c.anchor.page && !elementFor(c) ? 'Not on screen now · ' : ''}
           {stateLabel(c.anchor) ? `${stateLabel(c.anchor)} · ` : ''}{labelOf(c.anchor)}
         </button>}
       />
@@ -1252,7 +1175,12 @@ ${uiCss}
     const [areaSel, setAreaSel] = useState(null);
     // The box while it is being drawn, in viewport pixels.
     const [drag, setDrag] = useState(null);
-    const pressRef = useRef(null);
+    // The press in progress (selection/pick-gesture.js), for Esc.
+    const gestureRef = useRef(null);
+    // A quote being commented on: { quote, rect } (selection/anchors/text-range.js).
+    const [quoteSel, setQuoteSel] = useState(null);
+    // A comment on the whole page (no element).
+    const [pageSel, setPageSel] = useState(false);
     const [openId, setOpenId] = useState(null);
     const [notice, setNotice] = useState(null);
     // Connecting, with the tdoc window cut off from us by signing in.
@@ -1266,6 +1194,9 @@ ${uiCss}
     // An invite to answer: { id } from the link, or { slug } from the server.
     const [invite, setInvite] = useState(null);
     const [, setViewportTick] = useState(0);
+    // Moves only when the app's DOM changes (not on scroll): what the quote
+    // highlights are recomputed by.
+    const [domTick, setDomTick] = useState(0);
 
     const say = useCallback((text, bad = false) => {
       setToast({ text, bad });
@@ -1492,7 +1423,7 @@ ${uiCss}
         open: () => { if (!shown) show({ intent: 'bookmark' }); },
         close: hide,
         hide,
-        comment: () => { setShown(true); setPicking(true); },
+        comment: () => { setShown(true); setOpenId(null); setPanelOpen(false); setPicking(true); },
         disconnect: () => { writeSession(null); hide(); },
         // tdoc.on('open' | 'close' | 'comment', fn) → returns an unsubscribe.
         on: (event, fn) => {
@@ -1533,16 +1464,8 @@ ${uiCss}
       if (selected) return undefined;
       const priorCursor = document.documentElement.style.cursor;
       document.documentElement.style.cursor = 'crosshair';
-      const THRESHOLD = 8;
-      const LONG_PRESS_MS = 450;
       const fromShield = (event) => event.composedPath()[0] === shield;
       const pickable = (el) => el && el !== document.body && el !== document.documentElement && !isOurs(el);
-      const boxOf = (p, x, y) => toRect({ left: Math.min(p.x, x), top: Math.min(p.y, y), width: Math.abs(x - p.x), height: Math.abs(y - p.y) });
-      const commonAncestor = (a, b) => {
-        if (!a || !b) return a || b;
-        for (let el = a; el; el = el.parentElement) if (el.contains(b)) return el;
-        return a;
-      };
       const pickElement = async (element) => {
         if (!pickable(element)) return;
         if (reanchorId) {
@@ -1553,6 +1476,7 @@ ${uiCss}
         }
         setOpenId(null);
         setAreaSel(null);
+        setQuoteSel(null);
         setSelected(element);
         setHovered(null);
       };
@@ -1566,92 +1490,92 @@ ${uiCss}
         }
         const c = container.getBoundingClientRect();
         setOpenId(null);
+        setQuoteSel(null);
         setAreaSel(c.width && c.height
           ? { x: (box.left - c.left) / c.width, y: (box.top - c.top) / c.height, width: box.width / c.width, height: box.height / c.height, label: regionContext(box, container).label }
           : null);
         setSelected(container);
         setHovered(null);
       };
-      const reset = () => {
-        const p = pressRef.current;
-        if (p && p.timer) clearTimeout(p.timer);
-        pressRef.current = null;
-        setDrag(null);
+      // A drag over words: a quote of them (selection/anchors/text-range.js),
+      // anchored in the element that holds them all.
+      const pickText = async (start, end) => {
+        const before = shield.style.pointerEvents;
+        shield.style.pointerEvents = 'none';
+        let range = null;
+        try { range = rangeBetweenPoints(start, end); } finally { shield.style.pointerEvents = before; }
+        let holder = range ? range.commonAncestorContainer : null;
+        if (holder && holder.nodeType === 3) holder = holder.parentElement;
+        if (!range || !pickable(holder)) { pickElement(underPoint(start.x, start.y)); return; }
+        const quote = captureTextAnchor(range, collectTextNodes(holder, (node) => isOurs(node)));
+        if (!quote) { pickElement(holder); return; }
+        if (reanchorId) {
+          const result = await call({ type: 'tdoc-feedback-reanchor', id: reanchorId, anchor: { ...contextFor(holder), quote } });
+          if (apply(result)) setReanchorId(null);
+          setHovered(null);
+          return;
+        }
+        setOpenId(null);
+        setAreaSel(null);
+        setQuoteSel({ quote, rect: range.getBoundingClientRect() });
+        setSelected(holder);
+        setHovered(null);
       };
+      // One rule (Julie, 2026-11-08), now the shared pick gesture
+      // (selection/pick-gesture.js): a click picks the element, a drag that
+      // starts on text a person could select quotes it, a drag anywhere else
+      // (blank, an image, a canvas, a chart, an iframe) draws a box; on a
+      // touch screen a tap picks, a hold then drag draws a box, a swipe scrolls.
       let frame = 0;
-      const hoverAt = (x, y) => {
-        if (frame) return;
-        frame = requestAnimationFrame(() => { frame = 0; const el = underPoint(x, y); setHovered(pickable(el) ? el : null); });
-      };
+      const gesture = createPickGesture({
+        areaSelect: areaSelectOn,
+        textSelect: true,
+        elementAt: underPoint,
+        startsOnText,
+        onHover: (el) => {
+          if (frame) return;
+          frame = requestAnimationFrame(() => { frame = 0; setHovered(pickable(el) ? el : null); });
+        },
+        onDrag: (box) => setDrag(box),
+        onHold: () => { try { navigator.vibrate && navigator.vibrate(8); } catch (_) {} },
+        onElement: pickElement,
+        onText: pickText,
+        onBox: pickArea,
+      });
+      gestureRef.current = gesture;
+      const reset = () => { gesture.cancel(); setDrag(null); };
+      // A finger's scroll of a modal's body, while the press is undecided.
+      let touchScroll = null;
       const onPointerDown = (event) => {
         if (event.pointerType === 'mouse' && event.button !== 0) return;
+        touchScroll = { x: event.clientX, y: event.clientY, lastX: null, lastY: null, scroller: undefined };
         if (event.pointerType === 'mouse') event.preventDefault();
-        reset();
-        const x = event.clientX, y = event.clientY;
-        const start = underPoint(x, y);
-        // One rule (Julie, 2026-11-08): a drag that starts on text a person
-        // could select picks the element; anywhere else (blank, an image, a
-        // canvas, a chart, an iframe) it draws a box.
-        const p = {
-          id: event.pointerId, touch: event.pointerType !== 'mouse', x, y, lastX: x, lastY: y, start,
-          mode: 'pending', onText: areaSelectOn && startsOnText(x, y), timer: 0, scroller: undefined,
-        };
-        if (p.touch && areaSelectOn) {
-          // Hold still, then drag: a box. Moving first is a scroll.
-          p.timer = setTimeout(() => {
-            if (pressRef.current !== p || p.mode !== 'pending') return;
-            p.mode = 'area';
-            try { navigator.vibrate && navigator.vibrate(8); } catch (_) {}
-            setHovered(null);
-            setDrag(boxOf(p, p.lastX, p.lastY));
-          }, LONG_PRESS_MS);
-        }
-        if (!p.touch) { try { shield.setPointerCapture(event.pointerId); } catch (_) {} }
-        pressRef.current = p;
+        gesture.down(event);
+        if (event.pointerType === 'mouse') { try { shield.setPointerCapture(event.pointerId); } catch (_) {} }
       };
       const onPointerMove = (event) => {
-        const p = pressRef.current;
-        const x = event.clientX, y = event.clientY;
-        if (!p) { if (event.pointerType === 'mouse') hoverAt(x, y); return; }
-        if (event.pointerId !== p.id) return;
-        p.lastX = x; p.lastY = y;
-        const far = Math.hypot(x - p.x, y - p.y) >= THRESHOLD;
-        if (p.mode === 'pending' && far) {
-          if (p.touch) { p.mode = 'scroll'; clearTimeout(p.timer); return; }
-          p.mode = !areaSelectOn ? 'element' : (p.onText ? 'text' : 'area');
-        }
-        if (p.mode === 'area') { setHovered(null); setDrag(boxOf(p, x, y)); }
-        else if (p.mode === 'text') setHovered(commonAncestor(p.start, underPoint(x, y)));
+        if (gesture.touching() && gesture.mode() === 'pending') { /* a touch decides on its own */ }
+        gesture.move(event);
       };
       const onPointerUp = (event) => {
-        const p = pressRef.current;
-        if (!p || event.pointerId !== p.id) return;
-        reset();
+        if (!gesture.pressing()) return;
         // The sheet goes away under the composer before this press's click
         // is sent: that click must not land on the app.
         swallowClickUntil = Date.now() + 400;
-        const x = event.clientX, y = event.clientY;
-        if (p.mode === 'scroll') return;
-        if (p.mode === 'area') {
-          const box = boxOf(p, x, y);
-          // Smaller than the click threshold both ways: it was a click.
-          if (box.width >= THRESHOLD || box.height >= THRESHOLD) { pickArea(box); return; }
-        }
-        if (p.mode === 'text') { pickElement(commonAncestor(p.start, underPoint(x, y))); return; }
-        pickElement(p.start || underPoint(x, y));
+        gesture.up(event);
       };
       // A finger that scrolls a modal's body: the sheet is not inside it,
       // so move that box ourselves. Once a long press made a box, the finger
       // draws instead of scrolling.
       const onTouchMove = (event) => {
-        const p = pressRef.current;
-        if (!p) return;
+        const p = touchScroll;
+        if (!p || !gesture.pressing()) return;
         const t = event.touches[0];
         if (!t) return;
-        if (p.mode === 'area') { if (event.cancelable) event.preventDefault(); return; }
-        const dx = p.lastTouchX == null ? 0 : p.lastTouchX - t.clientX;
-        const dy = p.lastTouchY == null ? 0 : p.lastTouchY - t.clientY;
-        p.lastTouchX = t.clientX; p.lastTouchY = t.clientY;
+        if (gesture.mode() === 'area') { if (event.cancelable) event.preventDefault(); return; }
+        const dx = p.lastX == null ? 0 : p.lastX - t.clientX;
+        const dy = p.lastY == null ? 0 : p.lastY - t.clientY;
+        p.lastX = t.clientX; p.lastY = t.clientY;
         if (p.scroller === undefined && (dx || dy)) p.scroller = innerScroller(p.x, p.y, dx, dy);
         if (p.scroller && event.cancelable) { event.preventDefault(); p.scroller.scrollBy(dx, dy); }
       };
@@ -1663,7 +1587,7 @@ ${uiCss}
       };
       const handlers = {
         pointerdown: onPointerDown, pointermove: onPointerMove, pointerup: onPointerUp,
-        pointercancel: () => { if (pressRef.current && pressRef.current.mode !== 'area') reset(); },
+        pointercancel: () => { if (gesture.cancel(true)) setDrag(null); },
         touchmove: onTouchMove, wheel: onWheel,
         // The browser's own reactions to a press on the sheet: a touch's
         // follow-up mouse events and click, a long press's menu.
@@ -1682,11 +1606,12 @@ ${uiCss}
       for (const type of types) window.addEventListener(type, listener, options);
       // A press on the pins, the dock or the banner is not a pick, and a
       // pointer that leaves the window ends a drag.
-      const away = () => { if (pressRef.current && !pressRef.current.touch) reset(); };
+      const away = () => { if (gesture.pressing() && !gesture.touching()) reset(); };
       window.addEventListener('blur', away);
       return () => {
         if (frame) cancelAnimationFrame(frame);
         reset();
+        gestureRef.current = null;
         shield.hidden = true;
         document.documentElement.style.cursor = priorCursor;
         for (const type of types) window.removeEventListener(type, listener, options);
@@ -1698,13 +1623,11 @@ ${uiCss}
     // progress → composer → picking → card → list. Window capture: a host
     // modal underneath must not close on the same press.
     useEscapeLadder([
-      { active: () => Boolean(pressRef.current), close: () => {
-        const p = pressRef.current;
-        if (p && p.timer) clearTimeout(p.timer);
-        pressRef.current = null;
+      { active: () => Boolean(gestureRef.current && gestureRef.current.pressing()), close: () => {
+        gestureRef.current.cancel();
         setDrag(null); setHovered(null);
       } },
-      { active: Boolean(selected), close: () => { setSelected(null); setAreaSel(null); } },
+      { active: Boolean(selected), close: () => { setSelected(null); setAreaSel(null); setQuoteSel(null); } },
       { active: Boolean(picking || reanchorId), close: () => { setPicking(false); setReanchorId(null); setHovered(null); } },
       { active: Boolean(openId), close: () => setOpenId(null) },
       { active: panelOpen, close: () => setPanelOpen(false) },
@@ -1734,6 +1657,28 @@ ${uiCss}
       paused: Boolean(selected),
     });
 
+    // Quotes on this page are marked in the app's own text, through the CSS
+    // Highlight API: one constructed stylesheet adopted by the page (an
+    // inline <style> where that is not supported), no change to its DOM.
+    // Recomputed when the comments, the quote being written or the page's
+    // DOM change, not on every render.
+    useEffect(() => {
+      if (!shown || typeof CSS === 'undefined' || !CSS.highlights || typeof Highlight === 'undefined') return undefined;
+      adoptQuoteStyle();
+      const ranges = [];
+      for (const comment of area.pageComments) {
+        if (!comment.anchor || !comment.anchor.quote || comment.deleted) continue;
+        const range = quoteRangeFor(comment, elementFor(comment));
+        if (range) ranges.push(range);
+      }
+      if (quoteSel && selected) {
+        const live = findTextRange(quoteSel.quote, textViewOf(selected));
+        if (live) ranges.push(live);
+      }
+      CSS.highlights.set('tdoc-fb-quote', new Highlight(...ranges));
+      return () => { CSS.highlights.delete('tdoc-fb-quote'); };
+    }, [shown, area.pageComments, quoteSel, selected, domTick]);
+
     // Modals, tabs and client-side routing change the page without a scroll
     // or resize. Watch the DOM (not our own overlay) and re-place the pins.
     useEffect(() => {
@@ -1742,7 +1687,7 @@ ${uiCss}
       const observer = new MutationObserver((records) => {
         if (records.every((r) => host.contains(r.target))) return;
         if (frame) return;
-        frame = requestAnimationFrame(() => { frame = 0; setViewportTick((tick) => tick + 1); });
+        frame = requestAnimationFrame(() => { frame = 0; domEpoch += 1; setDomTick(domEpoch); setViewportTick((tick) => tick + 1); });
       });
       observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-hidden', 'aria-selected'] });
       return () => { observer.disconnect(); if (frame) cancelAnimationFrame(frame); };
@@ -1830,9 +1775,13 @@ ${uiCss}
       const c = selected.getBoundingClientRect();
       return toRect({ left: c.left + areaSel.x * c.width, top: c.top + areaSel.y * c.height, width: areaSel.width * c.width, height: areaSel.height * c.height });
     })();
-    const composerRect = areaBox || selected?.getBoundingClientRect();
+    // A whole-page comment has no element: its composer sits at the top.
+    const pageRect = { top: 72, bottom: 72, left: Math.max(8, (innerWidth - rightInset - COMPOSER_WIDTH) / 2), right: 0, width: 0, height: 0 };
+    const composerRect = pageSel ? pageRect : quoteSel ? quoteSel.rect : (areaBox || selected?.getBoundingClientRect());
+    const quoteLabel = (quote) => `“${quote.text.slice(0, 48)}${quote.text.length > 48 ? '…' : ''}”`;
     // Where a comment points on screen: its area, or its element.
-    const spotOf = (comment, element) => (comment.anchor && comment.anchor.region ? regionRect(comment.anchor, element) : null)
+    const spotOf = (comment, element) => (comment.anchor && comment.anchor.quote ? quoteRangeFor(comment, element)?.getBoundingClientRect() : null)
+      || (comment.anchor && comment.anchor.region ? regionRect(comment.anchor, element) : null)
       || element?.getBoundingClientRect();
     const openSpot = openComment && openComment.anchor && openComment.anchor.region ? regionRect(openComment.anchor, elementFor(openComment)) : null;
     const placeCard = (element, comment) => {
@@ -1867,6 +1816,8 @@ ${uiCss}
         {(picking || reanchorId) && !selected ? (
           <div className="tdoc-fb-banner" role="status">
             {bannerText}
+            {/* S6: a comment on the page as a whole, nothing picked. */}
+            {!reanchorId ? <button type="button" className="tdoc-fb-page-comment" onClick={() => { setHovered(null); setAreaSel(null); setQuoteSel(null); setPageSel(true); setSelected(document.body); }}>Comment on this page</button> : null}
             <button type="button" onClick={() => { setPicking(false); setReanchorId(null); setHovered(null); }}>Cancel · Esc</button>
           </div>
         ) : null}
@@ -1898,7 +1849,7 @@ ${uiCss}
           /* The shared composer adds the document shell's 48px bar. Feedback
              already has viewport coordinates, so cancel that offset here. */
           <CommentComposer
-            selection={{ kind: 'element', label: areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)), rect: {
+            selection={{ kind: 'element', label: pageSel ? 'This page' : quoteSel ? quoteLabel(quoteSel.quote) : areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)), rect: {
               top: composerRect.top - TOP_BAR_HEIGHT,
               bottom: composerRect.bottom - TOP_BAR_HEIGHT,
               left: Math.min(composerRect.left, Math.max(8, innerWidth - rightInset - COMPOSER_WIDTH - 8)),
@@ -1907,11 +1858,13 @@ ${uiCss}
             canSendToAgent={canSendToAgent}
             connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
             agentSetupHref={agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null}
-            onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); }}
+            onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); }}
             onSubmit={async (text, opts = {}) => {
-              const anchor = areaBox ? regionContext(areaBox, selected) : contextFor(selected);
+              const anchor = pageSel ? pageContext()
+                : quoteSel ? { ...contextFor(selected), quote: quoteSel.quote, label: quoteLabel(quoteSel.quote) }
+                : areaBox ? regionContext(areaBox, selected) : contextFor(selected);
               const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: threadAskPick(opts) });
-              if (apply(result)) { setSelected(null); setAreaSel(null); setPicking(false); }
+              if (apply(result)) { setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); }
             }}
           />
         ) : null}

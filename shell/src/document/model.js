@@ -114,12 +114,33 @@ function sheetIdentity(sheet) {
 export function anchorFromSelection(selection) {
   if (selection.kind === 'document') return null;
   if (selection.kind === 'element') {
-    return {
+    // What the frame described (selection/anchors/element.js): what the
+    // element showed and its slide's stable id, so it is found again after
+    // the deck is reordered or the page regenerated; and a box on it.
+    // Strings and plain objects only: the frame is the doc's, and its own
+    // scripts can post too (the server caps an anchor's size).
+    const el = selection.element && typeof selection.element === 'object' ? selection.element : {};
+    const str = (value, max) => (typeof value === 'string' ? value.slice(0, max) : undefined);
+    const container = el.container && typeof el.container.kind === 'string' && typeof el.container.id === 'string'
+      ? { kind: el.container.kind.slice(0, 20), id: el.container.id.slice(0, 200) } : undefined;
+    const region = selection.region && typeof selection.region === 'object' && selection.region.frac ? {
+      frac: ['x', 'y', 'width', 'height'].reduce((out, k) => ({ ...out, [k]: Math.max(0, Math.min(1, Number(selection.region.frac[k]) || 0)) }), {}),
+      container_text: str(selection.region.container_text, 500),
+    } : undefined;
+    const anchor = {
       kind: 'element',
-      selector: selection.selector,
-      label: selection.label,
-      ...(sheetIdentity(selection.sheet) ? { sheet: sheetIdentity(selection.sheet) } : {}),
+      selector: str(selection.selector, 600),
+      label: str(selection.label, 120),
+      tag: str(el.tag, 40),
+      text: str(el.text, 500),
+      accessible_name: str(el.accessible_name, 120),
+      container,
+      container_is_target: el.container_is_target === true ? true : undefined,
+      region,
+      sheet: sheetIdentity(selection.sheet) || undefined,
     };
+    for (const key of Object.keys(anchor)) if (anchor[key] === undefined || anchor[key] === '') delete anchor[key];
+    return anchor;
   }
   return {
     kind: 'text',
