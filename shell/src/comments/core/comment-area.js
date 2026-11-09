@@ -115,7 +115,7 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
       if (!body?.seen) return;
       // What the server said about what was sent: a thread it does not hold
       // leaves the cache, a stamp from a clock running ahead is lowered.
-      const reconciled = reconcileSeenMap(slug, entries, body.seen, body.unknown);
+      const reconciled = reconcileSeenMap(slug, entries, body.seen, body.unknown, body.capped);
       const { changed } = mergeSeenMap(slug, body.seen);
       if (reconciled || changed) setSeenMap(readSeenMap(slug));
     }).catch(() => {});

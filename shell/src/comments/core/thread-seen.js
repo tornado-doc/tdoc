@@ -89,6 +89,15 @@ function cleanStamp(value) {
  * stamp wins. Returns the merged map and what this browser knows that the
  * server does not yet (`ahead`), to be sent up.
  */
+const cappedKey = (slug) => `tdoc.thread-seen-capped.${slug}`;
+function readCapped(slug) {
+  if (!slug) return {};
+  try {
+    const parsed = JSON.parse(readStored(cappedKey(slug), '{}'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch { return {}; }
+}
+
 export function mergeSeenMap(slug, remote) {
   const local = readSeenMap(slug);
   const merged = { ...local };
@@ -99,9 +108,12 @@ export function mergeSeenMap(slug, remote) {
     const stamp = cleanStamp(value);
     if (stamp > cleanStamp(merged[id])) { merged[id] = stamp; changed = true; }
   }
+  // Marks the server already said it will not keep (its cap) stay here and
+  // are not sent again, unless they have moved on since.
+  const capped = readCapped(slug);
   for (const [id, value] of Object.entries(local)) {
     const stamp = cleanStamp(value);
-    if (stamp > cleanStamp(server[id])) ahead[id] = stamp;
+    if (stamp > cleanStamp(server[id]) && stamp > cleanStamp(capped[id])) ahead[id] = stamp;
   }
   if (changed && slug) writeStored(storageKey(slug), JSON.stringify(merged));
   return { map: merged, ahead, changed };
@@ -114,14 +126,22 @@ export function mergeSeenMap(slug, remote) {
  *  - a stamp lower than the one sent (a clock running ahead): the cache
  *    takes it, but only if it still holds the stamp that was sent: a newer
  *    mark made while the POST was on its way is kept.
- * An id the server merely did not keep (its record holds the newest 500)
- * stays here.
+ * An id the server did not keep because of its cap (`capped`: its record
+ * holds the newest 500) stays here and is not sent again.
  */
-export function reconcileSeenMap(slug, sent, server, unknown = []) {
+export function reconcileSeenMap(slug, sent, server, unknown = [], capped = []) {
   if (!slug || !sent) return false;
   const map = readSeenMap(slug);
   const answer = server && typeof server === 'object' && !Array.isArray(server) ? server : {};
   const gone = new Set(Array.isArray(unknown) ? unknown : []);
+  // Past the server's cap: kept here, remembered at the stamp sent, so the
+  // next pull does not send them again.
+  const cut = (Array.isArray(capped) ? capped : []).filter((id) => id in sent);
+  if (cut.length) {
+    const record = readCapped(slug);
+    for (const id of cut) record[id] = cleanStamp(sent[id]);
+    writeStored(cappedKey(slug), JSON.stringify(record));
+  }
   let changed = false;
   for (const [id, value] of Object.entries(sent)) {
     const mine = cleanStamp(map[id]);
