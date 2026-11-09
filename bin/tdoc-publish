@@ -1779,6 +1779,13 @@ upload_version() {
     else
       echo "[tdoc] v$v uploaded (${_sz:-?} bytes)"
     fi
+    # The server's block check (server/block-lint.js): advice on a version
+    # that is already published, printed as the server worded it.
+    local block_warning
+    block_warning="$(printf '%s' "$resp" | json_get block_warning)"
+    if [ -n "$block_warning" ]; then
+      printf '%s\n' "$block_warning" | sed 's/^/[tdoc] /' >&2
+    fi
   else
     # A revoked credential is not a failed upload, and printing the server's
     # JSON at somebody was the whole of the old answer. Say what happened, drop

@@ -26,7 +26,7 @@ Pick by what the data *is*:
 | a trend over time | a **line chart** |
 | where things sit on two axes | a **quadrant / positioning map** |
 | a feature comparison | a **matrix** with ✓ / ✗ / ~ marks |
-| a few key numbers | **stat tiles** (big number + label) |
+| a few key numbers | **stat tiles** (the `tdoc-tiles` house block) |
 | a sequence of events | a **timeline** |
 | a process with branches | a **flow diagram** (only when it truly is a flow) |
 | the composition of a whole | a **stacked bar** or parts-of-100 bar |
@@ -37,6 +37,15 @@ Most non-trivial docs carry **several different types**, not one repeated. A
 competitor analysis wants stat tiles + a positioning map + a comparison matrix
 + maybe a bar chart. A technical design wants an architecture diagram + a
 sequence + a metrics row. Reach for the variety the content earns.
+
+## Visuals are blocks
+
+Every visual is one block in the doc's sequence. Stat tiles, cards, notes,
+collapsibles, figures and diagrams are **house blocks** with fixed markup that
+the reader styles (`structure/components.md`, "House blocks"); use them as
+written. A chart, widget or designed panel of your own is **one element** — a
+`<figure>` or a wrapper with `data-tdoc-artifact` — and the prose between
+visuals stays plain `p`, `li` and `h*`. Never put text loose in a `div`.
 
 ## Excalidraw
 
@@ -90,10 +99,11 @@ already at the column's 672px width. Start from one rather than from an empty
 `<svg>`; the four rules at the top of that file are the ones that decide whether
 a figure renders or quietly overlaps its own labels.
 
-Wrap wide charts in `<div class="diagram-box">` (or `tdoc-table-scroll` for
-tables) so they scroll on a phone instead of overflowing. Tag an author-built
-figure `data-tdoc-artifact` if it is a composed block rather than a single
-`<svg>`, so a reader can comment on it as a unit.
+Wrap wide charts in `<div class="diagram-box" data-tdoc-artifact>` (or
+`tdoc-table-scroll` for tables) so they scroll on a phone instead of
+overflowing. Tag an author-built figure `data-tdoc-artifact` (or make it a
+`<figure>`) if it is a composed block rather than a single `<svg>`, so a reader
+can comment on it as a unit.
 
 
 ## Width and visual verification

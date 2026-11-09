@@ -401,10 +401,19 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
      CSP and therefore create controls or empty panels that cannot work. If
      the idea needs computation, write `v1/widgets/<name>.html` and iframe it.
    - No external CDNs in the host unless requested. No build step.
+   - **Build the doc from blocks** (`$SKILL_DIR/authoring/structure/components.md`,
+     "A doc is a sequence of blocks"): plain `h*` / `p` / `ul` / tables, the
+     house blocks as written (`tdoc-tiles` stat tiles, `tdoc-cards`,
+     `<aside class="note">`, `<details>`, `<figure>`, `diagram-box`), and each
+     chart, widget or custom panel as one `<figure>` or `data-tdoc-artifact`
+     element. Text never sits loose in a `div`.
    - Pick the style that fits the content when the user names none. A full-page
      custom design is allowed only when the user explicitly requests one;
      programmatic callers must make that exception visible with
-     `--custom-template`.
+     `--custom-template`. It is for a designed page (a landing page, a deck, a
+     poster), never for a report: an analysis, spec, proposal, review or status
+     update is a standard doc made of blocks however visual it is, even when an
+     earlier doc on the same topic used a custom template.
    - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, emit a sandboxed widget island (see that section); do NOT put `<script>` in the host document.
 4. **Hand the HTML to `bin/tdoc-write`.** The server automatically makes a title-and-excerpt preview card when you publish; do not create a custom card by default. Only when the user explicitly asks for a cover or preview image, copy `$SKILL_DIR/authoring/preview-card.svg` to a temporary file, replace its title and conclusion with this document's words, and replace the sample `42%` panel with a real key result or remove it. Keep text inside the card at 1200×630; escape XML characters. Use colors that fit the document. Do not insert scripts, external images, CSS, or links. Do not write into `~/tdocs` yourself.
 
@@ -448,6 +457,11 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
    # let readers page back through earlier versions too:
    #   bash "$SKILL_DIR/bin/tdoc-publish" --history public <slug>
    ```
+
+   If the publish prints a `Block check` warning, the doc is already live; it
+   lists loose text and non-house wrapper classes. Fix them in the next version
+   when it is quick (usually tiles or cards written as bare `<div>`s): it is
+   advice, not a failure.
 
    Report the `https://tdoc.dev/d/<slug>` URL (no `/v/<n>`: it always opens the
    newest version) on its own line, and say what
@@ -550,8 +564,10 @@ TDOC_NEW_CALLER=document-release \
 - `--style default|technical|editorial|paper` — selected house-style
   contract. Omit it to use `default`.
 - `--custom-template` — explicit opt-out from the default template for a
-  user-requested presentation, landing page, or full-bleed simulation. Normal
-  docs must not pass it.
+  user-requested presentation, landing page, poster, or full-bleed simulation.
+  Normal docs must not pass it: reports, analyses, specs, proposals and status
+  updates are standard docs made of blocks, with charts as artifacts. The flag
+  also switches off the reader styling of the house blocks.
 - `--force` — overwrite an existing slug. Without this, an existing
   slug is a hard error (no silent clobber).
 
@@ -1244,7 +1260,8 @@ root layout with arbitrary CSS.
 
 - **Standard design:** a centered 720px reading column with tdoc light/dark controls.
 - **Custom design:** `--custom-template` gives the author ownership of width,
-  typography and colors. It does not receive tdoc theme controls or reader styling.
+  typography and colors. It does not receive tdoc theme controls or reader styling
+  (house blocks included). Only for a designed page the user asked for, not a report.
 
 `tdoc-write` records this choice as `data-tdoc-design="tdoc"` or `"custom"`
 on `<html>`. A font or local spacing change alone does not change design ownership.
@@ -1378,7 +1395,7 @@ that a file opened without the provider will have the same layout.
 ### Don't conflict with the reader
 
 - **Don't define `button:hover { background: ... }`** globally — `frame-probe.js` injects the hover Comment pill as a `<button>` *inside* your document, so a global rule reaches it. Scope hover rules to your own buttons (e.g. `.my-btn:hover`, or `.wrap button:hover`).
-- **Don't invent new `tdoc-*` names.** The prefix belongs to tdoc, and the probe injects `.tdoc-hover-outline` / `.tdoc-comment-pill` into your document. Two `tdoc-*` classes are the opposite — they are **for you to use**, and the components file asks you to: `tdoc-table-scroll` (a table's scroll wrapper) and `tdoc-artifact` / `data-tdoc-artifact` (make a composed block one comment anchor).
+- **Don't invent new `tdoc-*` names.** The prefix belongs to tdoc, and the probe injects `.tdoc-hover-outline` / `.tdoc-comment-pill` into your document. Some `tdoc-*` classes are the opposite — they are **for you to use**, and the components file asks you to: `tdoc-table-scroll` (a table's scroll wrapper), the house blocks `tdoc-tiles` / `tdoc-tile` / `tdoc-tile-num` and `tdoc-cards` / `tdoc-card`, and `tdoc-artifact` / `data-tdoc-artifact` (make a composed block one comment anchor).
 - **Don't position-fixed elements at the top.** The top bar is in the shell now, so you will not overlap it — but a fixed banner is positioned against the frame's own viewport and will sit on top of your text as it scrolls.
 - **Don't use a `<footer>`.** The shell supplies the page footer; the validator rejects an author one.
 
@@ -1536,7 +1553,7 @@ The **same artifact in any future version gets the same aid**, regardless of how
 
 ### Make an author-composed block commentable as a unit
 
-If your doc has a "card" or composite widget built from `<div>`s (a transcript panel, a comparison card, a custom interactive widget), it won't be commentable as a unit by default — the probe resolves anchors to its inner text, not to the card. Two ways to fix:
+If your doc has a "card" or composite widget built from `<div>`s (a transcript panel, a comparison card, a custom interactive widget), it won't be commentable as a unit by default — the probe resolves anchors to its inner text, not to the card. If it is really text (a stat, a card, an aside), write it as a house block instead (`tdoc-tiles`, `tdoc-cards`, `aside.note`, `details`; see `$SKILL_DIR/authoring/structure/components.md`). For a genuine composite, two ways to fix:
 
 1. **Use a semantic tag**: change `<div class="my-card">` to `<section class="my-card">` (or `<aside>`, `<details>` if appropriate). Automatic — no other change needed.
 2. **Opt in explicitly** with `data-tdoc-artifact`:

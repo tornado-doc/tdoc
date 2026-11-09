@@ -8,9 +8,9 @@
    (extracted from overlay.js). Consumed by: tdoc-bake (creation-time bake),
    /frame fallback, /export.
 
-   The wrapper and print rules are deliberately not
-   zero-specificity: `.tdoc-table-scroll` names tdoc's
-   own wrapper class, and
+   The wrapper, house-block interior and print rules are deliberately not
+   zero-specificity: `.tdoc-table-scroll` and the house blocks name tdoc's
+   own classes, and
    the `@media print` block below only applies to printing. Other defaults
    remain inside :where(). */
 :where(:root) {
@@ -118,6 +118,36 @@
     padding: 56px 24px 80px;
     box-sizing: border-box;
   }
+  /* House blocks (authoring/structure/components.md). A doc is a sequence of
+     blocks; these are the named ones beyond plain prose, each with fixed
+     markup whose text sits in p / li / h* elements, so the reader, editor and
+     comments treat them as ordinary blocks. Colours come from the tokens above
+     and backgrounds stay transparent, so every house style (and the dark
+     invert) dresses them. The boxes are zero-specificity like the rest; the
+     rules for what sits INSIDE a house block carry ordinary class specificity
+     (tdoc owns these names, as with .tdoc-table-scroll) so that a style's
+     broad .wrap p margin does not pull a tile or a note apart. A style that
+     wants another look names the same selectors. worker.js copies this
+     section into a revised doc whose older baked template predates it. */
+  :where(body .tdoc-tiles) { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 24px 0; }
+  :where(body .tdoc-tile) { border: 1px solid var(--td-line); border-radius: 10px; padding: 14px 16px 12px; min-width: 0; }
+  .tdoc-tile > p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--td-muted); }
+  .tdoc-tile .tdoc-tile-num { margin: 0 0 6px; font-size: 30px; line-height: 1.1; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--td-heading); overflow-wrap: normal; }
+  :where(body .tdoc-cards) { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 24px 0; }
+  :where(body .tdoc-card) { border: 1px solid var(--td-line); border-radius: 10px; padding: 16px 18px; min-width: 0; }
+  .tdoc-card > h3, .tdoc-card > h4 { margin: 0 0 6px; font-size: 17px; line-height: 1.35; }
+  .tdoc-card > p, .tdoc-card > ul, .tdoc-card > ol { margin: 0 0 8px; font-size: 15.5px; line-height: 1.55; }
+  :where(body aside.note) { margin: 24px 0; padding: 14px 18px; border: 1px solid var(--td-line); border-radius: 10px; background: var(--td-surface-2); font-size: 15.5px; line-height: 1.55; }
+  aside.note > p { margin: 0 0 8px; }
+  :where(body details) { margin: 20px 0; padding: 0 18px; border: 1px solid var(--td-line); border-radius: 10px; }
+  :where(body details[open]) { padding-bottom: 14px; }
+  :where(body summary) { cursor: pointer; padding: 12px 0; font-weight: 600; color: var(--td-heading); }
+  :where(body details[open] > summary) { margin-bottom: 10px; border-bottom: 1px solid var(--td-line); }
+  .tdoc-card > :last-child, aside.note > :last-child, details > :last-child { margin-bottom: 0; }
+  :where(body figure) { margin: 28px 0; }
+  :where(body .diagram-box) { max-width: 100%; overflow-x: auto; margin: 28px 0; }
+  :where(body .diagram-box > p.cap) { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--td-muted); text-align: center; }
+  /* End house blocks. */
   /* End default template. ====================================================== */
 
   /* Defensive responsive defaults for artifacts. Docs sometimes hardcode pixel
