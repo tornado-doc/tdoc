@@ -113,7 +113,11 @@ const ID_RE = /^[a-f0-9]{32}\.[A-Za-z0-9_-]{22}$/;
     const [raw, sig] = id.split('.');
     const tampered = `${raw.slice(0, -1)}${raw.endsWith('a') ? 'b' : 'a'}.${sig}`;
     const forged = `${'0'.repeat(32)}.${'A'.repeat(22)}`;
-    for (const bad of [tampered, forged, 'nope', `${raw}.${sig.slice(0, -1)}x`]) {
+    // Swap the last character for one it is not: a fixed 'x' left the id
+    // valid whenever the signature already ended in 'x' (1 run in 64).
+    const badSig = `${raw}.${sig.slice(0, -1)}${sig.endsWith('x') ? 'y' : 'x'}`;
+    for (const bad of [tampered, forged, 'nope', badSig]) {
+      assert(bad !== id, `tampered id ${bad} equals the real one`);
       const info = await call(w.env, `/api/feedback/invite?id=${encodeURIComponent(bad)}`);
       assert(info.status === 404, `info for ${bad}: ${info.status}`);
       const join = await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.bob, headers: HOME, body: { origin: APP, invite: bad } });

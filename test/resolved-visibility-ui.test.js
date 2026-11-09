@@ -44,6 +44,12 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     };
     // The filter (Open / Resolved / All) docks at the top of the comment
     // column on a wide screen and heads the comments drawer on a phone.
+    // The phone drawer slides in and out over 0.2s. While it slides out,
+    // Base UI keeps the popup mounted with data-ending-style, so it still
+    // counts as visible: acting on it then raced its unmount (the Enter was
+    // lost, or the FAB was never clicked). Only use a drawer that is fully
+    // open, and wait for a closing one to be gone.
+    const sheet = page.locator('#tdoc-comment-layer');
     const filterRadio = async (name) => {
       const phone = await page.evaluate(() => innerWidth < 700);
       if (!phone) {
@@ -51,8 +57,10 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
         await dock.waitFor();
         return dock.getByRole('radio', { name });
       }
-      const drawer = page.locator('#tdoc-comment-layer .tdoc-comment-filter');
-      if (!(await drawer.isVisible().catch(() => false))) await page.locator('.tdoc-fab').click();
+      await page.locator('#tdoc-comment-layer[data-ending-style]').waitFor({ state: 'detached' });
+      if (!(await sheet.count())) await page.locator('.tdoc-fab').click();
+      await page.locator('#tdoc-comment-layer[data-open]:not([data-starting-style])').waitFor();
+      const drawer = sheet.locator('.tdoc-comment-filter');
       await drawer.waitFor();
       return drawer.getByRole('radio', { name });
     };
@@ -61,20 +69,16 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
       const on = (await allShown()) === 'true';
       // Keyboard activation keeps the selected card open until the filter
       // itself handles it (pointer-down on the page dismisses cards).
-      // The phone drawer re-renders as it opens: find the radio again if it
-      // was replaced under us.
-      for (let attempt = 0; ; attempt++) {
-        try {
-          const control = await filterRadio(on ? /^Open/ : /^All/);
-          await control.focus({ timeout: 3000 });
-          break;
-        } catch (error) {
-          if (attempt >= 4) throw error;
-          await page.waitForTimeout(200);
-        }
-      }
+      const control = await filterRadio(on ? /^Open/ : /^All/);
+      await control.focus();
       await page.keyboard.press('Enter');
-      if (await page.locator('#tdoc-comment-layer .tdoc-comment-filter').isVisible().catch(() => false)) await page.keyboard.press('Escape');
+      // The filter took the choice before the drawer is closed over it.
+      await page.waitForFunction((want) => [...document.querySelectorAll('.tdoc-comment-filter [role="radio"]')]
+        .some((radio) => radio.getAttribute('aria-checked') === 'true' && radio.textContent.trim().startsWith(want)), on ? 'Open' : 'All');
+      if (await sheet.count()) {
+        await page.keyboard.press('Escape');
+        await sheet.waitFor({ state: 'detached' });
+      }
     };
     // Open is the default on every comment surface: resolved threads hidden.
     assert.equal(await allShown(), 'false', 'fresh document defaults to Open');

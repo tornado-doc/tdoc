@@ -79,7 +79,11 @@
       button.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); open(el, button); });
       document.body.appendChild(button); entries.push({ el: el, button: button, slide: slide });
     });
-    schedule();
+    // Place buttons now, not on the next frame: a new button has no position
+    // until it is placed, so it was painted at the page's left edge for a
+    // frame or more (longer when WebKit delays an iframe's frames on load).
+    // Only scrolling waits for a frame.
+    position();
   }
   function restoreAttr(el, name, value) { if (value === null) el.removeAttribute(name); else el.setAttribute(name, value); }
   function close() {
