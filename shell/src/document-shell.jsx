@@ -57,6 +57,11 @@ import {
 } from './document/owner-access-dialog.jsx';
 import { copyText, isDocumentComment, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
 import { readStored, writeStored } from './safe-storage.js';
+import { SideResizeHandle, useSideWidth } from './ui/side-resize.jsx';
+import { CommentPanel } from './comments/panel/comment-panel.jsx';
+import { useDoubleTapOption, useEscapeLadder } from './comments/panel/keyboard.js';
+import { CommentIcon } from './ui/comment-icon.jsx';
+import { AppButton } from './ui/button.jsx';
 import { isFeatureOn } from './feature-flags.js';
 import { readDevMode } from './dev-mode.js';
 import { VersionHistory } from './document/version-history.jsx';
@@ -157,6 +162,12 @@ const HANDOFF_POLL_MS = 3000;
 // Live sync while a doc is open (see the effect in DocumentShell).
 const LIVE_SYNC_MIN_MS = (typeof window !== "undefined" && window.__TDOC_LIVE_SYNC_MS) || 20000;
 const LIVE_SYNC_MAX_MS = 60000;
+// The doc page's side comment list (comments/panel/): resizable, open or
+// closed as the reader last left it; with no choice yet, open on a doc with
+// this many threads to read through, where pins alone are a crowd.
+const SIDE_PANEL = { storageKey: 'tdoc-comment-panel-width', initial: 360, min: 300, max: 640 };
+const SIDE_PANEL_OPEN_KEY = 'tdoc-comment-panel';
+const SIDE_PANEL_AUTO_OPEN = 8;
 // The comment feed's longest wait on a quiet doc (use-comment-feed.js).
 const COMMENT_FEED_IDLE_MAX_MS = 60000;
 const commentsFingerprint = (list) => (Array.isArray(list) ? list : [])
@@ -582,6 +593,11 @@ export function DocumentShell({ boot, config }) {
       s.pick(String(message.id));
     },
     'tdoc:suggestKey': () => openAskRef.current?.(),
+    // Option and Esc pressed in the doc: the shell's own keys (keyboard.js).
+    'tdoc:key': (message) => {
+      if (message.key !== 'Alt' && message.key !== 'Escape') return;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: message.key, bubbles: true, cancelable: true }));
+    },
     'tdoc:editState': (message) => editorRef.current?.frameHandlers.editState(message),
     'tdoc:editBaseline': (message) => editorRef.current?.frameHandlers.editBaseline(message),
     'tdoc:editDraft': (message) => editorRef.current?.frameHandlers.editDraft(message),
@@ -774,6 +790,17 @@ export function DocumentShell({ boot, config }) {
     return groupBy(ordered, (comment) => (isDocumentComment(comment) ? 'document' : 'body'), { first: 'document' })
       .flatMap((group) => group.items);
   }, [shownComments, listPrefs.sort, bridge.layout.pins]);
+  // The same order as the shared panel's groups (comments/panel/): the whole
+  // document first, then the body in document order.
+  const panelGroups = useMemo(() => {
+    const whole = drawerComments.filter(isDocumentComment);
+    const body = drawerComments.filter((comment) => !isDocumentComment(comment));
+    const both = whole.length && body.length;
+    return [
+      { key: 'document', label: both ? 'On this document' : null, items: whole },
+      { key: 'body', label: both ? 'In the text' : null, items: body },
+    ];
+  }, [drawerComments]);
   const visibleCommentsById = commentArea.shownById;
   const seenMap = commentArea.seenMap;
   // Lost pins are seats, not anchors: they give the card somewhere to be drawn
@@ -1826,11 +1853,40 @@ export function DocumentShell({ boot, config }) {
   // Every comment card and pin is placed from the top of the document, so
   // anything docked above it moves all of them. STEP_HINT_HEIGHT is the bar's
   // own height in step-hint.css.
+  const sidePanelSize = useSideWidth(SIDE_PANEL);
+  const [sidePanelChoice, setSidePanelChoice] = useState(() => readStored(SIDE_PANEL_OPEN_KEY));
+  const sidePanelAvailable = !narrow && !config.isLanding && !comparing && !historyOpen && !visualOpen && !presenting;
+  const sidePanelOpen = sidePanelAvailable && (sidePanelChoice === '1'
+    || (sidePanelChoice !== '0' && commentArea.counts.all >= SIDE_PANEL_AUTO_OPEN));
+  const setSidePanel = useCallback((open) => {
+    writeStored(SIDE_PANEL_OPEN_KEY, open ? '1' : '0');
+    setSidePanelChoice(open ? '1' : '0');
+  }, []);
+  // Esc steps back one level, as in the widget (comments/panel/keyboard.js):
+  // composer → open card or cluster → the side list. A key something else
+  // took (an @ menu, a dialog, the phone sheet) is left alone.
+  useEscapeLadder([
+    { active: Boolean(composer), close: () => closeComposer() },
+    { active: !narrow && Boolean(openCommentId || openClusterKey), close: () => {
+      setOpenCommentId(null);
+      setOpenClusterKey(null);
+      bridge.send({ type: 'tdoc:focusAnchor', id: null });
+    } },
+    { active: sidePanelOpen, close: () => setSidePanel(false) },
+  ], { enabled: !config.isLanding && !reanchorId });
+  // Double-tap Option starts a comment, as in the widget: here, one on the
+  // whole document (the frame forwards the key from inside the doc).
+  useDoubleTapOption(() => startDocumentComment(false), {
+    enabled: !config.isLanding && Boolean(config.canComment || config.signInToComment),
+  });
+  // What the document and its pins have to themselves.
+  const sideInset = sidePanelOpen ? sidePanelSize.width : 0;
+  const viewRight = window.innerWidth - sideInset;
   const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (showExitBanner ? exitBannerHeight : 0)
     + (hintBar ? STEP_HINT_HEIGHT : 0) + (editor.mode === 'edit' ? 46 : 0);
   const pinLeft = Math.min(
-    (bridge.layout.articleRight || window.innerWidth - 44) + 14,
-    window.innerWidth - 34,
+    (bridge.layout.articleRight || viewRight - 44) + 14,
+    viewRight - 34,
   );
   const openComment = commentArea.selected;
   // Open / Resolved / All, in the comments area (it was a switch in the bar).
@@ -2006,7 +2062,7 @@ export function DocumentShell({ boot, config }) {
       )
       : frameTop + 4,
     // 280px card + 12px padding each side + 1px borders, kept 8px off the edge.
-    left: Math.max(8, Math.min(pinLeft + 34, window.innerWidth - 306 - 8)),
+    left: Math.max(8, Math.min(pinLeft + 34, viewRight - 306 - 8)),
   };
   // A deep link to a reply (?comment=<reply id>) opens its thread expanded;
   // any other open card starts with replies collapsed, as before.
@@ -2080,6 +2136,15 @@ export function DocumentShell({ boot, config }) {
               disabled={editor.mode === 'edit' && editor.dirty}
             />
             {askAiAction}
+            {!narrow && sidePanelAvailable ? (
+              // The comment list beside the doc: one toggle, its count on it.
+              <AppButton variant="quiet" className="tdoc-comments-toggle" aria-pressed={sidePanelOpen ? 'true' : 'false'}
+                aria-label={sidePanelOpen ? 'Hide the comment list' : `Show the comment list${openCount ? ` (${openCount} open)` : ''}`}
+                title={sidePanelOpen ? 'Hide the comment list' : 'Show the comment list'}
+                onClick={() => setSidePanel(!sidePanelOpen)}>
+                <CommentIcon size={16} outline />{openCount ? <span className="tdoc-comments-toggle-count">{openCount}</span> : null}
+              </AppButton>
+            ) : null}
             <DocumentModeControl
               mode={editor.mode}
               canComment={config.canComment}
@@ -2176,7 +2241,7 @@ export function DocumentShell({ boot, config }) {
           setDiagram(null);
           showToast(`${diagram.isNew ? 'Diagram inserted' : 'Diagram applied'}. Save the document to publish a new version.`);
         }} />
-      <div className="tdoc-reader-surface" hidden={comparing || historyOpen}>
+      <div className="tdoc-reader-surface" hidden={comparing || historyOpen} style={sideInset ? { marginRight: sideInset } : undefined}>
       <OldVersionNotice value={boot.oldVersion || (liveLatest > Number(config.version) ? {
         current: Number(config.version),
         latest: liveLatest,
@@ -2252,7 +2317,7 @@ export function DocumentShell({ boot, config }) {
 
       <DocumentFooter visible={bridge.layout.footerVisible} />
 
-      {!narrow && commentFilterControl && !comparing && !historyOpen ? (
+      {!narrow && commentFilterControl && !comparing && !historyOpen && !sidePanelOpen ? (
         <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.max(8, Math.min(pinLeft - 4, window.innerWidth - 336)) }}>
           <CommentListControls filter={commentFilterControl}
             unreadCount={unreadAgentReplies}
@@ -2279,21 +2344,18 @@ export function DocumentShell({ boot, config }) {
         /> : null}
         {demoBar && !drawerOpen ? <DemoRewriteBar state={demoRewriteState} agent={DEMO_AGENT.handle} onUndo={undoDemoRewrite} /> : null}
         <MobileCommentDrawer
-          filter={commentFilterControl}
+          area={commentArea}
+          prefs={listPrefs}
+          // shownComments, not the raw list: hiding resolved threads took the
+          // pins out of the document but left every one of them in the drawer,
+          // which on a phone IS the comment list.
+          groups={panelGroups}
           open={drawerOpen && !comparing && !historyOpen}
           openCount={openCount}
           unread={mobileUnread}
-          unreadCount={unreadAgentReplies}
           onRefresh={commentFeed.refresh}
           refreshing={commentFeed.refreshing}
-          listQuery={{ search: listPrefs.search, onSearch: listPrefs.setSearch, sort: listPrefs.sort, onSort: listPrefs.setSort }}
-          // shownComments, not the raw list: hiding resolved threads took the
-          // pins out of the document but left every one of them in the drawer,
-          // which on a phone IS the comment list. "Hide resolved" appeared to
-          // do nothing at all.
-          comments={drawerComments}
           pinIds={pinIds}
-          seenMap={seenMap}
           currentUser={config.identity?.login || 'anon'}
           handoffViewer={handoffViewer}
           isOwner={Boolean(config.isOwner)}
@@ -2312,7 +2374,6 @@ export function DocumentShell({ boot, config }) {
           onAskAi={config.canComment || config.signInToComment ? () => startDocumentComment(true) : null}
           onReply={replyTo}
           onMarkRead={commentArea.onSeen}
-          onMarkAllRead={markAllAgentRepliesRead}
           onEdit={editComment}
           onReact={reactTo}
           onDelete={removeComment}
@@ -2334,8 +2395,8 @@ export function DocumentShell({ boot, config }) {
           frameScrollY={bridge.layout.scrollY}
           frameTop={frameTop}
           pinLeft={pinLeft}
-          openComment={editor.mode === 'read' ? null : openComment}
-          openClusterKey={openClusterKey}
+          openComment={editor.mode === 'read' || sidePanelOpen ? null : openComment}
+          openClusterKey={sidePanelOpen ? null : openClusterKey}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
           handoffViewer={handoffViewer}
@@ -2350,6 +2411,10 @@ export function DocumentShell({ boot, config }) {
             focusComment(id);
           }}
           onOpenCluster={(key) => {
+            // With the side list open, a cluster's first thread is selected
+            // there; without it, the cluster opens beside its pin.
+            const cluster = sidePanelOpen ? clusters.find((item) => item.key === key) : null;
+            if (cluster && cluster.items.length) { focusComment(cluster.items[0].comment.id); return; }
             setOpenCommentId(null);
             setOpenClusterKey(openClusterKey === key ? null : key);
           }}
@@ -2367,6 +2432,51 @@ export function DocumentShell({ boot, config }) {
       )}
 
       {composerView}
+
+      {sidePanelOpen ? (
+        // The desktop side list: the shared panel. Pins stay beside the text;
+        // a thread picked here scrolls to its words and flashes them, and a
+        // pin picked there is selected here.
+        <aside className="tdoc-doc-side" style={{ top: frameTop, width: sidePanelSize.width }}>
+          <SideResizeHandle side={sidePanelSize} label="Resize the comment list" />
+          <CommentPanel
+            area={commentArea}
+            prefs={listPrefs}
+            groups={panelGroups}
+            title="Comments"
+            onAdd={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
+            onRefresh={commentFeed.refresh}
+            refreshing={commentFeed.refreshing}
+            onClose={() => setSidePanel(false)}
+            empty={<p className="tdoc-cpanel-empty">No comments here yet. Select any text to comment.</p>}
+            selectedId={openCommentId}
+            expandReplies
+            isAnchored={(comment) => isDocumentComment(comment) || pinIds.has(comment.id)}
+            onNavigate={(id) => (isDocumentComment(commentsById.get(id))
+              ? setOpenCommentId(id)
+              : focusComment(id, { scroll: true }))}
+            cardProps={{
+              currentUser: config.identity?.login || 'anon',
+              handoffViewer,
+              isOwner: Boolean(config.isOwner),
+              mentionable,
+              demo: !!config.demoComments,
+              canSendToAgent,
+              agentSetupHref: notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null,
+              onReply: replyTo,
+              onReact: reactTo,
+              onDelete: removeComment,
+              onResolve: resolveComment,
+              onEdit: editComment,
+              onMarkRead: commentArea.autoRead ? null : markAgentReplyRead,
+              onReanchor: (id) => { bridge.send({ type: 'tdoc:reanchorMode', active: true }); setReanchorId(id); },
+              handoff: handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null,
+              onResendHandoff: canNotify ? resendHandoff : null,
+              onSendHandoffElsewhere: canNotify ? sendHandoffElsewhere : null,
+            }}
+          />
+        </aside>
+      ) : null}
 
       </div>
 

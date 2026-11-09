@@ -808,7 +808,7 @@
 .tdoc-fbspace-group h2 { margin: 22px 0 8px; font-size: 13px; font-weight: 700; letter-spacing: .02em; color: var(--td-muted); }
 .tdoc-fbspace-group h2 a { color: inherit; text-decoration: none; }
 .tdoc-fbspace-group h2 a:hover { color: var(--td-accent); }
-.tdoc-fbspace-list { display: grid; gap: 10px; }
+.tdoc-fbspace-list:not(.tdoc-cpanel) { display: grid; gap: 10px; }
 .tdoc-fbspace-list .tdoc-margin-comment { position: static !important; width: auto !important; max-width: none !important; transform: none !important; opacity: 1 !important; margin: 0 !important; }
 .tdoc-fbspace-foot { margin-top: 28px; }
 .tdoc-fbspace .page-hd h1 { color: var(--td-ink); }

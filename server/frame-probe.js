@@ -2049,6 +2049,17 @@
     suggFocus(id, false);
     post({ type: 'tdoc:suggestAction', id: id, action: 'focus' });
   }, true);
+  // Option (for double-tap Option: start a comment) and Esc (step back one
+  // level) are the shell's keys too: a key pressed in the doc lands here, so
+  // it is passed on. Not while typing in the doc, and never in Edit mode.
+  document.addEventListener('keydown', function (e) {
+    var key = String(e.key || '');
+    if (key !== 'Alt' && key !== 'Escape') return;
+    if (e.repeat || e.ctrlKey || e.metaKey || e.shiftKey || interactionMode === 'edit') return;
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(String(t.tagName || '')))) return;
+    post({ type: 'tdoc:key', key: key });
+  }, true);
   // ⌘K opens Ask AI (the shell decides; only where the flag is on). ⌘↵ and
   // Esc are the shell's: it takes focus when a suggestion is picked here.
   document.addEventListener('keydown', function (e) {

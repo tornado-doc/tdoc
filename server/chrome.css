@@ -1563,3 +1563,67 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
 .tdoc-reply-form.tdoc-private-ask .hint { display: inline-flex; align-items: center; gap: 4px; color: #888; font-size: 11px; }
 .tdoc-reply-form.tdoc-private-ask .tdoc-composer-foot-actions { display: inline-flex; gap: 6px; }
 .tdoc-reply-form .tdoc-ask-hint { color: #888; font-size: 11px; }
+
+/* ── The shared comment panel (shell/src/comments/panel/comment-panel.jsx):
+   the widget's side panel, the doc page's side panel, the feedback space
+   page, and the body of the phone sheet. Colours from --td-* only. */
+.tdoc-cpanel { display: flex; flex-direction: column; min-height: 0; min-width: 0; color: var(--td-ink, #1a1a1a); font: 13px/1.45 system-ui, -apple-system, sans-serif; }
+.tdoc-cpanel-head { display: flex; flex-direction: column; gap: 8px; padding: 12px 12px 10px; border-bottom: 1px solid var(--td-line, #e8e7e3); }
+.tdoc-cpanel-titlerow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tdoc-cpanel-title { flex: 1 1 auto; min-width: 0; font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-cpanel-titlerow > :first-child:not(.tdoc-cpanel-title) { flex: 1 1 auto; min-width: 0; }
+.tdoc-cpanel-add svg { margin-right: 2px; }
+.tdoc-cpanel .tdoc-comment-filter-row { margin: 0; justify-content: flex-start; flex-wrap: nowrap; }
+.tdoc-cpanel .tdoc-comment-filter.tdoc-seg { flex: 1 1 auto; min-width: 0; }
+.tdoc-cpanel .tdoc-comment-filter.tdoc-seg button { flex: 1 1 auto; }
+.tdoc-cpanel .tdoc-comment-query { margin: 0; }
+.tdoc-cpanel-readbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--td-line, #e8e7e3); color: var(--td-muted, #6b6a66); font-size: 12px; }
+.tdoc-cpanel-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 4px 8px 16px; }
+.tdoc-cpanel-grouphead { margin: 14px 6px 6px; font: 700 11px/1.2 system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: var(--td-muted, #6b6a66); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-cpanel-grouphead a { color: inherit; text-decoration: none; }
+.tdoc-cpanel-grouphead a:hover { color: var(--td-accent, #1652f0); }
+.tdoc-cpanel-item { margin: 0 0 10px; padding: 0 4px; }
+.tdoc-cpanel-item .tdoc-margin-comment { position: relative; inset: auto; width: 100%; max-width: 100%; box-sizing: border-box; box-shadow: none; cursor: default; }
+.tdoc-cpanel-item .tdoc-margin-comment:hover { box-shadow: 0 4px 16px var(--td-accent-ring-soft, rgba(22,82,240,.18)); }
+.tdoc-cpanel-empty { margin: 8px 6px; color: var(--td-muted, #6b6a66); }
+.tdoc-cpanel-empty .link { appearance: none; border: 0; background: none; padding: 0; color: var(--td-accent, #1652f0); font: inherit; cursor: pointer; }
+.tdoc-cpanel-context { appearance: none; display: block; width: 100%; margin: 0 0 5px; padding: 0 2px; border: 0; background: none; color: var(--td-muted, #6b6a66); cursor: pointer;
+  font: 500 11px/1.35 system-ui, sans-serif; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-cpanel-context:hover { color: var(--td-accent, #1652f0); }
+/* The doc page's side panel: fixed to the right under the bar, resizable. */
+.tdoc-doc-side { position: fixed; right: 0; bottom: 0; z-index: 999991; background: var(--td-ground, #fff); border-left: 1px solid var(--td-line, #e8e7e3); }
+.tdoc-doc-side .tdoc-cpanel { height: 100%; }
+/* The phone sheet outside the doc page (the widget's shadow root has no
+   body.tdoc-narrow): the same sheet as #tdoc-comment-layer. */
+.tdoc-sheet-viewport { position: fixed; inset: 0; z-index: 2147483646; }
+.tdoc-sheet-backdrop { position: fixed; inset: 0; z-index: 2147483645; background: rgba(0,0,0,.28); }
+.tdoc-sheet { display: flex; flex-direction: column; position: fixed; left: 0; right: 0; bottom: 0; height: 100dvh; max-height: 100dvh; width: 100%; box-sizing: border-box;
+  background: var(--td-ground, #fff); border-top: 1px solid var(--td-line, #e8e7e3); border-radius: 14px 14px 0 0; box-shadow: 0 -4px 24px rgba(0,0,0,.08); overflow: hidden;
+  transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px))); transition: transform .2s;
+  padding: 10px 0 calc(max(16px, env(safe-area-inset-bottom)) + var(--drawer-snap-point-offset, 0px)); }
+.tdoc-sheet[data-starting-style], .tdoc-sheet[data-ending-style] { transform: translateY(100%); }
+.tdoc-sheet-handle { display: block; flex: none; width: 36px; height: 4px; padding: 0; border: 0; background: var(--td-line, #e8e7e3); border-radius: 2px; margin: 0 auto 8px; cursor: grab; touch-action: none; }
+.tdoc-sheet .tdoc-cpanel { flex: 1 1 auto; min-height: 0; }
+.tdoc-sheet .tdoc-cpanel-head { padding-top: 4px; }
+
+/* The agent activity badge (comments/panel/agent-activity.jsx): a dot, the
+   same on the doc's Ask AI and the widget's Send to agent. */
+.tdoc-send-agent-badge { display: inline-block; flex: none; width: 8px; height: 8px; border: 1.5px solid var(--td-ground, #fff); border-radius: 50%; background: var(--td-accent, #1652f0); box-sizing: content-box; }
+.tdoc-send-agent-badge.is-failed { background: var(--td-danger, #b42318); }
+/* On the feedback space page the panel is the page's list: no frame, no
+   inner scroll. */
+.tdoc-cpanel-inline .tdoc-cpanel-head { padding: 0 0 10px; }
+.tdoc-cpanel-inline .tdoc-cpanel-scroll { overflow: visible; padding: 4px 0 16px; }
+.tdoc-cpanel-inline .tdoc-cpanel-item { padding: 0; }
+.tdoc-cpanel-inline .tdoc-cpanel-readbar { padding: 7px 0; }
+/* In a sheet the sheet's content scrolls (it owns the swipe), with the
+   panel's header kept in view. */
+.tdoc-sheet-content { flex: 1 1 auto; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.tdoc-sheet-content .tdoc-cpanel-scroll { overflow: visible; }
+.tdoc-sheet-content .tdoc-cpanel-head { position: sticky; top: 0; z-index: 1; background: var(--td-ground, #fff); }
+/* The doc bar's comment-list toggle: the comment mark and the open count. */
+.tdoc-comments-toggle { gap: 5px; }
+.tdoc-comments-toggle[aria-pressed="true"] { color: var(--td-accent, #1652f0); background: var(--td-accent-wash, rgba(22,82,240,.06)); }
+.tdoc-comments-toggle-count { font-variant-numeric: tabular-nums; }
+.tdoc-sheet .tdoc-sheet-handle { display: block; }
+.tdoc-sheet:focus, .tdoc-sheet:focus-visible { outline: none; }

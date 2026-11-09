@@ -6,45 +6,16 @@ import { AppSelect } from '../ui/select.jsx';
 import { SORT_OPTIONS } from '../comments/core/comment-query.js';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AskIcon } from '../ui/ask-icon.jsx';
-import { Drawer } from '@base-ui/react/drawer';
+import { CommentSheet, SheetContent, SheetTrigger } from '../comments/panel/comment-sheet.jsx';
+import { CommentPanel } from '../comments/panel/comment-panel.jsx';
 import { CommentCard } from './comment-card.jsx';
 import { CommentThreadList } from './comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from './comment-pin.jsx';
 import { isDocumentComment, TOP_BAR_HEIGHT } from './model.js';
 
-// The list header, the same rule on every comment surface: the filter with
-// its counts, Refresh, and Mark all as read whenever something is unread
-// (comment-area.js). Where the threads are a list (the phone drawer), also
-// search and the order (`list`).
-export function CommentListControls({ filter, unreadCount = 0, onMarkAllRead = null, onRefresh = null, refreshing = false, list = null }) {
-  if (!filter && !(unreadCount && onMarkAllRead)) return null;
-  return <>
-    <div className={`tdoc-comment-filter-row${unreadCount > 0 && onMarkAllRead ? ' has-mark-all' : ''}`}>
-      {filter}
-      {onRefresh ? (
-        <AppButton variant="icon" size="s" className="tdoc-comment-refresh" aria-label="Refresh comments" title="Refresh comments"
-          aria-busy={refreshing ? 'true' : 'false'} onClick={() => onRefresh()}>
-          <RefreshCw size={14} aria-hidden="true" />
-        </AppButton>
-      ) : null}
-      {unreadCount > 0 && onMarkAllRead ? (
-        <button type="button" className="tdoc-comment-mark-all" onClick={() => onMarkAllRead()}>Mark all as read</button>
-      ) : null}
-    </div>
-    {list ? <CommentListQuery {...list} /> : null}
-  </>;
-}
-
-// Search (text, author:name, agent:name) and order, over the shared query.
-export function CommentListQuery({ search = '', onSearch, sort, onSort }) {
-  return (
-    <div className="tdoc-comment-query">
-      <input type="search" className="tdoc-comment-search" placeholder="Search comments" aria-label="Search comments"
-        value={search} onChange={(event) => onSearch(event.target.value)} />
-      <AppSelect className="tdoc-comment-sort" ariaLabel="Order" value={sort} onChange={onSort} options={SORT_OPTIONS} />
-    </div>
-  );
-}
+// The list header pieces live with the shared panel; re-exported for the
+// doc's compact dock beside its pins.
+export { CommentListControls, CommentListQuery } from '../comments/panel/comment-panel.jsx';
 
 function Pin({
   cluster, top, left, frameTop, commentsById, seenMap, currentUser, handoffViewer = currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,
@@ -249,15 +220,15 @@ function EmptyCommentsHowTo({ onAskAi }) {
 }
 
 export function MobileCommentDrawer({
-  // The Open / Resolved / All control, above the list.
-  filter = null,
+  // The shared list (comments/panel/): area + prefs from comment-area.js,
+  // groups in the drawer's order (whole document first, then the body).
+  area,
+  prefs,
+  groups,
   open,
-  comments,
-  openCount = comments.length,
+  openCount = 0,
   unread = false,
-  unreadCount = 0,
   pinIds,
-  seenMap = {},
   currentUser,
   handoffViewer = currentUser,
   isOwner,
@@ -282,11 +253,9 @@ export function MobileCommentDrawer({
   onResendHandoff = null,
   onSendHandoffElsewhere = null,
   onMarkRead = null,
-  onMarkAllRead = null,
   onRefresh = null,
   refreshing = false,
-  listQuery = null,
-  // Unified entry: the same drawer also holds the Ask AI panel, one tab away.
+  // Unified entry: the same sheet also holds the Ask AI panel, one tab away.
   askAi = null,
   tab = 'comments',
   onTab = null,
@@ -314,57 +283,53 @@ export function MobileCommentDrawer({
   }, [open, openCommentId]);
 
   return (
-    <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down" snapPoints={[0.7, 1]} defaultSnapPoint={0.7}>
-      <Drawer.Trigger className={`tdoc-fab${hideFab ? ' is-hidden' : ''}`} aria-label={openCount ? `${openCount} open comments${unread ? ', new agent reply' : ''}` : 'Open comments'}>
-        <CommentIcon size={16} />
-        {askAi ? <AskIcon className="tdoc-fab-ai" size={11} /> : null}
-        {openCount > 0 ? <span id="tdoc-fab-count">{openCount}</span> : null}
-        {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
-      </Drawer.Trigger>
-      <Drawer.Portal>
-        <Drawer.Backdrop className="tdoc-drawer-backdrop" />
-        <Drawer.Viewport className="tdoc-drawer-viewport">
-          <Drawer.Popup ref={drawerRef} id="tdoc-comment-layer" className="open">
-            <Drawer.Title className="tdoc-visually-hidden">Comments</Drawer.Title>
-            <Drawer.Close className="tdoc-drawer-handle" aria-label="Close comments" />
-            {askAi ? <div className="tdoc-drawer-tabs">
-              <SegmentedControl
-                ariaLabel="Comments or Ask AI"
-                value={tab}
-                onChange={onTab}
-                options={[
-                  { value: 'comments', label: openCount ? `Comments · ${openCount}` : 'Comments' },
-                  { value: 'ask', label: <>Ask AI{unread ? <span className="tdoc-tab-dot" aria-label="new agent reply" /> : null}</> },
-                ]}
-              />
-            </div> : null}
-            {showAsk ? <div className="tdoc-drawer-ask">{askAi}</div> : (
-            <Drawer.Content className="tdoc-drawer-list">
-              <CommentListControls filter={filter} unreadCount={unreadCount} onMarkAllRead={onMarkAllRead}
-                onRefresh={onRefresh} refreshing={refreshing} list={listQuery} />
-              {!comments.length && listQuery?.search ? <p className="tdoc-comment-query-empty">No comments match.</p> : null}
-              {!comments.length && !listQuery?.search ? <EmptyCommentsHowTo
-                onAskAi={askAi && onTab ? () => onTab('ask') : onAskAi ? () => { onOpenChange(false); onAskAi(); } : null}
-              /> : null}
-              <CommentThreadList
-                comments={comments}
-                selectedId={openCommentId}
-                expandReplies={expandReplies}
-                isAnchored={(comment) => isDocumentComment(comment) || pinIds.has(comment.id)}
-                isUnread={(comment) => commentPinState(comment, { seenMap, handoffViewer, isOwner }).unread}
-                onSeen={open && !showAsk ? onMarkRead : null}
-                onNavigate={onNavigate}
-                cardProps={{
-                  currentUser, handoffViewer, isOwner, mentionable, demo,
-                  canSendToAgent, agentSetupHref, onReply, onReact, onDelete,
-                  onResolve, onEdit, onReanchor, handoff, onResendHandoff,
-                  onSendHandoffElsewhere,
-                }}
-              />
-            </Drawer.Content>)}
-          </Drawer.Popup>
-        </Drawer.Viewport>
-      </Drawer.Portal>
-    </Drawer.Root>
+    <CommentSheet
+      ref={drawerRef}
+      id="tdoc-comment-layer"
+      open={open}
+      onOpenChange={onOpenChange}
+      trigger={(
+        <SheetTrigger className={`tdoc-fab${hideFab ? ' is-hidden' : ''}`} aria-label={openCount ? `${openCount} open comments${unread ? ', new agent reply' : ''}` : 'Open comments'}>
+          <CommentIcon size={16} />
+          {askAi ? <AskIcon className="tdoc-fab-ai" size={11} /> : null}
+          {openCount > 0 ? <span id="tdoc-fab-count">{openCount}</span> : null}
+          {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
+        </SheetTrigger>
+      )}
+      tabs={askAi ? {
+        value: tab,
+        onChange: onTab,
+        options: [
+          { value: 'comments', label: openCount ? `Comments · ${openCount}` : 'Comments' },
+          { value: 'ask', label: <>Ask AI{unread ? <span className="tdoc-tab-dot" aria-label="new agent reply" /> : null}</> },
+        ],
+      } : null}
+    >
+      {showAsk ? <div className="tdoc-drawer-ask">{askAi}</div> : (
+        <SheetContent className="tdoc-drawer-list tdoc-sheet-content">
+          <CommentPanel
+            area={area}
+            prefs={prefs}
+            groups={groups}
+            showTitle={false}
+            onRefresh={onRefresh}
+            refreshing={refreshing}
+            empty={<EmptyCommentsHowTo
+              onAskAi={askAi && onTab ? () => onTab('ask') : onAskAi ? () => { onOpenChange(false); onAskAi(); } : null}
+            />}
+            selectedId={openCommentId}
+            expandReplies={expandReplies}
+            isAnchored={(comment) => isDocumentComment(comment) || pinIds.has(comment.id)}
+            onSeen={open && !showAsk ? onMarkRead : null}
+            onNavigate={onNavigate}
+            cardProps={{
+              currentUser, handoffViewer, isOwner, mentionable, demo,
+              canSendToAgent, agentSetupHref, onReply, onReact, onDelete,
+              onResolve, onEdit, onReanchor, handoff, onResendHandoff,
+              onSendHandoffElsewhere,
+            }}
+          />
+        </SheetContent>)}
+    </CommentSheet>
   );
 }
