@@ -26,6 +26,21 @@ The last two are the axis that matters: a stat tile is the same stat tile in
 never what it is. A style that starts inventing components, or a component
 that hardcodes a colour, has broken that split.
 
+## Blocks first
+
+A doc is a sequence of blocks: plain prose blocks, the house blocks in
+`structure/components.md` (stat tiles, cards, note, collapsible, figure,
+diagram), and custom work as one self-contained artifact element. Text sits in
+`p` / `li` / `h*` / `td`, never loose in a `div`. That is what lets the reader
+edit, compare and comment on a doc block by block, and it costs nothing in
+looks: the house blocks are styled by the reader in every style, and a chart or
+widget is still whatever it needs to be inside its own element. Publishing
+returns a block check (a warning, never a refusal) when a doc strays.
+
+A whole-page custom design (`--custom-template`) is the exception, for a
+designed page the user asked for (a landing page, a deck, a poster), not for a
+report.
+
 ## voice.md is a floor, not an option
 
 Nobody picks "make it sound like AI." So voice is not a template a user

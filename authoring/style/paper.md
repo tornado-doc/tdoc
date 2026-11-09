@@ -51,8 +51,10 @@ body { background:#faf9f5; }
 .wrap h3 { font-family:"Fraunces","Newsreader",Georgia,serif; font-weight:500; }
 .wrap a  { color:#c15f3c; text-decoration:none; border-bottom:1px solid #e3c4b6; }
 .wrap p  { margin:0 0 24px; }
-/* a quiet pull-aside on the paper ground */
-.aside { border-left:2px solid #c15f3c; background:#f4efe7; padding:14px 18px; margin:20px 0; border-radius:0 6px 6px 0; }
+/* house blocks: serif figures, a quiet clay note */
+.tdoc-tile,.tdoc-card,.wrap details { border-color:#e6e0d4; }
+.tdoc-tile .tdoc-tile-num,.tdoc-card>h3 { font-family:"Fraunces",Georgia,serif; font-weight:500; }
+aside.note { border:0; border-left:2px solid #c15f3c; background:#f4efe7; border-radius:0 6px 6px 0; }
 
 /* Reading column: the same rules server/reader.css bakes into a published doc,
    so a page carrying only this CSS (unbaked, or written in another app) reads

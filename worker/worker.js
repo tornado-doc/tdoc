@@ -3371,10 +3371,31 @@ async function prepareDocVersion(rawHtml) {
     const tag = `<style id="tdoc-reader" data-tdoc-template="${stamp}">${css}</style>\n`;
     // Callback so a `$` in the template stays literal.
     html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, () => `${tag}</head>`) : tag + html;
+  } else if (css) {
+    html = withHouseBlocksCss(html, css);
   }
   const stamped = stampAids(html);
   const sha = (await sha256Hex(stamped.html)).slice(0, 16);
   return { html: stamped.html, aids: stamped.aids, sha };
+}
+
+// A doc keeps the reader template it was created with, so a revision of an
+// older doc that starts using the house blocks (tdoc-tiles, tdoc-cards,
+// aside.note) would show them unstyled. Such a revision gets reader.css's
+// house-blocks section added inside its baked template, where it is
+// zero-specificity like the rest and switched off with it for a custom
+// design. Only then: any other doc keeps its bytes.
+const HOUSE_BLOCKS_RE = /\/\* House blocks[\s\S]*?\/\* End house blocks\. \*\//;
+const HOUSE_BLOCKS_USE_RE = /\bclass=["'][^"']*\btdoc-(?:tiles|cards)\b|<aside\b[^>]*\bclass=["'](?:[^"']*\s)?note\b/i;
+function withHouseBlocksCss(html, css) {
+  const open = html.search(READER_BLOCK_RE);
+  if (open === -1) return html;
+  const close = html.indexOf('</style>', open);
+  if (close === -1 || html.slice(open, close).indexOf('/* House blocks') !== -1) return html;
+  if (!HOUSE_BLOCKS_USE_RE.test(html)) return html;
+  const section = css.match(HOUSE_BLOCKS_RE);
+  if (!section) return html;
+  return `${html.slice(0, close)}\n  ${section[0]}\n${html.slice(close)}`;
 }
 
 function injectReaderCss(html, css) {
@@ -19621,6 +19642,23 @@ function suggestNorm(s) {
 // changed" summaries match blocks the way the red/green view marks them.
 /* __TDOC_VERSION_DIFF__ */
 
+// The publish-time block check (server/block-lint.js, inlined by
+// bin/tdoc-bundle): loose text in wrapper <div>s and wrapper classes that are
+// not house blocks, returned with a successful upload as advice. Never a
+// refusal, and never the reason an upload fails: any error here is no warning.
+/* __TDOC_BLOCK_LINT__ */
+function blockLintOf(html) {
+  try {
+    const engine = globalThis.TdocBlockLint;
+    if (!engine || typeof engine.lint !== 'function') return null;
+    const r = engine.lint(html);
+    return r && r.warning ? r : null;
+  } catch (e) {
+    console.error('[upload] block check failed (ignored):', e && e.message ? e.message : String(e));
+    return null;
+  }
+}
+
 function suggestParse(html) {
   return TdocParse5.parse(String(html || ''), { sourceCodeLocationInfo: true });
 }
@@ -22967,12 +23005,19 @@ function mcpWritingGuide(style, kind) {
     '- Draw generously: roughly one visual per screenful, several kinds per doc. Inline SVG or CSS only; no <script> (it never runs).',
     '- Pick by data: compared quantities = bar chart; trend = line; tradeoff = scatter; two axes = quadrant; feature comparison = matrix (✓ ✗ ~); a few key numbers = stat tiles; sequence = timeline; branching process = flow diagram; composition = stacked bar; magnitude = gauge.',
     '- Real numbers, labeled axes, no chartjunk. Draw to the edge of the viewBox; give each SVG role="img" and an aria-label. One accent per figure.',
-    '## Components',
-    '- Figure: <div class="diagram-box" data-tdoc-artifact><svg viewBox="0 0 680 260" role="img" aria-label="…">…</svg><p class="cap">What to take from it.</p></div>',
+    '## Blocks',
+    kind === 'slides'
+      ? 'Each slide is one artifact (free inside). Around slides, text sits in p/li/h*, never loose in a div.'
+      : 'A doc is a sequence of blocks: h2-h4, p, lists, tables, the house blocks below (exact markup; styled for you), and each chart, widget or custom panel as ONE <figure> or data-tdoc-artifact="Name" element. Text sits in p/li/h*/td, never loose in a div; publish warns when it does.',
+    // A deck is slides, not a reading page: its own rules follow below.
+    ...(kind === 'slides' ? [] : [
+      '- Stat tiles: <div class="tdoc-tiles"><div class="tdoc-tile"><p class="tdoc-tile-num">11%</p><p>what it counts</p></div>…</div>',
+      '- Cards: <div class="tdoc-cards"><div class="tdoc-card"><h3>…</h3><p>…</p></div>…</div>',
+      '- Note: <aside class="note"><p>…</p></aside>. Collapsible: <details><summary>…</summary><p>…</p></details>. Figure: <figure>…<figcaption>…</figcaption></figure>',
+    ]),
+    '- Diagram: <div class="diagram-box" data-tdoc-artifact><svg viewBox="0 0 680 260" role="img" aria-label="…">…</svg><p class="cap">What to take from it.</p></div>',
     '- Table: <div class="tdoc-table-scroll"><table>…</table></div>; square corners, hairline row rules, no fills; numbers in <span class="num"> with tabular numerals.',
-    '- Stat tiles: <div class="tiles"><div class="tile"><b>11</b><span>what it counts</span></div>…</div>',
-    '- Note: <p class="note">an aside that qualifies</p>',
-    '- Rules: do not pad or center the content root, no position:fixed, no page footer, no tdoc-* class names of your own, light mode only (dark mode is an automatic invert).',
+    '- Rules: do not pad or center the content root, no position:fixed, no page footer, no other tdoc-* classes, light mode only (dark is an automatic invert). A custom design (own page-level CSS) only for a landing page or deck the user asked for, never a report.',
     `## Style: ${name}`,
   ];
   if (hs) {
@@ -23010,6 +23055,17 @@ function mcpDocUrl(origin, slug, version) {
 // edit_doc) publish through these, so every one of them meets the same
 // styling, the same /api/upload and therefore the same refusals.
 
+// The upload's block check, passed through as it came: the same words the CLI
+// prints, and the counts for a client that reads structuredContent.
+function mcpBlockWarning(data) {
+  return data && typeof data.block_warning === 'string'
+    ? { block_warning: data.block_warning, ...(data.block_lint ? { block_lint: data.block_lint } : {}) }
+    : {};
+}
+function mcpBlockWarningText(data) {
+  return data && typeof data.block_warning === 'string' ? `\n\n${data.block_warning}` : '';
+}
+
 // A new private doc. The server picks the address (a client-chosen slug could
 // squat a name a person would trust), always with a random part.
 async function mcpCreateDocument(call, { title, html, markdown, lang, style, team, raftAgent }) {
@@ -23041,9 +23097,9 @@ async function mcpCreateDocument(call, { title, html, markdown, lang, style, tea
       if (teamName && !placed && !(call.actor.scope)) {
         // Same as the CLI: a named team the account is not in leaves the
         // doc in My docs, and says so.
-        return mcpToolResult(`Published "${title}" to My docs, private (not in team "${teamName}": this account is not a member). Link: ${url}\n${FIRST_DOC_TELL}`, { ok: true, slug: attempt, version: 1, url, team: null, visibility: 'private' });
+        return mcpToolResult(`Published "${title}" to My docs, private (not in team "${teamName}": this account is not a member). Link: ${url}\n${FIRST_DOC_TELL}${mcpBlockWarningText(r.data)}`, { ok: true, slug: attempt, version: 1, url, team: null, visibility: 'private', ...mcpBlockWarning(r.data) });
       }
-      return mcpToolResult(`Published "${title}" (private${placed ? ', visible to the team' : ''}). Link: ${url}\n${FIRST_DOC_TELL} To let others read it, use share_doc when the user asks. Comments come back through get_comments.`, { ok: true, slug: attempt, version: 1, url, team: placed, visibility: 'private' });
+      return mcpToolResult(`Published "${title}" (private${placed ? ', visible to the team' : ''}). Link: ${url}\n${FIRST_DOC_TELL} To let others read it, use share_doc when the user asks. Comments come back through get_comments.${mcpBlockWarningText(r.data)}`, { ok: true, slug: attempt, version: 1, url, team: placed, visibility: 'private', ...mcpBlockWarning(r.data) });
     }
     const err = r.data && r.data.error;
     if ((err === 'slug_taken' || err === 'version_conflict' || err === 'not_doc_owner') && i < 2) continue;
@@ -23092,7 +23148,7 @@ async function mcpPublishVersion(call, ref, { html, markdown, title: newTitle, s
   }, { raftAgent });
   if (!(r.ok && r.data && r.data.ok)) return mcpApiError(r);
   const url = mcpDocUrl(call.origin, ref.slug);
-  return mcpToolResult(`Published v${next} of "${title}". Link: ${url}\nFor each comment this version handles, call reply_to_comment with status "applied" and applied_in ${next}.`, { ok: true, slug: ref.slug, version: next, url });
+  return mcpToolResult(`Published v${next} of "${title}". Link: ${url}\nFor each comment this version handles, call reply_to_comment with status "applied" and applied_in ${next}.${mcpBlockWarningText(r.data)}`, { ok: true, slug: ref.slug, version: next, url, ...mcpBlockWarning(r.data) });
 }
 
 // ---- uploads by URL (create_upload -> curl -T -> commit_upload) -------------
@@ -23407,7 +23463,7 @@ const MCP_AUTHORING_ESSENTIALS = [
   'How to write a tdoc (the authoring contract; full guides are the tdoc://authoring/* resources):',
   '- Voice: say the thing, then stop. Every sentence carries a fact, number, mechanism or judgment. No filler, hype, throat-clearing, "In conclusion", rhetorical questions or emoji section markers. Lead with the answer.',
   '- Visuals: draw generously. Comparisons, trends, sequences, structures and tradeoffs become inline SVG or CSS visuals (bar/line charts with labeled axes and real numbers, matrices, timelines, flow diagrams, stat tiles), roughly one per screenful, several kinds per doc.',
-  '- HTML: one self-contained body, semantic headings, short paragraphs, real <table>s. No <script> (it never runs) and no external JS. Light mode only: dark mode is an automatic invert. Do not pad or center the content root, no position:fixed, no page footer, no tdoc-* class names.',
+  '- HTML: one self-contained body made of blocks: semantic headings, short paragraphs, real <table>s, the house blocks (tdoc-tiles, tdoc-cards, aside.note, details, figure, diagram-box; markup in tdoc://authoring/structure/components.md), and each chart or custom piece as one <figure> or data-tdoc-artifact element. Text sits in p / li / h* / td, never loose in a div. No <script> (it never runs) and no external JS. Light mode only: dark mode is an automatic invert. Do not pad or center the content root, no position:fixed, no page footer, no other tdoc-* class names. A whole-page custom design is for a landing page or deck the user asked for, not a report.',
   '- Style: stark and calm by default (white ground, one sans, one accent). Avoid cream+serif+terracotta, purple-to-blue gradient heroes, everything centered, cards with a left accent bar, numbered eyebrows.',
 ].join('\n');
 
@@ -24095,7 +24151,7 @@ function mcpAuthoringResources() {
     'README.md': 'How tdoc composes a document: voice, visuals, components, style.',
     'voice.md': 'Required: how the prose reads (no AI slop).',
     'visuals.md': 'Required: which visual fits which data.',
-    'structure/components.md': 'The building blocks (stat tiles, matrices, diagrams, callouts) and their markup.',
+    'structure/components.md': 'The block model and the house blocks (stat tiles, cards, note, collapsible, figure, diagram) with their markup; custom components as artifacts.',
     'structure/slides.md': 'Slide decks: one 16:9 section per slide.',
     'style/default.md': 'The house style.',
   };
@@ -30839,6 +30895,7 @@ const tdocHandlers = {
           console.error('[onboarding] publish stamp failed (non-fatal):', e && e.message ? e.message : String(e));
         }
       }
+      const blockLint = blockLintOf(doc);
       // `new_doc` and `team` let the CLI place a first publish (its default
       // team) and say where every publish landed, so a doc in the wrong
       // place is seen at once (Julie, 2026-10-10).
@@ -30847,6 +30904,18 @@ const tdocHandlers = {
         new_doc: !writeGate.meta,
         team: (writeGate.meta && writeGate.meta.workspace_id) || scopedNewTeam || null,
         ...(previewWarning ? { preview_warning: previewWarning } : {}),
+        // Advice, not a refusal: the version above is already committed.
+        ...(blockLint ? {
+          block_warning: blockLint.warning,
+          block_lint: {
+            loose_text: blockLint.loose_text,
+            loose_text_samples: blockLint.loose_text_samples,
+            unknown_classes: blockLint.unknown_classes,
+            unknown_class_count: blockLint.unknown_class_count,
+            custom_design: blockLint.custom_design,
+            truncated: blockLint.truncated,
+          },
+        } : {}),
         // A connection limited to some workspaces: the server placed a new
         // doc already, so the CLI must not apply its default team on top.
         ...(auth.actor && auth.actor.scope ? { scoped: true } : {}),

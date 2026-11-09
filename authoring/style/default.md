@@ -47,8 +47,9 @@ body { background:#fff; }
 .wrap h1 { font-family:"Inter",system-ui,sans-serif; font-weight:600; font-size:clamp(28px,3.6vw,36px); letter-spacing:-.03em; line-height:1.05; color:#0a0a0a; }
 .wrap h2 { font-family:"Inter",system-ui,sans-serif; font-weight:600; letter-spacing:-.015em; color:#0a0a0a; margin-top:40px; }
 .wrap a  { color:rgba(10,10,10,.6); text-decoration:none; border-bottom:1px solid rgba(10,10,10,.2); }
-/* a hairline-ruled note — no fill, just a rule */
-.note { border-top:1px solid #e5e5e5; padding-top:12px; margin:20px 0; color:#555; font-size:15px; }
+/* house blocks: hairlines, square corners; the note is a rule, no fill */
+.tdoc-tile,.tdoc-card,.wrap details { border-color:#e5e5e5; border-radius:0; }
+aside.note { border:0; border-top:1px solid #e5e5e5; border-radius:0; background:none; padding:12px 0 0; color:#555; }
 
 /* Reading column: the same rules server/reader.css bakes into a published doc,
    so a page carrying only this CSS (unbaked, or written in another app) reads

@@ -77,7 +77,8 @@ code     { font:.85em ui-monospace,"SF Mono",Menlo,monospace; background:#f0f0f0
 table    { border-collapse:separate; border-spacing:3px; width:100%; }
 th       { color:#737373; text-align:left; font:600 11px/1 ui-monospace,Menlo,monospace; letter-spacing:.04em; text-transform:uppercase; padding:8px 10px; }
 td       { background:#f5f5f5; color:#171717; padding:9px 10px; border-radius:4px; }
-.callout { border-left:3px solid #ff4b2e; background:#fff5f3; padding:12px 16px; margin:16px 0; }
+.tdoc-tile .tdoc-tile-num { font-family:ui-monospace,Menlo,monospace; font-weight:500; }
+aside.note { border:0; border-left:3px solid #ff4b2e; border-radius:0; background:#fff5f3; }
 
 /* Reading column: the same rules server/reader.css bakes into a published doc,
    so a page carrying only this CSS (unbaked, or written in another app) reads

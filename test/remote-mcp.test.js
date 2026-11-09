@@ -705,6 +705,17 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(!/id="tdoc-style"/.test(ps) && JSON.parse(env.META.map.get(`meta:${pasted.structuredContent.slug}`)).style === 'technical', 'pasted style recognized, not doubled');
   });
 
+  await t('create_doc / update_doc pass the block check through as advice, never a refusal', async () => {
+    const loose = '<h1>Audit</h1><div class="tiles"><div class="tile"><b>11%</b><span>plain</span></div></div>';
+    const r = await tool(julieConn.access_token, 'create_doc', { title: 'Docs audit', html: loose });
+    assert(!r.isError && r.structuredContent.ok, JSON.stringify(r));
+    assert(/Block check \(a warning only; the doc is published\)/.test(r.content[0].text) && /div\.tile "11%"/.test(r.content[0].text), r.content[0].text);
+    assert(r.structuredContent.block_lint && r.structuredContent.block_lint.loose_text === 2 && /^Block check/.test(r.structuredContent.block_warning), JSON.stringify(r.structuredContent));
+    const blocks = '<h1>Audit</h1><div class="tdoc-tiles"><div class="tdoc-tile"><p class="tdoc-tile-num">11%</p><p>plain</p></div></div>';
+    const up = await tool(julieConn.access_token, 'update_doc', { slug: r.structuredContent.slug, html: blocks });
+    assert(!up.isError && !/Block check \(/.test(up.content[0].text) && !('block_lint' in up.structuredContent), JSON.stringify(up));
+  });
+
   await t('list_docs lists My docs and team docs', async () => {
     const team = (await call('/api/teams', { method: 'POST', cookie: julie.cookie, headers: origin, body: { name: 'Acme' } })).body.team;
     await call('/api/team/join', { method: 'POST', cookie: bob.cookie, body: { token: team.invite_url.split('/').pop() } });

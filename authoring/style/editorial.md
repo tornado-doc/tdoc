@@ -47,9 +47,9 @@ body { background:#f7f6f5; }
 .wrap h2 { font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-weight:500; }
 .wrap a  { color:#2200ff; text-decoration:none; border-bottom:2px solid #2200ff; }
 
-/* pulled-aside blocks */
-.aside  { border-left:2px solid #3a55f4; background:#eef1fb; padding:12px 16px; margin:16px 0; }
-.result { border-left:2px solid #4ba181; background:#f0f6f2; padding:12px 16px; margin:16px 0; }
+/* house blocks: serif figures, the note as a pulled aside */
+.tdoc-tile .tdoc-tile-num { font-family:"Iowan Old Style",Georgia,serif; font-weight:400; }
+aside.note { border:0; border-left:2px solid #3a55f4; border-radius:0; background:#eef1fb; }
 .diagram-box { max-width:100%; overflow-x:auto; margin:20px 0; }
 
 /* Reading column: the same rules server/reader.css bakes into a published doc,

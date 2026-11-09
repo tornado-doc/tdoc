@@ -88,11 +88,16 @@ Resources `tdoc://authoring/<path>.md` hold the authoring guides: `essentials.md
 1. Call `get_writing_guide` before writing (`kind: "slides"` for a deck,
    `style` if the user named one). For editable diagrams, also read
    `tdoc://authoring/structure/components.md`.
-2. Write one self-contained HTML body. Draw charts and diagrams as inline
-   SVG. No `<script>`, no external scripts or stylesheets.
+2. Write one self-contained HTML body as a sequence of blocks: text in
+   `p` / `li` / `h*` / tables, the house blocks from the guide (stat tiles,
+   cards, note, collapsible, figure, diagram), and each chart or custom piece
+   as one `<figure>` or `data-tdoc-artifact` element. Draw charts and diagrams
+   as inline SVG. No `<script>`, no external scripts or stylesheets.
 3. Publish (see above): `create_upload` + `curl` + `commit_upload`, or
    `create_doc`. Use `team` only when the user asked for a team doc.
    The doc starts private; call `share_doc` only if the user asked to share it.
+   A publish result may end with a `Block check` warning: the doc is live;
+   fix what it lists in the next version when it is quick.
 4. Give the user the link from the result and tell them they can comment on any part of the doc to ask for changes; you revise from their comments. Do not paste the document into chat, and do not offer to take changes in chat instead.
 
 ## Edit from comments
