@@ -56,6 +56,7 @@ const OFFLINE = [
   'suggest-edits.test.js',     // Ask/Edit v2: tdoc AI suggests text edits; editors accept (publish) or reject; text only, no markup
   'suggest-handoff-lock.test.js', // Ask/Edit v2: a reply_as "suggestions" handoff refuses its agent's publish until it is dealt with or an hour passes; browser, other agents, non-dev and team docs untouched
   'ask-in-thread.test.js',     // Ask AI in a comment: tdoc AI or the commenter's own agent answers as a reply in the thread, seen by all
+  'ask-only-lock.test.js',     // Ask only: the hand-off is answer only and the server holds it (Raft, webhook, local, owner's own agent included); tdoc AI never edits
   'hand-off.test.js',          // one door: Ask only decides edit (authorship) or answer (own / team agent / tdoc AI), never another's agent
   'doc-move-agents.test.js',   // a doc that changes workspace: nobody left behind is offered, the default, or sent to; history stays
   'handoff-privacy.test.js',   // handoff details: commenter, sender and owner only; a member hands off threads they began or replied in
@@ -136,7 +137,7 @@ const OFFLINE = [
   'tdoc-start.test.js',
   'tdoc-privacy.test.js', // public /privacy page is served from its landing doc
   'tdoc-pricing.test.js', // public /pricing page matches the limits the worker enforces
-  'landing-demo-loop.test.js', // the homepage demo: one doc, one comment-to-v2 loop
+  'landing-real-doc.test.js', // the homepage hero: a screenshot of a real doc
   'signin-github-tab.test.js', // #179: GitHub opens in a new tab, never this one // #142 onboarding: /start page + the modal served with it
   'web-oauth.test.js',        // web redirect flow: sanitizeReturn open-redirect guard + flow wiring + device fallback
   'browser-free-cli.test.js', // clean skill install, write/edit/preview/publish without browser dependencies
@@ -232,8 +233,8 @@ const BROWSER = [
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
   'comment-overflow-ask-dismiss-ui.test.js', // a long markdown reply (inline code, paths, a code block) never scrolls a comment card, its thread or an Ask AI answer sideways; Ask AI closes on a click in the document or Escape and keeps the draft; V1 + V2, desktop + phone
   'phone-ask-ai-scroll-ui.test.js', // WebKit + Chromium phone: a long Ask AI answer scrolls to its end in the drawer, the document scrolls after closing
-  'doc-bar-composer-ui.test.js', // the doc bar (title, space chip, Edited, quiet Share, mode switch in the bar, comments filter) and the composer's @agent pill / Answers only / Only me, desktop + phone, team docs
-  'reply-agent-ui.test.js',    // the reply box's @agent = the composer's: pill at the caret, pill dropdown (Mine / Team / tdoc AI), Answers only where it may not edit, Only me in a reply; the @ list shows every agent
+  'doc-bar-composer-ui.test.js', // the doc bar (title, space chip, Edited, quiet Share, mode switch in the bar, comments filter) and the composer's @agent pill / Ask only (off, or ticked and locked; ticked = a held question) / Only me, desktop + phone, team docs
+  'reply-agent-ui.test.js',    // the reply box's @agent = the composer's: pill at the caret, pill dropdown (Mine / Team / tdoc AI), Ask only (locked where it may not edit), Only me in a reply; the @ list shows every agent
   'phone-top-bar-ui.test.js', // signed in on a phone: ⋯ stays on screen, spaces under ⋯ → Switch space
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
   'share-access-ui.test.js', // Share panel: specific people / anyone with the link / public, sign-in switch, desktop + phone

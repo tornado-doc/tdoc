@@ -1486,9 +1486,10 @@ ${uiCss}
     // own agent is picked from the @ list, as on a doc page.
     const agentMentions = useMemo(() => ({
       choices: agentChoices, preselected: composerDefault(agentChoices, { orTop: true }),
-      ai: null, privateAskSupported: false,
+      ai: null, privateAskSupported: false, teamAskSupported: false,
+      ownAskSupported: Boolean(session?.own_agent),
       fixesTheApp: true,
-    }), [agentChoices]);
+    }), [agentChoices, session?.own_agent]);
 
     useEffect(() => {
       const api = {
