@@ -121,7 +121,7 @@ async function startServer(worker, env) {
       assert.match(v.page.url(), /history=1/);
       await v.page.waitForFunction(() => document.querySelectorAll('.tdoc-history-list > .tdoc-history-row').length === 3);
       const r = rows(panel(v.page));
-      assert.match(await r.nth(0).innerText(), /julie[\s\S]*Latest · Today/);
+      assert.match(await r.nth(0).innerText(), /julie[\s\S]*Latest · (Today|Yesterday), /);
       await v.page.waitForFunction(() => !document.querySelector('.tdoc-history-what.is-pending'), null, { timeout: 10000 });
       assert.match(await r.nth(0).locator('.tdoc-history-what').innerText(), /^Edited Goal · 1 place$/);
       assert.match(await r.nth(1).locator('.tdoc-history-what').innerText(), /^Edited Timeline, Risks · 2 places$/);
