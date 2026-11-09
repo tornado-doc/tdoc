@@ -54,16 +54,15 @@ t('runs no author JavaScript', () => {
   assert(!hrefs.some((h) => /^javascript:/i.test(h)), 'page contains a javascript: URL');
 });
 
-t('hero demo is a static mock, no iframe or author script', () => {
-  // The demo used to frame live widget islands. It is a refined STATIC mock
-  // now (crafted SVG/CSS charts), because the job is to sell the value-prop
-  // loop, not to rebuild the product. So: no iframe, no author <script>.
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
-  assert(demo.length > 1000, 'the hd demo block is missing');
-  assert(!/<iframe/i.test(html), 'the page frames an iframe; the demo is a static mock now');
+t('hero shows a real doc, no iframe or author script', () => {
+  // The hero used to carry a CSS mock of the product. It is now a screenshot
+  // of a real published doc that links to it. An iframe of the real doc does
+  // not work here: the homepage runs in a sandboxed frame, so a nested doc's
+  // shell script is blocked by CORS from the null origin.
+  assert(/<a class="hd-real" href="\/d\/[a-z0-9-]+"><img /.test(html), 'the real-doc screenshot link is missing');
+  assert(!/<div class="hd" style/.test(html), 'the old CSS mock demo is back');
+  assert(!/<iframe/i.test(html), 'the page frames an iframe');
   assert(!/<script\b/i.test(html), 'a published tdoc runs no author script');
-  assert(/class="hd-bars"/.test(demo) && /class="hd-hbars"/.test(demo),
-    'the demo needs its crafted charts (v1 bars, v2 cost bars)');
   // The old CSS-sprite glider workaround must stay gone from the host.
   assert(!/<g class="glider"/.test(html), 'CSS-sprite glider group still present');
   assert(!/@keyframes\s+glide/.test(html), 'host CSS still has the sprite @keyframes glide');
@@ -139,18 +138,6 @@ t('has an entry to the feedback tool in a section of its own', () => {
   assert(/<p class="eyebrow">Feedback<\/p>\s*<h2>[^<]+<\/h2>\s*<p>[^]*?href="\/feedback"/.test(html), 'the /feedback link is not in a section head');
 });
 
-t('demo doc and thread are siblings, not nested', () => {
-  // Nesting the thread inside the doc collapses the two-column canvas.
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
-  const iDoc = demo.indexOf('<div class="hd-doc">');
-  const iAside = demo.indexOf('<aside class="hd-notes">');
-  assert(iDoc >= 0 && iAside > iDoc, 'missing hd-doc or hd-notes');
-  const mid = demo.slice(iDoc + '<div class="hd-doc">'.length, iAside);
-  const opens = (mid.match(/<div\b/g) || []).length;
-  const closes = (mid.match(/<\/div>/g) || []).length;
-  assert(closes === opens + 1, `hd-doc still open when the thread starts (div net ${opens - closes})`);
-});
-
 t('phone rules override the headline, and no redundant Star pill in the doc', () => {
   // Desktop is `h1.tagline { font-size:56px }` (specificity 0,1,1). A
   // `@media { .tagline { font-size:38px } }` rule never wins, so the headline
@@ -200,27 +187,6 @@ t('phone rules override the headline, and no redundant Star pill in the doc', ()
     `last h1.tagline media query is ${last && last[1]}px; 640 must come last so phones do not inherit the 840px size`);
 });
 
-t('the demo thread is one comment with one agent reply', () => {
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
-  const threads = demo.match(/<aside class="hd-notes">[\s\S]*?<\/aside>/g) || [];
-  assert(threads.length === 1, `expected 1 thread, found ${threads.length}`);
-  for (const th of threads) {
-    const humans = (th.match(/<b>Jesse Pollak<\/b>/g) || []).length;
-    const replies = (th.match(/<div class="hd-reply">/g) || []).length;
-    assert(humans === 1, `expected 1 human comment per thread, found ${humans}`);
-    assert(replies === 1, `expected 1 agent reply per thread, found ${replies}`);
-  }
-});
-
-t('agent avatars are filled brand discs, not hollow glyphs', () => {
-  // The sunburst is hollow; on a transparent disc it reads as a broken image.
-  // Each agent mark sits filled-white on its own brand-coloured disc.
-  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<!-- /hd demo -->'));
-  assert(/background:#d97757"><svg[^>]*><use href="#hd-claude"/.test(demo),
-    'Claude reply needs a terracotta disc with the claude mark');
-  assert(/#hd-claude"[\s\S]*?fill="#fff"/.test(html), 'the claude mark must be white on its disc');
-});
-
 t('loop step 2 svg is well-formed', () => {
   // v30 closed the step-2 svg after "fix them all", then left two <rect>s
   // and a second </svg> in the markup. Browsers drop the orphans, so the
@@ -241,7 +207,7 @@ t('demos commentable artifacts', () => {
   // The overlay's COMMENTABLE set is img, svg, canvas, video, pre, figure,
   // section, aside, blockquote, table, details. The page must carry more than
   // one kind, so a visitor can try commenting on a picture AND on a block.
-  const kinds = ['svg', 'table', 'figure', 'blockquote', 'aside'].filter((k) => new RegExp(`<${k}[\\s>]`).test(html));
+  const kinds = ['svg', 'img', 'table', 'figure', 'blockquote', 'aside'].filter((k) => new RegExp(`<${k}[\\s>]`).test(html));
   assert(kinds.includes('svg'), 'missing svg artifact');
   assert(kinds.length >= 3, `only ${kinds.length} commentable artifact kinds (${kinds.join(', ')}), expected 3+`);
   assert(/role="img"[^>]*aria-label="|aria-label="[^"]+"[^>]*role="img"/.test(html), 'svg has no aria-label');
@@ -507,7 +473,7 @@ t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
     `release comments.json must be empty, got ${relComments.length} thread(s)`);
   // The static mock brings its own charts: the payload must not frame an iframe.
   assert(!/<iframe/i.test(relHtml), 'release HTML frames an iframe; the demo is a static mock');
-  assert(/class="hd-win hd-w1"/.test(relHtml), 'release HTML lost the demo component');
+  assert(/class="hd-real"/.test(relHtml), 'release HTML lost the real-doc screenshot');
 
   // tdoc-publish only attaches comments.json when it is a non-empty array.
   const publish = fs.readFileSync(path.join(root, 'bin', 'tdoc-publish'), 'utf8');
