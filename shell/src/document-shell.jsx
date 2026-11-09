@@ -58,6 +58,9 @@ import {
 import { copyText, isDocumentComment, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
 import { readStored, writeStored } from './safe-storage.js';
 import { isFeatureOn } from './feature-flags.js';
+import { readDevMode } from './dev-mode.js';
+import { VersionHistory } from './document/version-history.jsx';
+import { CommentDocVersionContext } from './document/comment-card.jsx';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
@@ -196,11 +199,29 @@ export function DocumentShell({ boot, config }) {
     history.pushState(null, '', url);
     setComparing(next);
   };
+  // Version history (flag versionHistory): "Edited …" opens the history
+  // panel for whoever may list the doc's history (cfg.historyVisible);
+  // ?history=1 is the panel open, so Back closes it.
+  const [historyFlag] = useState(() => isFeatureOn('versionHistory'));
+  const historyEnabled = historyFlag && config.mode === 'published' && !config.isLanding && Boolean(config.historyVisible);
+  const [historyOpen, setHistoryOpen] = useState(() => historyEnabled && new URLSearchParams(location.search).get('history') === '1');
+  const changeHistory = (next) => {
+    if (next === historyOpen) return;
+    const url = new URL(location.href);
+    if (next) url.searchParams.set('history', '1'); else url.searchParams.delete('history');
+    history.pushState(null, '', url);
+    setHistoryOpen(next);
+  };
   useEffect(() => {
-    const restore = () => setComparing(new URLSearchParams(location.search).get('compare') === '1');
+    const restore = () => {
+      const query = new URLSearchParams(location.search);
+      setComparing(query.get('compare') === '1');
+      setHistoryOpen(historyEnabled && query.get('history') === '1');
+    };
     window.addEventListener('popstate', restore);
     return () => window.removeEventListener('popstate', restore);
-  }, []);
+  }, [historyEnabled]);
+  const [historyDevMode] = useState(() => Boolean(readDevMode()?.on));
   const narrow = useNarrowViewport();
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
@@ -704,9 +725,8 @@ export function DocumentShell({ boot, config }) {
     bridge.send({ type: 'tdoc:clearPending' });
   }, [bridge.send]);
 
-  // Ask/Edit v2 (flag askEditV2): one Ask AI input that answers or edits,
-  // Edit with AI on a selection; tdoc AI's
-  // edits show in the doc to accept (publish) or reject. The owner and
+  // Ask/Edit v2 (flag askEditV2): one Ask AI input that answers or edits;
+  // tdoc AI's edits show in the doc to accept (publish) or reject. The owner and
   // editors only, on the latest version.
   const [askEditFlag] = useState(() => isFeatureOn('askEditV2'));
   const suggestOn = askEditFlag && Boolean(config.canSuggest) && config.mode === 'published' && !demoAgents;
@@ -1266,7 +1286,7 @@ export function DocumentShell({ boot, config }) {
           const n = body?.suggestion?.edits?.length || 0;
           setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, status: 'answered', suggested: true,
             answer: n ? `Suggested ${n} ${n === 1 ? 'change' : 'changes'} in the document${body.suggestion.summary ? `: ${body.suggestion.summary}` : '.'} Review them in the doc; Accept publishes a new version.`
-              : 'I could not place an edit for that in the text. Say which part to change, or select it and use Edit with AI.' } : turn));
+              : 'I could not place an edit for that in the text. Say which part to change, quoting a few of its words.' } : turn));
           if (n) { setHandoffDetailsOpen(false); if (unifiedEntry) setDrawerOpen(false); }
         }
       } catch (error) {
@@ -1362,47 +1382,6 @@ export function DocumentShell({ boot, config }) {
       return changed ? next : turns;
     });
   }, [myAgent.state?.asks]);
-  // Ask/Edit v2: Edit with AI (a selection). The
-  // agent picked in Ask AI's chip does it: tdoc AI suggests at once; an
-  // agent that may edit this doc gets a handoff asking for suggestions.
-  const pickedAskAiChoice = () => askAiTargets.find((item) => item.key === selectedAskAiTargetKey) || null;
-  const editingAgentChoice = (choice) => Boolean(suggestOn && choice && !choice.tdocAi && canSendToAgent && !demoAgents
-    && orderedAgentChoices(notifyTargets).some((t) => sameTarget(t, choice.target)));
-  const agentWorkingLabel = (choice) => (choice.target.provider === 'local'
-    ? `${choice.label} is working on your computer…` : `${choice.label} is working on it…`);
-  const suggestFailed = (error) => showToast(error.status === 429 ? 'No free tdoc AI answers left.' : (error.message || 'tdoc AI could not do that'), true);
-  const handToAgentForSuggestions = async (choice, commentIds, instruction, passage) => {
-    try {
-      const body = await postNotifyHandoff({ slug: config.slug, comment_ids: commentIds, instruction, recipient: choice.target, reply_as: 'suggestions' });
-      if (body?.delivery?.status === 'failed') { showToast(`Not delivered to ${choice.label}`, true); return; }
-      if (body?.reply_as !== 'suggestions') { showToast(`Sent to ${choice.label}`); comments.refresh(); return; }
-      suggestions.awaitAgent({ commentIds, label: agentWorkingLabel(choice), passage });
-    } catch (error) { showToast(error.message || 'Could not send it', true); }
-    comments.refresh();
-  };
-  const editWithAi = async (text) => {
-    const selection = composer;
-    if (!selection?.text) return;
-    const instruction = text || 'Make this clearer and more concise.';
-    closeComposer();
-    const choice = pickedAskAiChoice();
-    if (editingAgentChoice(choice)) {
-      const { ok, value } = await attempt(() => comments.addComment(selection, instruction));
-      if (!ok || !value?.id) return;
-      markCommented();
-      await handToAgentForSuggestions(choice, [value.id], instruction, selection.text);
-      return;
-    }
-    try {
-      const body = await suggestions.request({ instruction, scope: { kind: 'selection', text: selection.text }, passage: selection.text });
-      if (typeof body?.remaining === 'number') setAiRemaining(body.remaining);
-      if (body?.kind === 'answer') {
-        // It was a question after all: the answer goes where answers go.
-        setAskAiTurns((turns) => [...turns, { id: `${Date.now()}`, question: instruction, target: TDOC_AI, label: 'tdoc AI', kind: 'tdoc-ai', status: 'answered', answer: body.answer || '', askId: body.ask_id || null, public: false }]);
-        openAskRef.current?.();
-      } else if (!body?.suggestion) showToast('tdoc AI could not place an edit in that passage. Rephrase, or select a little more.', true);
-    } catch (error) { suggestFailed(error); }
-  };
   const suggestContext = suggestOn ? {
     enabled: true,
     pendingFor: suggestions.commentPending,
@@ -1638,7 +1617,9 @@ export function DocumentShell({ boot, config }) {
   const shareUrl = config.isLanding
     ? `${location.origin}/`
     : `${location.origin}/d/${encodeURIComponent(config.slug)}`;
-  const versionUrl = config.isLanding ? null : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
+  // With version history the link to one version lives in the panel (Share
+  // this version), not under Share.
+  const versionUrl = config.isLanding || historyEnabled ? null : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
 
   // While the owner waits on their agent, ask the server every few seconds
   // what it has done: read the comments (the card flips to "reading"), then
@@ -2111,7 +2092,6 @@ export function DocumentShell({ boot, config }) {
       onSubmit={postComment}
       onClose={closeComposer}
       onCopyToast={showToast}
-      onEditWithAi={suggestOn && !privateAskView ? editWithAi : null}
     />
   ) : null;
   return (
@@ -2129,6 +2109,7 @@ export function DocumentShell({ boot, config }) {
       <HandoffSendTransport.Provider value={demoBackend ? demoBackend.postNotifyHandoff : null}>
       <AgentMentionContext.Provider value={agentMentions}>
       <SuggestContext.Provider value={suggestContext}>
+      <CommentDocVersionContext.Provider value={historyFlag && config.mode === 'published' ? Number(config.version) : null}>
       <TopBar
         identity={config.identity}
         onboardingTest={config.debug ? {
@@ -2148,7 +2129,13 @@ export function DocumentShell({ boot, config }) {
           <LandingActions stars={config.stars} />
         </> : (
           !comparing && <>
-            <DocumentEdited config={config} onCompare={() => changeComparison(true)} />
+            <DocumentEdited
+              config={config}
+              onCompare={() => changeComparison(true)}
+              onHistory={historyEnabled ? () => changeHistory(!historyOpen) : null}
+              historyOpen={historyOpen}
+              disabled={editor.mode === 'edit' && editor.dirty}
+            />
             {askAiAction}
             <DocumentModeControl
               mode={editor.mode}
@@ -2178,6 +2165,7 @@ export function DocumentShell({ boot, config }) {
             onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
             onCompare={() => changeComparison(true)}
+            onHistory={historyEnabled ? () => changeHistory(true) : null}
           />
         )}
         onThemeChange={(nextTheme) => {
@@ -2220,6 +2208,17 @@ export function DocumentShell({ boot, config }) {
         {guestInviteStatus ? <span>{guestInviteStatus}</span> : null}
       </div> : null}
       {comparing ? <VersionDiffView config={config} theme={theme} narrow={narrow} onClose={() => changeComparison(false)} /> : null}
+      {historyOpen && !comparing ? (
+        <VersionHistory
+          config={config}
+          narrow={narrow}
+          theme={theme}
+          devMode={historyDevMode}
+          suggestions={suggestOn ? suggestions : null}
+          onClose={() => changeHistory(false)}
+          onToast={showToast}
+        />
+      ) : null}
 
       <DiagramDialog diagram={diagram} canApply={Boolean(config.canEdit)} onClose={() => setDiagram(null)}
         onApply={async (json, svg) => {
@@ -2234,7 +2233,7 @@ export function DocumentShell({ boot, config }) {
           setDiagram(null);
           showToast(`${diagram.isNew ? 'Diagram inserted' : 'Diagram applied'}. Save the document to publish a new version.`);
         }} />
-      <div className="tdoc-reader-surface" hidden={comparing}>
+      <div className="tdoc-reader-surface" hidden={comparing || historyOpen}>
       <OldVersionNotice value={boot.oldVersion || (liveLatest > Number(config.version) ? {
         current: Number(config.version),
         latest: liveLatest,
@@ -2310,7 +2309,7 @@ export function DocumentShell({ boot, config }) {
 
       <DocumentFooter visible={bridge.layout.footerVisible} />
 
-      {!narrow && commentFilterControl && !comparing ? (
+      {!narrow && commentFilterControl && !comparing && !historyOpen ? (
         <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.min(pinLeft - 4, window.innerWidth - 250) }}>
           <CommentListControls filter={commentFilterControl}
             unreadCount={autoReadEnabled ? unreadAgentReplies : 0}
@@ -2337,7 +2336,7 @@ export function DocumentShell({ boot, config }) {
         {demoBar && !drawerOpen ? <DemoRewriteBar state={demoRewriteState} agent={DEMO_AGENT.handle} onUndo={undoDemoRewrite} /> : null}
         <MobileCommentDrawer
           filter={commentFilterControl}
-          open={drawerOpen && !comparing}
+          open={drawerOpen && !comparing && !historyOpen}
           openCount={openCount}
           unread={mobileUnread}
           unreadCount={autoReadEnabled ? unreadAgentReplies : 0}
@@ -2529,14 +2528,15 @@ export function DocumentShell({ boot, config }) {
           {toast.text}
         </div>
       ) : null}
-      {suggestOn && !(narrow && (drawerOpen || composer)) && !comparing ? <SuggestReviewBar suggestions={suggestions} narrow={narrow} /> : null}
-      {suggestOn && suggestions.rect && !narrow && !comparing && !composer ? (() => {
+      {suggestOn && !(narrow && (drawerOpen || composer)) && !comparing && !historyOpen ? <SuggestReviewBar suggestions={suggestions} narrow={narrow} /> : null}
+      {suggestOn && suggestions.rect && !narrow && !comparing && !historyOpen && !composer ? (() => {
         const frameBox = bridge.frameRef.current?.getBoundingClientRect();
         const top = (frameBox?.top || frameTop) + suggestions.rect.docY - bridge.layout.scrollY + 6;
         if (top < (frameBox?.top || frameTop) || top > window.innerHeight - 120) return null;
         const left = Math.min(window.innerWidth - 120, (frameBox?.left || 0) + suggestions.rect.right - 40);
         return <SuggestInlineChip suggestions={suggestions} style={{ top, left }} />;
       })() : null}
+      </CommentDocVersionContext.Provider>
       </SuggestContext.Provider>
       </AgentMentionContext.Provider>
       </HandoffSendTransport.Provider>

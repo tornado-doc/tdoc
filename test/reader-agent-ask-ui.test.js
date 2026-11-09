@@ -174,10 +174,10 @@ async function touchSelect(page, phrase) {
     return { pop, row };
   };
   // No mode control (Julie, 2026-10-24): an agent that may only answer here
-  // gets one quiet "Answers only" line.
+  // shows Ask only ticked and locked.
   const answersOnly = async (pop) => {
     if (await pop.locator('.tdoc-ask-mode').count()) throw new Error('a mode control is back');
-    if (!(await pop.locator('.tdoc-ask-only-label', { hasText: 'Answers only' }).count())) throw new Error('no "Answers only" note');
+    if (!(await pop.locator('.tdoc-ask-only [role=checkbox][aria-checked="true"][data-disabled]').count())) throw new Error('no "Answers only" note');
   };
   try {
     await t("desktop, no agent: @ → tdoc AI first; Only me on: a private answer, then Make public posts it to the thread; the quota line is the asker's alone", async () => {

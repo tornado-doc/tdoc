@@ -197,6 +197,7 @@ async function loadWorker({ previewRenderer = false } = {}) {
   src = src.replace('/* __TDOC_NOTIFICATION_TEXT__ */', fs.readFileSync(path.join(root, 'shell', 'src', 'notification-text.js'), 'utf8').replace(/^export /gm, ''));
   src = src.replace('/* __TDOC_PREVIEW_VALIDATOR__ */', fs.readFileSync(path.join(root, 'server', 'preview', 'validate-svg.js'), 'utf8'));
   src = src.replace('/* __TDOC_HTML_PARSER__ */', () => fs.readFileSync(path.join(root, 'server', 'html-parser', 'parse5.js'), 'utf8'));
+  src = src.replace('/* __TDOC_VERSION_DIFF__ */', () => fs.readFileSync(path.join(root, 'server', 'version-diff.js'), 'utf8'));
   src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
   const sheets = require(path.join(root, 'server', 'sheets-source.js'));
   const sheetsJs = sheets.sheetsViewerSource();

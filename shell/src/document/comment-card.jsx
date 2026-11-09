@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreHorizontal, SmilePlus } from 'lucide-react';
@@ -10,7 +10,7 @@ import { usePortalContainer } from '../ui/portal.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
-import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
+import { AgentAskRow, AgentButton, AskOnlyToggle, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { agentForThread, targetKey } from './agent-choices.js';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, avatarInitial, QUICK_REACTIONS, tdocUrl } from './model.js';
@@ -259,7 +259,8 @@ function ReplyForm({
       if (v4) {
         // ⌘⇧Enter puts the default agent in, then sends. A named agent that
         // may edit gets the thread to answer or change; one that may not (or
-        // Only me) answers only, under this reply or to the asker alone.
+        // Ask only, or Only me) answers only, under this reply or to the asker
+        // alone.
         const out = ask.outgoing(sendToAgent);
         body = out.text;
         const recipient = canSendToAgent && out.target && !out.askOnly ? out.target : null;
@@ -329,6 +330,7 @@ function ReplyForm({
               {busy ? 'Posting…' : '@agent'}
             </button>
           ) : null}
+          {v4 ? <AskOnlyToggle ask={ask} busy={busy} /> : null}
           <button className="tdoc-reply-submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
             {busy ? 'Posting…' : 'Reply'}
           </button>
@@ -646,6 +648,12 @@ function ProductWhere({ anchor, origin }) {
     : <span className="tdoc-product-where">{label}</span>;
 }
 
+// The version the doc page shows (version history). A comment that lost its
+// place and was written on an older version says so: its text is gone from
+// this one, which is why it sits apart. Surfaces without versions (the
+// feedback overlay) provide nothing and the line never shows.
+export const CommentDocVersionContext = createContext(null);
+
 export function CommentCard({
   comment,
   currentUser,
@@ -692,6 +700,9 @@ export function CommentCard({
   const suggest = useContext(SuggestContext);
   const canReview = Boolean(suggest?.enabled) && !comment.resolved && comment.status !== 'applied' && !comment.deleted
     && suggest.pendingFor(comment.id);
+  const docVersion = useContext(CommentDocVersionContext);
+  const earlierVersion = Boolean(unanchored && docVersion && comment.anchor?.kind !== 'document'
+    && Number(comment.created_in) > 0 && Number(comment.created_in) < Number(docVersion));
   const thinkingId = asking?.thinking?.id;
   const askingHere = Boolean(thinkingId) && (thinkingId === comment.id || (comment.replies || []).some((r) => r.id === thinkingId));
   useEffect(() => { if (askingHere) setRepliesOpen(true); }, [askingHere]);
@@ -866,8 +877,10 @@ export function CommentCard({
         // tree, so choosing Edit or Delete arrived here as a click on the card.
         // In the phone drawer that meant "focus this comment", which closes the
         // drawer — the card appeared to jump away instead of opening an editor.
+        // A checkbox in the reply box (Only me, Ask only) is a <label>: the
+        // same, or ticking it closed the phone drawer.
         if (event.target instanceof Element
-          && event.target.closest('button, a, input, textarea, select, [role="button"], [role="menuitem"]')) return;
+          && event.target.closest('button, a, input, textarea, select, label, [role="button"], [role="menuitem"], [role="checkbox"]')) return;
         onActivate(comment.id);
       }}
     >
@@ -945,6 +958,7 @@ export function CommentCard({
         </div>
       </header>
       <ProductWhere anchor={comment.anchor} origin={productLinkOrigin} />
+      {earlierVersion ? <p className="tdoc-cc-earlier">Commented on an earlier version</p> : null}
       {editTarget === comment.id ? (
         <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />
       ) : (
