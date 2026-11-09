@@ -2,9 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Send, Share2 } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { Bookmarklet } from './feedback-install.jsx';
-import { SegmentedControl } from './ui/segmented-control.jsx';
 import { AppButton } from './ui/button.jsx';
-import { CommentCard } from './document/comment-card.jsx';
 import { ShareDialog } from './document/document-dialogs.jsx';
 import { OwnerAccessDialog } from './document/owner-access-dialog.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
@@ -13,9 +11,9 @@ import { composerAgents } from './document/ai-answerer.js';
 import { composerDefault } from './document/agent-choices.js';
 import { askOwnAgent, threadAskPick, useMyAgent } from './document/my-agent.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
-import { CommentListControls } from './document/comment-layer.jsx';
+import { CommentPanel } from './comments/panel/comment-panel.jsx';
 import { useCommentArea, useCommentListPrefs } from './comments/core/comment-area.js';
-import { filterOptions, groupBy } from './comments/core/comment-query.js';
+import { groupBy } from './comments/core/comment-query.js';
 import { useCommentFeed } from './comments/core/use-comment-feed.js';
 import {
   createComment, listComments, listMentionableUsers, listTeams, moveDocsToTeam, removeComment,
@@ -158,10 +156,7 @@ export function FeedbackSpace({ boot }) {
 
   const live = (comments || []).filter((c) => !c.deleted);
   const shown = area.shown;
-  // By app page (comment-query.js groupBy), as in the widget.
-  const groups = groupBy(shown, (c) => (c.anchor && c.anchor.url) || '');
   const ready = area.handoffBuckets.ready;
-  const unreadIds = new Set(area.unread.map((c) => c.id));
 
   return (
     <AgentMentionContext.Provider value={agentMentions}>
@@ -217,77 +212,57 @@ export function FeedbackSpace({ boot }) {
           </details>
         ) : null}
 
-        <div className="tdoc-fbspace-filter">
-          <CommentListControls
-            filter={<SegmentedControl
-              className="tdoc-comment-filter"
-              ariaLabel="Show"
-              value={filter}
-              onChange={setFilter}
-              options={filterOptions(area.counts).map(({ value, label }) => ({ value, label }))}
-            />}
-            unreadCount={area.unreadCount}
-            onMarkAllRead={area.markAllRead}
+        {notice ? <p className="muted" role="status">{notice}</p> : null}
+        {comments === null ? <p className="muted">Loading…</p> : (
+          // The same list as the widget and the doc page (comments/panel/),
+          // grouped by the app page each thread was left on.
+          <CommentPanel
+            area={area}
+            prefs={listPrefs}
+            className="tdoc-cpanel-inline tdoc-fbspace-list"
+            ariaLabel="Comments on the app"
+            title="Comments"
             onRefresh={feed.refresh}
             refreshing={feed.refreshing}
-            list={{ search: listPrefs.search, onSearch: listPrefs.setSearch, sort: listPrefs.sort, onSort: listPrefs.setSort }}
+            groups={groupBy(shown, (c) => (c.anchor && c.anchor.url) || '').map(({ key, items }) => ({
+              key, items, title: key || undefined, href: key || undefined, label: key ? pathOf(key) : 'Elsewhere',
+            }))}
+            empty={<p className="tdoc-cpanel-empty">{filter === 'all' ? 'No comments yet.' : `Nothing ${filter}.`}</p>}
+            selectedId={openId}
+            onNavigate={(id) => setOpenId(id)}
+            cardProps={{
+              currentUser: (identity && identity.login) || 'anon',
+              handoffViewer: viewerKeys,
+              isOwner: Boolean(isOwner),
+              mentionable,
+              canSendToAgent,
+              onMarkRead: area.markRead,
+              onReply: async (parentId, text, opts = {}) => {
+                if (!canComment) { setNotice('Join to reply.'); return false; }
+                let made = null;
+                const ok = await act(async () => { made = await createComment({ slug, version, text, parent_id: parentId }); });
+                if (ok && opts.sendToAgent && canSendToAgent) {
+                  const target = opts.handoffCommentId || (made && made.id);
+                  if (target) await act(() => sendOneCommentToAgent(slug, target, opts.recipient));
+                }
+                // Their own agent (or their team's) answers the reply they
+                // just wrote (only a comment of theirs may ask it).
+                const own = threadAskPick(opts);
+                if (ok && own && made && made.id) {
+                  const sent = await askOwnAgent(slug, made.id, own);
+                  if (sent.ask) myAgent.addAsk(sent.ask);
+                  setNotice(sent.message);
+                }
+                return ok;
+              },
+              onReact: (id, emoji) => act(() => toggleReaction({ slug, version, comment_id: id, emoji })),
+              onDelete: (id) => act(() => removeComment(slug, version, id)),
+              onResolve: (id, resolved) => act(() => setCommentResolved({ slug, version, id, resolved })),
+              onEdit: (id, text) => act(() => updateCommentText({ slug, version, id, text })),
+              onReanchor: () => setNotice('Move a comment from the app: open it there and use Move anchor.'),
+            }}
           />
-        </div>
-
-        {notice ? <p className="muted" role="status">{notice}</p> : null}
-        {comments === null ? <p className="muted">Loading…</p> : null}
-        {comments !== null && !shown.length ? (
-          <p className="empty">{listPrefs.search ? 'No comments match.' : filter === 'all' ? 'No comments yet.' : `Nothing ${filter}.`}</p>
-        ) : null}
-
-        {groups.map(({ key: url, items: list }) => (
-          <section key={url} className="tdoc-fbspace-group">
-            <h2 title={url}>{url ? <a href={url} target="_blank" rel="noopener noreferrer">{pathOf(url)}</a> : 'Elsewhere'}</h2>
-            <div className="tdoc-fbspace-list">
-              {list.map((c) => (
-                <CommentCard
-                  key={c.id}
-                  comment={c}
-                  currentUser={(identity && identity.login) || 'anon'}
-                  handoffViewer={viewerKeys}
-                  isOwner={Boolean(isOwner)}
-                  mentionable={mentionable}
-                  canSendToAgent={canSendToAgent}
-                  unanchored={false}
-                  selected={openId === c.id}
-                  expandReplies={openId === c.id}
-                  unread={unreadIds.has(c.id)}
-                  onSeen={area.onSeen}
-                  onMarkRead={area.markRead}
-                  onActivate={(id) => setOpenId(id)}
-                  onReply={async (parentId, text, opts = {}) => {
-                    if (!canComment) { setNotice('Join to reply.'); return false; }
-                    let made = null;
-                    const ok = await act(async () => { made = await createComment({ slug, version, text, parent_id: parentId }); });
-                    if (ok && opts.sendToAgent && canSendToAgent) {
-                      const target = opts.handoffCommentId || (made && made.id);
-                      if (target) await act(() => sendOneCommentToAgent(slug, target, opts.recipient));
-                    }
-                    // Their own agent answers the reply they just wrote (only
-                    // a comment of theirs may ask it).
-                    const own = threadAskPick(opts);
-                    if (ok && own && made && made.id) {
-                      const sent = await askOwnAgent(slug, made.id, own);
-                      if (sent.ask) myAgent.addAsk(sent.ask);
-                      setNotice(sent.message);
-                    }
-                    return ok;
-                  }}
-                  onReact={(id, emoji) => act(() => toggleReaction({ slug, version, comment_id: id, emoji }))}
-                  onDelete={(id) => act(() => removeComment(slug, version, id))}
-                  onResolve={(id, resolved) => act(() => setCommentResolved({ slug, version, id, resolved }))}
-                  onEdit={(id, text) => act(() => updateCommentText({ slug, version, id, text }))}
-                  onReanchor={() => setNotice('Move a comment from the app: open it there and use Move anchor.')}
-                />
-              ))}
-            </div>
-          </section>
-        ))}
+        )}
 
         <p className="muted tdoc-fbspace-foot"><a href="/me?tab=feedback">All your feedback</a> · <a href={docUrl}>Open as a document</a></p>
       </main>

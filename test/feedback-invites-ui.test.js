@@ -291,7 +291,7 @@ async function startSite(state) {
             assert.equal(await w.env.META.get(`feedback:invite-choice:bob:${w.space.slug}`), 'kept');
             // The list's header is the switcher.
             await root.locator('.tdoc-feedback-dock button', { hasText: 'open' }).click();
-            const switcher = root.locator('.tdoc-fb-panel .tdoc-fb-space');
+            const switcher = root.locator('.tdoc-fb-list .tdoc-fb-space');
             await switcher.waitFor();
             assert.equal((await switcher.innerText()).trim(), 'My space');
             await switcher.click();
