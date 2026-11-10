@@ -366,7 +366,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   assert(tiles.join('|') === 'Claude|ChatGPT|Grok|Cursor|VS Code|Claude Code|Codex|Gemini CLI|Grok Bot|Raft', `setup tiles: ${tiles.join('|')}`);
   assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-claude"/.test(setup), 'Claude Code does not show the Claude mark');
   assert(!/#i-terminal"|#i-code"/.test(setup + pick), 'a generic terminal or code icon stands in for an app');
-  assert(/sign in once/.test(setup), 'setup does not say you sign in once');
+  assert(/sign in once/i.test(setup), 'setup does not say you sign in once');
 });
 
 console.log('tdoc.dev / route');
