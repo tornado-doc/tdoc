@@ -38,8 +38,8 @@ t('side tabs switch slides with CSS only, without jumping the page', () => {
   const labels = [...work.matchAll(/<label for="(hd-r-[a-z]+)">/g)].map((m) => m[1]);
   assert(radios.length === 3 && radios.join() === labels.join(), `tabs ${labels} do not match radios ${radios}`);
   assert(/id="hd-r-doc" checked/.test(work), 'the first tab starts selected');
-  for (const [r, x] of [['hd-r-sheet', '-100%'], ['hd-r-bookmark', '-200%']]) {
-    assert(work.includes(`#${r}:checked ~ .hd-stage .hd-track{transform:translateX(${x})}`), `${r} does not move the track`);
+  for (const [r, x] of [['hd-r-sheet', '1'], ['hd-r-bookmark', '2']]) {
+    assert(work.includes(`#${r}:checked ~ .hd-stage .hd-track{--at:${x}}`), `${r} does not move the slides`);
   }
 });
 
