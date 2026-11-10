@@ -43,7 +43,7 @@ import {
 } from './document/document-toolbar.jsx';
 import {
   EditorToolbar,
-
+  availableModes,
   DocumentModeControl,
   LinkDialog,
   SaveConflictDialog,
@@ -1915,6 +1915,8 @@ export function DocumentShell({ boot, config }) {
   // Open / Resolved / All, in the comments area (it was a switch in the bar).
   // Only when there is something to filter.
   const openCount = commentArea.openCount;
+  // Read / Comment / Edit, at the top of ⋯ (document-toolbar.jsx).
+  const modeOptions = availableModes({ canComment: config.canComment, canEdit: config.canEdit, signInToComment: Boolean(config.signInToComment) });
   const mobileUnread = commentArea.unreadCount > 0;
   const startDocumentComment = (askAi = false) => {
     if (!config.canComment && !config.signInToComment) return;
@@ -2133,6 +2135,7 @@ export function DocumentShell({ boot, config }) {
   return (
     <div
       className="tdoc-document-app"
+      data-mode={editor.mode}
       data-visual-open={visualOpen || undefined}
       data-presenting={(visualOpen && presenting) || undefined}
       onPointerDown={() => {
@@ -2174,21 +2177,34 @@ export function DocumentShell({ boot, config }) {
             />
             {askAiAction}
             {!narrow && sidePanelAvailable ? (
-              // The comment list beside the doc: one toggle, its count on it.
+              // One Comment button, its open count on it: it opens and closes
+              // the comment list beside the doc. A new comment starts there
+              // (+ New comment), from a selection, or with double-tap Option.
+              // The Read / Comment / Edit switch that sat beside it read as a
+              // second comment button (Julie, 2026-11-10); it heads ⋯ now.
               <AppButton variant="quiet" className="tdoc-comments-toggle" aria-pressed={sidePanelOpen ? 'true' : 'false'}
-                aria-label={sidePanelOpen ? 'Hide the comment list' : `Show the comment list${openCount ? ` (${openCount} open)` : ''}`}
-                title={sidePanelOpen ? 'Hide the comment list' : 'Show the comment list'}
-                onClick={() => setSidePanel(!sidePanelOpen)}>
-                <CommentIcon size={16} outline />{openCount ? <span className="tdoc-comments-toggle-count">{openCount}</span> : null}
+                aria-label={`Comment${openCount ? ` (${openCount} open)` : ''}`}
+                title={sidePanelOpen ? 'Hide comments' : 'Show comments'}
+                onClick={() => {
+                  if (!sidePanelOpen && editor.mode === 'read') editor.changeMode('comment');
+                  setSidePanel(!sidePanelOpen);
+                }}>
+                <CommentIcon size={16} outline />
+                <span className="tdoc-comments-toggle-label">Comment</span>
+                {openCount ? <span className="tdoc-comments-toggle-count">{openCount}</span> : null}
               </AppButton>
             ) : null}
-            <DocumentModeControl
-              mode={editor.mode}
-              canComment={config.canComment}
-              canEdit={config.canEdit}
-              signInToComment={Boolean(config.signInToComment)}
-              onChange={(value) => editor.changeMode(value)}
-            />
+            {/* Only the "Read only" note is left in the bar: a doc that takes
+                no comments and no edits has no mode to switch to. */}
+            {modeOptions.length < 2 ? (
+              <DocumentModeControl
+                mode={editor.mode}
+                canComment={config.canComment}
+                canEdit={config.canEdit}
+                signInToComment={Boolean(config.signInToComment)}
+                onChange={(value) => editor.changeMode(value)}
+              />
+            ) : null}
             <DocumentPrimaryAction
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}
@@ -2211,6 +2227,7 @@ export function DocumentShell({ boot, config }) {
             onDelete={() => setDialog({ type: 'delete' })}
             onCompare={() => changeComparison(true)}
             onHistory={historyEnabled ? () => changeHistory(true) : null}
+            mode={{ modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
           />
         )}
         onThemeChange={(nextTheme) => {

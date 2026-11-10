@@ -81,7 +81,7 @@ export function CommentListControls({ filter, unreadCount = 0, onMarkAllRead = n
 export function CommentPanel({
   area, prefs, groups,
   title = 'Comments', titleSlot = null,
-  onAdd = null, addLabel = 'Comment',
+  onAdd = null, addLabel = 'New comment',
   onRefresh = null, refreshing = false,
   onClose = null, closeLabel = 'Close comments',
   empty = null,

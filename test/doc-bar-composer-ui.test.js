@@ -19,6 +19,7 @@
 const fs = require('fs');
 const http = require('http');
 const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
+const { chooseMode, modeSelector } = require('./helpers/doc-mode');
 const { loadWorker, makeEnv, issue } = require('./helpers/worker-harness');
 const browserEdit = (env, slug, login) => {
   // A person's last edit in the browser (what the editor stamps), so the
@@ -181,8 +182,7 @@ async function dragSelect(page, phrase) {
       }));
       if (!ownSelection.painted) throw new Error(`Comment point lost tdoc highlight: ${JSON.stringify(ownSelection)}`);
       await page.locator('.tdoc-popup .x').click();
-      await page.locator('.tdoc-mode-trigger').click();
-      await page.getByRole('menuitemradio', { name: /Read/ }).click();
+      await chooseMode(page, 'Read');
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'read');
       await page.mouse.click(box.x + point.x, box.y + point.y);
       if (await page.locator('.tdoc-popup').count()) throw new Error('Read point opened Comment composer');
@@ -234,19 +234,18 @@ async function dragSelect(page, phrase) {
       const buttonCopy = await page.evaluate(() => navigator.clipboard.readText());
       if (buttonCopy !== selected) throw new Error(`quote icon copied ${JSON.stringify(buttonCopy)}`);
       await pop.locator('.x').click();
-      await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
-      await page.getByRole('menuitemradio', { name: /Read/ }).click();
-      await page.locator('.tdoc-bar .tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await chooseMode(page, 'Read');
+      await page.locator(modeSelector('read')).waitFor();
       await page.waitForFunction(() => localStorage.getItem('tdoc-mode:launch-plan:julie') === 'read');
       await page.reload();
-      await page.locator('.tdoc-bar .tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await page.locator(modeSelector('read')).waitFor();
       await context.close();
     });
 
     await t('phone Comment selection opens the old composer immediately and can copy its quote', async () => {
       const { context, page } = await open(julie, 'launch-plan', true);
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-      await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
+      await page.locator(modeSelector('comment')).waitFor();
       const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
       await frame.evaluate(() => {
@@ -267,24 +266,21 @@ async function dragSelect(page, phrase) {
       await pop.getByRole('button', { name: 'Close' }).click();
       await pop.waitFor({ state: 'detached' });
       await frame.waitForFunction(() => !getSelection().toString() && !window.CSS?.highlights?.has('tdoc-pending') && !window.CSS?.highlights?.has('tdoc-selecting'));
-      await page.locator('.tdoc-mode-trigger').click();
-      await page.getByRole('menuitemradio', { name: /Read/ }).click();
+      await chooseMode(page, 'Read');
       await page.reload();
-      await page.locator('.tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await page.locator(modeSelector('read')).waitFor();
       await page.goto(`${base}/d/own-agent-draft`);
-      await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
+      await page.locator(modeSelector('comment')).waitFor();
       await context.close();
     });
 
     await t('signed-out desktop can select, copy, and draft before sign-in, then resume the draft', async () => {
       const { context, page } = await open(null, 'launch-plan');
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-      await page.locator('.tdoc-mode-trigger').click();
-      await page.getByRole('menuitemradio', { name: 'Read' }).click();
-      await page.locator('.tdoc-mode-trigger[data-mode="read"]').waitFor();
-      await page.locator('.tdoc-mode-trigger').click();
-      await page.getByRole('menuitemradio', { name: 'Comment' }).click();
-      await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
+      await chooseMode(page, 'Read');
+      await page.locator(modeSelector('read')).waitFor();
+      await chooseMode(page, 'Comment');
+      await page.locator(modeSelector('comment')).waitFor();
       await dragSelect(page, 'Billing ships first');
       if (await page.getByRole('dialog', { name: 'Sign in with GitHub' }).count()) throw new Error('desktop selection opened sign-in');
       const pop = page.locator('.tdoc-popup');
@@ -339,7 +335,7 @@ async function dragSelect(page, phrase) {
         const context = await browser.newContext({ ...devices['iPhone 13'], defaultBrowserType: undefined });
         const page = await context.newPage();
         await page.goto(`${base}/d/launch-plan`);
-        await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
+        await page.locator(modeSelector('comment')).waitFor();
         const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
         await frame.evaluate(() => {
           const node = document.querySelector('p').firstChild;
@@ -359,13 +355,29 @@ async function dragSelect(page, phrase) {
       } finally { await browser.close(); }
     });
 
-    await t('desktop bar: logo · title; Edited · ✈ · Share · ⋯ · space chip · avatar; mode switch in the bar; the filter heads the comments', async () => {
+    await t('desktop bar: logo · title; Edited · Ask AI · Comment N · Share · ⋯ · space chip · avatar; one Comment button, the modes head ⋯; the filter heads the comments', async () => {
       const { context, page } = await open(julie, 'launch-plan');
       await page.locator('.tdoc-bar .tdoc-space-trigger', { hasText: 'My docs' }).waitFor();
       if (await page.locator('.tdoc-crumbs, .tdoc-crumb').count()) throw new Error('space / folder crumbs are back');
       if (!(await page.locator('.tdoc-bar-left .doc-title').isVisible())) throw new Error('no title on the left');
       if (await page.locator('#tdoc-show-resolved, #tdoc-theme-btn, #tdoc-star-btn').count()) throw new Error('an old bar control is back');
-      if (!(await page.locator('.tdoc-bar .tdoc-mode-trigger').isVisible())) throw new Error('the mode switch is not in the bar');
+      // One comment entry in the bar (Julie, 2026-11-10): "Comment" with the
+      // open count, opening the comment list. No mode dropdown beside it.
+      if (await page.locator('.tdoc-bar .tdoc-mode-trigger').count()) throw new Error('the mode switch is back in the bar beside Comment');
+      const comment = page.locator('.tdoc-bar .tdoc-comments-toggle');
+      if ((await comment.innerText()).replace(/\s+/g, ' ').trim() !== 'Comment 1') throw new Error(`the Comment button reads ${JSON.stringify(await comment.innerText())}`);
+      if (await page.locator('.tdoc-bar button', { hasText: /^\s*Comment/ }).count() !== 1) throw new Error('more than one Comment button in the bar');
+      await comment.click();
+      const side = page.locator('.tdoc-doc-side');
+      await side.waitFor();
+      if (await comment.getAttribute('aria-pressed') !== 'true') throw new Error('Comment did not show as open');
+      // A new comment starts in the panel: + New comment enters the pick.
+      await side.getByRole('button', { name: 'New comment' }).click();
+      const pickFrame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+      await pickFrame.waitForFunction(() => document.documentElement.hasAttribute('data-tdoc-picking'), null, { timeout: 5000 });
+      await page.keyboard.press('Escape');
+      await comment.click();
+      await side.waitFor({ state: 'detached' });
       if (!/^Edited /.test((await page.locator('#tdoc-version-toggle').textContent()).trim())) throw new Error('no Edited …');
       await page.locator('#tdoc-send-agent-btn').waitFor();
       desktopAskIcon = await page.locator('#tdoc-send-agent-btn .tdoc-ask-ai-mark').evaluate((el) => el.outerHTML);
@@ -377,12 +389,13 @@ async function dragSelect(page, phrase) {
       });
       if (askStyle.background !== 'rgba(0, 0, 0, 0)' || askStyle.border !== '0px') throw new Error(`Ask AI has a pill: ${JSON.stringify(askStyle)}`);
       if (await page.locator('.tdoc-account-trigger .name').isVisible()) throw new Error('the avatar shows a name');
-      await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
-      await page.getByRole('menuitemradio', { name: /Comment/ }).waitFor();
-      await page.getByRole('menuitemradio', { name: /Read/ }).waitFor();
-      await page.getByRole('menuitemradio', { name: /Edit/ }).click();
-      await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
-      if (await page.getByRole('menuitemradio', { name: /Edit/ }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from the bar');
+      await page.locator('.tdoc-bar #tdoc-more-btn').click();
+      await page.getByRole('menuitemradio', { name: 'Comment', exact: true }).waitFor();
+      await page.getByRole('menuitemradio', { name: 'Read', exact: true }).waitFor();
+      await page.getByRole('menuitemradio', { name: 'Edit', exact: true }).click();
+      await page.locator(modeSelector('edit')).waitFor();
+      await page.locator('.tdoc-bar #tdoc-more-btn').click();
+      if (await page.getByRole('menuitemradio', { name: 'Edit', exact: true }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from ⋯');
       await page.keyboard.press('Escape');
       const filter = page.locator('.tdoc-comment-filter');
       await filter.waitFor();

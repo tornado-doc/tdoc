@@ -18,6 +18,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { requirePlaywrightOrSkip, reservePort } = require('./helpers/fixture-server');
+const { chooseMode, modeSelector } = require('./helpers/doc-mode');
 const { chromium } = requirePlaywrightOrSkip('sheets-ui.test.js');
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 const SHOTS = process.env.TDOC_TEST_SCREENSHOTS || '';
@@ -321,7 +322,7 @@ async function shot(page, name, opts = {}) {
     await test('a cell comment anchors to the row id and stays on its cell through a sort', async () => {
       const frame = await open('tracker');
       const f = frameLoc();
-      await page.getByRole('button', { name: /Document mode:/ }).waitFor();
+      await page.locator(modeSelector('comment')).waitFor();
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
       await f.locator('.ts-row[data-i="4"] .ts-c[data-c="1"]').click();
       await f.getByRole('button', { name: 'Comment on Tasks!B5' }).click();
@@ -356,8 +357,7 @@ async function shot(page, name, opts = {}) {
       const marked = () => frame.evaluate(() => Array.from(document.querySelectorAll('.ts-c.has-comment')).map((c) => [c.parentElement.querySelector('[data-c="0"]').textContent, c.getAttribute('data-c'), document.querySelectorAll('.ts-h b')[Number(c.getAttribute('data-c'))].textContent]));
       await frame.waitForFunction(() => document.querySelectorAll('.ts-c.has-comment').length === 1);
       assert(JSON.stringify(await marked()) === '[["Task 5","1","Owner"]]', JSON.stringify(await marked()));
-      await page.getByRole('button', { name: /Document mode:/ }).click();
-      await page.getByRole('menuitemradio', { name: 'Edit' }).click();
+      await chooseMode(page, 'Edit');
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'edit');
       await f.getByRole('button', { name: 'Owner column menu' }).click();
       await f.getByRole('menuitem', { name: 'Insert column left' }).click();
@@ -395,9 +395,7 @@ async function shot(page, name, opts = {}) {
     await test('Edit mode: edit a cell, pick a tag, add a row, paste a range, undo; Save writes a new version', async () => {
       const frame = await open('editable');
       const f = frameLoc();
-      const trigger = page.getByRole('button', { name: /Document mode:/ });
-      await trigger.click();
-      await page.getByRole('menuitemradio', { name: 'Edit' }).click();
+      await chooseMode(page, 'Edit');
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'edit');
       await f.getByRole('button', { name: 'Add row' }).waitFor();
       // Type over a cell.
@@ -670,9 +668,7 @@ async function shot(page, name, opts = {}) {
       assert(searchMs < 600, `search took ${searchMs.toFixed(0)}ms past its debounce`);
       await shot(page, 'sheet-10k-desktop');
       // Edit one cell and Save: a new version of a multi-megabyte sheet.
-      const trigger = page.getByRole('button', { name: /Document mode:/ });
-      await trigger.click();
-      await page.getByRole('menuitemradio', { name: 'Edit' }).click();
+      await chooseMode(page, 'Edit');
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'edit');
       await frame.evaluate(() => { const i = document.querySelector('.ts-search input'); i.value = ''; i.dispatchEvent(new Event('input')); });
       await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '10,000 rows');
