@@ -1,5 +1,5 @@
-// The homepage hero shows a screenshot of a real published tdoc, linking to
-// the live doc. It replaced a CSS mock of the product (#964). The screenshot
+// The homepage hero shows screenshots of real tdoc surfaces (a doc, a sheet,
+// the bookmark on a web app), each linking to the real thing. It replaced a CSS mock of the product (#964). The screenshot
 // is inline because the release payload ships index.html only.
 const fs = require('fs');
 const path = require('path');
@@ -17,15 +17,26 @@ const work = fs.readFileSync(path.join(root, 'landing', 'tornado-doc', `v${lates
 
 console.log('landing real doc');
 
-t('the hero is a real published doc screenshot that links to it', () => {
-  const after = work.slice(work.indexOf('<a class="hd-real"'));
-  const a = after.match(/<a class="hd-real" href="([^"]+)">([\s\S]*?)<\/a>/);
-  assert(a, 'missing the .hd-real link under the demo');
-  assert(/^\/d\/[a-z0-9-]+$/.test(a[1]), `the real doc link should be a /d/<slug> path, got ${a[1]}`);
-  const img = a[2].match(/<img src="data:image\/(webp|jpeg|png);base64,([A-Za-z0-9+\/=]+)"[^>]*>/);
-  assert(img, 'the screenshot must be inline (the release payload ships index.html only)');
-  assert(img[2].length < 250000, `the screenshot is ${img[2].length} base64 chars; keep it under 250k`);
-  assert(/alt="[^"]{20,}"/.test(a[2]) && /width="\d+" height="\d+"/.test(a[2]), 'the screenshot needs alt text and a size');
+t('the hero is a row of real screenshots, each linking to the real thing', () => {
+  const links = [...work.matchAll(/<a class="hd-real" href="([^"]+)">([\s\S]*?)<\/a>/g)];
+  assert(links.length === 3, `expected 3 hero slides (doc, sheet, any web app), got ${links.length}`);
+  for (const [, href, body] of links) {
+    assert(/^\/d\/[a-z0-9-]+$/.test(href) || href === '/feedback', `a slide should link to a /d/<slug> doc or /feedback, got ${href}`);
+    const img = body.match(/<img src="data:image\/(webp|jpeg|png);base64,([A-Za-z0-9+\/=]+)"[^>]*>/);
+    assert(img, `${href}: the screenshot must be inline (the release payload ships index.html only)`);
+    assert(img[2].length < 250000, `${href}: the screenshot is ${img[2].length} base64 chars; keep it under 250k`);
+    assert(/alt="[^"]{20,}"/.test(body) && /width="\d+" height="\d+"/.test(body), `${href}: the screenshot needs alt text and a size`);
+  }
+  assert(links[0][1] === '/d/maui-trip', 'the first slide is the Maui doc');
+});
+
+t('the slides swipe with CSS only, and every tab reaches its slide', () => {
+  assert(/\.hd-track\{[^}]*overflow-x:auto[^}]*scroll-snap-type:x mandatory/.test(work), 'the track must scroll sideways and snap');
+  const tabs = [...work.matchAll(/<nav class="hd-tabs"[^>]*>([\s\S]*?)<\/nav>/g)];
+  assert(tabs.length === 1, 'the fallback tabs are missing');
+  const targets = [...tabs[0][1].matchAll(/href="#([a-z-]+)"/g)].map((m) => m[1]);
+  const slides = [...work.matchAll(/<figure class="hd-slide" id="([a-z-]+)" data-label="([^"]+)">/g)].map((m) => m[1]);
+  assert(targets.length === 3 && targets.join() === slides.join(), `tabs ${targets} do not match slides ${slides}`);
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);
