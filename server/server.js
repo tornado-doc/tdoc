@@ -45,6 +45,12 @@ const SHELL_RUNTIME = loadRuntimeAssets();
 // Slugs that carry the onboarding modal. Product UI, injected under the same
 // nonce as the overlay, because a doc's own <script> never runs.
 const ONBOARD_SLUGS = new Set(['tornado-doc', 'tdoc-start']);
+// The site pages (the worker's SITE_PATHS) and their share card: a designed
+// 1200x630 PNG in assets/, drawn from tools/home-card/card.html. Same path and
+// alt as worker HOME_CARD_PATH / HOME_CARD_ALT (test/no-drift.test.js).
+const SITE_PAGE_SLUGS = new Set(['tornado-doc', 'tdoc-start', 'tdoc-templates', 'tdoc-pricing', 'tdoc-privacy']);
+const HOME_CARD_PATH = '/tdoc_home-card-v1.png';
+const HOME_CARD_ALT = 'tdoc: Your AI-native docs. Agents draft, you comment, they rewrite. A doc with a margin comment that Claude answered and applied.';
 // ---- onboarding (shared with server.js; test/no-drift.test.js pins these) ----
 // A step is a timestamp, never a boolean: resuming reads the first one that is
 // empty, the checklist renders from the same object, and the funnel is read
@@ -1235,13 +1241,17 @@ function shellDocument(slug, version, nonce, reqUrl) {
     }
   } catch {}
   const description = (SHELL.excerptFromHtml && SHELL.excerptFromHtml(rawHtml, 180)) || '';
+  // The site pages share the designed 1200x630 card, as on the worker
+  // (HOME_CARD_PATH there); every other local doc keeps the square logo.
+  const isSitePage = SITE_PAGE_SLUGS.has(slug);
   const seo = pageUrl ? {
     title: isLanding ? 'Tornado: AI Native Docs' : title,
     description: isLanding
       ? 'Your AI-native docs. Agents draft; you comment; they rewrite. Open source and free.'
       : (description || 'A local tdoc.'),
     url: pageUrl,
-    image: `${new URL(pageUrl).origin}/tdoc_logo-v2.png`,
+    image: `${new URL(pageUrl).origin}${isSitePage ? HOME_CARD_PATH : '/tdoc_logo-v2.png'}`,
+    ...(isSitePage ? { image_large: true, image_width: 1200, image_height: 630, image_alt: HOME_CARD_ALT } : {}),
     type: isLanding ? 'website' : 'article',
   } : null;
   return SHELL.shellHtml({
@@ -1755,6 +1765,14 @@ const server = http.createServer(async (req, res) => {
       'Content-Type': 'image/svg+xml; charset=utf-8',
       'Cache-Control': 'public, max-age=86400',
       'X-Content-Type-Options': 'nosniff',
+    });
+  }
+  if (p === HOME_CARD_PATH && (req.method === 'GET' || req.method === 'HEAD')) {
+    const cardPath = path.join(__dirname, '..', 'assets', HOME_CARD_PATH.slice(1));
+    if (!fs.existsSync(cardPath)) return send(res, 404, 'not found');
+    return send(res, 200, req.method === 'HEAD' ? '' : fs.readFileSync(cardPath), {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=31536000, immutable',
     });
   }
   if (p === '/tdoc_logo.png' || p === '/tdoc_logo-v2.png') {

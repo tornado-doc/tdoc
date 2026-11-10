@@ -306,6 +306,41 @@ function waitReady(port, ms = 5000) {
     if (r.body[0] !== 0x89 || r.body[1] !== 0x50) throw new Error('body is not PNG');
   });
 
+  await t('GET /tdoc_home-card-v1.png is the 1200x630 site share card', async () => {
+    const r = await rawGet('/tdoc_home-card-v1.png');
+    if (r.status !== 200) throw new Error(`status ${r.status}`);
+    if (!String(r.headers['content-type'] || '').includes('image/png')) throw new Error(`content-type ${r.headers['content-type']}`);
+    if (r.body[0] !== 0x89 || r.body[1] !== 0x50) throw new Error('body is not PNG');
+    if (r.body.readUInt32BE(16) !== 1200 || r.body.readUInt32BE(20) !== 630) throw new Error('card is not 1200x630');
+  });
+
+  // Site pages share the large designed card; any other doc without a card
+  // keeps the square logo with twitter:card=summary.
+  await t('site pages use the large home card; a plain doc keeps the logo', async () => {
+    for (const site of ['tornado-doc', 'tdoc-pricing']) {
+      fs.mkdirSync(path.join(TMP_DIR, site, 'v1'), { recursive: true });
+      fs.writeFileSync(path.join(TMP_DIR, site, 'v1', 'index.html'), `<h1>${site}</h1><p>Body.</p>`);
+      fs.writeFileSync(path.join(TMP_DIR, site, 'meta.json'), JSON.stringify({ title: site, versions: [{ n: 1 }] }));
+    }
+    // The local shell builds absolute URLs on http://127.0.0.1 (no port).
+    const origin = 'http://127.0.0.1';
+    for (const site of ['tornado-doc', 'tdoc-pricing']) {
+      const page = (await rawGet(`/d/${site}/v/1`)).body.toString('utf8');
+      for (const needle of [
+        `property="og:image" content="${origin}/tdoc_home-card-v1.png"`,
+        'property="og:image:width" content="1200"',
+        'property="og:image:height" content="630"',
+        'name="twitter:card" content="summary_large_image"',
+        `name="twitter:image" content="${origin}/tdoc_home-card-v1.png"`,
+        'name="twitter:image:alt" content="tdoc: Your AI-native docs.',
+      ]) if (!page.includes(needle)) throw new Error(`${site} missing ${needle}`);
+    }
+    const doc = (await rawGet(`/d/${SLUG}/v/1`)).body.toString('utf8');
+    if (!doc.includes(`property="og:image" content="${origin}/tdoc_logo-v2.png"`)) throw new Error('plain doc lost the logo fallback');
+    if (!doc.includes('name="twitter:card" content="summary"')) throw new Error('plain doc should stay summary');
+    if (/tdoc_home-card|og:image:width|twitter:image:alt/.test(doc)) throw new Error('plain doc took the home card tags');
+  });
+
   // Cleanup: kill the spawned server + remove the temp dir.
   shutdown();
 
