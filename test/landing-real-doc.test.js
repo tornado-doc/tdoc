@@ -30,13 +30,17 @@ t('the hero is a row of real screenshots, each linking to the real thing', () =>
   assert(links[0][1] === '/d/maui-trip', 'the first slide is the Maui doc');
 });
 
-t('the slides swipe with CSS only, and every tab reaches its slide', () => {
-  assert(/\.hd-track\{[^}]*overflow-x:auto[^}]*scroll-snap-type:x mandatory/.test(work), 'the track must scroll sideways and snap');
-  const tabs = [...work.matchAll(/<nav class="hd-tabs"[^>]*>([\s\S]*?)<\/nav>/g)];
-  assert(tabs.length === 1, 'the fallback tabs are missing');
-  const targets = [...tabs[0][1].matchAll(/href="#([a-z-]+)"/g)].map((m) => m[1]);
-  const slides = [...work.matchAll(/<figure class="hd-slide" id="([a-z-]+)" data-label="([^"]+)">/g)].map((m) => m[1]);
-  assert(targets.length === 3 && targets.join() === slides.join(), `tabs ${targets} do not match slides ${slides}`);
+t('side tabs switch slides with CSS only, without jumping the page', () => {
+  // Radio + label, not #fragment links: a fragment link scrolls the page to
+  // the slide, which reads as the page jumping up (Safari, 2026-11-09).
+  assert(!/<a href="#hd-/.test(work), 'a fragment link would scroll the page when a tab is clicked');
+  const radios = [...work.matchAll(/<input class="hd-r" type="radio" name="hd-ex" id="(hd-r-[a-z]+)"/g)].map((m) => m[1]);
+  const labels = [...work.matchAll(/<label for="(hd-r-[a-z]+)">/g)].map((m) => m[1]);
+  assert(radios.length === 3 && radios.join() === labels.join(), `tabs ${labels} do not match radios ${radios}`);
+  assert(/id="hd-r-doc" checked/.test(work), 'the first tab starts selected');
+  for (const [r, x] of [['hd-r-sheet', '-100%'], ['hd-r-bookmark', '-200%']]) {
+    assert(work.includes(`#${r}:checked ~ .hd-stage .hd-track{transform:translateX(${x})}`), `${r} does not move the track`);
+  }
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);
