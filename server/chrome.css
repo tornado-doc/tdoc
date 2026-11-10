@@ -1621,9 +1621,12 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
 .tdoc-sheet-content { flex: 1 1 auto; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
 .tdoc-sheet-content .tdoc-cpanel-scroll { overflow: visible; }
 .tdoc-sheet-content .tdoc-cpanel-head { position: sticky; top: 0; z-index: 1; background: var(--td-ground, #fff); }
-/* The doc bar's comment-list toggle: the comment mark and the open count. */
-.tdoc-comments-toggle { gap: 5px; }
-.tdoc-comments-toggle[aria-pressed="true"] { color: var(--td-accent, #1652f0); background: var(--td-accent-wash, rgba(22,82,240,.06)); }
-.tdoc-comments-toggle-count { font-variant-numeric: tabular-nums; }
+/* The doc bar's one Comment button: the comment mark, the word and the open
+   count. It opens the comment list; it reads like its neighbours Ask AI and
+   Share (the mode switch it replaces had the same type). */
+.tdoc-bar .tdoc-comments-toggle { gap: 6px; color: var(--td-ink, #1a1a1a); font-weight: 500; }
+.tdoc-comments-toggle-count { color: var(--td-muted, #6b6b6b); font-variant-numeric: tabular-nums; }
+.tdoc-comments-toggle[aria-pressed="true"] .tdoc-comments-toggle-count { color: inherit; }
+.tdoc-bar .tdoc-comments-toggle[aria-pressed="true"] { color: var(--td-accent, #1652f0); background: var(--td-accent-wash, rgba(22,82,240,.06)); }
 .tdoc-sheet .tdoc-sheet-handle { display: block; }
 .tdoc-sheet:focus, .tdoc-sheet:focus-visible { outline: none; }

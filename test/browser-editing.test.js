@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const { requirePlaywrightOrSkip, reservePort } = require('./helpers/fixture-server');
+const { chooseMode, modeSelector } = require('./helpers/doc-mode');
 const { chromium } = requirePlaywrightOrSkip('browser-editing.test.js');
 const PRIMARY_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -49,14 +50,6 @@ async function selectParagraph(frame, id = 'editable-paragraph') {
   }, id);
   await frame.getByRole('button', { name: 'Comment', exact: true }).click();
   await frame.page().locator('.tdoc-popup').waitFor({ timeout: 3000 });
-}
-
-async function chooseMode(page, label) {
-  const trigger = page.getByRole('button', { name: /Document mode:/ });
-  if ((await trigger.getAttribute('aria-label')) === `Document mode: ${label}`) return;
-  await trigger.click();
-  await page.getByRole('menuitemradio', { name: label }).click();
-  await page.getByRole('button', { name: `Document mode: ${label}` }).waitFor();
 }
 
 (async () => {
@@ -154,7 +147,9 @@ async function chooseMode(page, label) {
     assert(frame, 'author frame missing');
 
     await test('comment-capable docs default to compact Comment mode', async () => {
-      const trigger = page.getByRole('button', { name: 'Document mode: Comment' });
+      await page.locator(modeSelector('comment')).waitFor();
+      // The bar's one Comment button carries the comment mark.
+      const trigger = page.locator('.tdoc-bar .tdoc-comments-toggle');
       await trigger.waitFor();
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
       const cursor = await frame.evaluate(() => getComputedStyle(document.body).cursor);
@@ -164,7 +159,7 @@ async function chooseMode(page, label) {
       const pill = frame.locator('.tdoc-comment-pill:not(.tdoc-selection-action)');
       await pill.waitFor({ state: 'visible' });
       assert(await pill.locator('svg path').getAttribute('d') === triggerPath,
-        'Comment artifact pill and mode trigger use different icon geometry');
+        'Comment artifact pill and the bar Comment button use different icon geometry');
       assert(await pill.locator('svg').evaluate((icon) => getComputedStyle(icon).stroke) === 'none',
         'Comment artifact pill retained an outline around the solid icon');
     });
@@ -594,24 +589,21 @@ async function chooseMode(page, label) {
         scrollWidth: document.documentElement.scrollWidth,
         innerWidth: window.innerWidth,
         toolbarWidth: Math.round(document.querySelector('.tdoc-editor-toolbar').getBoundingClientRect().width),
-        modeWidth: Math.round(document.querySelector('.tdoc-mode-trigger').getBoundingClientRect().width),
-        modeLabelDisplay: getComputedStyle(document.querySelector('.tdoc-mode-label')).display,
+        modeInBar: Boolean(document.querySelector('.tdoc-bar .tdoc-mode-trigger')),
         versionDisplay: document.querySelector('#tdoc-version-toggle') ? getComputedStyle(document.querySelector('#tdoc-version-toggle')).display : 'none',
         publishDisplay: document.querySelector('#tdoc-publish-btn') ? getComputedStyle(document.querySelector('#tdoc-publish-btn')).display : 'none',
         accountDisplay: document.querySelector('.tdoc-account-trigger') ? getComputedStyle(document.querySelector('.tdoc-account-trigger')).display : 'none',
       }));
       assert(dimensions.scrollWidth <= dimensions.innerWidth + 1,
         `mobile shell overflows: ${JSON.stringify(dimensions)}`);
-      assert(dimensions.modeWidth === 44 && dimensions.modeLabelDisplay === 'none',
-        `mobile mode control did not collapse to one icon: ${JSON.stringify(dimensions)}`);
+      assert(!dimensions.modeInBar,
+        `the mode switch is back in the phone bar: ${JSON.stringify(dimensions)}`);
       assert(['versionDisplay', 'publishDisplay', 'accountDisplay'].every((key) => dimensions[key] === 'none'),
         `secondary controls leaked into the mobile primary bar: ${JSON.stringify(dimensions)}`);
-      await page.getByRole('button', { name: /Document mode:/ }).click();
-      await page.getByRole('menuitemradio', { name: 'Comment' }).waitFor();
-      await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-browser-editing-mobile.png'), fullPage: false });
-      await page.keyboard.press('Escape');
       await page.getByRole('button', { name: 'More actions' }).click();
       await page.locator('.ui-menu-popup').waitFor();
+      await page.getByRole('menuitemradio', { name: 'Comment', exact: true }).waitFor();
+      await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-browser-editing-mobile.png'), fullPage: false });
       const moreLabels = await page.locator('.ui-menu-popup .ui-menu-item').allTextContents();
       // Copy as Markdown lives in "Download & copy" and Sign out in "My account"
       // since the ⋯ menu was grouped (#443); the top level carries the groups.
