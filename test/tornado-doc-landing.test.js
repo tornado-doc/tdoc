@@ -305,7 +305,10 @@ t('names the apps it runs in, each linked to its connect step', () => {
   // and More, every app in a popover of its own (the HTML popover attribute,
   // so it works with no script). Each popover's way in works from the
   // sandboxed frame (an https link or a line to copy).
-  const pick = html.slice(html.indexOf('<div class="pick" id="get-started">'), html.indexOf('<!-- tdoc demo'));
+  // The picker ends where the hero demo starts (its tabs are radios too).
+  const pickStart = html.indexOf('<div class="pick" id="get-started">');
+  const pickEnd = [html.indexOf('<!-- tdoc demo'), html.indexOf('<div class="hd-show">')].filter((i) => i > pickStart).sort((a, b) => a - b)[0];
+  const pick = html.slice(pickStart, pickEnd);
   assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
   const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
   // Claude Code (desktop app), Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
