@@ -25490,7 +25490,11 @@ const tdocHandlers = {
         headers: {
           'Content-Security-Policy': frameCspHeader(nonce),
           'X-Content-Type-Options': 'nosniff',
-          'Cache-Control': 'no-store',
+          // no-transform: Cloudflare must not inject its Web Analytics beacon
+          // here. The frame is sandboxed (origin "null"), so the beacon's POST
+          // to /cdn-cgi/rum fails its CORS preflight and logs a console error
+          // on every doc view. The top page still carries the beacon.
+          'Cache-Control': 'no-store, no-transform',
           'Vary': 'Sec-Fetch-Dest',
           ...(siteFrame ? { 'X-Robots-Tag': 'noindex, indexifembedded' } : {}),
         },
