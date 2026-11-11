@@ -87,13 +87,20 @@ function layoutTables({ apply = true } = {}) {
   const tables = allTables.filter(t => !isSheet(t) &&
     t.getClientRects().length && getComputedStyle(t).display === 'table' &&
     getComputedStyle(t).visibility !== 'hidden' && getComputedStyle(t).writingMode === 'horizontal-tb');
+  // A long table is measured on its first MEASURE_ROWS rows: its columns are
+  // set by column-wide rules, so the rows after them follow without a rule
+  // (or a measurement) per cell. A table with merged cells, whose columns are
+  // not its cells' positions, keeps a rule per measured cell.
+  const MEASURE_ROWS = 200;
   const records = tables.map(table => {
-    const cells = [...table.querySelectorAll('th,td')].filter(c => c.closest('table') === table &&
-      c.getClientRects().length && getComputedStyle(c).display === 'table-cell' && getComputedStyle(c).visibility !== 'hidden');
+    const cells = [];
+    for (const row of [...table.rows].slice(0, MEASURE_ROWS)) for (const c of row.cells) {
+      if (c.getClientRects().length && getComputedStyle(c).display === 'table-cell' && getComputedStyle(c).visibility !== 'hidden') cells.push(c);
+    }
     const wrap = table.parentElement && table.parentElement.classList.contains('tdoc-table-scroll') &&
       table.parentElement.children.length === 1 ? table.parentElement : null;
     const fit = !!wrap && standard(table);
-    const spans = cells.some(c => c.colSpan > 1 || c.rowSpan > 1);
+    const spans = !!table.querySelector('[colspan]:not([colspan="1"]),[rowspan]:not([rowspan="1"])');
     // The header row: thead's last row, or a first row of <th> only.
     const head = table.tHead && table.tHead.rows.length ? table.tHead.rows[table.tHead.rows.length - 1]
       : table.rows[0] && [...table.rows[0].cells].every(c => c.localName === 'th') ? table.rows[0] : null;
@@ -104,12 +111,24 @@ function layoutTables({ apply = true } = {}) {
       const rects = ink(cell);
       const tops = rects.map(r => r.top).sort((a,b) => a-b);
       const lines = tops.filter((top,i) => !i || top - tops[i-1] > font * .6).length;
-      return { cell, selector: path(cell), font, padding, borders, boxSizing: css.boxSizing,
+      return { cell, get selector() { return path(cell); }, font, padding, borders, boxSizing: css.boxSizing,
         available: cell.clientWidth - padding, lines };
     }) };
   });
   const natural = records.map(r => `${r.selector}{table-layout:auto!important;width:max-content!important;min-width:0!important;max-width:none!important}` +
-    r.cells.map(c => `${c.selector}{width:auto!important;min-width:0!important;max-width:none!important;white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important}`).join('')).join('');
+    `${r.selector}>*>tr>*,${r.selector}>tr>*{width:auto!important;min-width:0!important;max-width:none!important;white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important}`).join('');
+  // Per cell, or per column (the widest cell's minimum) for a table without
+  // merged cells; value cells keep together either way.
+  const minRules = (r, mins) => {
+    if (r.spans) return mins.map(m => `${m.c.selector}{min-width:${m.px}px!important${m.value ? ';white-space:nowrap!important' : ''}}`).join('');
+    const col = [];
+    let value = false;
+    for (const m of mins) { const i = m.c.cell.cellIndex; col[i] = Math.max(col[i] || 0, m.px); value = value || m.value; }
+    let css = '';
+    col.forEach((px, i) => { if (px != null) css += `${r.selector}>*>tr>:nth-child(${i + 1}),${r.selector}>tr>:nth-child(${i + 1}){min-width:${px}px!important}`; });
+    if (value) css += `${r.selector}>*>tr>[data-tdoc-cell="value"],${r.selector}>tr>[data-tdoc-cell="value"]{white-space:nowrap!important}`;
+    return css;
+  };
   const errors = [], adjustments = [];
   let fitted = '', printed = '';
   // The wrapper's own scrollbar is styled so it is drawn whenever the table
@@ -130,6 +149,7 @@ function layoutTables({ apply = true } = {}) {
     style.textContent = natural;
     for (const r of records) {
       let needsAuto = false;
+      const fitMins = [], floorMins = [];
       r.colNat = [];
       const narrow = innerWidth <= 480;
       r.cards = r.fit && narrow && !r.spans && !!r.head && r.head.cells.length > 3;
@@ -144,7 +164,7 @@ function layoutTables({ apply = true } = {}) {
           const i = c.cell.cellIndex;
           r.colNat[i] = Math.max(r.colNat[i] || 0, Math.min(unwrapped, 15 * c.font) + c.padding + c.borders);
           const fitMin = Math.ceil(value ? unwrapped : Math.min(unwrapped, 6 * c.font)) + (c.boxSizing === 'border-box' ? c.padding + c.borders : 0);
-          if (!r.cards) fitted += `${c.selector}{min-width:${fitMin}px!important${value ? ';white-space:nowrap!important' : ''}}`;
+          if (!r.cards) fitMins.push({ c, px: fitMin, value });
         }
         // 12em is the minimum reading measure for prose, not a minimum for
         // every column: a short value only reserves its natural ink width.
@@ -153,8 +173,7 @@ function layoutTables({ apply = true } = {}) {
         const minimum = Math.ceil(value ? unwrapped : Math.min(unwrapped, (r.fit ? 6 : 12) * c.font));
         const cssMin = minimum + (c.boxSizing === 'border-box' ? c.padding + c.borders : 0);
         // (A fitted table keeps this floor for print, where it is as written.)
-        const floor = `${c.selector}{min-width:${r.fit ? Math.ceil(value ? unwrapped : Math.min(unwrapped, 12 * c.font)) + (c.boxSizing === 'border-box' ? c.padding + c.borders : 0) : cssMin}px!important${value ? ';white-space:nowrap!important' : ''}}`;
-        if (r.fit) printed += floor; else rules += floor;
+        floorMins.push({ c, px: r.fit ? Math.ceil(value ? unwrapped : Math.min(unwrapped, 12 * c.font)) + (c.boxSizing === 'border-box' ? c.padding + c.borders : 0) : cssMin, value });
         if (!r.cards && c.available + 2 < minimum && (c.lines >= 2 || value)) {
           const issue = `table ${r.index+1}, column ${c.cell.cellIndex+1}: compressed table column (${Math.round(c.available)}px available, ${minimum}px reading minimum, ${c.lines} lines): ${c.cell.textContent.trim().slice(0,70)}`;
           needsAuto = true;
@@ -162,6 +181,8 @@ function layoutTables({ apply = true } = {}) {
           adjustments.push({ table: r.index+1, column: c.cell.cellIndex+1, available: Math.round(c.available), minimum });
         }
       }
+      fitted += minRules(r, fitMins);
+      if (r.fit) printed += minRules(r, floorMins); else rules += minRules(r, floorMins);
       if (needsAuto) rules += `${r.selector}{table-layout:auto!important}`;
     }
   } finally {

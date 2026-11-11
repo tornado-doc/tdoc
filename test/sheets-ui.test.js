@@ -98,7 +98,7 @@ ${M.tableHtml({ name: 'Notes', columns: [{ name: 'Note', type: 'text' }], rows: 
   writeDoc('brief', `<!doctype html><html><head><meta charset="utf-8"><title>Supplier follow up</title></head><body><main><h1>Supplier follow up</h1>
 <p>EGI and Potato are the two suppliers we are pricing first.</p>
 ${M.tableHtml({ name: 'Suppliers', columns: [{ name: 'Supplier', type: 'text' }, { name: 'Status', type: 'tags' }, { name: 'Next action', type: 'text' }, { name: 'Updated', type: 'date' }], rows: ['EGI', 'Potato', 'Mighty', 'Via', 'Great Buy'].map((n, k) => ({ id: `r${k + 1}`, cells: [n, [k < 2 ? 'Active' : 'Paused'], `Confirm per-SKU prices, case pack and minimum order with ${n}, then ask whether they allow listing on the marketplace and how often stock updates.`, `2026-11-${String(10 - k).padStart(2, '0')}`] })) })}
-${M.tableHtml({ name: 'Plan', columns: [{ name: 'Step', type: 'text' }], rows: Array.from({ length: 18 }, (_, k) => ({ id: `r${k + 1}`, cells: [`Step ${k + 1}`] })) })}
+${M.tableHtml({ name: 'Plan', columns: [{ name: 'Step', type: 'text' }, { name: 'Detail', type: 'text' }], rows: Array.from({ length: 18 }, (_, k) => ({ id: `r${k + 1}`, cells: [`Step ${k + 1}`, 'Route back to the old region with DNS weights and keep the old cluster warm for a while'.slice(0, 40 + (k % 3) * 15)] })) })}
 ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { name: 'Qty', type: 'number' }], rows: Array.from({ length: 21 }, (_, k) => ({ id: `r${k + 1}`, cells: [`Item ${k + 1}`, String(k * 3)] })) })}
 <h2>Next</h2><p>Call EGI on Thursday.</p></main></body></html>`, 'Supplier follow up');
   // Eight columns, five rows: wider than the reading column.
@@ -955,6 +955,20 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
         await p.waitForTimeout(100);
         m = await measure(frame);
         assert(m.flat && m.flatScrollsY && m.rows === 18, `${name}: 18 rows scroll after 15: ${JSON.stringify(m)}`);
+        // The cap follows the width: narrower, the rows wrap taller and so does the 15-row cap.
+        const capOk = () => frame.evaluate(() => { const f = document.querySelector('.ts-flat'), r = f.querySelectorAll('tbody tr, .ts-card')[14]; return { max: f.style.maxHeight, want: r.offsetTop + r.offsetHeight + (f.classList.contains('is-cards') ? 0 : 1) }; });
+        let cap = await capOk();
+        assert(cap.max === cap.want + 'px', `${name}: cap at the 15th row: ${JSON.stringify(cap)}`);
+        if (name === 'desktop') {
+          await p.setViewportSize({ width: 560, height: 860 });
+          await frame.waitForFunction(() => innerWidth === 560);
+          await p.waitForTimeout(400);
+          cap = await capOk();
+          assert(cap.max === cap.want + 'px', `after a resize: ${JSON.stringify(cap)}`);
+          await p.setViewportSize({ width: 1280, height: 860 });
+          await frame.waitForFunction(() => innerWidth === 1280);
+          await p.waitForTimeout(300);
+        }
         // Past 20 rows it is data to filter: the grid and the whole toolbar.
         await f.getByRole('tab', { name: 'Inventory' }).click();
         await p.waitForTimeout(100);

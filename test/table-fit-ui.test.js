@@ -35,7 +35,9 @@ const small = '<div class="tdoc-table-scroll"><table><thead><tr><th>Owner</th><t
 const many = `<div class="tdoc-table-scroll"><table><thead><tr>${Array.from({ length: 22 }, (_, i) => `<th>Metric ${i + 1}</th>`).join('')}</tr></thead><tbody>${Array.from({ length: 4 }, (_, r) => `<tr>${Array.from({ length: 22 }, (_, i) => `<td>${i ? `value_${r}_${i}_unbreakable` : `Row ${r + 1}`}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 const page = (body, root = ' data-tdoc-design="tdoc"', css = '') => `<!doctype html><html lang="en"${root}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rollout</title>${css ? `<style>${css}</style>` : ''}</head><body><main class="wrap"><h1>Q4 rollout plan</h1><p>Eight services move to the new region this quarter.</p>${body}<p>Questions go to the rollout channel.</p></main></body></html>`;
 
+const long = `<div class="tdoc-table-scroll"><table><thead><tr><th>Item</th><th>Owner</th><th>Qty</th><th>Description</th></tr></thead><tbody>${Array.from({ length: 3000 }, (_, i) => `<tr><td>Item ${i}</td><td>Owner ${i % 7}</td><td data-tdoc-cell="value">${i * 3} units</td><td>A longer description for row ${i} that wraps within its cell</td></tr>`).join('')}</tbody></table></div>`;
 const DOCS = {
+  long: page(long),
   fit: page(table8() + '<h2>Owners</h2>' + small),
   many: page(many),
   styled: page(table8(' class="pricing"') + table8(' style="width:100%"') + '<figure>' + table8() + '<figcaption>In a figure</figcaption></figure>' + table8(' data-tdoc-table="fixed"') + `<div class="tdoc-table-scroll"><table><tr><td>${table8()}</td></tr></table></div>`, ' data-tdoc-design="tdoc"', '.pricing td{color:#333}'),
@@ -117,6 +119,19 @@ const DOCS = {
       if (SHOTS) await p.screenshot({ path: path.join(SHOTS, 'table-fit-phone.png'), fullPage: true });
       await p.emulateMedia({ media: 'print' });
       assert((await tables(frame))[0].display === 'table', 'print: a table, not cards');
+      await p.close();
+    });
+
+    await test('a 3000-row table lays out fast: column-wide rules, the last rows follow the first', async () => {
+      const t0 = Date.now();
+      const { p, frame } = await open(desktop, 'long');
+      const took = Date.now() - t0;
+      const m = await frame.evaluate(() => {
+        const rows = document.querySelector('table').rows, css = (r, c) => getComputedStyle(rows[r].cells[c]);
+        return { rules: document.querySelector('style#tdoc-provider-table-layout').textContent.length, first: css(1, 3).minWidth, last: css(2999, 3).minWidth, nowrap: css(2999, 2).whiteSpace };
+      });
+      assert(m.rules < 20000 && m.first === m.last && m.first !== '0px' && m.nowrap === 'nowrap', JSON.stringify(m));
+      assert(took < 10000, `opened in ${took} ms`);
       await p.close();
     });
 

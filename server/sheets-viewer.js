@@ -763,14 +763,17 @@
       }
       html += '</tbody></table>';
     }
-    // Unchanged: leave the DOM alone (no mutation, no relayout downstream).
-    if (html === ui.flatHtml && cards === ui.flat.classList.contains('is-cards') && ui.flat.firstChild) return;
-    ui.flatHtml = html;
-    ui.flat.classList.toggle('is-cards', cards);
-    ui.flat.innerHTML = html;
+    // Unchanged: leave the DOM alone (no mutation, no relayout downstream),
+    // but the height still follows the width (rows rewrap on a resize).
+    if (!(html === ui.flatHtml && cards === ui.flat.classList.contains('is-cards') && ui.flat.firstChild)) {
+      ui.flatHtml = html;
+      ui.flat.classList.toggle('is-cards', cards);
+      ui.flat.innerHTML = html;
+    }
     // At most EMBED_ROWS rows (or cards) tall, however tall each one wraps.
     var items = ui.flat.querySelectorAll(cards ? '.ts-card' : 'tbody tr'), last = items[EMBED_ROWS - 1];
-    ui.flat.style.maxHeight = items.length > EMBED_ROWS && last ? (last.offsetTop + last.offsetHeight + (cards ? 0 : 1)) + 'px' : '';
+    var maxH = items.length > EMBED_ROWS && last ? (last.offsetTop + last.offsetHeight + (cards ? 0 : 1)) + 'px' : '';
+    if (ui.flat.style.maxHeight !== maxH) ui.flat.style.maxHeight = maxH;
   }
   // A header sorts; in Comment mode a cell takes a comment; a commented cell
   // opens its thread.
