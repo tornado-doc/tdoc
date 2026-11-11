@@ -16,6 +16,7 @@ import {
   History,
   Share2,
   Star,
+  Table2,
   Trash2,
   Upload,
   X,
@@ -239,6 +240,9 @@ export function DocumentOverflowActions({
   // Read / Comment / Edit, at the top of ⋯ with the current one ticked
   // (it was a dropdown in the bar): { modes: [{ value, label, Icon }], value, onChange }.
   mode = null,
+  // The owner's "Allow sheet embeds on this page": shown only when an
+  // embedded sheet here is held back because a version names no writer.
+  onAllowEmbeds = null,
 }) {
   return (
     <>
@@ -268,6 +272,11 @@ export function DocumentOverflowActions({
       {onHistory ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="history" onClick={onHistory}>
           <History size={15} /> Version history
+        </AppMenuItem>
+      ) : null}
+      {onAllowEmbeds ? (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="allow-embeds" onClick={onAllowEmbeds}>
+          <Table2 size={15} /> Allow sheet embeds on this page
         </AppMenuItem>
       ) : null}
       {config.mode === 'local' ? (

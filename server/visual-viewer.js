@@ -21,6 +21,9 @@
     if (!node || !node.closest || node.closest('[data-tdoc-provider]')) return null;
     var el = node.closest(SELECTOR);
     if (!el || el.closest(CONTROL) || el.matches('[aria-hidden="true"],[role="presentation"]')) return null;
+    // A sheet embedded by reference (sheet-embed-viewer.js) is a live view
+    // with its own Open: the sheet page is its full screen.
+    if (el.closest('[data-tdoc-embed]')) return null;
     // A composed diagram is one visual, not a separate viewer for each SVG.
     return el.closest('figure,[data-tdoc-artifact],[class~="tdoc-artifact"]') || el;
   }

@@ -50,8 +50,10 @@ export function useFrameBridge(handlers) {
         }));
       }
 
+      // The event too: a handler that answers over a transferred port
+      // (sheet embeds) needs event.ports.
       const handler = handlersRef.current?.[message.type];
-      handler?.(message);
+      handler?.(message, event);
     };
 
     window.addEventListener('message', receive);
