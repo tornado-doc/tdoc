@@ -109,7 +109,9 @@ header row is the last row of `<thead>`; each `<th>` declares its column type.
   `gray`, `red`, `orange`, `yellow`, `green`, `teal`, `blue`, `purple`, `pink`.
   A tag the palette does not name gets a stable colour of its own.
 - **Tabs.** Several sheet tables in one doc are tabs of one grid, shown where
-  the first table is. Give each a distinct `data-name`. With more than one,
+  the first table is. Give each a distinct `data-name` (case does not make
+  names distinct: a second "data" shows, and is named in formulas and
+  exports, as "data (2)"). With more than one,
   add `<caption>Name</caption>` so the plain page still names each table.
 - Plain text in cells: no nested tables, no markup except `<a>` in a `url`
   column and `<span data-tag>` in a `tags` column. Formatting is attributes
@@ -191,6 +193,46 @@ default), never a style:
 - **Tab order.** Tabs follow the tables' order in the doc. `data-order="0"`,
   `"1"`, … on the tables puts them in another order in the strip (the editor
   writes it when someone drags a tab in a doc with prose around the sheet).
+
+## Formulas
+
+A cell can compute its value as in Google Sheets or Excel: put the formula
+in `data-formula` on the `<td>` and the value it gives as the cell's text,
+so a reader without the viewer, an export or another agent sees the value.
+The reader recomputes on load and after every edit; in Edit mode people type
+`=…` into a cell, and the formula bar shows the selected cell's formula.
+
+```html
+<tr data-row="r4"><td>Total</td><td data-formula="=SUM(B1:B3)">25.5</td><td data-formula="=IF(B4>20,&quot;over&quot;,&quot;ok&quot;)">over</td></tr>
+```
+
+- **A1 is the first body row**, the row numbers the grid shows; the header
+  row is not a row. Columns are letters in header order: A, B, … AA.
+- References: `B3`, `$B$3` (absolute), `B1:B9`, whole columns `B:B` and rows
+  `2:4`, another tab `Rates!A1` or `'Tab name'!A1:B9`. Operators
+  `+ - * / ^ & % = <> < > <= >=` with the usual precedence.
+- Functions: SUM AVERAGE MIN MAX COUNT COUNTA COUNTIF COUNTIFS SUMIF SUMIFS
+  AVERAGEIF AVERAGEIFS IF IFS IFERROR AND OR NOT ROUND ROUNDUP ROUNDDOWN ABS
+  VLOOKUP HLOOKUP XLOOKUP INDEX MATCH CONCAT CONCATENATE TEXTJOIN LEFT RIGHT
+  MID LEN TRIM UPPER LOWER SUBSTITUTE TEXT VALUE TODAY NOW DATE YEAR MONTH DAY
+  DATEDIF. Another name shows `#NAME?`.
+- Errors show in the cell: `#DIV/0!`, `#VALUE!`, `#REF!` (a deleted cell or
+  unknown tab), `#NAME?`, `#N/A`, `#NUM!`, `#ERROR!` (a formula that does
+  not parse), `#CYCLE!` (a cell that depends on itself), `#BUSY!` (a sheet
+  too heavy to compute in time).
+- Dates are day numbers as in a spreadsheet; a formula over a `date` column
+  or from DATE/TODAY shows as `2026-03-01`.
+- Escape `"` in the attribute as `&quot;` and `<` `>` as `&lt;` `&gt;`.
+  Text that starts with `=` but is not a formula: a cell without
+  `data-formula` is always text.
+- Editing in the reader moves references the way a spreadsheet does
+  (inserting or deleting rows and columns, fill down, copy and paste, renaming
+  a tab). When you edit the HTML yourself, keep references pointing at the
+  right rows, and write each formula cell's current value as its text.
+- Excel import keeps formulas the engine computes (and moves them under the
+  header); others keep their value. Excel export writes them back.
+- With merges, hidden rows and groups: a cell a merge covers reads as
+  empty; hidden rows and rows in a collapsed group still compute and count.
 
 ## Size
 

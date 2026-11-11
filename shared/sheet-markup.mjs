@@ -30,6 +30,9 @@
 //
 // A cell's own format (bold, colours, number format, borders) and merged
 // cells (rowspan / colspan) are shared/sheet-format.mjs's.
+//
+// A formula cell: <td data-formula="=SUM(C1:C9)">42</td>, the text being
+// the value it last computed (shared/sheet-formula.mjs).
 
 export function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -107,11 +110,14 @@ export function tableHtml(sheet, { caption = false } = {}) {
   });
   const body = (sheet.rows || []).map((row, i) => {
     const id = row.id || `r${i + 1}`;
+    // A formula cell (row.formulas[c] = '=…', shared/sheet-formula.mjs)
+    // keeps its formula beside the value it last showed.
+    const fx = row.formulas || [];
     const cells = cols.map((col, c) => {
       if (covered.size && covered.has(i * 256 + c)) return '';
       const m = spans.size ? spans.get(i * 256 + c) : null;
       const span = m ? (m.cs > 1 ? ` colspan="${m.cs}"` : '') + (m.rs > 1 ? ` rowspan="${m.rs}"` : '') : '';
-      return `<td${(row.attrs && row.attrs[c]) || ''}${span}>${cellHtml(col.type, row.cells[c])}</td>`;
+      return `<td${fx[c] ? ` data-formula="${escapeHtml(fx[c])}"` : ''}${(row.attrs && row.attrs[c]) || ''}${span}>${cellHtml(col.type, row.cells[c])}</td>`;
     }).join('');
     const ht = cleanSize(row.height, MIN_HEIGHT, MAX_HEIGHT);
     return `<tr data-row="${escapeHtml(id)}"${ht ? ` data-height="${ht}"` : ''}>${cells}</tr>`;

@@ -24,6 +24,7 @@ const OFFLINE = [
   'thread-seen-api.test.js',   // server read state: authorized like reading the comments, no cross-doc reads, no thread-id leaks
   'feedback-team-agents.test.js', // the widget's @ lists team agents (answer only) only through tdoc's own-origin token door
   'version-diff.test.js', // bounded block matching and Unicode edits
+  'sheet-formula.test.js',     // sheets: formulas (parser, functions, errors, refs, cycles, incremental recompute, ref shifting, Excel, hostile input, 10k formulas < 200 ms)
   'sheets.test.js',            // sheets: view query (search/filter/sort/URL), CSV parsing + type inference, markup round trip
   'sheet-rules.test.js',       // sheets: find & replace, rule JSON parsing (hostile input dropped), conditional formats, dropdowns, fill series, 10k rows in budget
   'sheet-embed.test.js',      // a sheet embedded in a page by reference: the reference resolves only to /d/<slug>, data is text with the view applied, the SHEET's access for the reader (owner/link/sign-in/private/team/guest/anonymous), no title on refusal, linear on hostile markup
@@ -243,6 +244,7 @@ const BROWSER = [
   'sheet-embed-ui.test.js', // a sheet embedded in a page: live view (saved view, comment count, Open), no-access state with nothing of the sheet, keyless frames and requests get nothing, flag off is the link, desktop + phone
   'sheets-ui.test.js', // data-tdoc-sheet: grid, search/filter/sort/tags, view in #hash, cell comments, Edit + Save, CSV/XLSX import, CLI, 10k rows, phone
   'sheets-structure-ui.test.js', // group/collapse/expand rows + columns, hide/unhide, drag + Alt-arrow reorder, freeze (menu, grip, reader's own), tab rename/reorder/duplicate/colour/delete+undo, comments keep cells, flat view + phone cards summary rows, 10k rows grouped; desktop + phone
+  'sheet-formulas-ui.test.js', // sheet formulas: Read computes and changes nothing, Edit types =…, recompute across tabs, formula bar, Save keeps formula + value, insert/delete/fill/paste/rename move refs, undo, hostile sheet stays usable (#BUSY!), 10k formulas; desktop + phone
   'sheets-basics-ui.test.js', // sheet modes (Read edits nothing, a Comment click comments on a cell, Edit), column/row resize (drag, double-click fit, touch, frozen column) through the editor's Save, a reader's own layout, Wrap/Clip + align, line breaks (Alt/Ctrl+Enter, multi-line paste, <br>), fill down, ⌘-arrow edges, 10k rows wrapped; desktop + phone
   'sheets-format-ui.test.js', // cell formatting: Read draws formats/number formats/merges (grid, flat, phone) with no toolbar; Edit's one-row toolbar (bold, italic, colours, fills, number formats, align, clear, merge/unmerge) through Undo and Save; hostile attributes inert; 10k rows in budget
   'sheets-rules-ui.test.js', // sheets: Find and replace (⌘⇧H, match case, entire cell, every tab, one Undo), conditional formatting + dropdowns side panel (JSON on the table, Save), dropdown chips and marks, the fill handle (number/date series, Ctrl copies, under a sort), Read stays clean, phone bottom sheets, 10k rows with rules

@@ -6,24 +6,40 @@
 import { SHEET_SELECTOR, readSheetTable } from '../../../shared/sheet-markup.mjs';
 import { KEY, readFormats, excelFormat, isNumeric, isDateLike, toNumber, toDateParts, nonOverlapping } from '../../../shared/sheet-format.mjs';
 import { styleXlsx, colName } from '../../../shared/sheet-xlsx-style.mjs';
+import { toExcel, unsupportedFunctions, isFormula, referencedSheets } from '../../../shared/sheet-formula.mjs';
 
 export const CSV_MIME = 'text/csv';
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 // [{ name, columns: [{ name, type }], rows: [[text | string[]]], formats,
-// merges }]: formats is Map(r * KEY + c → cell format) or null, merges
-// [{ r, c, rs, cs }] (shared/sheet-format.mjs). CSV writes values as the
-// document holds them; Excel keeps number formats, styles and merges.
+// merges, formulas }]: formats is Map(r * KEY + c → cell format) or null,
+// merges [{ r, c, rs, cs }] (shared/sheet-format.mjs), formulas [{ r, c, f }]
+// for the cells with a data-formula (the text in rows is the value it last
+// showed). CSV writes values as the document holds them; Excel keeps number
+// formats, styles, merges and formulas.
 export function sheetsFromDocument(doc) {
   const tables = Array.prototype.filter.call(doc.querySelectorAll(SHEET_SELECTOR), (t) => !(t.closest && t.closest('[data-tdoc-provider]')));
+  // Names as the viewer shows them: unique without regard to case (a second
+  // "data" is "data (2)"), so a formula naming "data (2)" finds that tab.
+  const seen = new Set();
+  const unique = (name) => {
+    let out = name, n = 1;
+    while (seen.has(out.toLowerCase())) out = `${name} (${++n})`;
+    seen.add(out.toLowerCase());
+    return out;
+  };
   return tables.map((table, i) => {
     const sheet = readSheetTable(table);
     return {
-      name: sheet.name || `Sheet ${i + 1}`,
+      name: unique(String(sheet.name || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 100) || `Sheet ${i + 1}`),
       columns: sheet.columns.map((c) => ({ name: c.name, type: c.type, width: c.width || 0 })),
       rows: sheet.rows.map((r) => r.cells),
       formats: readFormats(sheet, table),
       merges: sheet.merges || [],
+      formulas: sheet.rows.flatMap((row, r) => row.tds.map((td, c) => {
+        const f = td && td.getAttribute && td.getAttribute('data-formula');
+        return f ? { r, c, f: f.trim()[0] === '=' ? f.trim() : '=' + f.trim() } : null;
+      }).filter(Boolean)),
     };
   });
 }
@@ -103,6 +119,8 @@ export function xlsxBytes(XLSX, sheets) {
   const book = XLSX.utils.book_new();
   const names = workbookNames(sheets);
   const styled = [];
+  // A tab's name as the workbook spells it, for references to it.
+  const renamed = new Map(sheets.map((sheet, i) => [String(sheet.name).toLowerCase(), names[i]]));
   sheets.forEach((sheet, i) => {
     const ws = XLSX.utils.aoa_to_sheet(sheetRows(sheet));
     // A column's saved width goes with it (Excel's own unit, from px).
@@ -122,6 +140,9 @@ export function xlsxBytes(XLSX, sheets) {
     // Never two merges over one cell (Excel calls such a file corrupt).
     const merges = nonOverlapping((sheet.merges || []).filter((m) => m.r + m.rs <= sheet.rows.length && m.c + m.cs <= sheet.columns.length));
     if (merges.length) ws['!merges'] = merges.map((m) => ({ s: { r: m.r + 1, c: m.c }, e: { r: m.r + m.rs, c: m.c + m.cs - 1 } }));
+    // After the number formats (formatCell replaces a cell): the formula
+    // goes onto the cell as written, its format kept.
+    addFormulas(XLSX, ws, sheet, renamed);
     styled.push({ cells });
     XLSX.utils.book_append_sheet(book, ws, names[i]);
   });
@@ -129,6 +150,25 @@ export function xlsxBytes(XLSX, sheets) {
   // Bold, italic, strikethrough, colours, fills, borders and alignment:
   // SheetJS's community build does not write them; styleXlsx does.
   try { return styleXlsx(XLSX, bytes, styled); } catch { return bytes; }
+}
+
+// Formulas go into the workbook as formulas (Excel's row 1 is the header,
+// so every row moves down one), beside the value they last showed. Only
+// formulas the engine itself computes: anything else stays a value, so an
+// export never carries a function the sheet could not run (no WEBSERVICE)
+// nor a reference outside the workbook.
+export function addFormulas(XLSX, ws, sheet, renamed) {
+  for (const { r, c, f } of sheet.formulas || []) {
+    if (!isFormula(f)) continue;
+    const missing = unsupportedFunctions(f);
+    if (!missing || missing.length) continue;
+    // Only references to tabs of this workbook.
+    const used = referencedSheets(f) || [];
+    if (used.some((n) => !renamed.has(String(n).toLowerCase()))) continue;
+    const addr = XLSX.utils.encode_cell({ r: r + 1, c });
+    const cell = ws[addr] || (ws[addr] = { t: 's', v: '' });
+    cell.f = toExcel(f, { names: renamed });
+  }
 }
 
 // The tab on screen: its name from the view in the page's #hash (the

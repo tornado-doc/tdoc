@@ -123,9 +123,11 @@ hang on them). The reader shows it as a
 spreadsheet grid with tabs, search, per-column filters and sort; without the
 viewer it is a plain table. For a file, `tdoc-new --slug <slug> --from-csv
 <file>` (or `--from-tsv`, `--from-xlsx`) writes the markup with column types
-inferred. **Before writing or editing a sheet, read
+inferred. A computed cell is `<td data-formula="=SUM(C1:C9)">42</td>`:
+spreadsheet formulas (A1 is the first body row), with the value written as
+the cell's text. **Before writing or editing a sheet, read
 `$SKILL_DIR/authoring/structure/sheets.md`**: when to use one, the markup, the
-types, tag colours, row ids and the size limit.
+types, tag colours, row ids, formulas and the size limit.
 
 To show a standalone sheet inside another page, embed it by reference
 instead of copying its rows: `<figure data-tdoc-embed="sheet"

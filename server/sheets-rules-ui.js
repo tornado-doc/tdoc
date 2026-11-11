@@ -91,6 +91,10 @@ var SheetRulesUI = (function () {
     function keysOf(tab) { return tab.data.columns.map(function (_, c) { return A.colKey(tab, c); }); }
     function letter(c) { return Q.columnLetter(c); }
     function cellText(tab, r, c) { var col = tab.index.cols[c]; return col.text[r]; }
+    // fx: a formula cell (data-formula) is found and replaced in its formula,
+    // a plain cell in the value it shows.
+    function formulaAt(tab, r, c) { return A.formulaOf ? A.formulaOf(tab, r, c) : null; }
+    function findText(tab, r, c) { return formulaAt(tab, r, c) || cellText(tab, r, c); }
     // [structure] Find steps through rows in collapsed groups too (opening
     // the group), never hidden rows or hidden columns; Replace all changes
     // every cell, hidden ones included (the count says how many are hidden).
@@ -218,7 +222,7 @@ var SheetRulesUI = (function () {
       scopeTabs().forEach(function (tab) {
         var t = book.tabs.indexOf(tab), order = orderOf(tab), n = tab.data.columns.length;
         for (var i = 0; i < order.length && out.length < limit; i++) {
-          for (var c = 0; c < n; c++) if (tab.index.cols[c].type !== 'checkbox' && colShown(tab, c) && f.test(cellText(tab, order[i], c))) { out.push({ t: t, i: i, r: order[i], c: c }); if (out.length >= limit) break; }
+          for (var c = 0; c < n; c++) if (tab.index.cols[c].type !== 'checkbox' && colShown(tab, c) && f.test(findText(tab, order[i], c))) { out.push({ t: t, i: i, r: order[i], c: c }); if (out.length >= limit) break; }
         }
       });
       return out;
@@ -228,7 +232,7 @@ var SheetRulesUI = (function () {
       var n = 0;
       scopeTabs().forEach(function (tab) {
         var w = tab.data.columns.length;
-        for (var r = 0; r < tab.index.size && n < limit; r++) for (var c = 0; c < w; c++) if (tab.index.cols[c].type !== 'checkbox' && f.test(cellText(tab, r, c))) n++;
+        for (var r = 0; r < tab.index.size && n < limit; r++) for (var c = 0; c < w; c++) if (tab.index.cols[c].type !== 'checkbox' && f.test(findText(tab, r, c))) n++;
       });
       return n;
     }
@@ -291,14 +295,16 @@ var SheetRulesUI = (function () {
           A.select(ht.pos[hit.r], hit.c, false);
           say((k + 1) + ' of ' + A.fmt(list.length));
         };
-        var newValue = function (tab, c, text) { return tab.index.cols[c].type === 'tags' ? Q.splitTags(text) : text; };
+        // fx: a plain cell's new text that starts with "=" stays text ("'="); a
+        // formula's new source is written as a formula (its value follows).
+        var newValue = function (tab, c, text, isFormula) { return tab.index.cols[c].type === 'tags' ? Q.splitTags(text) : !isFormula && text[0] === '=' ? "'" + text : text; };
         function replaceOne() {
           var f = finder();
           if (!f.ok) { say('Type something to find.'); return; }
           var tab = A.cur(), s = A.sel(), r = tab.order[s.r], c = s.c;
-          if (r != null && tab.index.cols[c].type !== 'checkbox' && f.test(cellText(tab, r, c))) {
-            var next = f.replace(cellText(tab, r, c), fr.repl);
-            if (next !== cellText(tab, r, c)) A.setCells(tab, [{ r: r, c: c, value: newValue(tab, c, next) }], r);
+          if (r != null && tab.index.cols[c].type !== 'checkbox' && f.test(findText(tab, r, c))) {
+            var was = findText(tab, r, c), next = f.replace(was, fr.repl);
+            if (next !== was) A.setCells(tab, [{ r: r, c: c, value: newValue(tab, c, next, !!formulaAt(tab, r, c)) }], r);
           }
           go(1);
         }
@@ -312,10 +318,10 @@ var SheetRulesUI = (function () {
             var list = [], n = tab.data.columns.length;
             for (var r = 0; r < tab.index.size; r++) for (var c = 0; c < n; c++) {
               if (tab.index.cols[c].type === 'checkbox') continue;
-              var text = cellText(tab, r, c);
+              var text = findText(tab, r, c), isF = !!formulaAt(tab, r, c);
               if (!text || !f.test(text)) continue;
               var next = f.replace(text, fr.repl);
-              if (next !== text) list.push({ r: r, c: c, value: newValue(tab, c, next) });
+              if (next !== text) list.push({ r: r, c: c, value: newValue(tab, c, next, isF) });
             }
             if (list.length) { groups.push({ tab: tab, list: list }); cells += list.length; }
           });
@@ -685,14 +691,30 @@ var SheetRulesUI = (function () {
       // group are not in tab.order, and hidden columns are stepped over (a
       // drag right counts shown columns). [format] a merge's covered slots
       // are dropped by writeCells; merges are not extended.
-      var put = function (r, c, v) { list.push({ r: r, c: c, value: tab.index.cols[c].type === 'tags' ? Q.splitTags(v) : v }); };
+      // fx: a plain value that starts with "=" stays text; a formula is put as a formula.
+      var put = function (r, c, v, isF) { list.push({ r: r, c: c, value: tab.index.cols[c].type === 'tags' ? Q.splitTags(v) : !isF && typeof v === 'string' && v[0] === '=' ? "'" + v : v }); };
+      // fx: where the source holds a formula, the source cells repeat (as Google
+      // Sheets does): a formula with its references moved by how far it went
+      // (document rows and columns, as fill down does), a value copied.
+      var fxFill = function (srcCells, targets) {
+        if (!A.FM || !srcCells.some(function (x) { return formulaAt(tab, x.r, x.c); })) return false;
+        var n = srcCells.length;
+        targets.forEach(function (t, k) {
+          var from = srcCells[back ? n - 1 - (k % n) : k % n], f = formulaAt(tab, from.r, from.c);
+          if (f) put(t.r, t.c, A.FM.offsetFormula(f, t.r - from.r, t.c - from.c), true);
+          else put(t.r, t.c, valueAt(tab, from.r, from.c));
+        });
+        return true;
+      };
       var shownCols = [];
       for (var sc = 0; sc < tab.widths.length; sc++) if (colShown(tab, sc)) shownCols.push(sc);
       if (vertical) {
         for (var c = g.ca; c <= g.cb; c++) {
           if (!colShown(tab, c)) continue;
-          var src = [];
-          for (var i = g.ra; i <= g.rb; i++) src.push(valueAt(tab, order[i], c));
+          var src = [], cellsV = [], targetsV = [];
+          for (var i = g.ra; i <= g.rb; i++) { src.push(valueAt(tab, order[i], c)); cellsV.push({ r: order[i], c: c }); }
+          for (var kv = 0; kv < to.n; kv++) { var iv = back ? g.ra - 1 - kv : g.rb + 1 + kv; if (iv >= 0 && iv < order.length) targetsV.push({ r: order[iv], c: c }); }
+          if (fxFill(cellsV, targetsV)) continue;
           var out = R.fillSeries(src, to.n, { copy: copy, backward: back }, fillCtx);
           for (var k = 0; k < out.length; k++) { var ii = back ? g.ra - 1 - k : g.rb + 1 + k; if (ii >= 0 && ii < order.length) put(order[ii], c, out[k]); }
         }
@@ -700,8 +722,11 @@ var SheetRulesUI = (function () {
         for (var i2 = g.ra; i2 <= g.rb; i2++) {
           var r = order[i2], src2 = [];
           for (var c2 = g.ca; c2 <= g.cb; c2++) if (colShown(tab, c2)) src2.push(valueAt(tab, r, c2));
+          var p0 = shownCols.indexOf(back ? g.ca : g.cb), cellsH = [], targetsH = [];
+          for (var c3 = g.ca; c3 <= g.cb; c3++) if (colShown(tab, c3)) cellsH.push({ r: r, c: c3 });
+          for (var kh = 0; kh < to.n; kh++) { var ph = back ? p0 - 1 - kh : p0 + 1 + kh; if (p0 >= 0 && ph >= 0 && ph < shownCols.length) targetsH.push({ r: r, c: shownCols[ph] }); }
+          if (fxFill(cellsH, targetsH)) continue;
           var out2 = R.fillSeries(src2, to.n, { copy: copy, backward: back }, fillCtx);
-          var p0 = shownCols.indexOf(back ? g.ca : g.cb);
           for (var k2 = 0; k2 < out2.length; k2++) { var pk = back ? p0 - 1 - k2 : p0 + 1 + k2; if (p0 >= 0 && pk >= 0 && pk < shownCols.length) put(r, shownCols[pk], out2[k2]); }
         }
       }

@@ -31,15 +31,21 @@
 // is server/sheets-structure.js, reached through the hooks marked
 // [structure] below; its markup and pure logic are shared/sheet-outline.mjs.
 //
+// Formulas: a <td data-formula="=SUM(B1:B9)"> is computed here (SheetFormula as FM,
+// shared/sheet-formula.mjs) on load and after each edit; its text is the last
+// value, written back only in Edit mode as part of an edit. See the
+// "formulas" section below; the hooks elsewhere are marked "fx:"
+// (FM and fm: FX is the cell-format UI, [format]).
+//
 // Served at /sheets-viewer.js and loaded by server/sheets-loader.js only when
-// the doc has a sheet. SheetQuery, SheetMarkup and DocType are
-// shared/sheet-query.mjs, shared/sheet-markup.mjs and shared/doc-type.mjs,
-// inlined by server/sheets-source.js.
+// the doc has a sheet. SheetQuery, SheetMarkup, DocType and SheetFormula are
+// shared/sheet-query.mjs, shared/sheet-markup.mjs, shared/doc-type.mjs and
+// shared/sheet-formula.mjs, inlined by server/sheets-source.js.
 (function () {
   'use strict';
   if (window === window.parent || window.__tdocSheets) return;
   if (new URLSearchParams(location.search).get('tdoc_compare') === '1') return;
-  var Q = SheetQuery, M = SheetMarkup;
+  var Q = SheetQuery, M = SheetMarkup, FM = SheetFormula; // FX is the format UI ([format])
   var SEL = M.SHEET_SELECTOR;
   var NARROW = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
   var ROW_H = 32, HEAD_H = 34, OVERSCAN = 6, MAX_COLUMNS = 200;
@@ -260,6 +266,13 @@
     'a.ts-btn{text-decoration:none;color:inherit}',
     '.ts-xhead .ts-icon{width:32px;height:32px}',
     '.ts-xhead .ts-icon svg{width:18px;height:18px}',
+    // fx: the formula of the active cell, in the Edit-mode toolbar row
+    // (in place of the editing hint), only while that cell holds one.
+    '.ts-fx{display:flex;align-items:center;gap:6px;height:32px;padding:0 4px 0 10px;border:1px solid var(--ts-line);border-radius:8px;background:#fff;flex:1 1 260px;min-width:0;max-width:560px}',
+    '.ts-fx[hidden]{display:none!important}',
+    '.ts-fx:focus-within{border-color:var(--ts-accent);box-shadow:0 0 0 3px var(--ts-accent-tint)}',
+    '.ts-fx i{flex:none;color:var(--ts-muted);font:italic 600 12px/1 Georgia,serif}',
+    '.ts-fx input{flex:1;min-width:0;border:0;outline:0;background:transparent;font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:inherit;-webkit-user-select:text;user-select:text}',
     '@media (max-width:640px){',
     '.ts-bar{gap:6px}.ts-search{flex:1 1 100%}.ts-count{margin-left:0}',
     '.ts-search{order:-2}.ts-bar>.ts-expand{order:-1}.ts-bar:has(>.ts-expand:not([hidden])) .ts-search{flex-basis:calc(100% - 40px)}',
@@ -390,8 +403,9 @@
     var tab = old || { query: Q.emptyQuery(), widths: [], matchAt: -1, local: emptyLocal(), defW: {} };
     tab.table = table;
     tab.data = data;
-    tab.name = cleanName(data.name) || 'Sheet ' + (book ? book.tabs.indexOf(tab) + 1 || book.tabs.length + 1 : 1);
+    tab.name = uniqueName(tab, cleanName(data.name) || 'Sheet ' + (book ? book.tabs.indexOf(tab) + 1 || book.tabs.length + 1 : 1));
     tab.index = Q.buildIndex(data);
+    fxRead(tab); // fx: formula cells show their computed value
     tab.palettes = data.columns.map(function (c) { return Q.parsePalette(c.palette); });
     FX.read(tab); // [format] cell formats and merges (sheets-format-ui.js)
     tab.rowOf = new Map();
@@ -486,6 +500,14 @@
     while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (tab.tops[mid] <= y) lo = mid; else hi = mid - 1; }
     return lo;
   }
+  // Tab names are unique without regard to case (formulas name tabs that
+  // way): a second "Data" or "data" shows as "data (2)".
+  function uniqueName(tab, name) {
+    var others = book ? book.tabs.filter(function (t) { return t !== tab; }).map(function (t) { return String(t.name).toLowerCase(); }) : [];
+    var out = name, n = 1;
+    while (others.indexOf(out.toLowerCase()) !== -1) out = name + ' (' + (++n) + ')';
+    return out;
+  }
   // A tab name is one line: line breaks and tabs read as a space.
   function cleanName(name) { return String(name || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 100); }
   function defaultWidth(tab, c) {
@@ -562,8 +584,10 @@
     var tables = Array.prototype.slice.call(document.querySelectorAll(SEL)).filter(function (t) { return !t.closest('[data-tdoc-provider]'); });
     if (!tables.length) return false;
     book = { tabs: [], active: 0 };
+    fm.ready = false;
     tables.forEach(function (t) { book.tabs.push(readTab(t)); });
     book.tabs = S.stripOrder(book.tabs); // [structure] data-order: the strip's order
+    fxInit(); // fx: every tab read, compute every formula
     var first = tables[0];
     var host = first.parentElement && first.parentElement.classList.contains('tdoc-table-scroll') && first.parentElement.children.length === 1 ? first.parentElement : first;
     var root = provider(h('div', 'tdoc-sheet'));
@@ -589,6 +613,11 @@
     // The whole sheet is an ordinary table comment (no label of its own), so
     // a new version reconciles it like any other table.
     ui.comment.addEventListener('click', function (e) { e.stopPropagation(); commentOn(cur().table, ui.comment.getBoundingClientRect()); });
+    ui.fx = h('label', 'ts-fx'); ui.fx.hidden = true; // fx: the formula bar
+    ui.fx.innerHTML = '<i aria-hidden="true">fx</i>';
+    ui.fx.title = 'Formula of the selected cell';
+    ui.fxInput = h('input'); ui.fxInput.type = 'text'; ui.fxInput.spellcheck = false; ui.fxInput.setAttribute('aria-label', 'Formula');
+    ui.fx.appendChild(ui.fxInput); ui.bar.appendChild(ui.fx);
     ui.note = h('span', 'ts-note');
     ui.count = h('span', 'ts-count'); ui.count.setAttribute('aria-live', 'polite');
     ui.bar.appendChild(ui.note); ui.bar.appendChild(ui.count); ui.bar.appendChild(ui.comment);
@@ -725,6 +754,7 @@
     if (expand.on) linkHrefs();
     if (rulesExt) rulesExt.bar(); // [sheet-rules]
     ui.note.hidden = !(m2 === 'edit');
+    fxBar();
     ui.note.textContent = canEdit() ? 'Type or double-click to edit · Alt+Enter for a new line · paste a range from Excel or Sheets' : m2 === 'edit' ? 'Editing sheets in the browser is not available yet' : '';
   }
   function describeFilter(tab, c, f) {
@@ -853,6 +883,7 @@
     S.afterBody(tab, first, last, cols); // [structure] outline gutter, markers, frozen rows
     if (tab.anyWrap && measureRows(tab, first, last)) return true;
     placePill();
+    fxBar();
     placeOffscreen();
     if (rulesExt) rulesExt.painted(); // [sheet-rules] the fill handle
     return true;
@@ -1203,6 +1234,7 @@
     }
     placePill();
     if (rulesExt) rulesExt.painted(); // [sheet-rules] the fill handle
+    fxBar();
   }
   function select(i, c, extend) {
     var tab = cur(), n = tab.order.length, cols = tab.widths.length;
@@ -1691,6 +1723,264 @@
     return Math.round(Math.max(M.MIN_WIDTH, Math.min(800, w)));
   }
 
+  // ---- formulas ----------------------------------------------------------------------
+  // The engine is shared/sheet-formula.mjs (FX): one workbook of every tab.
+  // A formula cell is a <td data-formula="=…"> whose text is the value last
+  // computed. On load every formula is computed and the grid shows the
+  // results; the document is not touched (a reader changes nothing). After
+  // an edit in Edit mode the cells that changed get their new values written
+  // into their <td>s, with the edit, so a save keeps formula and value
+  // together. Values are only ever text in the grid (cellHtml escapes).
+  // unwritten: formula <td>s whose text is not their value yet (computed
+  // while nothing was being edited); the next edit writes them too.
+  var fm = { wb: null, ready: false, writing: false, off: false, clip: null, unwritten: new Set(), edited: new Set() };
+  function fxDeps() { return { parseNumber: Q.parseNumber, parseDate: Q.parseDate }; }
+  function fxFormulaOf(td) {
+    var f = td && td.getAttribute('data-formula');
+    if (!f) return null;
+    f = String(f).trim();
+    if (!f) return null;
+    return f[0] === '=' ? f : '=' + f;
+  }
+  // A tab as the engine reads it: values from the cells' text (typed by
+  // their column), formulas from data-formula.
+  function fxInput(tab) {
+    var data = tab.data, cols = data.columns, rows = data.rows, deps = fxDeps();
+    return {
+      name: tab.name, rows: rows.length, cols: cols.length,
+      types: cols.map(function (c) { return c.type; }),
+      cell: function (r, c) {
+        var row = rows[r], f = fxFormulaOf(row.tds[c]);
+        if (f) return { f: f };
+        return FM.cellValue(cols[c].type, row.cells[c], deps);
+      },
+    };
+  }
+  function fxHas(tab) {
+    var t = tab.table;
+    return !!(t && t.querySelector('td[data-formula]'));
+  }
+  // Every tab again: on load, a reload, and when tabs come or go.
+  // Formulas never take the sheet down: if the engine fails, the grid shows
+  // the cells' stored values, as it would without JavaScript.
+  function fxSafe(fn) {
+    try { fn(); } catch (e) {
+      fm.wb = null; fm.off = true; fm.unwritten.clear();
+      try { console.error('tdoc sheets: formulas turned off', e); } catch (x) {}
+    }
+  }
+  function fxInit() { fxSafe(fxInitNow); }
+  function fxInitNow() {
+    fm.ready = true;
+    if (!book || fm.off) return;
+    var any = book.tabs.some(fxHas);
+    if (!any && !fm.wb) return;
+    fm.wb = FM.createWorkbook();
+    fm.wb.load(book.tabs.map(fxInput));
+    book.tabs.forEach(function (tab) { fxPatch(tab, fm.wb.formulas(tab.name)); if (rulesExt) rulesExt.readTab(tab); }); // [sheet-rules] rules see computed values
+    fxFlush();
+  }
+  function fxSameTabs() {
+    var wb = fm.wb;
+    return wb.sheets.length === book.tabs.length && book.tabs.every(function (t) { return !!wb.sheet(t.name); });
+  }
+  // A tab was read again (an edit, an undo): the engine takes its cells,
+  // recomputes what depends on what changed, and every tab shows that.
+  function fxRead(tab) { fxSafe(function () { fxReadNow(tab); }); }
+  function fxReadNow(tab) {
+    if (fm.off) return;
+    if (!fm.ready || !book || book.tabs.indexOf(tab) < 0) return;
+    if (!fm.wb) { if (!fxHas(tab)) return; fxInitNow(); return; }
+    // A tab added, removed or renamed (or put back by an undo): all again.
+    if (!fxSameTabs()) { fxInitNow(); return; }
+    var changedCells = fm.wb.update(fxInput(tab));
+    var byTab = new Map();
+    changedCells.forEach(function (x) { var k = x.sheet.toLowerCase(); if (!byTab.has(k)) byTab.set(k, []); byTab.get(k).push(x); });
+    // This tab's cells were just read from their <td> text: all of its
+    // formula cells are shown from the engine again.
+    fxPatch(tab, fm.wb.formulas(tab.name));
+    book.tabs.forEach(function (t) { var list = byTab.get(t.name.toLowerCase()); if (t !== tab && list) { fxPatch(t, list); if (rulesExt) rulesExt.readTab(t); } }); // [sheet-rules] another tab's rules see its new values
+    fxFlush();
+  }
+  // During an edit: the cells computed earlier get their values written.
+  function fxFlush() {
+    if (!fm.writing || !fm.unwritten.size) return;
+    var list = Array.from(fm.unwritten);
+    fm.unwritten.clear();
+    list.forEach(function (td) {
+      if (!td.isConnected) return;
+      var tab = book.tabs.filter(function (t) { return t.table.contains(td); })[0];
+      // [format] with merges a cell's index in its <tr> is not its column
+      var r = tab && tab.rowOf.get(td.parentElement), c = r == null ? -1 : tab.data.rows[r].tds.indexOf(td);
+      if (r == null || !tab.index.cols[c]) return;
+      var text = fm.wb.display(tab.name, r, c);
+      if (text == null) return;
+      var col = tab.index.cols[c], value = col.tags ? Q.splitTags(text) : text;
+      if (!fxMayWrite(tab, r, c, td)) { fm.unwritten.add(td); return; }
+      if (M.readCell(td, col.type) + '' === (col.type === 'checkbox' ? (Q.parseCheckbox(text) || text === 'TRUE' ? Q.CHECK_MARK : '') : value) + '') return;
+      M.writeCell(td, col.type, value);
+    });
+  }
+  // Show computed values in a tab's index (what the grid draws, searches,
+  // filters and sorts), and in Edit mode, during an edit, in its <td>s.
+  function fxPatch(tab, cells) {
+    if (!tab.index || !cells.length || !fm.wb) return;
+    // Only this tab's own sheet in the engine (names are unique, but never
+    // write one tab's values into another's cells).
+    var sheet = fm.wb.sheet(tab.name);
+    if (!sheet || sheet.name !== tab.name) return;
+    for (var k = 0; k < cells.length; k++) {
+      var r = cells[k].r, c = cells[k].c;
+      var col = tab.index.cols[c], row = tab.data.rows[r];
+      if (!col || !row) continue;
+      var text = fm.wb.display(tab.name, r, c);
+      if (text == null) continue;
+      var shown = text;
+      if (col.tags) { col.tags[r] = Q.splitTags(text); shown = col.tags[r].join(', '); }
+      else if (col.type === 'checkbox') shown = Q.parseCheckbox(text) || text === 'TRUE' ? Q.CHECK_MARK : '';
+      if (col.text[r] !== shown) {
+        col.text[r] = shown;
+        col.lower[r] = shown.toLowerCase();
+        if (col.num) {
+          var v = col.type === 'number' ? Q.parseNumber(shown) : col.type === 'date' ? Q.parseDate(shown) : (Q.parseCheckbox(shown) ? 1 : 0);
+          col.num[r] = v == null ? NaN : v;
+        }
+        row.cells[c] = col.tags ? col.tags[r] : shown;
+      }
+      var td = row.tds[c];
+      if (!td || M.readCell(td, col.type) + '' === (col.tags ? col.tags[r] : shown) + '') { if (td) fm.unwritten.delete(td); continue; }
+      if (fm.writing && canEdit() && fxMayWrite(tab, r, c, td)) { M.writeCell(td, col.type, col.tags ? col.tags[r] : text); fm.unwritten.delete(td); }
+      else fm.unwritten.add(td);
+    }
+  }
+  // A value that follows TODAY() or NOW() (the engine traces it) changes by
+  // itself: written only when someone edits that formula, not by every
+  // other edit.
+  // Nor is anything from a recalculation that ran out of budget (#BUSY!
+  // cells, and values computed from them): the cell keeps its last good
+  // stored value and stays unwritten until a recalculation completes.
+  function fxMayWrite(tab, r, c, td) {
+    if (fm.wb.stats.busy) return false;
+    return !fm.wb.volatile(tab.name, r, c) || fm.edited.has(td);
+  }
+  function fxAttr(td, f) { if (f) td.setAttribute('data-formula', f); else td.removeAttribute('data-formula'); }
+  // Write what was typed: '=…' is a formula (its value comes with the
+  // recompute after this edit); '\'=…' is the text '=…'.
+  function fxWrite(td, type, value) {
+    if (typeof value === 'string' && FM.isFormula(value.trim()) && type !== 'tags' && type !== 'checkbox') {
+      fm.edited.add(td);
+      td.setAttribute('data-formula', value.trim());
+      M.writeCell(td, type, '');
+      return;
+    }
+    if (typeof value === 'string' && value[0] === "'" && value[1] === '=') value = value.slice(1);
+    td.removeAttribute('data-formula');
+    M.writeCell(td, type, value);
+  }
+  function fxSource(tab, r, c) {
+    var row = tab.data.rows[r];
+    return row ? fxFormulaOf(row.tds[c]) : null;
+  }
+  // What the cell editor starts from: the formula, or text that would read
+  // as one marked as text.
+  function fxEditText(tab, r, c) {
+    var f = fxSource(tab, r, c);
+    if (f) return f;
+    var text = tab.index.cols[c].text[r];
+    return text[0] === '=' && text.length > 1 ? "'" + text : text;
+  }
+  // References follow rows and columns inserted or deleted on `tab`, in
+  // every tab's formulas. This tab's are inside the caller's snapshot; the
+  // others' come back as { undo, redo }.
+  function fxShift(tab, axis, at, count) {
+    return fxRewrite(tab, function (src, t) { return FM.shiftFormula(src, { target: tab.name, host: t.name, axis: axis, at: at, count: count }); });
+  }
+  // Rows deleted (document positions, maybe not adjacent): from the bottom
+  // up, a run of adjacent rows at a time.
+  function fxShiftRows(tab, docRows) {
+    var list = docRows.slice().sort(function (a, b) { return b - a; }), runs = [];
+    for (var k = 0; k < list.length; k++) {
+      var last = runs[runs.length - 1];
+      if (last && list[k] === last.at - 1) { last.at--; last.n++; } else runs.push({ at: list[k], n: 1 });
+    }
+    return fxRewrite(tab, function (src, t) {
+      runs.forEach(function (run) { src = FM.shiftFormula(src, { target: tab.name, host: t.name, axis: 'row', at: run.at, count: -run.n }); });
+      return src;
+    });
+  }
+  function fxRename(from, to) {
+    var owner = book.tabs.filter(function (t) { return t.name === from; })[0];
+    return fxRewrite(owner, function (src) { return FM.renameSheetIn(src, from, to); });
+  }
+  function fxRewrite(home, fn) {
+    if (!fm.wb) return null;
+    var others = [];
+    book.tabs.forEach(function (t) {
+      t.data.rows.forEach(function (row) {
+        for (var c = 0; c < row.tds.length; c++) {
+          var td = row.tds[c], src = fxFormulaOf(td);
+          if (!src) continue;
+          var next = fn(src, t);
+          if (next === src) continue;
+          if (t !== home) others.push({ td: td, before: td.getAttribute('data-formula'), after: next });
+          td.setAttribute('data-formula', next);
+        }
+      });
+    });
+    if (!others.length) return null;
+    var touched = [];
+    book.tabs.forEach(function (t) { if (t !== home && others.some(function (o) { return t.table.contains(o.td); })) touched.push(t); });
+    // The other tabs are read again (their formulas moved); the values they
+    // show settle when the changed tab is read, after this change.
+    touched.forEach(function (t) { readTab(t.table, t); });
+    return {
+      undo: function () { others.forEach(function (o) { o.td.setAttribute('data-formula', o.before); }); touched.forEach(function (t) { readTab(t.table, t); }); },
+      redo: function () { others.forEach(function (o) { o.td.setAttribute('data-formula', o.after); }); touched.forEach(function (t) { readTab(t.table, t); }); },
+    };
+  }
+  // Copy: remember where the formulas came from; a paste of the same text
+  // in this sheet brings them, moved by where it lands.
+  function fxCopy(tab, ra, rb, ca, cb, text) {
+    fm.clip = null;
+    var cells = [], any = false;
+    for (var i = ra; i <= rb; i++) {
+      var r = tab.order[i], line = [];
+      for (var c = ca; c <= cb; c++) { var f = fxSource(tab, r, c); if (f) any = true; line.push(f ? { f: f, r: r, c: c } : null); }
+      cells.push(line);
+    }
+    if (any) fm.clip = { text: text, cells: cells };
+  }
+  function fxPasted(text, g, c, r, col, value) {
+    var clip = fm.clip;
+    if (!clip || r < 0 || String(text).replace(/\r?\n$/, '') !== clip.text) return value;
+    var line = clip.cells[g % clip.cells.length], src = line && line[c % line.length];
+    return src ? FM.offsetFormula(src.f, r - src.r, col - src.c) : value;
+  }
+  // The formula bar: in Edit mode, the active cell's formula, in the
+  // toolbar row in place of the editing hint. Enter applies an edit.
+  function fxBar() {
+    if (!ui.fx || !book) return;
+    var tab = cur(), r = tab.order[sel.r];
+    var f = canEdit() && r != null && sel.c < tab.data.columns.length ? fxSource(tab, r, sel.c) : null;
+    ui.fx.hidden = !f;
+    if (f) ui.note.hidden = true;
+    if (f && document.activeElement !== ui.fxInput) { ui.fxInput.value = f; ui.fxInput.setAttribute('aria-label', 'Formula in ' + refLabel(tab, r, sel.c)); }
+  }
+  function fxWire() {
+    ui.fxInput.addEventListener('keydown', function (e) {
+      e.stopPropagation();
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        var tab = cur(), r = tab.order[sel.r], v = ui.fxInput.value;
+        if (r != null && canEdit() && v !== fxSource(tab, r, sel.c)) setCells(tab, [{ r: r, c: sel.c, value: v }], r);
+        ui.grid.focus({ preventScroll: true });
+        fxBar();
+      } else if (e.key === 'Escape') { e.preventDefault(); ui.fxInput.blur(); ui.grid.focus({ preventScroll: true }); fxBar(); }
+    });
+    ['input', 'beforeinput', 'paste', 'copy', 'cut', 'keyup'].forEach(function (t) { ui.fxInput.addEventListener(t, function (e) { e.stopPropagation(); }); });
+    ui.fxInput.addEventListener('blur', function () { setTimeout(fxBar, 0); });
+  }
+
   // ---- editing ------------------------------------------------------------------------
   // Every change lands in the author's table, then the editor's own draft
   // and dirty state are told, exactly as typing in the page would.
@@ -1733,8 +2023,9 @@
   }
   function afterChange(tab, keepSel) {
     var t = book.tabs.indexOf(tab);
-    if (t < 0) { renderAll(); changed(); return; }
-    readTab(tab.table, tab);
+    if (t < 0) { fxInit(); renderAll(); changed(); return; }
+    fm.writing = canEdit(); // fx: computed values go into the cells with this edit
+    try { readTab(tab.table, tab); } finally { fm.writing = false; fm.edited.clear(); }
     if (t === book.active) {
       var activeRow = keepSel != null ? keepSel : null;
       runTab(tab);
@@ -1773,13 +2064,13 @@
       tab.measured.delete(row.tr);
       var hadCells = row.tr.cells.length;
       var td = ensureCell(tab, ch.r, ch.c);
-      before.push({ tr: row.tr, td: td, html: td.innerHTML, cells: hadCells });
-      M.writeCell(td, tab.index.cols[ch.c].type, ch.value);
-      after.push({ td: td, html: td.innerHTML });
+      before.push({ tr: row.tr, td: td, html: td.innerHTML, cells: hadCells, f: td.getAttribute('data-formula') });
+      fxWrite(td, tab.index.cols[ch.c].type, ch.value); // fx: '=…' is a formula
+      after.push({ td: td, html: td.innerHTML, f: td.getAttribute('data-formula') });
     });
     var op = { tab: tab,
-      undo: function () { before.slice().reverse().forEach(function (b) { b.td.innerHTML = b.html; while (b.tr.cells.length > b.cells) b.tr.removeChild(b.tr.lastElementChild); }); },
-      redo: function () { after.forEach(function (a, k) { var b = before[k]; while (b.tr.cells.length < b.cells || !b.td.isConnected && b.tr.cells.length <= Array.prototype.indexOf.call(b.tr.cells, b.td)) b.tr.appendChild(document.createElement('td')); if (!b.td.isConnected) b.tr.appendChild(b.td); a.td.innerHTML = a.html; }); } };
+      undo: function () { before.slice().reverse().forEach(function (b) { b.td.innerHTML = b.html; fxAttr(b.td, b.f); while (b.tr.cells.length > b.cells) b.tr.removeChild(b.tr.lastElementChild); }); },
+      redo: function () { after.forEach(function (a, k) { var b = before[k]; while (b.tr.cells.length < b.cells || !b.td.isConnected && b.tr.cells.length <= Array.prototype.indexOf.call(b.tr.cells, b.td)) b.tr.appendChild(document.createElement('td')); if (!b.td.isConnected) b.tr.appendChild(b.td); a.td.innerHTML = a.html; fxAttr(a.td, a.f); }); } };
     return op;
   }
   // Structural changes (rows, columns, types, tabs, pastes) snapshot the
@@ -1788,10 +2079,13 @@
     var table = tab.table;
     var before = { html: table.innerHTML, name: table.getAttribute('data-name') };
     tab.measured = new Map();
-    FX.wrap(tab, fn); // [format] on the table laid out flat, merged again after
+    // fn may return { undo, redo } for what it changed outside this table
+    // (fx: formulas on other tabs that point here).
+    var extra;
+    FX.wrap(tab, function () { extra = fn(); }); // [format] on the table laid out flat, merged again after
     var after = { html: table.innerHTML, name: table.getAttribute('data-name') };
     var put = function (s) { table.innerHTML = s.html; if (s.name == null) table.removeAttribute('data-name'); else table.setAttribute('data-name', s.name); };
-    record({ tab: tab, undo: function () { put(before); }, redo: function () { put(after); } });
+    record({ tab: tab, undo: function () { put(before); if (extra) extra.undo(); }, redo: function () { put(after); if (extra) extra.redo(); } });
   }
 
   var editor = null;
@@ -1823,7 +2117,7 @@
     input.style.top = (cr.top - g.top + ui.grid.scrollTop - 1) + 'px';
     input.style.width = Math.max(cr.width + 2, Math.min(420, cr.width * 1.6)) + 'px';
     input.style.height = (cr.height + 2) + 'px';
-    input.value = initial != null ? initial : tab.index.cols[c].text[r];
+    input.value = initial != null ? initial : fxEditText(tab, r, c); // fx: a formula cell edits its formula
     ui.grid.appendChild(input);
     var minH = cr.height + 2;
     var grow = function () { if (!multi) return; input.style.height = minH + 'px'; input.style.height = Math.min(320, Math.max(minH, input.scrollHeight + 4)) + 'px'; };
@@ -1852,7 +2146,7 @@
     var ed = editor; editor = null;
     var value = ed.input.value;
     ed.input.remove();
-    if (value !== ed.tab.index.cols[ed.c].text[ed.r]) setCells(ed.tab, [{ r: ed.r, c: ed.c, value: value }], ed.r);
+    if (value !== fxEditText(ed.tab, ed.r, ed.c)) setCells(ed.tab, [{ r: ed.r, c: ed.c, value: value }], ed.r);
     ui.grid.focus({ preventScroll: true });
   }
   function cancelEdit() {
@@ -1969,6 +2263,7 @@
         if (ref && !before) ref = tr;
       }
       S.inheritGroup(list); // [structure] rows added inside a group join it
+      if (r != null) return fxShift(tab, 'row', before ? r : r + 1, count); // fx
     });
     readTab(tab.table, tab); runTab(tab);
     var newR = tab.rowOf.get(added);
@@ -1980,9 +2275,12 @@
   function deleteRows(ra, rb) {
     var tab = cur(), trs = [];
     for (var i = ra; i <= rb; i++) trs.push(tab.data.rows[tab.order[i]].tr);
+    var docRows = [];
+    for (var j = ra; j <= rb; j++) docRows.push(tab.order[j]);
     snapshotOp(tab, function () {
       S.keepCollapsed(trs); // [structure] a deleted first row hands its group's collapsed default on
       trs.forEach(function (tr) { tr.remove(); });
+      return fxShiftRows(tab, docRows); // fx
     });
     trs.forEach(function (tr) { tab.measured.delete(tr); });
     sel.r2 = sel.r = ra;
@@ -2028,6 +2326,7 @@
         while (tr.cells.length < at) tr.appendChild(document.createElement('td'));
         for (var j = 0; j < n; j++) tr.insertBefore(document.createElement('td'), tr.cells[at] || null);
       });
+      return fxShift(tab, 'col', at, 1); // fx
     });
     for (var w = 0; w < n; w++) tab.widths.splice(at, 0, 140);
     tab.query = Q.shiftQueryColumns(tab.query, at, n);
@@ -2040,6 +2339,7 @@
     snapshotOp(tab, function () {
       var th = tab.data.columns[c].th; th.remove();
       tab.data.rows.forEach(function (row) { if (row.tr.cells[c]) row.tr.removeChild(row.tr.cells[c]); });
+      return fxShift(tab, 'col', c, -1); // fx
     });
     tab.widths.splice(c, 1);
     tab.query = Q.shiftQueryColumns(tab.query, c, -1);
@@ -2094,10 +2394,12 @@
   function renameTab(i, anchor) {
     var tab = book.tabs[i];
     inlineInput(anchor, tab.name, 'Tab name', function (v) {
-      if (book.tabs.some(function (t, k) { return k !== i && t.name === v; })) { toast('Another tab already has that name.'); return; }
+      if (book.tabs.some(function (t, k) { return k !== i && t.name.toLowerCase() === v.toLowerCase(); })) { toast('Another tab already has that name.'); return; }
+      var old = tab.name;
       snapshotOp(tab, function () {
         tab.table.setAttribute('data-name', v);
         var cap = tab.table.caption; if (cap) cap.textContent = v;
+        return fxRename(old, v); // fx
       });
       tab.name = v;
       afterChange(tab);
@@ -2133,6 +2435,8 @@
     book.active = Math.max(0, Math.min(book.active, book.tabs.length - 1));
     record({ tab: tab, undo: function () { parent.insertBefore(node, nextSib); book.tabs.splice(i, 0, tab); book.active = i; }, redo: function () { node.remove(); book.tabs.splice(book.tabs.indexOf(tab), 1); book.active = Math.max(0, Math.min(book.active, book.tabs.length - 1)); } });
     sel = { r: 0, c: 0, r2: 0, c2: 0 };
+    fm.writing = canEdit(); // fx: references to the tab are #REF! now
+    try { fxInit(); } finally { fm.writing = false; }
     renderAll(); changed(); relayout(); saveView();
   }
   // A range copied from Excel or Google Sheets arrives as tab-separated text.
@@ -2150,7 +2454,7 @@
     if (single && (sel.r !== sel.r2 || sel.c !== sel.c2)) {
       // One value into a selected range fills the range.
       var fill = [];
-      forRange(function (r, c) { fill.push({ r: r, c: c, value: grid[0][0] }); });
+      forRange(function (r, c) { fill.push({ r: r, c: c, value: fxPasted(text, 0, 0, r, c, grid[0][0]) }); });
       setCells(tab, fill, tab.order[i0]);
       return;
     }
@@ -2184,7 +2488,8 @@
         }
         lastTr = tr;
         while (tr.cells.length < c0 + width) tr.appendChild(document.createElement('td'));
-        for (var c = 0; c < grid[g].length; c++) M.writeCell(tr.cells[c0 + c], types[c0 + c], types[c0 + c] === 'tags' ? Q.splitTags(grid[g][c]) : grid[g][c]);
+        var tr0 = tab.rowOf.has(tr) ? tab.rowOf.get(tr) : -1;
+        for (var c = 0; c < grid[g].length; c++) fxWrite(tr.cells[c0 + c], types[c0 + c], types[c0 + c] === 'tags' ? Q.splitTags(grid[g][c]) : fxPasted(text, g, c, tr0, c0 + c, grid[g][c]));
       }
       if (needCols > 0) tab.data.rows.forEach(function (row) { while (row.tr.cells.length < types.length) row.tr.appendChild(document.createElement('td')); });
     });
@@ -2208,7 +2513,9 @@
       for (var c = ca; c <= cb; c++) { var v = safeForSpreadsheet(tab.index.cols[c].text[r]); cells.push(/[\t\n"]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v); }
       lines.push(cells.join('\t'));
     }
-    return lines.join('\n');
+    var out = lines.join('\n');
+    fxCopy(tab, ra, rb, ca, cb, out); // fx: pasted back here, formulas come with their references moved
+    return out;
   }
 
   // ---- keyboard, pointer, clipboard ---------------------------------------------------
@@ -2299,6 +2606,8 @@
       var from = dir === 'down' ? { i: ra, c: c } : { i: i, c: ca };
       var r = tab.order[i], fr = tab.order[from.i], type = tab.index.cols[c].type, ftype = tab.index.cols[from.c].type;
       var value = ftype === 'tags' ? tab.index.cols[from.c].tags[fr].slice() : tab.index.cols[from.c].text[fr];
+      var fsrc = fxSource(tab, fr, from.c); // fx: a formula fills with its references moved
+      if (fsrc) value = FM.offsetFormula(fsrc, r - fr, c - from.c);
       if (type === 'tags' && !Array.isArray(value)) value = Q.splitTags(value);
       if (type !== 'tags' && Array.isArray(value)) value = value.join(', ');
       list.push({ r: r, c: c, value: value });
@@ -2325,6 +2634,7 @@
   function rowsOn(type, fn, capture) { ui.rows.addEventListener(type, fn, capture); ui.frozen.addEventListener(type, fn, capture); }
   function wire() {
     S.wire(); // [structure] group toggles, unhide markers, the corner's view menu
+    fxWire();
     ui.grid.addEventListener('keydown', onKey);
     ['input', 'beforeinput', 'keyup'].forEach(function (t) { ui.root.addEventListener(t, function (e) { e.stopPropagation(); }); });
     ui.root.addEventListener('keydown', escapeClose);
@@ -2717,8 +3027,22 @@
     if (!book) return;
     var tables = Array.prototype.slice.call(document.querySelectorAll(SEL));
     var old = book.tabs;
-    book.tabs = S.stripOrder(tables.map(function (t) { var o = old.find(function (x) { return x.name === (t.getAttribute('data-name') || ''); }); return readTab(t, o); })); // [structure]
+    fm.ready = false;
+    book.tabs = [];
+    // Each table keeps its own tab object (its view state): the same
+    // element first, else the first unused tab of that name, never one
+    // object for two tables (names may repeat: "data", "data (2)").
+    var used = new Set();
+    tables.forEach(function (t) {
+      var name = t.getAttribute('data-name') || '';
+      var o = old.find(function (x) { return x.table === t && !used.has(x); }) ||
+        old.find(function (x) { return !used.has(x) && (x.table.getAttribute('data-name') || '') === name; });
+      if (o) used.add(o);
+      book.tabs.push(readTab(t, o));
+    });
+    book.tabs = S.stripOrder(book.tabs); // [structure] data-order: the strip's order
     if (!book.tabs.length) { ui.root.remove(); book = null; return; }
+    fxInit();
     book.active = Math.min(book.active, book.tabs.length - 1);
     renderAll();
   }
@@ -2736,6 +3060,9 @@
     selection: function () { return Object.assign({}, sel); },
     // [format] apply formats as the toolbar does (tests)
     format: FX.api,
+    formula: function (t, r, c) { var tab = book && book.tabs[t]; return tab ? fxSource(tab, r, c) : null; },
+    shown: function (t, r, c) { var tab = book && book.tabs[t]; return tab ? tab.index.cols[c].text[r] : null; },
+    formulaStats: function () { return fm.wb ? Object.assign({}, fm.wb.stats) : null; },
     expanded: function () { return { on: expand.on, alone: expand.alone, sheetOnly: expand.sheetOnly, embed: expand.embed, fit: expand.fit, flat: !!book && flatView() }; },
     // [structure] the active tab's outline, hidden and frozen state, as shown.
     structure: function () { return book ? S.describe(cur()) : null; },
@@ -2751,6 +3078,7 @@
     ensureKeys: function (tab) { ensureKeys(headRow(tab)); },
     refLabel: refLabel, colKey: colKey, rowTop: rowTop, rowH: rowH, numW: numW, cellFromEvent: cellFromEvent,
     S: S, FX: FX, // [structure] hidden rows and columns, groups, freeze; [format] merges
+    FM: FM, formulaOf: fxSource, // fx: find & replace and the fill handle work on a formula cell's formula
   }) : null;
   // Mounted: the tables are hidden by the viewer's own style now, so the
   // frame's 200-row hold (#tdoc-sheets-pending) is no longer needed.
