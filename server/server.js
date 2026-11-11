@@ -38,6 +38,7 @@ const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const frameProbeSource = require('./frame-probe-source');
 const { sheetsViewerSource, sheetsViewerVersion } = require('./sheets-source');
+const { loadSheetEmbed, sheetEmbedViewerSource } = require('./sheet-embed-source');
 // Shared shell builder keeps local and production boot markup identical.
 const SHELL = require('./shell.js');
 const { loadRuntimeAssets } = require('./runtime-assets.js');
@@ -1588,6 +1589,16 @@ const server = http.createServer(async (req, res) => {
       'X-Tdoc-Sheets-Version': sheetsViewerVersion(source),
     });
   }
+  // The sheet embed viewer (server/sheet-embed-loader.js fetches it). Read
+  // per request so an edit shows on reload.
+  if (p === '/sheet-embed.js' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const source = sheetEmbedViewerSource();
+    return send(res, 200, req.method === 'HEAD' ? '' : source, {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
   if (p === '/feedback.js' && (req.method === 'GET' || req.method === 'HEAD')) {
     const file = path.join(__dirname, 'runtime', 'feedback.js');
     if (!fs.existsSync(file)) return send(res, 404, 'feedback client is not built: npm run build:feedback');
@@ -1965,6 +1976,37 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // A sheet embedded in a page, as data: the worker's /api/embed/sheet
+  // (handleSheetEmbed), same reference rules and the same data. Every local
+  // doc is the local user's, so there is no access to check here; the
+  // refusal has the worker's shape, so the frame draws one state for both.
+  if (p === '/api/embed/sheet' && req.method === 'GET') {
+    const E = loadSheetEmbed();
+    const site = String(req.headers['sec-fetch-site'] || '').toLowerCase();
+    if (site && site !== 'same-origin' && site !== 'none') return json(res, 403, { error: 'cross_site' });
+    const ref = E.refFromQuery(new URL(req.url, 'http://local').searchParams);
+    if (!ref) return json(res, 400, { error: 'invalid_reference' });
+    const noAccess = () => json(res, 403, { error: 'no_access', signed_in: true }, { 'Cache-Control': 'private, no-cache' });
+    const meta = readJson(path.join(ROOT, ref.slug, 'meta.json'), null);
+    const latest = meta ? latestLocalVersion(ref.slug, meta) : 0;
+    const file = path.join(ROOT, ref.slug, `v${latest}`, 'index.html');
+    if (!latest || !fs.existsSync(file)) return noAccess();
+    const data = E.payload(fs.readFileSync(file, 'utf8'), ref);
+    if (data.error === 'no_sheet') return json(res, 422, { error: 'not_a_sheet' });
+    if (data.error === 'no_tab') return json(res, 404, { error: 'no_tab', tabs: data.tabs });
+    const comments = readCommentFile(path.join(ROOT, ref.slug, 'comments.json'))
+      .filter((c) => c && !c.deleted && !c.resolved && c.status !== 'applied' && c.status !== 'resolved').length;
+    return json(res, 200, {
+      ok: true,
+      slug: ref.slug,
+      title: (typeof meta.title === 'string' && meta.title.trim().slice(0, 200)) || ref.slug,
+      version: latest,
+      href: E.sheetHref(ref.slug, data.tabs > 1 ? data.tab_number : 0, ref.view),
+      comments,
+      ...data,
+    }, { 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff' });
+  }
+
   // Download as Markdown: the worker's /export.md, same conversion.
   const markdownMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/export\.md$/);
   if (markdownMatch && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -1989,6 +2031,19 @@ const server = http.createServer(async (req, res) => {
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     });
+  }
+
+  // A bare /d/<slug> (what an embedded sheet's Open and a pasted link
+  // name): the latest version, query kept (the worker serves it in place).
+  const docHeadMatch = req.method === 'GET' ? p.match(/^\/d\/([^/]+)\/?$/) : null;
+  if (docHeadMatch) {
+    const slug = safeSlug(docHeadMatch[1]);
+    const latest = slug ? latestLocalVersion(slug, readJson(path.join(ROOT, slug, 'meta.json'), {})) : 0;
+    if (latest > 0) {
+      const search = new URL(req.url, 'http://local').search;
+      res.writeHead(302, { Location: `/d/${slug}/v/${latest}${search}` });
+      return res.end();
+    }
   }
 
   const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);

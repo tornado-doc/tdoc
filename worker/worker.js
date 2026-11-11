@@ -18133,9 +18133,13 @@ function historyBlocks(html) {
   const visit = (n) => {
     if (!isEl(n) || HISTORY_SKIP_TAGS.has(n.tagName) || (n.attrs || []).some((x) => x.name === 'data-tdoc-provider')) return;
     const ownText = (n.childNodes || []).some((c) => c.nodeName === '#text' && norm(c.value || ''));
-    if (HISTORY_BLOCK_TAGS.has(n.tagName) || ownText) {
+    // An embedded sheet (data-tdoc-embed) is one block, and its reference is
+    // what a version changes: the same frame-compare.js reads.
+    const embed = attr(n, 'data-tdoc-embed');
+    if (HISTORY_BLOCK_TAGS.has(n.tagName) || ownText || embed) {
       const text = norm(textOf(n));
-      blocks.push({ kind: n.tagName, key: attr(n, 'id') || attr(n, 'data-aid') || '', text, fingerprint: `${text}\n${assets(n, []).join('\n')}` });
+      const ref = embed ? ['data-src', 'data-tab', 'data-view', 'data-rows', 'data-columns'].map((k) => attr(n, k)).join('\n') : '';
+      blocks.push({ kind: n.tagName, key: attr(n, 'id') || attr(n, 'data-aid') || '', text, fingerprint: `${text}\n${assets(n, []).join('\n')}${ref ? `\n${ref}` : ''}` });
       return;
     }
     for (const c of n.childNodes || []) visit(c);
@@ -20571,6 +20575,133 @@ function blockLintOf(html) {
     console.error('[upload] block check failed (ignored):', e && e.message ? e.message : String(e));
     return null;
   }
+}
+
+// ---- Sheet embeds ----------------------------------------------------------
+// A page embeds a standalone sheet BY REFERENCE (<figure data-tdoc-embed=
+// "sheet" data-src="/d/<slug>">, shared/sheet-embed.mjs). The doc frame asks
+// the shell, the shell asks GET /api/embed/sheet, and this answers with one
+// tab of the sheet's LATEST version as data: column names and types, then
+// cell text, the reference's saved view (filters, sort, search) applied,
+// only the rows and columns the embed shows. Never HTML: nothing the sheet's
+// author wrote runs in the page that embeds it.
+//
+// Access is the SHEET's, for the person asking: the same gate as reading the
+// sheet itself (enforceDocAccess: cookie session, bearer, owner token). The
+// page that embeds it grants nothing. Every refusal -- no such doc, in
+// Trash, private, not signed in, a feedback token for another doc -- is the
+// same answer with no title, so an embed cannot be used to learn whether a
+// private doc exists or what it is called.
+//
+// Caching: the extracted data is the same for everybody who passes the gate
+// on one version, so (like the frame and the Markdown download) it is kept
+// in the edge cache under the version's content hash, read only after the
+// gate. The response itself is `private, no-cache` with an ETag: a browser
+// may revalidate its own copy, and no shared cache keeps it.
+//
+// Cost: a miss reads the whole sheet (up to 8 MB) and scans it once
+// (linear, shared/sheet-embed-data.mjs). Misses are limited per isolate and,
+// for a large sheet, per person through KV.
+/* __TDOC_SHEET_EMBED__ */
+const SHEET_EMBED_BIG_BYTES = 512 * 1024;
+const SHEET_EMBED_BIG_PER_MIN = 30;
+const SHEET_EMBED_MISSES_PER_MIN = 240;
+const SHEET_EMBED_ISOLATE = { window: 0, count: 0 };
+function sheetEmbedJson(body, status, extra = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'private, no-cache',
+      'Vary': 'Cookie, Authorization',
+      'X-Content-Type-Options': 'nosniff',
+      ...extra,
+    },
+  });
+}
+function sheetEmbedOpenThreads(list) {
+  ensureMigrated(list);
+  let n = 0;
+  for (const c of snapshotList(list, Infinity)) {
+    if (!c || c.deleted || c.resolved || c.status === 'resolved' || c.status === 'applied') continue;
+    n++;
+  }
+  return n;
+}
+async function handleSheetEmbed(env, req, url, ctx) {
+  const engine = globalThis.TdocSheetEmbed;
+  if (!engine) return sheetEmbedJson({ error: 'unavailable' }, 503);
+  // Read by the tdoc shell on this origin (or a CLI, which sends no
+  // Sec-Fetch-Site). A page on another site gets nothing, not even a
+  // timing difference between a readable and an unreadable sheet.
+  const site = String(req.headers.get('sec-fetch-site') || '').toLowerCase();
+  if (site && site !== 'same-origin' && site !== 'none') return sheetEmbedJson({ error: 'cross_site' }, 403);
+  const ref = engine.refFromQuery(url.searchParams);
+  if (!ref) return sheetEmbedJson({ error: 'invalid_reference' }, 400);
+  const denied = (session) => sheetEmbedJson({ error: 'no_access', signed_in: Boolean(sessionPrincipal(session)) }, 403);
+  const gate = await enforceDocAccess(env, req, ref.slug, null);
+  if (!gate.ok) return denied(await getSession(env, req));
+  if (feedbackScopeDenied(gate.session, ref.slug)) return denied(gate.session);
+  const meta = gate.meta;
+  const latest = latestVersionNumber(meta);
+  if (!meta || !latest) return denied(gate.session);
+  const docKey = `docs/${ref.slug}/v${latest}/index.html`;
+  const params = `${ref.tab}\n${ref.tabIndex}\n${ref.view}\n${ref.rows}\n${ref.columns}`;
+  const frameKey = frameCacheKey(url.origin, ref.slug, latest, meta, await frameBakeGeneration());
+  const cacheKey = frameKey ? `${frameKey.replace('/__frame-cache/', '/__sheet-embed-cache/')}-${(await sha256Hex(params)).slice(0, 16)}` : null;
+  const cache = cacheKey ? edgeCache() : null;
+  let data = null;
+  if (cache) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) data = await hit.json();
+    } catch { data = null; }
+  }
+  if (!data) {
+    const now = Math.floor(Date.now() / 60000);
+    if (SHEET_EMBED_ISOLATE.window !== now) { SHEET_EMBED_ISOLATE.window = now; SHEET_EMBED_ISOLATE.count = 0; }
+    if (++SHEET_EMBED_ISOLATE.count > SHEET_EMBED_MISSES_PER_MIN) return sheetEmbedJson({ error: 'rate_limited' }, 429, { 'Retry-After': '60' });
+    const head = await env.DOCS.head(docKey);
+    if (!head) return denied(gate.session);
+    const size = Number(head.size) || 0;
+    if (size > SHEET_MAX_DOC_BYTES * 2) return sheetEmbedJson({ error: 'too_large' }, 413);
+    if (size > SHEET_EMBED_BIG_BYTES) {
+      const who = actorKey(gate.session) || `ip:${clientIp(req)}`;
+      if (await rateLimited(env, `sheet-embed:${who}`, SHEET_EMBED_BIG_PER_MIN, 60)) return sheetEmbedJson({ error: 'rate_limited' }, 429, { 'Retry-After': '60' });
+    }
+    const obj = await env.DOCS.get(docKey);
+    if (!obj) return denied(gate.session);
+    let out;
+    try { out = engine.payload(await obj.text(), ref); } catch (e) {
+      console.error('[sheet-embed] read failed:', e && e.message ? e.message : String(e));
+      return sheetEmbedJson({ error: 'unreadable' }, 500);
+    }
+    if (out.error === 'no_sheet') return sheetEmbedJson({ error: 'not_a_sheet' }, 422);
+    if (out.error === 'no_tab') return sheetEmbedJson({ error: 'no_tab', tabs: out.tabs }, 404);
+    data = out;
+    if (cache) {
+      const put = cache.put(cacheKey, new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=31536000' } })).catch(() => {});
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put); else await put;
+    }
+  }
+  let comments = 0;
+  try { comments = sheetEmbedOpenThreads(await readComments(env, ref.slug)); } catch {}
+  const title = (typeof meta.title === 'string' && meta.title.trim().slice(0, 200)) || ref.slug;
+  const body = {
+    ok: true,
+    slug: ref.slug,
+    title,
+    version: latest,
+    href: engine.sheetHref(ref.slug, data.tabs > 1 ? data.tab_number : 0, ref.view),
+    comments,
+    ...data,
+  };
+  const entry = (Array.isArray(meta.versions) ? meta.versions : []).find((v) => Number(v.n) === latest);
+  const etag = `W/"${(await sha256Hex(`${ref.slug}\n${latest}\n${entry && entry.sha || ''}\n${params}\n${comments}\n${title}`)).slice(0, 24)}"`;
+  if ((req.headers.get('if-none-match') || '') === etag) {
+    return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': 'private, no-cache', 'Vary': 'Cookie, Authorization' } });
+  }
+  return sheetEmbedJson(body, 200, { 'ETag': etag });
 }
 
 function suggestParse(html) {
@@ -23909,6 +24040,10 @@ function mcpGuideSection(md, heading) {
   const end = rest.indexOf('\n## ', 4);
   return (end === -1 ? rest : rest.slice(0, end)).trim();
 }
+// A sheet embedded in a page by reference: one line, as the guide's 8 KB
+// allows; authoring/structure/sheets.md ("Embedding a sheet in a page")
+// has the rest.
+const MCP_SHEET_EMBED_GUIDE = 'Shown live in another page, by reference: <figure data-tdoc-embed="sheet" data-src="/d/<slug>" data-rows="10"><a href="/d/<slug>">Name</a></figure> (sheets.md: when).';
 function mcpWritingGuide(style, kind) {
   const name = MCP_STYLES.includes(style) ? style : 'default';
   const hs = mcpHouseStyle(name);
@@ -23929,10 +24064,15 @@ function mcpWritingGuide(style, kind) {
       ? 'Each slide is one artifact (free inside). Around slides, text sits in p/li/h*, never loose in a div.'
       : 'A doc is a sequence of blocks: h2-h4, p, lists, tables, the house blocks below (exact markup; styled for you), and each chart, widget or custom panel as ONE <figure> or data-tdoc-artifact="Name" element. Text sits in p/li/h*/td, never loose in a div; publish warns when it does.',
     // A deck is slides, not a reading page: its own rules follow below.
+    // A live sheet from another doc (the sheets kind says more).
+    ...(kind === 'slides' || kind === 'sheets' ? [] : [
+      '- Live sheet from a sheet doc: <figure data-tdoc-embed="sheet" data-src="/d/<slug>" data-rows="10"><a href="/d/<slug>">Name</a></figure> (latest rows, the sheet\'s access; get_writing_guide kind "sheets").',
+    ]),
     ...(kind === 'slides' ? [] : [
       '- Stat tiles: <div class="tdoc-tiles"><div class="tdoc-tile"><p class="tdoc-tile-num">11%</p><p>what it counts</p></div>…</div>',
       '- Cards: <div class="tdoc-cards"><div class="tdoc-card"><h3>…</h3><p>…</p></div>…</div>',
       '- Note: <aside class="note"><p>…</p></aside>. Collapsible: <details><summary>…</summary><p>…</p></details>. Figure: <figure>…<figcaption>…</figcaption></figure>',
+
     ]),
     '- Diagram: <div class="diagram-box" data-tdoc-artifact><svg viewBox="0 0 680 260" role="img" aria-label="…">…</svg><p class="cap">What to take from it.</p></div>',
     '- Table: <div class="tdoc-table-scroll"><table>…</table></div>; square corners, hairline row rules, no fills; numbers in <span class="num"> with tabular numerals.',
@@ -23960,6 +24100,7 @@ function mcpWritingGuide(style, kind) {
     parts.push('## Sheets', 'Records people search, filter and sort: one <table data-tdoc-sheet data-name="Tab"> per tab, drawn by the reader as a spreadsheet grid. Full guide: tdoc://authoring/structure/sheets.md');
     if (markup) parts.push(markup.replace(/^## The markup\n+/, '').replace(/^[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*\n\n/, ''));
     parts.push('Keep every data-row id and th data-key when editing (cell comments hang on them); a new row or column takes the next number. data-palette colours: gray red orange yellow green teal blue purple pink. Several tables are tabs of one grid. A sheet doc may be up to 8 MB (10,000 rows × 20 columns fits).');
+    parts.push(MCP_SHEET_EMBED_GUIDE);
   }
   return parts.join('\n\n') + '\n';
 }
@@ -26404,6 +26545,9 @@ const tdocHandlers = {
     // Stable machine-readable form of the canonical bare document URL. It
     // resolves the latest version behind the same access gate but stays
     // read-only and exposes no listing/search surface.
+    // A sheet embedded in a page, as data (handleSheetEmbed).
+    if (p === '/api/embed/sheet' && method === 'GET') return handleSheetEmbed(env, req, url, ctx);
+
     const rawHeadMatch = p.match(/^\/d\/([^/]+)\/raw\/?$/);
     if (rawHeadMatch && (method === 'GET' || method === 'HEAD')) {
       const slug = rawHeadMatch[1];
@@ -26855,6 +26999,21 @@ const tdocHandlers = {
           'Cache-Control': current ? 'public, max-age=31536000, immutable' : 'public, max-age=300',
           'X-Content-Type-Options': 'nosniff',
           // Fetched by the sandboxed (opaque-origin) doc frame.
+          'Cross-Origin-Resource-Policy': 'cross-origin',
+        },
+      });
+    }
+    // The sheet embed viewer (server/sheet-embed-source.js), fetched only by a
+    // doc frame that holds an embed (server/sheet-embed-loader.js).
+    if (p === '/sheet-embed.js' && (method === 'GET' || method === 'HEAD')) {
+      const engine = globalThis.TdocSheetEmbed;
+      if (!engine) return text('sheet embeds unavailable', { status: 503 });
+      const current = url.searchParams.get('v') === engine.viewerVersion;
+      return new Response(method === 'HEAD' ? null : engine.viewerJs, {
+        headers: {
+          'Content-Type': 'text/javascript; charset=utf-8',
+          'Cache-Control': current ? 'public, max-age=31536000, immutable' : 'public, max-age=300',
+          'X-Content-Type-Options': 'nosniff',
           'Cross-Origin-Resource-Policy': 'cross-origin',
         },
       });

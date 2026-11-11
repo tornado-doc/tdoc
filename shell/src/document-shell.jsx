@@ -69,6 +69,7 @@ import { CommentDocVersionContext } from './document/comment-card.jsx';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
+import { createSheetEmbedHandler, embedFrameSrc } from './document/sheet-embed.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
@@ -226,6 +227,8 @@ export function DocumentShell({ boot, config }) {
   }, [historyEnabled]);
   const [historyDevMode] = useState(() => Boolean(readDevMode()?.on));
   const narrow = useNarrowViewport({ bodyClass: 'tdoc-narrow' });
+  // The frame's address carries this page's embed key (sheet-embed.js).
+  const [frameSrc] = useState(() => embedFrameSrc(boot.frameSrc));
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
   const editorRef = useRef(null);
@@ -555,8 +558,12 @@ export function DocumentShell({ boot, config }) {
   const [docShape, setDocShape] = useState({ sheets: 0, sheetDoc: false });
   // The signed-out homepage remembers nothing about a visitor's view.
   const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity) });
+  // Sheets embedded in the page (flag sheetEmbeds): the frame asks, this
+  // fetches as the reader and answers on the request's own port.
+  const sheetEmbed = useMemo(() => createSheetEmbedHandler({ enabled: () => isFeatureOn('sheetEmbeds') }), []);
   const bridge = useFrameBridge({
     ...sheetHandlers,
+    'tdoc:sheetEmbed': sheetEmbed,
     'tdoc:demoRewriteDone': (message) => {
       const pending = demoRewriteWait.current;
       if (pending && pending.id === message.id) pending.resolve(message.ok === true);
@@ -2407,7 +2414,7 @@ export function DocumentShell({ boot, config }) {
         aria-label="Document content"
         onMouseLeave={() => setHoveredAnchorId(null)}
         sandbox="allow-scripts"
-        src={boot.frameSrc}
+        src={frameSrc}
       />
 
       <DocumentFooter visible={bridge.layout.footerVisible} />

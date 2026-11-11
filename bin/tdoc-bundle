@@ -83,6 +83,8 @@ const htmlParser = fs.readFileSync(path.join(skill, 'server/html-parser/parse5.j
 const versionDiffJs = fs.readFileSync(path.join(skill, 'server/version-diff.js'), 'utf8');
 // The publish-time block check, shared with Node tests.
 const blockLintJs = fs.readFileSync(path.join(skill, 'server/block-lint.js'), 'utf8');
+// Sheet embeds: one tab of a sheet as data (/api/embed/sheet).
+const sheetEmbedJs = require(path.join(skill, 'server/sheet-embed-source.js')).sheetEmbedSource();
 // The authoring guides, served to AI apps as MCP resources.
 const authoringGuides = require(path.join(skill, 'server/authoring-guides.js')).loadAuthoringGuides(skill);
 // The site pages' share card (worker HOME_CARD_PATH), served from memory.
@@ -102,7 +104,7 @@ const git = (...args) => {
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
-const bundleSha = sha(Buffer.concat([Buffer.from([bundlerSource, worker, shellMod, notificationText, frameProbe, sheetsViewerJs, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewValidator, htmlParser, versionDiffJs, blockLintJs, JSON.stringify(previewCoverage), JSON.stringify(authoringGuides)].join('\0')), previewWasm, ...previewFonts, homeCardPng]));
+const bundleSha = sha(Buffer.concat([Buffer.from([bundlerSource, worker, shellMod, notificationText, frameProbe, sheetsViewerJs, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewValidator, htmlParser, versionDiffJs, blockLintJs, sheetEmbedJs, JSON.stringify(previewCoverage), JSON.stringify(authoringGuides)].join('\0')), previewWasm, ...previewFonts, homeCardPng]));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -149,6 +151,7 @@ replaced = mustReplace(replaced, '/* __TDOC_PREVIEW_VALIDATOR__ */', previewVali
 replaced = mustReplace(replaced, '/* __TDOC_HTML_PARSER__ */', htmlParser, 'HTML_PARSER');
 replaced = mustReplace(replaced, '/* __TDOC_VERSION_DIFF__ */', versionDiffJs, 'VERSION_DIFF');
 replaced = mustReplace(replaced, '/* __TDOC_BLOCK_LINT__ */', blockLintJs, 'BLOCK_LINT');
+replaced = mustReplace(replaced, '/* __TDOC_SHEET_EMBED__ */', sheetEmbedJs, 'SHEET_EMBED');
 replaced = mustReplace(replaced, /const HOME_CARD_PNG_B64 = "__TDOC_HOME_CARD_PNG_B64__";/, 'const HOME_CARD_PNG_B64 = ' + JSON.stringify(homeCardPng.toString('base64')) + ';', 'HOME_CARD_PNG_B64');
 replaced = mustReplace(replaced, /const AUTHORING_GUIDES = "__TDOC_AUTHORING_GUIDES__";/, 'const AUTHORING_GUIDES = ' + JSON.stringify(authoringGuides) + ';', 'AUTHORING_GUIDES');
 

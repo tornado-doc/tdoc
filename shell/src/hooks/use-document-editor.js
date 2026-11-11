@@ -1,6 +1,7 @@
 import { isFeatureOn } from '../feature-flags.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveDocumentVersion } from '../document/api.js';
+import { embedFrameSrc } from '../document/sheet-embed.js';
 import {
   clearDraft,
   clearDraftBody,
@@ -154,7 +155,7 @@ export function useDocumentEditor({
     setDirty(false);
     setChecking(false);
     setStaleDraft(null);
-    if (frameRef.current) frameRef.current.src = boot.frameSrc;
+    if (frameRef.current) frameRef.current.src = embedFrameSrc(boot.frameSrc, true);
   }, [boot.frameSrc, frameRef, storeKey]);
 
   const restoreDraft = useCallback((bodyHtml) => {
