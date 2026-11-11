@@ -203,11 +203,10 @@ export function DocumentShell({ boot, config }) {
     history.pushState(null, '', url);
     setComparing(next);
   };
-  // Version history (flag versionHistory): "Edited …" opens the history
-  // panel for whoever may list the doc's history (cfg.historyVisible);
-  // ?history=1 is the panel open, so Back closes it.
-  const [historyFlag] = useState(() => isFeatureOn('versionHistory'));
-  const historyEnabled = historyFlag && config.mode === 'published' && !config.isLanding && Boolean(config.historyVisible);
+  // Version history: "Edited …" opens the history panel for whoever may
+  // list the doc's history (cfg.historyVisible); for anyone else it is plain
+  // text. ?history=1 is the panel open, so Back closes it.
+  const historyEnabled = config.mode === 'published' && !config.isLanding && Boolean(config.historyVisible);
   const [historyOpen, setHistoryOpen] = useState(() => historyEnabled && new URLSearchParams(location.search).get('history') === '1');
   const changeHistory = (next) => {
     if (next === historyOpen) return;
@@ -2190,7 +2189,7 @@ export function DocumentShell({ boot, config }) {
       <HandoffSendTransport.Provider value={demoBackend ? demoBackend.postNotifyHandoff : null}>
       <AgentMentionContext.Provider value={agentMentions}>
       <SuggestContext.Provider value={suggestContext}>
-      <CommentDocVersionContext.Provider value={historyFlag && config.mode === 'published' ? Number(config.version) : null}>
+      <CommentDocVersionContext.Provider value={config.mode === 'published' ? Number(config.version) : null}>
       <TopBar
         identity={config.identity}
         onboardingTest={config.debug ? {
@@ -2212,7 +2211,6 @@ export function DocumentShell({ boot, config }) {
           !comparing && <>
             <DocumentEdited
               config={config}
-              onCompare={() => changeComparison(true)}
               onHistory={historyEnabled ? () => changeHistory(!historyOpen) : null}
               historyOpen={historyOpen}
               disabled={editor.mode === 'edit' && editor.dirty}
@@ -2269,7 +2267,6 @@ export function DocumentShell({ boot, config }) {
             docShape={docShape}
             onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
-            onCompare={() => changeComparison(true)}
             onHistory={historyEnabled ? () => changeHistory(true) : null}
             mode={{ modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
           />
@@ -2343,7 +2340,7 @@ export function DocumentShell({ boot, config }) {
       <OldVersionNotice value={boot.oldVersion || (liveLatest > Number(config.version) ? {
         current: Number(config.version),
         latest: liveLatest,
-        latestUrl: `/d/${encodeURIComponent(config.slug)}/v/${liveLatest}`,
+        latestUrl: `/d/${encodeURIComponent(config.slug)}`,
         fresh: true,
       } : null)} />
 

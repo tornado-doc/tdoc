@@ -109,8 +109,13 @@ const { resolveTarget } = require('./helpers/fixture-server');
     assert.equal(await page.locator('iframe[aria-label="Document content"]').count(),1);
     assert.equal(await page.frameLocator('iframe[aria-label="Document content"]').locator('body').evaluate(() => window.__readerInstance),'retained','reader instance survives the comparison');
     assert.equal(await page.frameLocator('iframe[aria-label="Document content"]').locator('[data-tdoc-change],.tdoc-diff-del').count(),0,'comparison annotations never touch the reader');
+    // ⋯ no longer offers View changes (the version history panel replaced
+    // the old menu); ?compare=1 still opens the comparison.
     await page.getByRole('button', {name:'More actions',exact:true}).click();
-    await page.getByRole('menuitem', {name:'View changes',exact:true}).click();
+    await page.locator('.ui-menu-popup').waitFor();
+    assert.equal(await page.getByRole('menuitem', {name:'View changes',exact:true}).count(), 0, 'no View changes in ⋯');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => { const u = new URL(location.href); u.searchParams.set('compare', '1'); history.pushState(null, '', u); dispatchEvent(new PopStateEvent('popstate')); });
     await summary.waitFor({state:'attached'});
     assert(new URL(page.url()).searchParams.has('compare'));
     await page.goBack();

@@ -10,7 +10,9 @@
 //   - Restore saves the old version as a new one and opens it.
 //   - a phone gets the same rows in a bottom drawer from ⋯ → Version history.
 //   - dev mode adds version numbers; normal mode shows none.
-//   - the flag off: the old Edited menu, unchanged.
+//   - a viewer who may not list the history: "Edited …" is plain text, no
+//     menu, no View changes or Versions in ⋯; a shared /v/N link still says
+//     which version it is and links to the latest.
 //   - a comment whose words are gone and which was written on an older
 //     version says "Commented on an earlier version".
 // Run with: node test/version-history-ui.test.js
@@ -89,9 +91,11 @@ async function startServer(worker, env) {
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.stack || error.message}`); } };
   const shot = async (p, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await p.waitForTimeout(500); await p.screenshot({ path: `${SHOTS}/${name}` }); } };
 
-  const open = async (slug, { phone = false, flags = null, path = '' } = {}) => {
+  const strangerSid = 'c'.repeat(32);
+  await env.META.put(`session:${strangerSid}`, JSON.stringify({ login: 'reader', name: 'reader', email: 'reader@tdoc.test', avatar_url: '', created: new Date().toISOString() }));
+  const open = async (slug, { phone = false, flags = null, path = '', as = sid } = {}) => {
     const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : { viewport: { width: 1280, height: 800 } });
-    await ctx.addCookies([{ name: 'tdoc_sid', value: sid, domain: '127.0.0.1', path: '/' }]);
+    if (as) await ctx.addCookies([{ name: 'tdoc_sid', value: as, domain: '127.0.0.1', path: '/' }]);
     await ctx.route(/api\.github\.com/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' }));
     await ctx.addInitScript((pinned) => {
       window.__copied = [];
@@ -260,12 +264,73 @@ async function startServer(worker, env) {
       await v.ctx.close();
     });
 
-    await t('flag off: the Edited menu as before', async () => {
+    // The doc's history is its owner's (history_visibility default): a
+    // signed-in reader and a signed-out one may read the doc, not its history.
+    for (const [who, as] of [['a signed-in reader', strangerSid], ['a signed-out reader', null]]) {
+      await t(`${who} without history rights: "Edited …" is plain text; no version menu anywhere`, async () => {
+        const slug = await newDoc();
+        const v = await open(slug, { as });
+        const edited = v.page.locator('.tdoc-bar .tdoc-edited');
+        await edited.waitFor();
+        assert.match(await edited.innerText(), /^Edited /);
+        assert.equal(await edited.evaluate((el) => el.tagName), 'SPAN', 'not a button');
+        assert.equal(await edited.getAttribute('aria-expanded'), null);
+        assert.equal(await v.page.locator('.tdoc-bar button.tdoc-edited').count(), 0);
+        await edited.click();
+        await v.page.waitForTimeout(300);
+        assert.equal(await v.page.locator('[role="menu"]').count(), 0, 'no menu opens');
+        assert.equal(await v.page.locator('.tdoc-history-panel').count(), 0, 'no panel opens');
+        assert.doesNotMatch(v.page.url(), /history=1|compare=1/);
+        await shot(v.page, `history-reader-plain-${as ? 'signed-in' : 'signed-out'}.png`);
+        // ⋯ has no View changes, Versions or Version history either.
+        await v.page.locator('.tdoc-bar [aria-label="More actions"], .tdoc-bar [aria-label="More"], .tdoc-bar .tdoc-more-trigger').first().click();
+        await v.page.locator('[role="menu"]').first().waitFor();
+        for (const name of ['View changes', 'Versions', 'Version history']) {
+          assert.equal(await v.page.getByRole('menuitem', { name, exact: true }).count(), 0, `no ${name} in ⋯`);
+        }
+        assert.equal(await v.page.locator('[data-action="compare"], [data-action="history"], .tdoc-version-submenu-trigger').count(), 0);
+        await shot(v.page, `history-reader-overflow-${as ? 'signed-in' : 'signed-out'}.png`);
+        await v.ctx.close();
+        // A phone: "Edited …" is not in the bar, and ⋯ has no version rows.
+        const m = await open(slug, { as, phone: true });
+        await m.page.locator('.tdoc-bar [aria-label="More actions"], .tdoc-bar [aria-label="More"], .tdoc-bar .tdoc-more-trigger').first().click();
+        await m.page.locator('[role="menu"]').first().waitFor();
+        for (const name of ['View changes', 'Versions', 'Version history']) {
+          assert.equal(await m.page.getByRole('menuitem', { name, exact: true }).count(), 0, `no ${name} in phone ⋯`);
+        }
+        await shot(m.page, `history-reader-phone-overflow-${as ? 'signed-in' : 'signed-out'}.png`);
+        await m.ctx.close();
+      });
+    }
+
+    await t('a reader without history rights on a shared /v/N link: the strip names the version and links to the latest', async () => {
       const slug = await newDoc();
-      const v = await open(slug, { flags: { versionHistory: false } });
+      for (const [phone, name] of [[false, 'desktop'], [true, 'phone']]) {
+        const v = await open(slug, { as: strangerSid, path: '/v/2', phone });
+        const strip = v.page.locator('.tdoc-oldver-strip');
+        await strip.waitFor();
+        assert.match(await strip.innerText(), /You're viewing v2 - the latest is v5/);
+        assert.equal(await strip.locator('a').getAttribute('href'), `/d/${slug}`, 'the live doc, not a pinned version');
+        if (!phone) {
+          assert.equal(await v.page.locator('.tdoc-bar .tdoc-edited').evaluate((el) => el.tagName), 'SPAN');
+          assert.equal(await v.page.locator('[role="menu"]').count(), 0);
+        }
+        await shot(v.page, `history-reader-old-version-${name}.png`);
+        await strip.locator('a').click();
+        await v.page.waitForURL(new RegExp(`/d/${slug}$`));
+        await v.page.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 15000 });
+        assert.equal(await v.page.locator('.tdoc-oldver-strip').count(), 0, 'no strip on the latest');
+        await v.ctx.close();
+      }
+    });
+
+    await t('the owner on a shared /v/N link: the same strip, and Edited still opens the panel', async () => {
+      const slug = await newDoc();
+      const v = await open(slug, { path: '/v/2' });
+      await v.page.locator('.tdoc-oldver-strip').getByText("You're viewing v2").waitFor();
       await v.page.locator('#tdoc-version-toggle').click();
-      await v.page.getByRole('menuitem', { name: 'View changes' }).waitFor();
-      assert.equal(await v.page.locator('.tdoc-history-panel').count(), 0);
+      await panel(v.page).waitFor();
+      await shot(v.page, 'history-owner-old-version-panel.png');
       await v.ctx.close();
     });
 
