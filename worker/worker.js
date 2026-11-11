@@ -24213,7 +24213,7 @@ function mcpGuideSection(md, heading) {
 // A sheet embedded in a page by reference: one line, as the guide's 8 KB
 // allows; authoring/structure/sheets.md ("Embedding a sheet in a page")
 // has the rest.
-const MCP_SHEET_EMBED_GUIDE = 'Shown live in another page, by reference: <figure data-tdoc-embed="sheet" data-src="/d/<slug>" data-rows="10"><a href="/d/<slug>">Name</a></figure> (sheets.md: when).';
+const MCP_SHEET_EMBED_GUIDE = 'Embed live in another page: <figure data-tdoc-embed="sheet" data-src="/d/<slug>" data-rows="10"><a href="/d/<slug>">Name</a></figure>. When to embed, and the rest: tdoc://authoring/structure/sheets.md';
 function mcpWritingGuide(style, kind) {
   const name = MCP_STYLES.includes(style) ? style : 'default';
   const hs = mcpHouseStyle(name);
@@ -24269,9 +24269,11 @@ function mcpWritingGuide(style, kind) {
   if (kind === 'sheets') {
     const md = mcpAuthoringGuides()['structure/sheets.md'];
     const markup = mcpGuideSection(md, 'The markup');
-    parts.push('## Sheets', 'Records people search, filter and sort: one <table data-tdoc-sheet data-name="Tab"> per tab, drawn by the reader as a spreadsheet grid. In a prose doc a small table (20 rows, 5 columns, short cells) is a plain <table> (publish warns); a list of records that is the deliverable is its own sheet doc, linked from the prose. Full guide: tdoc://authoring/structure/sheets.md');
-    if (markup) parts.push(markup.replace(/^## The markup\n+/, '').replace(/^[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*\n\n/, ''));
-    parts.push('Keep every data-row id and th data-key when editing (cell comments hang on them); a new row or column takes the next number. data-palette colours: gray red orange yellow green teal blue purple pink. Several tables are tabs of one grid. A sheet doc may be up to 8 MB (10,000 rows × 20 columns fits).');
+    parts.push('## Sheets', 'Records people search, filter and sort, drawn as a spreadsheet grid: one <table data-tdoc-sheet data-name="Tab"> per tab. In a prose doc a small table (20 rows, 5 columns, short cells) stays a plain <table>; records that are the deliverable are their own sheet doc, linked from the prose.');
+    // The type table without its Filter column (what the reader does, not
+    // what to write): the guide stays under 8 KB; sheets.md has it all.
+    if (markup) parts.push(markup.replace(/^## The markup\n+/, '').replace(/^[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*\n\n/, '').replace(/^(\|.*\|)[^|\n]*\|$/gm, '$1'));
+    parts.push('Keep every data-row id and th data-key when editing (cell comments hang on them); new rows and columns take the next number. data-palette: gray red orange yellow green teal blue purple pink. A sheet doc may be up to 8 MB (10,000 rows × 20 columns).');
     parts.push(MCP_SHEET_EMBED_GUIDE);
   }
   return parts.join('\n\n') + '\n';
