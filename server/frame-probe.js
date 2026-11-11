@@ -960,6 +960,70 @@
     trigger._tdocSentTimer = setTimeout(function () { trigger.classList.remove('tdoc-sent'); }, 1600);
   }, true);
 
+  // --- data-tdoc-carousel: radio-driven slides (author CSS) ---
+  // Author CSS can switch slides with radios and labels and even run them on
+  // a timer with CSS animations, but it cannot see a swipe, and choosing the
+  // radio that is already checked changes no style, so a timed cycle that has
+  // moved on cannot be sent back to it. On an element with
+  // data-tdoc-carousel the reader adds both:
+  //   - a sideways touch swipe checks the next (left) or previous (right)
+  //     radio inside it, counted from the slide on show: the
+  //     [data-tdoc-carousel-for="<radio id>"] element nearest the carousel's
+  //     centre, else the checked radio;
+  //   - landing on the radio that is already checked (a swipe, or a click on
+  //     its label) restarts the CSS animations inside from their start. ---
+  function carouselRestart(host) {
+    (host.getAnimations ? host.getAnimations({ subtree: true }) : []).forEach(function (a) { try { a.currentTime = 0; } catch (_) {} });
+  }
+  document.addEventListener('click', function (e) {
+    var label = e.target && e.target.closest && e.target.closest('label[for]');
+    var host = label && label.closest('[data-tdoc-carousel]');
+    if (!host) return;
+    var radio = document.getElementById(label.htmlFor);
+    if (radio && radio.type === 'radio' && radio.checked && host.contains(radio)) carouselRestart(host);
+  }, true);
+  // A swipe is only a swipe in Read/Comment with nothing else under way: not
+  // while + Comment is picking, not in Edit, not while a box is being drawn
+  // and not over a text selection, so a comment-selection drag can never
+  // flip the slide under its own anchor.
+  function carouselGestureBusy() {
+    if (picking || interactionMode === 'edit') return true;
+    if (marquee && marquee.style.display !== 'none') return true;
+    var sel = window.getSelection && window.getSelection();
+    return !!(sel && sel.rangeCount && !sel.isCollapsed);
+  }
+  var swipeStart = null;
+  document.addEventListener('touchstart', function (e) {
+    var host = e.target && e.target.closest && e.target.closest('[data-tdoc-carousel]');
+    swipeStart = host && e.touches.length === 1 && !carouselGestureBusy() ? { host: host, x: e.touches[0].clientX, y: e.touches[0].clientY, busy: false } : null;
+  }, { passive: true, capture: true });
+  document.addEventListener('touchmove', function () {
+    if (swipeStart && carouselGestureBusy()) swipeStart.busy = true;
+  }, { passive: true, capture: true });
+  document.addEventListener('touchend', function (e) {
+    var start = swipeStart; swipeStart = null;
+    if (!start || start.busy || carouselGestureBusy() || !e.changedTouches.length) return;
+    var dx = e.changedTouches[0].clientX - start.x, dy = e.changedTouches[0].clientY - start.y;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    var host = start.host;
+    // One group: the checked radio's (else the first one's) name.
+    var all = Array.prototype.slice.call(host.querySelectorAll('input[type="radio"]'));
+    var lead = all.filter(function (r) { return r.checked; })[0] || all[0];
+    var radios = all.filter(function (r) { return !r.disabled && lead && r.name === lead.name; });
+    if (radios.length < 2) return;
+    var at = -1, box = host.getBoundingClientRect(), cx = box.left + box.width / 2, cy = box.top + box.height / 2, best = Infinity;
+    Array.prototype.forEach.call(host.querySelectorAll('[data-tdoc-carousel-for]'), function (item) {
+      var r = item.getBoundingClientRect(), d = Math.abs(r.left + r.width / 2 - cx) + Math.abs(r.top + r.height / 2 - cy);
+      var i = radios.indexOf(document.getElementById(item.getAttribute('data-tdoc-carousel-for')));
+      if (i >= 0 && d < best) { best = d; at = i; }
+    });
+    if (at < 0) at = radios.findIndex(function (r) { return r.checked; });
+    var next = radios[(Math.max(at, 0) + (dx < 0 ? 1 : -1) + radios.length) % radios.length];
+    if (next.checked) { carouselRestart(host); return; }
+    next.checked = true;
+    next.dispatchEvent(new Event('change', { bubbles: true }));
+  }, { passive: true, capture: true });
+
   // --- anchor resolution (faithful port of overlay.js collectTextNodes/
   //     findTextRange). Normalizes whitespace so multi-block/wrapped selections
   //     (Selection.toString gives "para1\n\npara2" but the raw DOM has "\n   ")
