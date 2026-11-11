@@ -11,7 +11,7 @@ import { readHashExpanded, readHashView, readSheetAlone, withHashExpanded, withH
 // visitor to the homepage keeps nothing: no storage, no hash rewrite.
 //
 //   frame → shell { type:'tdoc:sheetReady', tabs }
-//   shell → frame { type:'tdoc:sheetConfig', editing, hash, widths, path, expanded, alone }
+//   shell → frame { type:'tdoc:sheetConfig', editing, canEdit, hash, widths, path, expanded, alone }
 //   frame → shell { type:'tdoc:sheetView', hash, widths }
 //   frame → shell { type:'tdoc:sheetExpand', open }
 //
@@ -45,7 +45,11 @@ function storeView(slug, value) {
   writeStored(storeKey(slug), JSON.stringify(value));
 }
 
-export function useSheetView({ slug, send, persist = true }) {
+// `widths` is the reader's own layout per tab ({ w, h, wrap, align }, by
+// column key and row id): a reader who may not edit the doc resizes and
+// wraps for themselves. `canEdit` tells the frame that this reader's layout
+// changes are the document's instead (Edit mode, the editor's draft, Save).
+export function useSheetView({ slug, send, persist = true, canEdit = false }) {
   const ready = useCallback(() => {
     const stored = persist ? readStoredView(slug) : {};
     // A link that carries a view wins over the one remembered here.
@@ -53,13 +57,14 @@ export function useSheetView({ slug, send, persist = true }) {
     send({
       type: 'tdoc:sheetConfig',
       editing: isFeatureOn('sheets'),
+      canEdit: Boolean(canEdit),
       hash: fromLink || (typeof stored.hash === 'string' ? stored.hash : ''),
       widths: stored.widths && typeof stored.widths === 'object' ? stored.widths : {},
       path: location.pathname,
       expanded: readHashExpanded(),
       alone: readSheetAlone(),
     });
-  }, [persist, send, slug]);
+  }, [canEdit, persist, send, slug]);
 
   const expandChanged = useCallback((message) => {
     const next = withHashExpanded(location.hash, message.open === true);
@@ -73,7 +78,8 @@ export function useSheetView({ slug, send, persist = true }) {
     const hash = typeof message.hash === 'string' ? message.hash.slice(0, 4000) : '';
     let widths = message.widths && typeof message.widths === 'object' ? message.widths : {};
     // The frame is author-controlled territory: keep what it hands over small.
-    if (JSON.stringify(widths).length > 20_000) widths = {};
+    // (A reader's own layout: up to 2,000 row heights a tab fit.)
+    if (JSON.stringify(widths).length > 100_000) widths = {};
     storeView(slug, { hash, widths });
     const next = withHashView(location.hash, hash);
     if (next !== (location.hash || '')) {

@@ -323,6 +323,9 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
     await test('keyboard: arrows, Tab, Home/End, ⌘↓/⌘↑, shift-extend; tabs switch', async () => {
       const frame = await open('tracker');
       const f = frameLoc();
+      // Read mode: in Comment mode a click on a cell comments on it.
+      await chooseMode(page, 'Read');
+      await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'read');
       await f.locator('.ts-row[data-i="0"] .ts-c[data-c="0"]').click();
       for (const k of ['ArrowDown', 'ArrowDown', 'ArrowRight', 'Tab']) await page.keyboard.press(k);
       let s = (await state(frame)).sel;
@@ -343,6 +346,7 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await f.getByRole('tab', { name: 'People' }).click();
       await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '3 rows');
       assert((await state(frame)).active === 1, 'tab switched');
+      await chooseMode(page, 'Comment');
     });
 
     await test('a cell comment anchors to the row id and stays on its cell through a sort', async () => {
@@ -350,8 +354,8 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       const f = frameLoc();
       await page.locator(modeSelector('comment')).waitFor();
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
+      // Comment mode: a click on the cell is the comment on it.
       await f.locator('.ts-row[data-i="4"] .ts-c[data-c="1"]').click();
-      await f.getByRole('button', { name: 'Comment on Tasks!B5' }).click();
       await page.waitForSelector('.tdoc-popup textarea', { timeout: 5000 });
       await page.fill('.tdoc-popup textarea', 'Is Bo really on this?');
       await page.click('.tdoc-popup .submit');
@@ -764,8 +768,11 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       assert(before.top >= 390, `scrolled: ${before.top}`);
 
       await f.getByRole('button', { name: 'Expand sheet to full screen' }).click();
-      await page.waitForFunction(() => document.querySelector('.tdoc-document-app[data-visual-open][data-presenting]'));
       await frame.waitForFunction(() => window.__tdocSheets.expanded().on);
+      // The page's top bar stays (mode, comments, share, ⋯): full screen is
+      // the doc frame's whole area, as on every doc type.
+      assert(!(await page.locator('.tdoc-document-app[data-visual-open]').count()), 'the shell is not covered');
+      await page.locator('.tdoc-bar #tdoc-more-btn').waitFor();
       await page.waitForFunction(() => /(^#|&)expand=1(&|$)/.test(location.hash));
       await page.waitForTimeout(150);
       const big = await frame.evaluate(() => {
@@ -773,8 +780,9 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
         return { q: window.__tdocSheets.tabs()[0].query, top: document.querySelector('.ts-grid').scrollTop, search: document.querySelector('.ts-search input').value, w: g.width, h: g.height, vw: innerWidth, vh: innerHeight, close: !!document.querySelector('.ts-xhead button[aria-label^="Close full screen"]') };
       });
       const frameBox = await page.locator('iframe[aria-label="Document content"]').boundingBox();
-      assert(frameBox.width === 1280 && frameBox.height === 860, `the frame fills the window: ${JSON.stringify(frameBox)}`);
-      assert(big.w > 1200 && big.h > 600, `the grid fills the frame: ${JSON.stringify(big)}`);
+      const barBox = await page.locator('.tdoc-bar').first().boundingBox();
+      assert(frameBox.y >= barBox.y + barBox.height - 1 && frameBox.width === 1280, `the frame sits under the top bar: ${JSON.stringify({ frameBox, barBox })}`);
+      assert(big.w > 1200 && big.h > 560 && big.vh === Math.round(frameBox.height), `the grid fills the frame: ${JSON.stringify(big)}`);
       assert(JSON.stringify(big.q) === JSON.stringify(before.q) && big.search === 'run', `search and sort carry in: ${JSON.stringify(big)}`);
       assert(Math.abs(big.top - before.top) < 2, `scroll carries in: ${big.top} vs ${before.top}`);
       await shot(page, 'sheet-expanded-desktop');
@@ -785,7 +793,7 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await f.locator('.ts-row[data-i="2"] .ts-c[data-c="0"]').click();
       await page.keyboard.press('Escape');
       await frame.waitForFunction(() => !window.__tdocSheets.expanded().on);
-      await page.waitForFunction(() => !document.querySelector('.tdoc-document-app[data-visual-open]') && !/expand=1/.test(location.hash));
+      await page.waitForFunction(() => !/expand=1/.test(location.hash));
       const back = await frame.evaluate(() => ({ count: document.querySelector('.ts-count').textContent, search: document.querySelector('.ts-search input').value, sel: window.__tdocSheets.selection(), inert: document.querySelectorAll('[inert]').length, expandShown: !document.querySelector('.ts-expand').hidden }));
       assert(back.count === '11 of 60 rows' && back.search === 'run 1' && back.sel.r === 2, `the view carries out: ${JSON.stringify(back)}`);
       assert(back.inert === 0 && back.expandShown, JSON.stringify(back));
@@ -796,7 +804,7 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       const link = await page.evaluate(() => location.href.split('#')[0] + location.hash + '&expand=1');
       const p2 = await context.newPage();
       await p2.goto(link);
-      await p2.waitForFunction(() => document.querySelector('.tdoc-document-app[data-visual-open]'), null, { timeout: 15000 });
+      await p2.frameLocator('iframe[aria-label="Document content"]').locator('.tdoc-sheet.is-expanded').waitFor({ timeout: 15000 });
       const fr2 = p2.frames().find((x) => x.url().includes('/frame'));
       await fr2.waitForFunction(() => window.__tdocSheets && window.__tdocSheets.expanded().on && document.querySelector('.ts-count').textContent === '11 of 60 rows');
       // The close button exits too.
@@ -814,12 +822,11 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
       const f = frameLoc();
       // Once the frame has grown to the window and the grid with it.
-      await frame.waitForFunction(() => innerHeight === 860 && document.querySelector('.ts-grid').getBoundingClientRect().height > 600);
+      await frame.waitForFunction(() => innerHeight > 700 && document.querySelector('.ts-grid').getBoundingClientRect().height > 560);
       await page.waitForTimeout(100);
       await f.locator('.ts-row[data-i="3"] .ts-c[data-c="0"]').click();
-      await f.getByRole('button', { name: 'Comment on Runs!A4' }).click();
       await page.waitForSelector('.tdoc-popup textarea', { timeout: 5000 });
-      assert(await page.locator('.tdoc-popup textarea').isVisible(), 'the composer shows above the full-screen frame');
+      assert(await page.locator('.tdoc-popup textarea').isVisible(), 'the composer shows over the full-screen sheet');
       await page.fill('.tdoc-popup textarea', 'Why only this run?');
       await page.click('.tdoc-popup .submit');
       const file = path.join(root, 'prose', 'comments.json');
@@ -852,6 +859,10 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       assert(info.x.on && info.x.alone === 1 && info.count === '11 of 60 rows', `the view came along: ${JSON.stringify(info)}`);
       assert(info.tabs === 'none' && !info.close && /^\/d\/prose\/v\/1#sheet=/.test(info.back), JSON.stringify(info));
       assert(info.title === 'Runs report · Runs', info.title);
+      // Its own page has the doc's top bar too: the mode switch is in ⋯.
+      await tab.locator('.tdoc-bar #tdoc-more-btn').click();
+      await tab.getByRole('menuitemradio', { name: 'Edit', exact: true }).waitFor({ timeout: 5000 });
+      await tab.keyboard.press('Escape');
       // The same doc: the comment on Runs!A4 shows on its cell here. Esc does not leave.
       await fl.getByRole('searchbox', { name: 'Search this sheet' }).fill('');
       await tf.waitForFunction(() => document.querySelector('.ts-row[data-i="3"] .ts-c[data-c="0"]') && document.querySelector('.ts-row[data-i="3"] .ts-c[data-c="0"]').classList.contains('has-comment'));
@@ -881,9 +892,10 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await frame.waitForFunction(() => window.__tdocSheets.expanded().on);
       await p.waitForTimeout(200);
       const box = await p.locator('iframe[aria-label="Document content"]').boundingBox();
-      assert(box.width === 390 && box.height === 844, JSON.stringify(box));
+      assert(box.width === 390 && box.y >= 40 && box.y + box.height <= 845, JSON.stringify(box));
+      assert(await p.locator('.tdoc-bar #tdoc-more-btn').isVisible(), 'the top bar stays on a phone');
       const m = await frame.evaluate(() => { const r = document.querySelector('.ts-grid').getBoundingClientRect(); return { w: r.width, h: r.height, overflow: document.documentElement.scrollWidth - innerWidth }; });
-      assert(m.w > 340 && m.h > 500 && m.overflow <= 1, JSON.stringify(m));
+      assert(m.w > 340 && m.h > 450 && m.overflow <= 1, JSON.stringify(m));
       await shot(p, 'sheet-expanded-phone');
       await f.getByRole('button', { name: 'Close full screen (Esc)' }).tap();
       await frame.waitForFunction(() => !window.__tdocSheets.expanded().on);

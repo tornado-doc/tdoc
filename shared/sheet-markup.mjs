@@ -16,6 +16,17 @@
 // the other ids alone) and the `data-key` on each header (kept through
 // rename and type changes; inserting or deleting a column leaves the other
 // keys alone). Markup without keys falls back to the column's position.
+//
+// Layout a sheet's editors save with it (readers may change it for
+// themselves, in their view only), all optional, all plain attributes:
+//
+//   <th data-width="180" data-wrap="wrap" data-align="right">   a column's
+//     width in CSS px, Wrap text (absent: clip to one line) and alignment
+//     (absent: the type's own, numbers right)
+//   <tr data-row="r4" data-height="64">                        a row's height
+//
+// A line break inside a cell is a <br>: it survives any HTML tool, shows
+// as a break where no viewer runs, and reads back as "\n".
 
 export function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -48,7 +59,32 @@ export function cellHtml(type, raw) {
     const href = safeHref(text);
     if (href) return `<a href="${escapeHtml(href)}">${escapeHtml(text)}</a>`;
   }
-  return escapeHtml(text);
+  return breaksHtml(text);
+}
+
+// Text with its line breaks as <br>.
+function breaksHtml(text) {
+  return String(text).split(/\r\n|\r|\n/).map(escapeHtml).join('<br>');
+}
+
+// The layout attributes, cleaned: a width or height is a whole number of px
+// in a sane band, wrap is on or off, alignment one of three.
+export const MIN_WIDTH = 40;
+export const MAX_WIDTH = 1200;
+export const MIN_HEIGHT = 24;
+export const MAX_HEIGHT = 800;
+export function cleanSize(value, min, max) {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) && n > 0 ? Math.max(min, Math.min(max, n)) : 0;
+}
+export function cleanAlign(value) {
+  const a = String(value || '').toLowerCase();
+  return a === 'left' || a === 'center' || a === 'right' ? a : '';
+}
+function colAttrs(col) {
+  const w = cleanSize(col.width, MIN_WIDTH, MAX_WIDTH);
+  const align = cleanAlign(col.align);
+  return (w ? ` data-width="${w}"` : '') + (col.wrap ? ' data-wrap="wrap"' : '') + (align ? ` data-align="${align}"` : '');
 }
 
 // One <table data-tdoc-sheet>. sheet = { name, columns:[{name,type,palette?}], rows:[{id?, cells:[raw]}] }
@@ -56,12 +92,13 @@ export function tableHtml(sheet, { caption = false } = {}) {
   const cols = sheet.columns || [];
   const head = cols.map((col, i) => {
     const pal = col.palette ? ` data-palette="${escapeHtml(col.palette)}"` : '';
-    return `<th data-key="${escapeHtml(col.key || `c${i + 1}`)}" data-type="${escapeHtml(col.type || 'text')}"${pal}>${escapeHtml(col.name)}</th>`;
+    return `<th data-key="${escapeHtml(col.key || `c${i + 1}`)}" data-type="${escapeHtml(col.type || 'text')}"${pal}${colAttrs(col)}>${escapeHtml(col.name)}</th>`;
   }).join('');
   const body = (sheet.rows || []).map((row, i) => {
     const id = row.id || `r${i + 1}`;
     const cells = cols.map((col, c) => `<td>${cellHtml(col.type, row.cells[c])}</td>`).join('');
-    return `<tr data-row="${escapeHtml(id)}">${cells}</tr>`;
+    const ht = cleanSize(row.height, MIN_HEIGHT, MAX_HEIGHT);
+    return `<tr data-row="${escapeHtml(id)}"${ht ? ` data-height="${ht}"` : ''}>${cells}</tr>`;
   }).join('\n');
   const name = sheet.name || 'Sheet 1';
   const cap = caption ? `<caption>${escapeHtml(name)}</caption>\n` : '';
@@ -200,6 +237,32 @@ function cellText(el) {
   return String(el.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
+// A cell's text with its <br>s as line breaks; every other run of
+// whitespace reads as one space, as the page shows it. Most cells hold a
+// single text node or none: that is the fast path on a 10,000-row sheet.
+function multilineText(el) {
+  const kids = el.childNodes;
+  if (!kids || !kids.length || (kids.length === 1 && kids[0].nodeType === 3)) return cellText(el);
+  const lines = [''];
+  (function walk(node) {
+    const list = node.childNodes;
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (n.nodeType === 3) lines[lines.length - 1] += n.data;
+      else if (n.nodeType === 1) {
+        const tag = String(n.tagName).toUpperCase();
+        if (tag === 'BR') lines.push('');
+        else if (tag !== 'SCRIPT' && tag !== 'STYLE') walk(n);
+      }
+    }
+  })(el);
+  if (lines.length === 1) return cellText(el);
+  const out = lines.map((l) => l.replace(/\s+/g, ' ').trim());
+  while (out.length && !out[out.length - 1]) out.pop();
+  while (out.length && !out[0]) out.shift();
+  return out.join('\n');
+}
+
 // The header row: the last row of <thead>, else a first body row made of <th>.
 export function headerCells(table) {
   const head = ownRows(table, 'head');
@@ -221,7 +284,7 @@ export function readCell(td, type) {
     return cellText(td).split(/[,;|]/).map((t) => t.trim()).filter(Boolean);
   }
   if (type === 'checkbox') return checkboxOn(cellText(td)) ? CHECK : '';
-  return cellText(td);
+  return type === 'url' ? cellText(td) : multilineText(td);
 }
 
 // { name, columns:[{name,type,palette,th}], rows:[{id, tr, tds, cells}] }
@@ -235,6 +298,9 @@ export function readSheetTable(table, normalize) {
     name: cellText(th) || `Column ${i + 1}`,
     type: norm(th.getAttribute('data-type')),
     palette: th.getAttribute('data-palette') || '',
+    width: cleanSize(th.getAttribute('data-width'), MIN_WIDTH, MAX_WIDTH),
+    wrap: th.getAttribute('data-wrap') === 'wrap',
+    align: cleanAlign(th.getAttribute('data-align')),
     th,
   }));
   const headRow = ths.length ? ths[0].parentElement : null;
@@ -248,7 +314,8 @@ export function readSheetTable(table, normalize) {
       tds.push(td);
       cells.push(readCell(td, columns[c].type));
     }
-    rows.push({ id: tr.getAttribute('data-row') || '', tr, tds, cells });
+    const height = tr.hasAttribute('data-height') ? cleanSize(tr.getAttribute('data-height'), MIN_HEIGHT, MAX_HEIGHT) : 0;
+    rows.push({ id: tr.getAttribute('data-row') || '', tr, tds, cells, height });
   });
   return { name: table.getAttribute('data-name') || '', columns, rows, table };
 }
@@ -280,7 +347,23 @@ export function writeCell(td, type, value) {
     td.appendChild(a);
     return;
   }
-  td.textContent = text;
+  const lines = text.split(/\r\n|\r|\n/);
+  lines.forEach((line, i) => {
+    if (i) td.appendChild(doc.createElement('br'));
+    if (line) td.appendChild(doc.createTextNode(line));
+  });
+}
+
+// A column's or row's layout, written onto its <th> or <tr>; a falsy value
+// removes the attribute (the default).
+export function writeColumnLayout(th, { width, wrap, align } = {}) {
+  if (width !== undefined) { const w = cleanSize(width, MIN_WIDTH, MAX_WIDTH); if (w) th.setAttribute('data-width', String(w)); else th.removeAttribute('data-width'); }
+  if (wrap !== undefined) { if (wrap) th.setAttribute('data-wrap', 'wrap'); else th.removeAttribute('data-wrap'); }
+  if (align !== undefined) { const a = cleanAlign(align); if (a) th.setAttribute('data-align', a); else th.removeAttribute('data-align'); }
+}
+export function writeRowHeight(tr, height) {
+  const ht = cleanSize(height, MIN_HEIGHT, MAX_HEIGHT);
+  if (ht) tr.setAttribute('data-height', String(ht)); else tr.removeAttribute('data-height');
 }
 
 // The next unused column key among `keys`: c<max+1>.
