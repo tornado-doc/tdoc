@@ -157,6 +157,16 @@ async function t(name, fn) {
     assert.equal(tr.hasAttribute('data-hidden'), false);
   });
 
+  await t('tab strip order: data-order first (cleaned), the rest after in document order', () => {
+    const tab = (name, order) => ({ name, table: { getAttribute: (a) => (a === 'data-order' ? order : null) } });
+    const names = (list) => O.stripOrder(list).map((x) => x.name).join();
+    assert.equal(names([tab('A'), tab('B'), tab('C')]), 'A,B,C');
+    assert.equal(names([tab('A', '2'), tab('B', '0'), tab('C', '1')]), 'B,C,A');
+    assert.equal(names([tab('A', '1'), tab('New'), tab('B', '0')]), 'B,A,New', 'a tab added later comes last');
+    assert.equal(names([tab('A', '-1'), tab('B', 'x'), tab('C', '0')]), 'C,A,B', 'bad orders are no order');
+    assert.equal(O.cleanOrder('1000'), null);
+  });
+
   await t('structureAttrs: the same attributes as a string, cleaned', () => {
     assert.equal(O.structureAttrs({ level: 2, collapsed: [2, 3, 1], hidden: true }), ' data-group="2" data-collapsed="1 2" data-hidden');
     assert.equal(O.structureAttrs({ level: '"><script>' }), '');

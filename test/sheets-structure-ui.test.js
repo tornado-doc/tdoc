@@ -9,8 +9,14 @@
 //     Save writes the attributes
 //   - a cell comment keeps its cell through grouping, collapsing and hiding
 //     the rows around it, live and after Save
-//   - freeze rows and columns from the menus; a reader's own freeze
-//   - tabs: rename, drag to reorder, move from the menu, delete with Undo in the toast
+//   - grouping is refused (said so) under a sort, filter or search; a row
+//     inserted inside a group joins it; deleting a group's first row hands its
+//     collapsed default on; search never steps into a hidden column
+//   - freeze rows and columns from the menus; frozen rows select, edit, open
+//     the row menu and take comments like any row; a reader's own freeze
+//   - tabs: rename, drag to reorder, move from the menu, delete with Undo in
+//     the toast; in a prose doc the strip order is data-order, tables stay put;
+//     a tab called __proto__ keeps its view
 //   - insert several rows and columns at once
 //   - a small sheet in a prose doc: a collapsed group is one summary row, a
 //     card on a phone; a phone taps toggles, the corner menu and the tab menu
@@ -74,6 +80,11 @@ async function shot(page, name) {
   writeDoc('reader', withStructure(plain(30)), 2);
   for (const slug of ['group', 'hide', 'comment', 'freeze', 'insert']) writeDoc(slug, plain(30));
   writeDoc('tabs', plain(10, [people, { ...people, name: 'Places' }]));
+  // Tabs in a prose doc: reordering keeps the tables where they are.
+  writeDoc('prosetabs', `<!doctype html><html><head><meta charset="utf-8"><title>Notes</title></head><body><main><h1>Notes</h1><p>One.</p><p>Two.</p><p>Three.</p>${M.tableHtml({ name: 'Tasks', columns, rows: rowsOf(30) }, { caption: true })}<p id="between">Between the tables.</p>${M.tableHtml({ ...people, name: 'People' }, { caption: true })}</main></body></html>`);
+  // A group whose first row is deleted; a tab called __proto__.
+  writeDoc('delfirst', withStructure(plain(30)));
+  writeDoc('proto', withStructure(M.sheetDocumentHtml({ title: 'Proto', sheets: [{ name: 'Tasks', columns, rows: rowsOf(30) }, { name: '__proto__', columns, rows: rowsOf(3) }] })));
   writeDoc('phone', withStructure(plain(30, [people])));
   // A small sheet in a prose doc: the flat view (cards on a phone).
   const small = M.tableHtml({ name: 'Budget', columns, rows: rowsOf(8) })
@@ -100,7 +111,7 @@ async function shot(page, name) {
     await context.addInitScript(() => { try { localStorage.setItem('tdoc-save-notice-dismissed', '1'); } catch {} });
     const page = await context.newPage();
     const errors = [];
-    page.on('pageerror', (e) => errors.push(e.message));
+    page.on('pageerror', (e) => errors.push(e.stack || e.message));
     const frameLoc = (p = page) => p.frameLocator('iframe[aria-label="Document content"]');
     async function open(slug, { v = 1, viewPage = page, selector = '.tdoc-sheet .ts-row' } = {}) {
       await viewPage.goto('about:blank');
@@ -192,6 +203,16 @@ async function shot(page, name) {
       const frame = await open('group');
       const f = frameLoc();
       await edit(frame);
+      // Under a search a range would take in rows the view hides: refused, said so.
+      await f.locator('.ts-search input').fill('Task 1');
+      await frame.waitForFunction(() => window.__tdocSheets.tabs()[0].shown === 11);
+      await f.locator('.ts-rows .ts-row[data-i="1"] .ts-c[data-c="0"]').click();
+      await f.locator('.ts-rows .ts-row[data-i="2"] .ts-c[data-c="0"]').click({ modifiers: ['Shift'] });
+      await page.keyboard.press('Alt+Shift+ArrowRight');
+      await f.locator('.ts-toast', { hasText: 'Clear the sort, filters and search first' }).waitFor({ timeout: 3000 });
+      assert(await frame.evaluate(() => !document.querySelector('tr[data-group]')), 'nothing grouped');
+      await f.locator('.ts-search input').fill('');
+      await frame.waitForFunction(() => window.__tdocSheets.tabs()[0].shown === 30);
       await rowNum(f, 2).click();
       await rowNum(f, 6).click({ modifiers: ['Shift'] });
       await rowNum(f, 4).click({ button: 'right' });
@@ -215,11 +236,21 @@ async function shot(page, name) {
       await f.locator('.ts-rows .ts-row[data-i="4"] .ts-c[data-c="0"]').click();
       await page.keyboard.press('Alt+Shift+ArrowLeft');
       await frame.waitForFunction(() => document.querySelector('tr[data-row="r5"]').getAttribute('data-group') === '1');
-      await f.getByRole('button', { name: 'Collapse rows 3–7' }).click();
+      // A row inserted inside the group joins it; one inserted just above it does not.
+      await rowNum(f, 5).click({ button: 'right' });
+      await f.getByRole('menuitem', { name: 'Insert row above' }).click();
+      await frame.waitForFunction(() => document.querySelector('tr[data-row="r31"]'));
+      assert(await attr(frame, 'tr[data-row="r31"]', 'data-group') === '1', 'inserted inside: level 1');
+      await rowNum(f, 2).click({ button: 'right' });
+      await f.getByRole('menuitem', { name: 'Insert row above' }).click();
+      await frame.waitForFunction(() => document.querySelector('tr[data-row="r32"]'));
+      assert(await attr(frame, 'tr[data-row="r32"]', 'data-group') === null, 'inserted above the group: outside');
+      await f.getByRole('button', { name: 'Collapse rows 4–9' }).click();
       await shot(page, 'structure-collapsed-edit-desktop');
       await save('group', 2);
       const html = saved('group', 2);
       assert(/<tr data-row="r3" data-group="1" data-collapsed="1">/.test(html), 'v2: the group and its default');
+      assert(/<tr data-row="r31" data-group="1">/.test(html), 'v2: the inserted row is in the group');
       assert(/<tr data-row="r4" data-group="2">/.test(html) && /<tr data-row="r5" data-group="1">/.test(html), 'v2: nesting');
     });
 
@@ -245,6 +276,10 @@ async function shot(page, name) {
       await f.locator('.ts-rows .ts-row[data-i="0"] .ts-c[data-c="1"]').click();
       await page.keyboard.press('ArrowRight');
       assert((await frame.evaluate(() => window.__tdocSheets.selection().c)) === 3, 'past the hidden column');
+      // Search does not step into a hidden column (Points 45 is row 16's only match).
+      await f.locator('.ts-search input').fill('45');
+      await f.locator('.ts-search output', { hasText: 'No matches' }).waitFor({ timeout: 3000 });
+      await f.locator('.ts-search input').fill('');
       await page.locator('.tdoc-editor-toolbar button[aria-label="Undo"]').click();
       await frame.waitForFunction(() => !document.querySelectorAll('table[data-tdoc-sheet] thead th')[2].hasAttribute('data-hidden'));
       await save('hide', 2);
@@ -319,8 +354,32 @@ async function shot(page, name) {
       await f.getByRole('menuitem', { name: 'Freeze up to row 6' }).click();
       await frame.waitForFunction(() => document.querySelector('table[data-tdoc-sheet]').getAttribute('data-freeze-rows') === '6');
       assert(await frame.evaluate(() => document.querySelectorAll('.ts-frozen .ts-row').length) === 6, 'six frozen rows drawn');
+      // Frozen rows are the grid's own rows: select, edit and the row menu, scrolled or not.
+      await frame.evaluate(() => { document.querySelector('.ts-grid').scrollTop = 500; });
+      await page.waitForTimeout(100);
+      const frozenCell = f.locator('.ts-frozen .ts-row[data-i="1"] .ts-c[data-c="0"]');
+      await frozenCell.click();
+      const after = await frame.evaluate(() => ({ sel: window.__tdocSheets.selection(), top: document.querySelector('.ts-grid').scrollTop }));
+      assert(after.sel.r === 1 && after.sel.c === 0 && after.top >= 400, `a click selects it and does not scroll: ${JSON.stringify(after)}`);
+      await frozenCell.dblclick();
+      await f.locator('.ts-editor').waitFor();
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
+      await page.keyboard.type('Frozen edit');
+      await page.keyboard.press('Enter');
+      await frame.waitForFunction(() => document.querySelector('tr[data-row="r2"] td').textContent === 'Frozen edit');
+      await f.locator('.ts-frozen .ts-row[data-i="2"] .ts-n').click({ button: 'right' });
+      await f.getByRole('menuitem', { name: 'Insert row above' }).waitFor();
+      await page.keyboard.press('Escape');
       await save('freeze', 2);
       assert(/data-freeze-rows="6" data-freeze-cols="2"/.test(saved('freeze', 2)), 'v2 holds the freeze');
+      // Comment mode: a click on a frozen cell comments on it.
+      const v2 = await open('freeze', { v: 2 });
+      await chooseMode(page, 'Comment');
+      await frameMode(v2, 'comment');
+      await v2.evaluate(() => { document.querySelector('.ts-grid').scrollTop = 500; });
+      await frameLoc().locator('.ts-frozen .ts-row[data-i="3"] .ts-c[data-c="1"]').click();
+      await page.waitForSelector('.tdoc-popup textarea', { timeout: 5000 });
+      await page.keyboard.press('Escape');
     });
 
     // ---- tabs ------------------------------------------------------------------------------
@@ -357,6 +416,47 @@ async function shot(page, name) {
       await save('tabs', 2);
       const html = saved('tabs', 2);
       assert(html.indexOf('data-name="People"') < html.indexOf('data-name="Tasks"') && !/Sites|Places/.test(html), 'v2: People first, Sites gone');
+    });
+
+    await test('tabs in a prose doc: reordering writes data-order and leaves the tables among the paragraphs', async () => {
+      const frame = await open('prosetabs');
+      const f = frameLoc();
+      await edit(frame);
+      await f.getByRole('tab', { name: 'People' }).click({ button: 'right' });
+      await f.getByRole('menuitem', { name: 'Move left' }).click();
+      await frame.waitForFunction(() => window.__tdocSheets.tabs().map((t) => t.name).join() === 'People,Tasks');
+      const doc = await frame.evaluate(() => ({ order: Array.from(document.querySelectorAll('table[data-tdoc-sheet]')).map((t) => t.getAttribute('data-name') + ':' + t.getAttribute('data-order')).join(), between: document.querySelector('table[data-name="Tasks"]').compareDocumentPosition(document.getElementById('between')) & 4 }));
+      assert(doc.order === 'Tasks:1,People:0' && doc.between, `tables stay, the strip moves: ${JSON.stringify(doc)}`);
+      await save('prosetabs', 2);
+      const v2 = await open('prosetabs', { v: 2 });
+      assert(await v2.evaluate(() => window.__tdocSheets.tabs().map((t) => t.name).join()) === 'People,Tasks', 'v2 opens in that order');
+    });
+
+    await test('deleting a group\'s first row hands its collapsed default to the next row', async () => {
+      const frame = await open('delfirst');
+      const f = frameLoc();
+      await chooseMode(page, 'Read');
+      await frameMode(frame, 'read');
+      await f.getByRole('button', { name: /Expand rows 8–12/ }).click();
+      await edit(frame);
+      await f.locator('.ts-rows .ts-row', { hasText: 'Task 8' }).first().locator('.ts-n').click({ button: 'right' });
+      await f.getByRole('menuitem', { name: 'Delete row' }).click();
+      await frame.waitForFunction(() => !document.querySelector('tr[data-row="r8"]'));
+      assert(await attr(frame, 'tr[data-row="r9"]', 'data-collapsed') === '1', 'r9 carries the default now');
+    });
+
+    await test('a tab called __proto__ keeps its own view state', async () => {
+      let frame = await open('proto');
+      const f = frameLoc();
+      await chooseMode(page, 'Read');
+      await frameMode(frame, 'read');
+      await f.getByRole('tab', { name: '__proto__' }).click();
+      await f.getByRole('tab', { name: 'Tasks' }).click();
+      await f.getByRole('button', { name: 'Collapse rows 2–6' }).click();
+      await frame.waitForFunction(() => window.__tdocSheets.structure().shown === 19);
+      await page.waitForTimeout(400);
+      frame = await open('proto');
+      assert((await st(frame)).shown === 19, 'kept across a reload: ' + JSON.stringify(await st(frame)));
     });
 
     // ---- insert several -----------------------------------------------------------------------

@@ -502,7 +502,7 @@
     tab.pos = new Int32Array(tab.index.size).fill(-1);
     for (var i = 0; i < tab.order.length; i++) tab.pos[tab.order[i]] = i;
     // Search finds a match in a collapsed group too; stepping to it opens it.
-    tab.matches = Q.searchMatches(tab.index, tab.sorder, tab.query.search);
+    tab.matches = S.shownHits(tab, Q.searchMatches(tab.index, tab.sorder, tab.query.search)); // [structure] not in hidden columns
     S.spans(tab);
     if (tab.matchAt >= tab.matches.hits.length) tab.matchAt = -1;
     tab.colLeft = [];
@@ -538,7 +538,7 @@
   var S = SheetStructure({
     Q: Q, HEAD_H: HEAD_H,
     get book() { return book; }, get sel() { return sel; },
-    get config() { return config; }, get undoStack() { return undoStack; },
+    get config() { return config; }, get undoStack() { return undoStack; }, get expand() { return expand; },
     ui: ui, h: h, provider: provider, esc: esc, mode: mode, canEdit: canEdit, cur: cur, numW: numW,
     openMenu: openMenu, toast: toast, post: post, record: record, undo: undo, afterChange: afterChange, runTab: runTab,
     renderAll: renderAll, renderBar: renderBar, layout: layout, renderHead: renderHead, renderBody: renderBody, rowsHtml: rowsHtml,
@@ -550,6 +550,7 @@
     if (!tables.length) return false;
     book = { tabs: [], active: 0 };
     tables.forEach(function (t) { book.tabs.push(readTab(t)); });
+    book.tabs = S.stripOrder(book.tabs); // [structure] data-order: the strip's order
     var first = tables[0];
     var host = first.parentElement && first.parentElement.classList.contains('tdoc-table-scroll') && first.parentElement.children.length === 1 ? first.parentElement : first;
     var root = provider(h('div', 'tdoc-sheet'));
@@ -1054,7 +1055,7 @@
   }
   var saveTimer = null;
   function viewObject() {
-    var view = { active: book.tabs.length > 1 ? cur().name : '', tabs: {} };
+    var view = { active: book.tabs.length > 1 ? cur().name : '', tabs: Object.create(null) };
     book.tabs.forEach(function (t) { view.tabs[t.name] = t.query; });
     return view;
   }
@@ -1065,7 +1066,8 @@
       // column key and row id), kept by the shell beside the view: at most
       // 2,000 row heights a tab, as many as a load reads back (the shell
       // keeps up to 100,000 characters of it).
-      var widths = {};
+      // No prototype: a tab may be called "__proto__".
+      var widths = Object.create(null);
       if (useLocal()) book.tabs.forEach(function (t) {
         if (!t.resized) return;
         var h = {}, n = 0;
@@ -1073,14 +1075,18 @@
         widths[t.name] = { w: t.local.w, h: h, wrap: t.local.wrap, align: t.local.align };
       });
       // [structure] anyone's expanded / collapsed groups and a reader's freeze.
+      // Over the shell's budget, group state goes first, never the widths.
       book.tabs.forEach(function (t) { var o = S.viewState(t); if (o) (widths[t.name] = widths[t.name] || {}).o = o; });
+      S.fitViewState(widths, 90000);
       post({ type: 'tdoc:sheetView', hash: Q.encodeView(viewObject()), widths: widths });
     }, 250);
   }
   function applyView(hash, widths) {
     var view = Q.decodeView(hash || '');
+    // Own keys only: a tab may be called "__proto__".
+    var own = function (o, k) { return o && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined; };
     book.tabs.forEach(function (t) {
-      var q = view.tabs[t.name];
+      var q = own(view.tabs, t.name);
       if (q) {
         // A saved view never names a column that is not there.
         Object.keys(q.filters).forEach(function (k) { if (Number(k) >= t.data.columns.length) delete q.filters[k]; });
@@ -1088,7 +1094,7 @@
         Object.keys(q.totals || {}).forEach(function (k) { if (Number(k) >= t.data.columns.length) delete q.totals[k]; });
         t.query = q;
       }
-      var w = widths && widths[t.name];
+      var w = own(widths, t.name);
       var loc = emptyLocal();
       var size = function (v, lo, hi) { return M.cleanSize(v, lo, hi) || undefined; };
       // Before layouts had keys: a plain array of widths by position.
@@ -1129,8 +1135,9 @@
     var tab = cur(), g = ui.grid;
     var top = rowTop(tab, i), hgt = rowH(tab, i), viewH = g.clientHeight - HEAD_H - footH();
     // [structure] frozen rows cover the top of the view, frozen columns its left.
-    var fh = i < S.frozenRows(tab) ? 0 : S.frozenH(tab);
-    if (top < g.scrollTop + fh) g.scrollTop = top - fh;
+    var frozen = i < S.frozenRows(tab), fh = S.frozenH(tab);
+    if (frozen) { /* always in view: no scroll */ }
+    else if (top < g.scrollTop + fh) g.scrollTop = top - fh;
     else if (top + hgt > g.scrollTop + viewH) g.scrollTop = Math.min(top - fh, top + hgt - viewH);
     if (c >= S.frozenCount(tab)) {
       var left = tab.colLeft[c] - numW() - S.frozenW(tab), right = tab.colLeft[c] + tab.widths[c];
@@ -1239,8 +1246,8 @@
     if (at.head) return ui.head.querySelector('.ts-h[data-c="' + at.c + '"]') || ui.grid;
     if (at.r == null) return ui.grid;
     var i = cur().pos[at.r];
-    // A row the search or a filter hides: the note under the toolbar.
-    if (i < 0) return !ui.offHidden.hidden ? ui.offHidden : ui.count;
+    // A row the search or a filter hides (or a hidden column): the note under the toolbar.
+    if (i < 0 || !S.colShown(cur(), at.c)) return !ui.offHidden.hidden ? ui.offHidden : ui.count;
     var where = rowPlace(i);
     // Scrolled out of the grid: the "N comments above / below" marker at
     // that edge, so the pin points the way to scroll.
@@ -1303,6 +1310,7 @@
     if (at.t !== book.active) { book.active = at.t; renderAll(); }
     if (at.r == null) { ui.root.scrollIntoView({ block: 'nearest' }); return true; }
     S.expandTo(cur(), at.r, at.c); // [structure] its collapsed group opens (the reader's view)
+    if (at.c != null && !S.colShown(cur(), at.c)) { toast('That cell is in a hidden column.'); return false; }
     var i = cur().pos[at.r];
     if (i < 0) { toast(S.hiddenRow(cur(), at.r) ? 'That cell is in a hidden row.' : 'That cell is hidden by the search or a filter on this sheet.'); return false; }
     ui.root.scrollIntoView({ block: 'nearest' });
@@ -1338,7 +1346,7 @@
       var at = locate(el);
       if (!at || at.t !== book.active || at.r == null) return;
       var i = tab.pos[at.r];
-      if (i < 0) { hidden += ids.length; return; }
+      if (i < 0 || (at.c != null && !S.colShown(tab, at.c))) { hidden += ids.length; return; } // [structure] hidden columns too
       var where = rowPlace(i);
       if (where < 0) above.push({ i: i, ids: ids });
       else if (where > 0) below.push({ i: i, ids: ids });
@@ -1887,9 +1895,11 @@
     return b;
   }
   // Insert after (or before) the document row r; at the end when r is null.
+  var MAX_INSERT = 1000;
   function insertRows(r, count, before) {
     if (!canEdit()) return;
-    var tab = cur(), next = rowIds(tab), added;
+    if (count > MAX_INSERT) { toast('At most ' + fmt(MAX_INSERT) + ' rows at a time: adding ' + fmt(MAX_INSERT) + '.'); count = MAX_INSERT; }
+    var tab = cur(), next = rowIds(tab), added, list = [];
     snapshotOp(tab, function () {
       var ref = r == null ? null : tab.data.rows[r].tr;
       for (var k = 0; k < count; k++) {
@@ -1898,20 +1908,25 @@
         else if (before) ref.parentNode.insertBefore(tr, ref);
         else ref.parentNode.insertBefore(tr, ref.nextSibling);
         if (!added) added = tr;
+        list.push(tr);
         if (ref && !before) ref = tr;
       }
+      S.inheritGroup(list); // [structure] rows added inside a group join it
     });
     readTab(tab.table, tab); runTab(tab);
     var newR = tab.rowOf.get(added);
     afterChange(tab, newR);
     var p = tab.pos[newR];
     if (p >= 0) select(p, r == null ? 0 : sel.c, false);
-    else toast('Row added. The current search or filter hides it.');
+    else toast('Row added. This view hides it (a search, a filter or a collapsed group).');
   }
   function deleteRows(ra, rb) {
     var tab = cur(), trs = [];
     for (var i = ra; i <= rb; i++) trs.push(tab.data.rows[tab.order[i]].tr);
-    snapshotOp(tab, function () { trs.forEach(function (tr) { tr.remove(); }); });
+    snapshotOp(tab, function () {
+      S.keepCollapsed(trs); // [structure] a deleted first row hands its group's collapsed default on
+      trs.forEach(function (tr) { tr.remove(); });
+    });
     trs.forEach(function (tr) { tab.measured.delete(tr); });
     sel.r2 = sel.r = ra;
     afterChange(tab);
@@ -2244,6 +2259,9 @@
     return { i: i, c: c, el: cell };
   }
   var drag = null, cellPress = null, rowPress = -1;
+  // [structure] the frozen rows (drawn over the body's top) take the same
+  // presses, double-clicks and menus as the rows under them.
+  function rowsOn(type, fn, capture) { ui.rows.addEventListener(type, fn, capture); ui.frozen.addEventListener(type, fn, capture); }
   function wire() {
     S.wire(); // [structure] group toggles, unhide markers, the corner's view menu
     ui.grid.addEventListener('keydown', onKey);
@@ -2320,7 +2338,7 @@
     });
     // Row resize: drag the bottom edge of a row number (every selected row
     // when the row is one of them); a double-click there fits the row again.
-    ui.rows.addEventListener('pointerdown', function (e) {
+    rowsOn('pointerdown', function (e) {
       var grip = e.target.closest('.ts-rresize');
       if (!grip || e.button > 0) return;
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
@@ -2341,7 +2359,7 @@
         setLayout(tab, { rows: rows });
       });
     }, true);
-    ui.rows.addEventListener('dblclick', function (e) {
+    rowsOn('dblclick', function (e) {
       var grip = e.target.closest('.ts-rresize');
       if (!grip) return;
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
@@ -2349,7 +2367,7 @@
       var rows = {}; rows[r] = 0;
       setLayout(tab, { rows: rows });
     }, true);
-    ui.rows.addEventListener('pointerdown', function (e) {
+    rowsOn('pointerdown', function (e) {
       if (e.button !== 0) return;
       var at = cellFromEvent(e);
       if (!at) return;
@@ -2393,10 +2411,10 @@
     // Selecting re-renders the rows, which detaches the element the press
     // began on; left to itself the browser would then move focus to <body>
     // and the keyboard would stop reaching the grid. Focus is ours to move.
-    ui.rows.addEventListener('mousedown', function (e) {
+    rowsOn('mousedown', function (e) {
       if (!e.target.closest('a[href],input,button')) e.preventDefault();
     });
-    ui.rows.addEventListener('pointermove', function (e) {
+    rowsOn('pointermove', function (e) {
       if (!drag || !(e.buttons & 1)) { drag = null; return; }
       var at = cellFromEvent(e);
       if (at && at.c >= 0 && (at.i !== sel.r2 || at.c !== sel.c2)) select(at.i, at.c, true);
@@ -2406,7 +2424,7 @@
     // thread. On the click, the last event of a press, and after the page's
     // own click handling (which closes what was open), so the composer this
     // opens is not closed by the same press.
-    ui.rows.addEventListener('click', function (e) {
+    rowsOn('click', function (e) {
       var press = cellPress; cellPress = null;
       if (!press || mode() !== 'comment' || e.button > 0) return;
       var at = cellFromEvent(e);
@@ -2419,18 +2437,18 @@
         commentOnCell();
       }, 0);
     });
-    ui.rows.addEventListener('dblclick', function (e) {
+    rowsOn('dblclick', function (e) {
       var at = cellFromEvent(e);
       if (!at || at.c < 0) return;
       if (canEdit()) { e.preventDefault(); select(at.i, at.c, false); startEdit(); }
     });
-    ui.rows.addEventListener('contextmenu', function (e) {
+    rowsOn('contextmenu', function (e) {
       var at = cellFromEvent(e);
       if (!at || !canEdit()) return;
       e.preventDefault();
       rowMenu(at.i, { left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY });
     });
-    ui.rows.addEventListener('click', function (e) {
+    rowsOn('click', function (e) {
       var at = cellFromEvent(e);
       var again = rowPress; rowPress = -1;
       if (at && at.c < 0 && canEdit() && again === at.i) rowMenu(at.i, at.el);
@@ -2469,7 +2487,7 @@
     }
   }
   function heightLive(tab, list) {
-    var rows = ui.rows.children;
+    var rows = Array.prototype.slice.call(ui.rows.children).concat(Array.prototype.slice.call(ui.frozen.children)); // [structure]
     for (var k = 0; k < rows.length; k++) {
       var i = Number(rows[k].getAttribute('data-i'));
       if (list.indexOf(tab.order[i]) !== -1) rows[k].style.height = rowH(tab, i) + 'px';
@@ -2606,6 +2624,8 @@
       // turns Edit mode on, and takes its baseline, in its own.
       var pending = pendingLayout; pendingLayout = null;
       S.onMode(d.mode); // [structure] a structure change that asked for Edit mode
+      // Leaving Edit mode saves or discards the draft: its undo history goes with it.
+      if (d.mode !== 'edit') { undoStack = []; redoStack = []; }
       if (pending) setTimeout(function () {
         if (d.mode === 'edit' && mode() === 'edit' && book && book.tabs.indexOf(pending.tab) >= 0) applyLayout(pending.tab, pending.change);
         else relayoutTab(pending.tab);
@@ -2634,7 +2654,7 @@
     if (!book) return;
     var tables = Array.prototype.slice.call(document.querySelectorAll(SEL));
     var old = book.tabs;
-    book.tabs = tables.map(function (t) { var o = old.find(function (x) { return x.name === (t.getAttribute('data-name') || ''); }); return readTab(t, o); });
+    book.tabs = S.stripOrder(tables.map(function (t) { var o = old.find(function (x) { return x.name === (t.getAttribute('data-name') || ''); }); return readTab(t, o); })); // [structure]
     if (!book.tabs.length) { ui.root.remove(); book = null; return; }
     book.active = Math.min(book.active, book.tabs.length - 1);
     renderAll();

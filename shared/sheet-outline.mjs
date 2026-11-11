@@ -2,7 +2,7 @@
 // deep), hidden rows and columns, and frozen rows and columns, as plain
 // attributes on the sheet's own markup:
 //
-//   <table data-tdoc-sheet data-name="Budget" data-freeze-rows="1" data-freeze-cols="2">
+//   <table data-tdoc-sheet data-name="Budget" data-freeze-rows="1" data-freeze-cols="2" data-order="1">
 //   <th data-key="c4" data-hidden>                                a column
 //   <tr data-row="r7" data-group="2" data-collapsed="2">          a row
 //
@@ -16,6 +16,7 @@
 // data-hidden hides a row or column for everyone until an editor unhides it.
 // data-freeze-rows / data-freeze-cols freeze that many rows / columns
 // (columns default to 1, the first, as before this markup existed).
+// data-order puts a tab in its place in the strip (see stripOrder).
 //
 // Every attribute is read through a cleaner: an unknown or out-of-range value
 // reads as the default, so author HTML can never put a style or a script
@@ -32,6 +33,21 @@ export function cleanFreeze(value, fallback = 0) {
   if (value == null || value === '') return fallback;
   const n = Number(value);
   return Number.isInteger(n) && n >= 0 ? Math.min(MAX_FREEZE, n) : fallback;
+}
+// A tab's place in the strip: data-order="0".."999" on its table. In a prose
+// doc reordering tabs writes this, so the tables stay where the author put
+// them among the paragraphs.
+export function cleanOrder(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 && n < 1000 ? n : null;
+}
+// Items (each with .table) in strip order: those with a data-order by it,
+// then those without in document order (a tab added later comes last).
+export function stripOrder(items) {
+  return items.map((it, i) => { const o = cleanOrder(it.table.getAttribute('data-order')); return { it, i, k: o == null ? 1000 + i : o }; })
+    .sort((a, b) => a.k - b.k || a.i - b.i)
+    .map((x) => x.it);
 }
 // "1 2" → bitmask of levels (bit L-1); anything else is dropped.
 export function parseCollapsed(attr) {

@@ -147,6 +147,12 @@ function SheetStructure(api) {
     return c;
   }
   function unhiddenCount(tab) { return tab.index.size - (tab.st.rows.any ? hiddenCount(tab, 'r') : 0); }
+  // Search matches less those in hidden columns (stepping never lands there).
+  function shownHits(tab, m) {
+    if (!tab.st.colShown) return m;
+    var hits = m.hits.filter(function (x) { return colShown(tab, x.col); });
+    return hits.length === m.hits.length ? m : { hits: hits, total: Math.max(hits.length, m.total - (m.hits.length - hits.length)), capped: m.capped };
+  }
   function hiddenRow(tab, r) { return !!(tab.st.rows.hidden[r]); }
   function emptyText(tab) {
     if (tab.sorder && tab.sorder.length && !tab.order.length) return 'Every row is in a collapsed group.';
@@ -272,7 +278,7 @@ function SheetStructure(api) {
       });
       return;
     }
-    list.forEach(function (x) { tab.ov[ax][O.groupKey(x.g, idsOf(tab, ax))] = x.on; });
+    list.forEach(function (x) { remember(tab.ov[ax], O.groupKey(x.g, idsOf(tab, ax)), x.on); });
     refresh(tab);
     api.saveView();
   }
@@ -292,7 +298,7 @@ function SheetStructure(api) {
     [['r', r], ['c', c]].forEach(function (p) {
       if (p[1] == null) return;
       groupsOf(tab, p[0]).forEach(function (g) {
-        if (p[1] >= g.start && p[1] <= g.end && collapsedNow(tab, p[0], g)) { tab.ov[p[0]][O.groupKey(g, idsOf(tab, p[0]))] = false; changed = true; }
+        if (p[1] >= g.start && p[1] <= g.end && collapsedNow(tab, p[0], g)) { remember(tab.ov[p[0]], O.groupKey(g, idsOf(tab, p[0])), false); changed = true; }
       });
     });
     if (!changed) return;
@@ -334,21 +340,26 @@ function SheetStructure(api) {
     api.afterChange(tab, tab.order[api.sel.r]);
   }
   function onMode(m) {
+    // A new mode: the delete's Undo has nothing left to undo here.
+    if (undoToast) { undoToast.remove(); undoToast = null; }
     var p = pending; pending = null;
     if (!p) return;
     setTimeout(function () {
       if (m === 'edit' && api.mode() === 'edit' && api.book && api.book.tabs.indexOf(p.tab) >= 0) docChange(p.tab, p.els, p.attrs, p.fn);
     }, 0);
   }
-  function needSort(tab) {
-    if (!tab.query.sort.length) return false;
-    api.toast('Clear the sort first: groups and row order follow the document, not a sorted view.');
+  // Groups are runs of the document's rows: grouped in a sorted, filtered or
+  // searched view, a range would take in rows the view does not show.
+  function viewChanged(tab) { var q = tab.query; return q.sort.length > 0 || Object.keys(q.filters).length > 0 || !!q.search; }
+  function needDocOrder(tab) {
+    if (!viewChanged(tab)) return false;
+    api.toast('Clear the sort, filters and search first: a group takes in the rows between, shown or not.');
     return true;
   }
   // The document rows of view rows a..b.
   function viewRows(tab, a, b) { var out = []; for (var i = a; i <= b; i++) if (tab.order[i] != null) out.push(tab.order[i]); return out; }
   function regroup(tab, ax, a, b, delta) {
-    if (ax === 'r' && needSort(tab)) return;
+    if (ax === 'r' && needDocOrder(tab)) return;
     var axis = axisOf(tab, ax), next = O.regroup(axis.level, a, b, delta), els = [];
     for (var i = a; i <= b; i++) if (next[i] !== axis.level[i]) els.push(i);
     if (!els.length) { api.toast(delta > 0 ? 'Groups go ' + O.MAX_LEVEL + ' levels deep at most.' : 'Nothing there is grouped.'); return; }
@@ -369,6 +380,28 @@ function SheetStructure(api) {
     }
     var nodes = list.map(function (i) { return elOf(tab, ax, i); });
     docChange(tab, nodes, ATTRS, function () { nodes.forEach(function (el) { O.writeHidden(el, on); }); });
+  }
+  // Rows inserted together (in document order) take the level that keeps
+  // them inside the group around them: the lower of their neighbours'.
+  function inheritGroup(trs) {
+    if (!trs.length) return;
+    var level = function (tr) { return tr && tr.getAttribute ? O.cleanLevel(tr.getAttribute('data-group')) : 0; };
+    var l = Math.min(level(trs[0].previousElementSibling), level(trs[trs.length - 1].nextElementSibling));
+    if (l) trs.forEach(function (tr) { O.writeLevel(tr, l); });
+  }
+  // Before rows are deleted: a collapsed default on a group's first row moves
+  // to the next row that stays, at the levels that row still has.
+  function keepCollapsed(trs) {
+    var gone = new Set(trs);
+    trs.forEach(function (tr) {
+      var mask = O.parseCollapsed(tr.getAttribute('data-collapsed'));
+      if (!mask) return;
+      var next = tr.nextElementSibling;
+      while (next && gone.has(next)) next = next.nextElementSibling;
+      if (!next) return;
+      var lv = O.cleanLevel(next.getAttribute('data-group'));
+      for (var l = 1; l <= lv; l++) if (mask & (1 << (l - 1))) O.writeCollapsed(next, l, true);
+    });
   }
   function unhideRange(tab, ax, a, b) { var list = []; for (var i = a; i <= b; i++) if (axisOf(tab, ax).hidden[i]) list.push(i); setHidden(tab, ax, list, false); }
   function unhideAll(tab, ax) { unhideRange(tab, ax, 0, axisOf(tab, ax).level.length - 1); }
@@ -432,16 +465,16 @@ function SheetStructure(api) {
 
   // ---- menus the viewer adds to ------------------------------------------------------------
   function rowItems(tab, ra, rb) {
-    var n = rb - ra + 1, rows = viewRows(tab, ra, rb), sorted = tab.query.sort.length > 0;
+    var n = rb - ra + 1, rows = viewRows(tab, ra, rb), inView = viewChanged(tab);
     var lo = Math.min.apply(null, rows), hi = Math.max.apply(null, rows), grouped = false;
     for (var r = lo; r <= hi; r++) if (tab.st.rows.level[r]) grouped = true;
     var label = rangeLabel(lo, hi);
     var items = ['sep',
       { label: 'Hide ' + (n > 1 ? n + ' rows' : 'row'), onSelect: function () { setHidden(tab, 'r', rows, true); } },
       'sep',
-      { label: 'Group rows ' + label, disabled: sorted, onSelect: function () { groupRows(tab, ra, rb, 1); } },
+      { label: 'Group rows ' + label, disabled: inView, onSelect: function () { groupRows(tab, ra, rb, 1); } },
     ];
-    if (grouped) items.push({ label: 'Ungroup rows ' + label, disabled: sorted, onSelect: function () { groupRows(tab, ra, rb, -1); } });
+    if (grouped) items.push({ label: 'Ungroup rows ' + label, disabled: inView, onSelect: function () { groupRows(tab, ra, rb, -1); } });
     if (rb + 1 <= O.MAX_FREEZE) items.push({ label: 'Freeze up to row ' + (rb + 1), onSelect: function () { setFreeze(tab, rb + 1, undefined); } });
     return items;
   }
@@ -462,25 +495,35 @@ function SheetStructure(api) {
     var p = table.parentElement;
     return p && p.classList.contains('tdoc-table-scroll') && p.children.length === 1 ? p : table;
   }
-  // Tab `from` to position `to` in the strip (and its table in the document).
+  // Tab `from` to position `to` in the strip. A doc that is only its sheet
+  // moves the tables themselves (its plain page then reads in tab order); in
+  // a prose doc the tables stay among the author's paragraphs and data-order
+  // on each holds the strip's order.
   function moveTab(from, to) {
     var book = api.book, tabs = book.tabs;
     to = Math.max(0, Math.min(tabs.length - 1, to));
     if (from === to) return;
-    var tab = tabs[from], active = tabs[book.active], node = nodeOf(tab.table);
-    var parent = node.parentNode, next = node.nextSibling;
+    var tab = tabs[from], active = tabs[book.active];
     var order = tabs.slice(); order.splice(from, 1); order.splice(to, 0, tab);
+    var prev = tabs.slice(), tables = tabs.map(function (t) { return t.table; });
+    var attrs = function () { return tables.map(function (t) { return t.getAttribute('data-order'); }); };
+    var putAttrs = function (list) { tables.forEach(function (t, k) { if (list[k] == null) t.removeAttribute('data-order'); else t.setAttribute('data-order', list[k]); }); };
+    var before = attrs(), node = nodeOf(tab.table), parent = node.parentNode, next = node.nextSibling;
+    var moveNodes = !!api.expand.sheetOnly;
     var place = function () {
-      var after = order[to - 1], before = order[to + 1];
-      if (before) { var b = nodeOf(before.table); b.parentNode.insertBefore(node, b); }
-      else { var a = nodeOf(after.table); a.parentNode.insertBefore(node, a.nextSibling); }
+      if (moveNodes) {
+        var after = order[to - 1], beforeTab = order[to + 1];
+        if (beforeTab) { var b2 = nodeOf(beforeTab.table); b2.parentNode.insertBefore(node, b2); }
+        else { var a2 = nodeOf(after.table); a2.parentNode.insertBefore(node, a2.nextSibling); }
+        tables.forEach(function (t) { t.removeAttribute('data-order'); });
+      } else order.forEach(function (t, k) { t.table.setAttribute('data-order', String(k)); });
       book.tabs = order.slice(); book.active = book.tabs.indexOf(active);
     };
-    var prev = tabs.slice();
     place();
+    var after = attrs();
     api.record({ tab: tab,
-      undo: function () { parent.insertBefore(node, next); book.tabs = prev.slice(); book.active = Math.max(0, book.tabs.indexOf(active)); },
-      redo: place });
+      undo: function () { if (moveNodes) parent.insertBefore(node, next); putAttrs(before); book.tabs = prev.slice(); book.active = Math.max(0, book.tabs.indexOf(active)); },
+      redo: function () { if (moveNodes) place(); else { putAttrs(after); book.tabs = order.slice(); book.active = book.tabs.indexOf(active); } } });
     api.renderAll(); api.changed(); api.relayout(); api.saveView();
   }
   function tabItems(i, anchor) {
@@ -506,7 +549,8 @@ function SheetStructure(api) {
     t.style.bottom = '72px';
     b.addEventListener('click', function (e) {
       e.stopPropagation(); t.remove();
-      if (api.undoStack[api.undoStack.length - 1] === op) api.undo(false);
+      // Only while that delete is still the last change, in Edit mode.
+      if (api.canEdit() && api.undoStack[api.undoStack.length - 1] === op) api.undo(false);
     });
     t.appendChild(b);
     document.body.appendChild(t);
@@ -586,10 +630,24 @@ function SheetStructure(api) {
   }
 
   // ---- view state: expanded / collapsed groups, a reader's freeze ------------------------------------
+  // The newest choice last, so a budget keeps the newest.
+  var MAX_KEYS = 1000;
+  function remember(map, key, value) { delete map[key]; map[key] = value; }
+  // Over budget (characters of JSON), each tab's group choices go, oldest
+  // tabs' first; a reader's widths and freeze always stay.
+  function fitViewState(widths, budget) {
+    if (JSON.stringify(widths).length <= budget) return;
+    Object.keys(widths).forEach(function (name) {
+      var o = widths[name].o;
+      if (!o || JSON.stringify(widths).length <= budget) return;
+      delete o.r; delete o.c;
+      if (!Object.keys(o).length) delete widths[name].o;
+    });
+  }
   function viewState(tab) {
     var ov = tab.ov, o = {}, any = false;
     ['r', 'c'].forEach(function (ax) {
-      var keys = Object.keys(ov[ax] || {}).slice(0, 2000);
+      var keys = Object.keys(ov[ax] || {}).slice(-MAX_KEYS);
       if (!keys.length) return;
       o[ax] = {}; keys.forEach(function (k) { o[ax][k] = !!ov[ax][k]; }); any = true;
     });
@@ -603,7 +661,7 @@ function SheetStructure(api) {
     ['r', 'c'].forEach(function (ax) {
       var src = o[ax];
       if (!src || typeof src !== 'object' || Array.isArray(src)) return;
-      Object.keys(src).slice(0, 2000).forEach(function (k) { if (typeof src[k] === 'boolean' && /^[1-3]:/.test(k) && k.length <= 210) ov[ax][k] = src[k]; });
+      Object.keys(src).slice(-MAX_KEYS).forEach(function (k) { if (typeof src[k] === 'boolean' && /^[1-3]:/.test(k) && k.length <= 210) ov[ax][k] = src[k]; });
     });
     // A reader's freeze only: an editor's is the document's.
     if (!api.config.canEditDoc) {
@@ -626,11 +684,11 @@ function SheetStructure(api) {
   }
 
   return {
-    read: read, run: run, spans: spans, gutterW: gutterW, colShown: colShown, colW: colW,
+    stripOrder: O.stripOrder, read: read, run: run, spans: spans, gutterW: gutterW, colShown: colShown, colW: colW,
     frozenCount: frozenCount, frozenRows: frozenRows, frozenH: frozenH, frozenW: frozenW, frozenCls: frozenCls, frozenLeft: frozenLeft,
-    shownCol: shownCol, hiddenRow: hiddenRow, unhiddenCount: unhiddenCount, emptyText: emptyText, cornerHtml: cornerHtml, afterHead: afterHead, afterBody: afterBody,
+    shownCol: shownCol, shownHits: shownHits, hiddenRow: hiddenRow, unhiddenCount: unhiddenCount, emptyText: emptyText, cornerHtml: cornerHtml, afterHead: afterHead, afterBody: afterBody,
     flatSummary: flatSummary, flatToggle: flatToggle, flatClick: flatClick, expandTo: expandTo, onMode: onMode,
-    rowItems: rowItems, columnItems: columnItems, tabItems: tabItems, deleteTabWithUndo: deleteTabWithUndo, decorateTab: decorateTab,
-    wire: wire, onKey: onKey, viewState: viewState, applyViewState: applyViewState, describe: describe,
+    rowItems: rowItems, columnItems: columnItems, inheritGroup: inheritGroup, keepCollapsed: keepCollapsed, tabItems: tabItems, deleteTabWithUndo: deleteTabWithUndo, decorateTab: decorateTab,
+    wire: wire, onKey: onKey, viewState: viewState, fitViewState: fitViewState, applyViewState: applyViewState, describe: describe,
   };
 }

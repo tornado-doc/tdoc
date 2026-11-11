@@ -146,6 +146,9 @@ default), never a style:
   unhides it. Its cells stay in the doc and in exports.
 - **Frozen.** `data-freeze-rows` freezes that many rows under the header (up
   to 10); `data-freeze-cols` that many columns (default 1, the first).
+- **Tab order.** Tabs follow the tables' order in the doc. `data-order="0"`,
+  `"1"`, … on the tables puts them in another order in the strip (the editor
+  writes it when someone drags a tab in a doc with prose around the sheet).
 
 ## Size
 
