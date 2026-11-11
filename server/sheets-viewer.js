@@ -27,22 +27,33 @@
 // own, and a range pasted from Excel or Google Sheets fills the grid. Every
 // change goes through the editor's own draft and Save (a new version).
 //
+// Structure (row groups, hidden rows and columns, freeze, reordering tabs)
+// is server/sheets-structure.js, reached through the hooks marked
+// [structure] below; its markup and pure logic are shared/sheet-outline.mjs.
+//
+// Formulas: a <td data-formula="=SUM(B1:B9)"> is computed here (SheetFormula as FM,
+// shared/sheet-formula.mjs) on load and after each edit; its text is the last
+// value, written back only in Edit mode as part of an edit. See the
+// "formulas" section below; the hooks elsewhere are marked "fx:"
+// (FM and fm: FX is the cell-format UI, [format]).
+//
 // Served at /sheets-viewer.js and loaded by server/sheets-loader.js only when
-// the doc has a sheet. SheetQuery, SheetMarkup and DocType are
-// shared/sheet-query.mjs, shared/sheet-markup.mjs and shared/doc-type.mjs,
-// inlined by server/sheets-source.js.
+// the doc has a sheet. SheetQuery, SheetMarkup, DocType and SheetFormula are
+// shared/sheet-query.mjs, shared/sheet-markup.mjs, shared/doc-type.mjs and
+// shared/sheet-formula.mjs, inlined by server/sheets-source.js.
 (function () {
   'use strict';
   if (window === window.parent || window.__tdocSheets) return;
   if (new URLSearchParams(location.search).get('tdoc_compare') === '1') return;
-  var Q = SheetQuery, M = SheetMarkup;
+  var Q = SheetQuery, M = SheetMarkup, FM = SheetFormula; // FX is the format UI ([format])
   var SEL = M.SHEET_SELECTOR;
   var NARROW = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
   var ROW_H = 32, HEAD_H = 34, OVERSCAN = 6, MAX_COLUMNS = 200;
   // A sheet of COMPACT_ROWS rows or fewer in a prose doc is a small table
   // (server/block-lint.js warns about it): compact, at most EMBED_ROWS tall.
   var COMPACT_ROWS = 20, EMBED_ROWS = 15;
-  function numW() { return NARROW && NARROW.matches ? 36 : 48; }
+  // [structure] the row-number column grows by the row outline's gutter.
+  function numW() { return (NARROW && NARROW.matches ? 36 : 48) + (S ? S.gutterW() : 0); }
   var hooks = window.__tdocElementHooks = window.__tdocElementHooks || {};
 
   function post(msg) { msg.source = 'tdoc-frame'; try { window.parent.postMessage(msg, '*'); } catch (e) {} }
@@ -255,6 +266,13 @@
     'a.ts-btn{text-decoration:none;color:inherit}',
     '.ts-xhead .ts-icon{width:32px;height:32px}',
     '.ts-xhead .ts-icon svg{width:18px;height:18px}',
+    // fx: the formula of the active cell, in the Edit-mode toolbar row
+    // (in place of the editing hint), only while that cell holds one.
+    '.ts-fx{display:flex;align-items:center;gap:6px;height:32px;padding:0 4px 0 10px;border:1px solid var(--ts-line);border-radius:8px;background:#fff;flex:1 1 260px;min-width:0;max-width:560px}',
+    '.ts-fx[hidden]{display:none!important}',
+    '.ts-fx:focus-within{border-color:var(--ts-accent);box-shadow:0 0 0 3px var(--ts-accent-tint)}',
+    '.ts-fx i{flex:none;color:var(--ts-muted);font:italic 600 12px/1 Georgia,serif}',
+    '.ts-fx input{flex:1;min-width:0;border:0;outline:0;background:transparent;font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:inherit;-webkit-user-select:text;user-select:text}',
     '@media (max-width:640px){',
     '.ts-bar{gap:6px}.ts-search{flex:1 1 100%}.ts-count{margin-left:0}',
     '.ts-search{order:-2}.ts-bar>.ts-expand{order:-1}.ts-bar:has(>.ts-expand:not([hidden])) .ts-search{flex-basis:calc(100% - 40px)}',
@@ -385,9 +403,11 @@
     var tab = old || { query: Q.emptyQuery(), widths: [], matchAt: -1, local: emptyLocal(), defW: {} };
     tab.table = table;
     tab.data = data;
-    tab.name = cleanName(data.name) || 'Sheet ' + (book ? book.tabs.indexOf(tab) + 1 || book.tabs.length + 1 : 1);
+    tab.name = uniqueName(tab, cleanName(data.name) || 'Sheet ' + (book ? book.tabs.indexOf(tab) + 1 || book.tabs.length + 1 : 1));
     tab.index = Q.buildIndex(data);
+    fxRead(tab); // fx: formula cells show their computed value
     tab.palettes = data.columns.map(function (c) { return Q.parsePalette(c.palette); });
+    FX.read(tab); // [format] cell formats and merges (sheets-format-ui.js)
     tab.rowOf = new Map();
     data.rows.forEach(function (row, r) { tab.rowOf.set(row.tr, r); });
     // Measured heights are kept by row element across a re-read: an edit
@@ -407,6 +427,9 @@
       }
     });
     readLayout(tab);
+    S.read(tab); // [structure]
+    // [sheet-rules] the table's conditional formats and validation, evaluated once per read
+    if (rulesExt) rulesExt.readTab(tab);
     return tab;
   }
   // ---- layout: widths, heights, wrap, alignment ------------------------------
@@ -477,6 +500,14 @@
     while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (tab.tops[mid] <= y) lo = mid; else hi = mid - 1; }
     return lo;
   }
+  // Tab names are unique without regard to case (formulas name tabs that
+  // way): a second "Data" or "data" shows as "data (2)".
+  function uniqueName(tab, name) {
+    var others = book ? book.tabs.filter(function (t) { return t !== tab; }).map(function (t) { return String(t.name).toLowerCase(); }) : [];
+    var out = name, n = 1;
+    while (others.indexOf(out.toLowerCase()) !== -1) out = name + ' (' + (++n) + ')';
+    return out;
+  }
   // A tab name is one line: line breaks and tabs read as a space.
   function cleanName(name) { return String(name || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 100); }
   function defaultWidth(tab, c) {
@@ -491,13 +522,18 @@
   }
   function runTab(tab) {
     tab.order = Q.runQuery(tab.index, tab.query);
+    // [structure] hidden rows out (tab.sorder), then collapsed groups (tab.order).
+    S.run(tab);
     tab.pos = new Int32Array(tab.index.size).fill(-1);
     for (var i = 0; i < tab.order.length; i++) tab.pos[tab.order[i]] = i;
-    tab.matches = Q.searchMatches(tab.index, tab.order, tab.query.search);
+    // Search finds a match in a collapsed group too; stepping to it opens it.
+    tab.matches = S.shownHits(tab, Q.searchMatches(tab.index, tab.sorder, tab.query.search)); // [structure] not in hidden columns
+    S.spans(tab);
+    FX.view(tab); // [format] which merges this view draws merged (after [structure]: hidden rows and columns, freeze)
     if (tab.matchAt >= tab.matches.hits.length) tab.matchAt = -1;
     tab.colLeft = [];
     var x = numW();
-    for (var c = 0; c < tab.widths.length; c++) { tab.colLeft.push(x); x += tab.widths[c]; }
+    for (var c = 0; c < tab.widths.length; c++) { tab.colLeft.push(x); x += S.colW(tab, c); }
     tab.totalW = x;
     buildTops(tab);
   }
@@ -506,7 +542,7 @@
   function reflow(tab) {
     tab.colLeft = [];
     var x = numW();
-    for (var c = 0; c < tab.widths.length; c++) { tab.colLeft.push(x); x += tab.widths[c]; }
+    for (var c = 0; c < tab.widths.length; c++) { tab.colLeft.push(x); x += S.colW(tab, c); }
     tab.totalW = x;
     if (tab.anyWrap) tab.measured = new Map();
     buildTops(tab);
@@ -521,12 +557,37 @@
   var sel = { r: 0, c: 0, r2: 0, c2: 0 };
   var config = { editing: false, canEditDoc: false, received: false };
   var undoStack = [], redoStack = [];
+  // [format] Cell formatting and merged cells: server/sheets-format-ui.js,
+  // given the few internals it needs. The hooks below are marked [format].
+  var FX = SheetFormatUI({
+    ui: ui, h: h, provider: provider, cur: cur, sel: function () { return sel; }, canEdit: canEdit,
+    isEditing: function () { return !!editor; }, openPop: openPop, closePop: closePop, menuItems: menuItems,
+    toast: toast, record: record, afterChange: afterChange, ensureCell: ensureCell, rowH: rowH,
+    embedded: function () { return !expand.sheetOnly && !expand.on; },
+    structure: function () { return S; }, // [structure] hidden columns and freeze, for which merges draw merged
+  });
+
+  // [structure] groups, hidden rows and columns, freeze and tab operations
+  // live in server/sheets-structure.js; it reaches the viewer only through
+  // this object.
+  var S = SheetStructure({
+    Q: Q, HEAD_H: HEAD_H,
+    get book() { return book; }, get sel() { return sel; },
+    get config() { return config; }, get undoStack() { return undoStack; }, get expand() { return expand; },
+    ui: ui, h: h, provider: provider, esc: esc, mode: mode, canEdit: canEdit, cur: cur, numW: numW,
+    openMenu: openMenu, toast: toast, post: post, record: record, undo: undo, afterChange: afterChange, runTab: runTab,
+    renderAll: renderAll, renderBar: renderBar, layout: layout, renderHead: renderHead, renderBody: renderBody, rowsHtml: rowsHtml,
+    relayout: relayout, changed: changed, saveView: saveView, flatView: flatView, rowTop: rowTop, rowH: rowH, deleteTab: deleteTab,
+  });
 
   function mount() {
     var tables = Array.prototype.slice.call(document.querySelectorAll(SEL)).filter(function (t) { return !t.closest('[data-tdoc-provider]'); });
     if (!tables.length) return false;
     book = { tabs: [], active: 0 };
+    fm.ready = false;
     tables.forEach(function (t) { book.tabs.push(readTab(t)); });
+    book.tabs = S.stripOrder(book.tabs); // [structure] data-order: the strip's order
+    fxInit(); // fx: every tab read, compute every formula
     var first = tables[0];
     var host = first.parentElement && first.parentElement.classList.contains('tdoc-table-scroll') && first.parentElement.children.length === 1 ? first.parentElement : first;
     var root = provider(h('div', 'tdoc-sheet'));
@@ -544,6 +605,7 @@
     ui.prev = iconButton(ICON.up, 'Previous match', function () { stepMatch(-1); });
     ui.next = iconButton(ICON.down, 'Next match', function () { stepMatch(1); });
     search.appendChild(ui.search); search.appendChild(ui.hits); search.appendChild(ui.prev); search.appendChild(ui.next);
+    if (rulesExt) rulesExt.mountSearch(search); // [sheet-rules] Find and replace
     ui.bar.appendChild(search);
     ui.chips = h('div', 'ts-chips'); ui.bar.appendChild(ui.chips);
     ui.searchBox = search;
@@ -551,6 +613,11 @@
     // The whole sheet is an ordinary table comment (no label of its own), so
     // a new version reconciles it like any other table.
     ui.comment.addEventListener('click', function (e) { e.stopPropagation(); commentOn(cur().table, ui.comment.getBoundingClientRect()); });
+    ui.fx = h('label', 'ts-fx'); ui.fx.hidden = true; // fx: the formula bar
+    ui.fx.innerHTML = '<i aria-hidden="true">fx</i>';
+    ui.fx.title = 'Formula of the selected cell';
+    ui.fxInput = h('input'); ui.fxInput.type = 'text'; ui.fxInput.spellcheck = false; ui.fxInput.setAttribute('aria-label', 'Formula');
+    ui.fx.appendChild(ui.fxInput); ui.bar.appendChild(ui.fx);
     ui.note = h('span', 'ts-note');
     ui.count = h('span', 'ts-count'); ui.count.setAttribute('aria-live', 'polite');
     ui.bar.appendChild(ui.note); ui.bar.appendChild(ui.count); ui.bar.appendChild(ui.comment);
@@ -574,9 +641,12 @@
     ui.head = h('div', 'ts-head'); ui.head.setAttribute('role', 'row');
     ui.body = h('div', 'ts-body');
     ui.rows = h('div', 'ts-rows'); ui.rows.setAttribute('role', 'rowgroup');
+    // [structure] the outline gutter (over the row numbers) and the frozen rows.
+    ui.outline = h('div', 'ts-outline'); ui.body.appendChild(ui.outline);
+    ui.frozen = h('div', 'ts-frozen'); ui.frozen.setAttribute('role', 'rowgroup');
     ui.body.appendChild(ui.rows);
     ui.foot = h('div', 'ts-foot'); ui.foot.setAttribute('role', 'row'); ui.foot.setAttribute('aria-label', 'Summary'); ui.foot.hidden = true;
-    ui.grid.appendChild(ui.head); ui.grid.appendChild(ui.body); ui.grid.appendChild(ui.foot);
+    ui.grid.appendChild(ui.head); ui.grid.appendChild(ui.frozen); ui.grid.appendChild(ui.body); ui.grid.appendChild(ui.foot);
     ui.flat = h('div', 'ts-flat');
     ui.flat.addEventListener('click', flatClick);
     ui.addRow = h('button', 'ts-add-row'); ui.addRow.type = 'button'; ui.addRow.innerHTML = ICON.plus + '<span>Add row</span>';
@@ -589,6 +659,7 @@
     });
     ui.offHidden = h('div', 'ts-note ts-off-hidden'); ui.offHidden.hidden = true;
     root.appendChild(ui.xhead); root.appendChild(ui.tabs); root.appendChild(ui.bar); root.appendChild(ui.offHidden); root.appendChild(ui.grid); root.appendChild(ui.flat); root.appendChild(ui.offAbove); root.appendChild(ui.offBelow); root.appendChild(ui.addRow);
+    FX.mount(root, ui.tabs); // [format] Edit mode's format toolbar, above the tabs
     host.parentNode.insertBefore(root, host);
     expand.sheetOnly = isSheetOnly();
     expand.embed = !expand.sheetOnly && isProseDoc();
@@ -630,6 +701,7 @@
         b.addEventListener('dblclick', function (e) { e.stopPropagation(); renameTab(i, b); });
         b.addEventListener('contextmenu', function (e) { e.preventDefault(); tabMenu(i, b); });
       }
+      S.decorateTab(b, tab, i, editing); // [structure] in Edit: drag to reorder, a tap on the open tab for its menu
       ui.tabs.appendChild(b);
     });
     if (editing) {
@@ -668,7 +740,8 @@
       clear.addEventListener('click', function (e) { e.stopPropagation(); setQuery({ search: tab.query.search, filters: {}, sort: [], totals: Object.assign({}, tab.query.totals) }); });
       ui.chips.appendChild(clear);
     }
-    var total = tab.index.size, shown = tab.order.length;
+    // [structure] collapsed groups are not a filter; hidden rows are not counted.
+    var total = S.unhiddenCount(tab), shown = tab.sorder.length;
     ui.count.textContent = shown === total ? fmt(total) + (total === 1 ? ' row' : ' rows') : fmt(shown) + ' of ' + fmt(total) + ' rows';
     var m2 = mode();
     ui.comment.hidden = m2 !== 'comment';
@@ -679,7 +752,9 @@
     ui.back.hidden = !expand.alone;
     ui.xtitle.textContent = expand.alone ? docTitle() + ' · ' + tab.name : docTitle();
     if (expand.on) linkHrefs();
+    if (rulesExt) rulesExt.bar(); // [sheet-rules]
     ui.note.hidden = !(m2 === 'edit');
+    fxBar();
     ui.note.textContent = canEdit() ? 'Type or double-click to edit · Alt+Enter for a new line · paste a range from Excel or Sheets' : m2 === 'edit' ? 'Editing sheets in the browser is not available yet' : '';
   }
   function describeFilter(tab, c, f) {
@@ -720,13 +795,14 @@
   }
   function renderHead() {
     var tab = cur(), W = numW();
-    var html = '<div class="ts-corner" style="width:' + W + 'px"></div>';
+    var html = '<div class="ts-corner" style="width:' + W + 'px">' + S.cornerHtml(tab) + '</div>'; // [structure]
     var a = Math.min(sel.c, sel.c2), b = Math.max(sel.c, sel.c2);
     tab.data.columns.forEach(function (col, c) {
+      if (!S.colShown(tab, c)) return; // [structure] a hidden column
       var s = -1, dir = null;
       tab.query.sort.forEach(function (k, i) { if (k.col === c) { s = i; dir = k.dir; } });
       var filtered = tab.query.filters[c] != null;
-      html += '<div class="ts-h' + (c === 0 ? ' is-first' : '') + (c >= a && c <= b ? ' is-sel' : '') + '" role="columnheader" data-c="' + c + '" style="width:' + tab.widths[c] + 'px' + (c === 0 ? ';left:' + W + 'px' : '') + '"' +
+      html += '<div class="ts-h' + S.frozenCls(tab, c) + (c >= a && c <= b ? ' is-sel' : '') + '" role="columnheader" data-c="' + c + '" style="width:' + tab.widths[c] + 'px' + S.frozenLeft(tab, c) + '"' +
         (dir ? ' aria-sort="' + (dir === 'asc' ? 'ascending' : 'descending') + '"' : '') + '>' +
         '<button type="button" class="ts-hname" data-act="sort" title="Sort by ' + esc(col.name) + ' (shift-click to add)"><span class="ts-glyph" aria-label="' + TYPE_LABEL[tab.index.cols[c].type] + '">' + TYPE_GLYPH[tab.index.cols[c].type] + '</span><b>' + esc(col.name) + '</b>' +
         (dir ? '<span class="ts-sorted">' + (dir === 'asc' ? ICON.up : ICON.down) + (tab.query.sort.length > 1 ? (s + 1) : '') + '</span>' : '') + '</button>' +
@@ -736,13 +812,15 @@
     });
     if (canEdit()) html += '<div class="ts-h-add"><button type="button" class="ts-icon" data-act="addcol" aria-label="Add a column" title="Add a column">' + ICON.plus + '</button></div>';
     ui.head.innerHTML = html;
+    S.afterHead(tab); // [structure] hidden-column markers
     renderFoot();
+    FX.sync(); // [format] the toolbar follows the mode and the active cell
   }
   // ---- summary row -----------------------------------------------------------------
   function hasTotals(tab) { return Object.keys(tab.query.totals || {}).some(function (k) { return Number(k) < tab.data.columns.length; }); }
   function footH() { var tab = cur(); return tab && hasTotals(tab) ? ROW_H : 0; }
   function totalText(tab, c, fn) {
-    var v = Q.columnTotal(tab.index, tab.order, c, fn);
+    var v = Q.columnTotal(tab.index, tab.sorder || tab.order, c, fn); // [structure] collapsed rows still count
     if (v == null) return '–';
     if (fn === 'avg') return Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
     return fmt(v);
@@ -754,11 +832,12 @@
     if (!any) { ui.foot.textContent = ''; return; }
     var html = '<div class="ts-fcorner" style="width:' + W + 'px" title="Summary of the rows shown">Σ</div>';
     tab.data.columns.forEach(function (col, c) {
+      if (!S.colShown(tab, c)) return; // [structure]
       var fn = tab.query.totals[c];
       var label = fn ? Q.TOTAL_LABEL[fn] : 'Summary';
-      html += '<button type="button" class="ts-fc' + (c === 0 ? ' is-first' : '') + (fn ? '' : ' is-none') + '" data-c="' + c + '" role="gridcell"' +
+      html += '<button type="button" class="ts-fc' + S.frozenCls(tab, c) + (fn ? '' : ' is-none') + '" data-c="' + c + '" role="gridcell"' +
         ' aria-label="' + esc(col.name) + ' summary' + (fn ? ': ' + label + ' ' + esc(totalText(tab, c, fn)) : '') + '"' +
-        ' style="width:' + tab.widths[c] + 'px' + (c === 0 ? ';left:' + W + 'px' : '') + '">' +
+        ' style="width:' + tab.widths[c] + 'px' + S.frozenLeft(tab, c) + '">' +
         '<small>' + esc(label) + '</small>' + (fn ? '<b>' + esc(totalText(tab, c, fn)) + '</b>' : '') + '</button>';
     });
     ui.foot.innerHTML = html;
@@ -776,7 +855,7 @@
   function visibleCols(tab) {
     var left = ui.grid.scrollLeft, right = left + ui.grid.clientWidth;
     var c0 = 0, c1 = tab.widths.length - 1;
-    for (var c = 0; c < tab.widths.length; c++) { if (tab.colLeft[c] + tab.widths[c] >= left + numW()) { c0 = c; break; } }
+    for (var c = 0; c < tab.widths.length; c++) { if (tab.colLeft[c] + tab.widths[c] >= left + numW() + S.frozenW(tab)) { c0 = c; break; } }
     for (var d = c0; d < tab.widths.length; d++) { if (tab.colLeft[d] > right) { c1 = d; break; } }
     return [Math.max(0, c0 - 1), Math.min(tab.widths.length - 1, c1 + 1)];
   }
@@ -786,41 +865,53 @@
     var n = tab.order.length;
     if (!n) {
       ui.rows.style.top = '0px';
-      ui.rows.innerHTML = '<div class="ts-empty" style="width:' + ui.grid.clientWidth + 'px">' + (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.') + '</div>';
+      ui.rows.innerHTML = '<div class="ts-empty" style="width:' + ui.grid.clientWidth + 'px">' + (S.emptyText(tab) || (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.')) + '</div>';
+      S.afterBody(tab, 0, -1, [0, -1]); // [structure]
       rendered.key = 'empty';
       return true;
     }
     var top = ui.grid.scrollTop, viewH = ui.grid.clientHeight - HEAD_H;
-    var first = Math.max(0, rowAtY(tab, top) - OVERSCAN);
+    var first = FX.firstRow(tab, Math.max(0, rowAtY(tab, top) - OVERSCAN)); // [format] a merge's top row
     var last = Math.min(n - 1, rowAtY(tab, top + viewH) + OVERSCAN);
     var cols = tab.widths.length > 30 ? visibleCols(tab) : [0, tab.widths.length - 1];
     var key = first + ':' + last + ':' + cols[0] + ':' + cols[1] + ':' + (tab.tops ? tab.tops[n] : 0);
     if (!force && key === rendered.key) return false;
     rendered.key = key;
+    var html = rowsHtml(tab, first, last, cols);
+    ui.rows.style.top = rowTop(tab, first) + 'px';
+    ui.rows.innerHTML = html;
+    S.afterBody(tab, first, last, cols); // [structure] outline gutter, markers, frozen rows
+    if (tab.anyWrap && measureRows(tab, first, last)) return true;
+    placePill();
+    fxBar();
+    placeOffscreen();
+    if (rulesExt) rulesExt.painted(); // [sheet-rules] the fill handle
+    return true;
+  }
+  // View rows first..last as markup, with the columns cols[0]..cols[1] (and
+  // the frozen ones before them, a spacer standing for those between).
+  function rowsHtml(tab, first, last, cols) {
     var W = numW(), needle = tab.query.search.trim().toLowerCase();
     var ra = Math.min(sel.r, sel.r2), rb = Math.max(sel.r, sel.r2), ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2);
     var hit = tab.matchAt >= 0 ? tab.matches.hits[tab.matchAt] : null;
     var html = '';
-    var list = [];
-    if (cols[0] > 0) list.push(0);
-    for (var c = cols[0]; c <= cols[1]; c++) list.push(c);
+    // [structure] the frozen columns, then the scrolled range; hidden ones skipped.
+    var fc = S.frozenCount(tab), from = Math.max(cols[0], fc), list = [];
+    for (var f = 0; f < fc; f++) if (S.colShown(tab, f)) list.push(f);
+    var gap = from > fc ? tab.colLeft[from] - tab.colLeft[fc] : 0, gapAt = list.length;
+    for (var c = from; c <= cols[1]; c++) if (S.colShown(tab, c)) list.push(c);
     for (var i = first; i <= last; i++) {
       var r = tab.order[i];
       var rowSel = i >= ra && i <= rb;
       html += '<div class="ts-row" role="row" data-i="' + i + '" style="width:' + tab.totalW + 'px' + (tab.tops ? ';height:' + rowH(tab, i) + 'px' : '') + '"><div class="ts-n' + (rowSel ? ' is-sel' : '') + '" role="rowheader" style="width:' + W + 'px">' + (r + 1) + '<span class="ts-rresize" data-act="rresize" aria-hidden="true"></span></div>';
       for (var k = 0; k < list.length; k++) {
         var cc = list[k];
-        if (k === 1 && list[0] === 0 && cols[0] > 1) html += '<div style="flex:none;width:' + (tab.colLeft[cols[0]] - tab.colLeft[1]) + 'px"></div>';
+        if (k === gapAt && gap > 0) html += '<div style="flex:none;width:' + gap + 'px"></div>';
         html += cellHtml(tab, r, cc, i, rowSel && cc >= ca && cc <= cb, i === sel.r && cc === sel.c, needle, hit && hit.row === r && hit.col === cc);
       }
       html += '</div>';
     }
-    ui.rows.style.top = rowTop(tab, first) + 'px';
-    ui.rows.innerHTML = html;
-    if (tab.anyWrap && measureRows(tab, first, last)) return true;
-    placePill();
-    placeOffscreen();
-    return true;
+    return html;
   }
   // Wrapped rows drawn: their real heights replace the estimates. true when
   // one changed (the body is drawn again with the new tops).
@@ -832,7 +923,7 @@
       var ln = (tab.lines && tab.lines.get(r)) || 1;
       var need = ln > 1 ? Math.min(M.MAX_HEIGHT, ln * LINE_H + PAD_Y) : ROW_H;
       for (var c = el.firstChild; c; c = c.nextSibling) {
-        if (!c.classList || !c.classList.contains('is-wrap')) continue;
+        if (!c.classList || !c.classList.contains('is-wrap') || c.classList.contains('fx-span')) continue;
         var kids = c.children, inner = 0;
         for (var j = 0; j < kids.length; j++) inner = Math.max(inner, kids[j].offsetTop + kids[j].offsetHeight);
         need = Math.max(need, Math.ceil(inner + 7 + 1));
@@ -855,7 +946,7 @@
   }
   function cellHtml(tab, r, c, i, isSel, isActive, needle, isHitOn) {
     var col = tab.index.cols[c], type = col.type, inner = '', cls = 'ts-c';
-    if (c === 0) cls += ' is-first';
+    cls += S.frozenCls(tab, c); // [structure] frozen columns
     if (type === 'number' && !tab.align[c]) cls += ' is-num';
     else if (type === 'number') cls += ' is-num-t';
     if (tab.align[c]) cls += ' al-' + tab.align[c];
@@ -869,6 +960,11 @@
     if (isHitOn) cls += ' is-hit-on';
     var td = tab.data.rows[r].tds[c];
     if (td && commented.has(td)) cls += ' has-comment';
+    // [format] the cell's own format, a merge's span, or a slot it covers
+    var fx = FX.cell(tab, r, c, i, type, tab.align[c], col.text[r], tab.widths[c]);
+    if (fx && fx.skip) return '';
+    if (fx && fx.cov) return fx.cov;
+    if (fx) cls += fx.cls;
     if (type === 'tags') {
       var tags = col.tags[r], pal = tab.palettes[c];
       for (var t = 0; t < tags.length; t++) inner += '<span class="ts-tag" style="' + tagStyle(tags[t], pal) + '">' + mark(tags[t], needle) + '</span>';
@@ -878,51 +974,71 @@
     } else {
       var text = col.text[r];
       var href = type === 'url' ? M.safeHref(text) : '';
+      if (fx && fx.text != null) text = fx.text; // [format] the value in its number format
       inner = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + mark(text, needle) + '</a>' : '<span class="ts-t">' + mark(text, needle) + '</span>';
     }
-    var w = tab.widths[c];
-    return '<div class="' + cls + '" role="gridcell" data-c="' + c + '" style="width:' + w + 'px' + (c === 0 ? ';left:' + numW() + 'px' : '') + '"' + (isActive ? ' aria-selected="true"' : '') + ' title="' + esc(col.text[r].slice(0, 300)) + '">' + inner + '</div>';
+    // [sheet-rules] a conditional format, a dropdown chip, a mark on a value outside its list
+    var rx = rulesExt && rulesExt.cell(tab, r, c, needle, inner), xs = '';
+    if (rx) { if (rx.cls) cls += rx.cls; if (rx.inner != null) inner = rx.inner; if (rx.style) xs = ';' + rx.style; }
+    // A conditional format's fill wins over the cell's own fill ([format]), as in Google Sheets.
+    if (xs) cls = cls.replace(/ fx-fill| fx-f-[a-z]+/g, '');
+    var w = fx ? fx.w : tab.widths[c];
+    return '<div class="' + cls + '" role="gridcell" data-c="' + c + '" style="width:' + w + 'px' + S.frozenLeft(tab, c) + (fx ? fx.style : '') + xs + '"' + (isActive ? ' aria-selected="true"' : '') + ' title="' + esc(col.text[r].slice(0, 300)) + '">' + inner + '</div>';
   }
   // ---- flat view: a small sheet in a prose doc, read as a table --------------------
   function renderFlat() {
     var tab = cur(), n = tab.order.length, cols = tab.data.columns, needle = tab.query.search.trim().toLowerCase();
-    var cards = ui.root.clientWidth <= 480 && cols.length > 3;
-    var html = '', i, r, c;
+    // [structure] hidden columns are left out; a collapsed group is one summary row.
+    var vis = [];
+    for (c = 0; c < cols.length; c++) if (S.colShown(tab, c)) vis.push(c);
+    var cards = ui.root.clientWidth <= 480 && vis.length > 3;
+    var html = '', i, r, c, v;
     var cell = function (r, c) {
       var col = tab.index.cols[c], type = col.type, td = tab.data.rows[r].tds[c], inner = '';
+      var fx = FX.flat(tab, r, c, type, col.text[r], cards); // [format]
+      if (fx.skip) return fx;
       if (type === 'tags') { for (var t = 0; t < col.tags[r].length; t++) inner += '<span class="ts-tag" style="' + tagStyle(col.tags[r][t], tab.palettes[c]) + '">' + mark(col.tags[r][t], needle) + '</span>'; }
       else if (type === 'checkbox') inner = col.num[r] === 1 ? '✓' : '';
-      else { var href = type === 'url' ? M.safeHref(col.text[r]) : ''; inner = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + mark(col.text[r], needle) + '</a>' : mark(col.text[r], needle); }
+      else { var href = type === 'url' ? M.safeHref(col.text[r]) : ''; inner = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + mark(col.text[r], needle) + '</a>' : mark(fx.text != null ? fx.text : col.text[r], needle); }
       var cls = (type === 'number' ? ' is-num' : type === 'date' || type === 'checkbox' ? ' is-short' : '') + (needle && col.lower[r].indexOf(needle) !== -1 ? ' is-hit' : '') + (td && commented.has(td) ? ' has-comment' : '') +
         // The grid's line breaks and column alignment read the same here.
         (type !== 'tags' && type !== 'checkbox' && col.text[r].indexOf('\n') !== -1 ? ' is-ml' : '') + (tab.align && tab.align[c] ? ' al-' + tab.align[c] : '');
-      return { cls: cls, inner: inner };
+      // [sheet-rules] conditional formats read the same here, and win over the cell's own fill
+      var fst = rulesExt && rulesExt.flatStyle(tab, r, c);
+      cls += fst ? fx.cls.replace(/ fx-fill| fx-f-[a-z]+/g, '') : fx.cls;
+      return { cls: cls, inner: inner, span: fx.span, style: fst ? ' style="' + fst + '"' : '' };
     };
-    if (!n) html = '<p class="ts-flat-empty">' + (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.') + '</p>';
+    if (!n && !S.flatSummary(tab, 0, cards, vis.length)) html = '<p class="ts-flat-empty">' + (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.') + '</p>';
     else if (cards) {
-      for (i = 0; i < n; i++) {
+      for (i = 0; i <= n; i++) {
+        html += S.flatSummary(tab, i, true, vis.length);
+        if (i === n) break;
         r = tab.order[i];
-        var t0 = cell(r, 0);
-        html += '<div class="ts-card" role="listitem"><p class="ts-card-t' + t0.cls + '" data-i="' + i + '" data-c="0">' + (t0.inner || '&nbsp;') + '</p>';
-        for (c = 1; c < cols.length; c++) {
+        var t0 = cell(r, vis[0]);
+        html += '<div class="ts-card" role="listitem"><p class="ts-card-t' + t0.cls + '" data-i="' + i + '" data-c="' + vis[0] + '"' + (t0.style || '') + '>' + S.flatToggle(tab, i) + (t0.inner || '&nbsp;') + '</p>';
+        for (v = 1; v < vis.length; v++) {
+          c = vis[v];
           var x = cell(r, c);
-          if (!x.inner) continue;
-          html += '<p class="ts-card-l' + x.cls + '" data-i="' + i + '" data-c="' + c + '"><span class="ts-card-k">' + esc(cols[c].name) + ':</span> ' + x.inner + '</p>';
+          if (x.skip || !x.inner) continue;
+          html += '<p class="ts-card-l' + x.cls + '" data-i="' + i + '" data-c="' + c + '"' + x.style + '><span class="ts-card-k">' + esc(cols[c].name) + ':</span> ' + x.inner + '</p>';
         }
         html += '</div>';
       }
       html = '<div role="list" aria-label="' + esc(tab.name) + '">' + html + '</div>';
     } else {
       html = '<table><thead><tr>';
-      for (c = 0; c < cols.length; c++) {
+      for (v = 0; v < vis.length; v++) {
+        c = vis[v];
         var s = tab.query.sort.filter(function (k) { return k.col === c; })[0];
         html += '<th data-c="' + c + '"' + (s ? ' aria-sort="' + (s.dir === 'desc' ? 'descending' : 'ascending') + '"' : '') + '><button type="button" data-sort="' + c + '" title="Sort by ' + esc(cols[c].name) + '">' + esc(cols[c].name) + (s ? ' <span class="ts-sorted">' + (s.dir === 'desc' ? ICON.down : ICON.up) + '</span>' : '') + '</button></th>';
       }
       html += '</tr></thead><tbody>';
-      for (i = 0; i < n; i++) {
+      for (i = 0; i <= n; i++) {
+        html += S.flatSummary(tab, i, false, vis.length);
+        if (i === n) break;
         r = tab.order[i];
         html += '<tr>';
-        for (c = 0; c < cols.length; c++) { var y = cell(r, c); html += '<td class="' + y.cls.trim() + '" data-i="' + i + '" data-c="' + c + '">' + y.inner + '</td>'; }
+        for (v = 0; v < vis.length; v++) { c = vis[v]; var y = cell(r, c); if (y.skip) continue; html += '<td class="' + y.cls.trim() + '"' + y.span + ' data-i="' + i + '" data-c="' + c + '"' + y.style + '>' + (v ? '' : S.flatToggle(tab, i)) + y.inner + '</td>'; }
         html += '</tr>';
       }
       html += '</tbody></table>';
@@ -942,6 +1058,7 @@
   // A header sorts; in Comment mode a cell takes a comment; a commented cell
   // opens its thread.
   function flatClick(e) {
+    if (S.flatClick(e)) return; // [structure] a group's summary row or toggle
     var b = e.target.closest('[data-sort]');
     if (b) { e.stopPropagation(); setQuery(Q.toggleSort(cur().query, Number(b.getAttribute('data-sort')), e.shiftKey)); return; }
     var el = e.target.closest('[data-i]');
@@ -1003,7 +1120,7 @@
   }
   var saveTimer = null;
   function viewObject() {
-    var view = { active: book.tabs.length > 1 ? cur().name : '', tabs: {} };
+    var view = { active: book.tabs.length > 1 ? cur().name : '', tabs: Object.create(null) };
     book.tabs.forEach(function (t) { view.tabs[t.name] = t.query; });
     return view;
   }
@@ -1014,20 +1131,27 @@
       // column key and row id), kept by the shell beside the view: at most
       // 2,000 row heights a tab, as many as a load reads back (the shell
       // keeps up to 100,000 characters of it).
-      var widths = {};
+      // No prototype: a tab may be called "__proto__".
+      var widths = Object.create(null);
       if (useLocal()) book.tabs.forEach(function (t) {
         if (!t.resized) return;
         var h = {}, n = 0;
         Object.keys(t.local.h).forEach(function (id) { if (n < 2000 && t.local.h[id]) { h[id] = t.local.h[id]; n++; } });
         widths[t.name] = { w: t.local.w, h: h, wrap: t.local.wrap, align: t.local.align };
       });
+      // [structure] anyone's expanded / collapsed groups and a reader's freeze.
+      // Over the shell's budget, group state goes first, never the widths.
+      book.tabs.forEach(function (t) { var o = S.viewState(t); if (o) (widths[t.name] = widths[t.name] || {}).o = o; });
+      S.fitViewState(widths, 90000);
       post({ type: 'tdoc:sheetView', hash: Q.encodeView(viewObject()), widths: widths });
     }, 250);
   }
   function applyView(hash, widths) {
     var view = Q.decodeView(hash || '');
+    // Own keys only: a tab may be called "__proto__".
+    var own = function (o, k) { return o && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined; };
     book.tabs.forEach(function (t) {
-      var q = view.tabs[t.name];
+      var q = own(view.tabs, t.name);
       if (q) {
         // A saved view never names a column that is not there.
         Object.keys(q.filters).forEach(function (k) { if (Number(k) >= t.data.columns.length) delete q.filters[k]; });
@@ -1035,7 +1159,7 @@
         Object.keys(q.totals || {}).forEach(function (k) { if (Number(k) >= t.data.columns.length) delete q.totals[k]; });
         t.query = q;
       }
-      var w = widths && widths[t.name];
+      var w = own(widths, t.name);
       var loc = emptyLocal();
       var size = function (v, lo, hi) { return M.cleanSize(v, lo, hi) || undefined; };
       // Before layouts had keys: a plain array of widths by position.
@@ -1047,7 +1171,8 @@
         each(w.wrap, function (k, v) { if (typeof v === 'boolean') loc.wrap[k] = v; });
         each(w.align, function (k, v) { if (M.cleanAlign(v)) loc.align[k] = M.cleanAlign(v); });
       }
-      if (w) { t.local = loc; t.resized = true; readLayout(t); }
+      if (w && !(w.o && Object.keys(w).length === 1)) { t.local = loc; t.resized = true; readLayout(t); }
+      if (w && w.o) S.applyViewState(t, w.o); // [structure]
     });
     var at = book.tabs.findIndex(function (t) { return t.name === view.active; });
     if (at >= 0) book.active = at;
@@ -1061,19 +1186,26 @@
     if (!m.hits.length) return;
     tab.matchAt = tab.matchAt < 0 ? (d > 0 ? 0 : m.hits.length - 1) : (tab.matchAt + d + m.hits.length) % m.hits.length;
     var hit = m.hits[tab.matchAt];
-    sel.r = sel.r2 = hit.at; sel.c = sel.c2 = hit.col;
-    renderBar(); renderHead(); renderBody(true);
-    ensureVisible(hit.at, hit.col);
+    // [structure] a match in a collapsed group opens it first.
+    S.expandTo(tab, hit.row, hit.col);
+    var at = tab.pos[hit.row];
+    if (at < 0) return;
+    sel.r = sel.r2 = at; sel.c = sel.c2 = hit.col;
+    renderBar(); layout(); renderHead(); renderBody(true);
+    ensureVisible(at, hit.col);
   }
 
   // ---- selection & scrolling -------------------------------------------------------
   function ensureVisible(i, c) {
     var tab = cur(), g = ui.grid;
     var top = rowTop(tab, i), hgt = rowH(tab, i), viewH = g.clientHeight - HEAD_H - footH();
-    if (top < g.scrollTop) g.scrollTop = top;
-    else if (top + hgt > g.scrollTop + viewH) g.scrollTop = Math.min(top, top + hgt - viewH);
-    if (c > 0) {
-      var left = tab.colLeft[c] - tab.colLeft[0] - tab.widths[0], right = tab.colLeft[c] + tab.widths[c];
+    // [structure] frozen rows cover the top of the view, frozen columns its left.
+    var frozen = i < S.frozenRows(tab), fh = S.frozenH(tab);
+    if (frozen) { /* always in view: no scroll */ }
+    else if (top < g.scrollTop + fh) g.scrollTop = top - fh;
+    else if (top + hgt > g.scrollTop + viewH) g.scrollTop = Math.min(top - fh, top + hgt - viewH);
+    if (c >= S.frozenCount(tab)) {
+      var left = tab.colLeft[c] - numW() - S.frozenW(tab), right = tab.colLeft[c] + tab.widths[c];
       if (left < g.scrollLeft) g.scrollLeft = left;
       else if (right > g.scrollLeft + g.clientWidth) g.scrollLeft = right - g.clientWidth;
     }
@@ -1086,7 +1218,7 @@
     var tab = cur();
     if (!tab.order.length) return;
     var ra = Math.min(sel.r, sel.r2), rb = Math.max(sel.r, sel.r2), ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2);
-    var rows = ui.rows.children;
+    var rows = Array.prototype.slice.call(ui.rows.children).concat(Array.prototype.slice.call(ui.frozen.children)); // [structure]
     for (var k = 0; k < rows.length; k++) {
       var row = rows[k], i = Number(row.getAttribute('data-i'));
       if (!row.classList.contains('ts-row')) continue;
@@ -1101,17 +1233,24 @@
       }
     }
     placePill();
+    if (rulesExt) rulesExt.painted(); // [sheet-rules] the fill handle
+    fxBar();
   }
   function select(i, c, extend) {
     var tab = cur(), n = tab.order.length, cols = tab.widths.length;
     if (!n || !cols) return;
     i = Math.max(0, Math.min(n - 1, i)); c = Math.max(0, Math.min(cols - 1, c));
+    c = S.shownCol(tab, c, extend ? sel.c2 : sel.c); // [structure] never onto a hidden column
+    if (!extend) { var at = FX.snap(tab, i, c); i = at.i; c = at.c; } // [format] a covered slot is its merge's
     if (extend) { sel.r2 = i; sel.c2 = c; } else { sel.r = sel.r2 = i; sel.c = sel.c2 = c; }
     sel.touched = true;
     renderHead();
     if (extend) ensureVisible(i, c); else ensureVisible(sel.r, sel.c);
   }
-  function cellAt(i, c) { return ui.rows.querySelector('.ts-row[data-i="' + i + '"] .ts-c[data-c="' + c + '"]'); }
+  function cellAt(i, c) {
+    var q = '.ts-row[data-i="' + i + '"] .ts-c[data-c="' + c + '"]';
+    return (i < S.frozenRows(cur()) && ui.frozen.querySelector(q)) || ui.rows.querySelector(q); // [structure] frozen rows on top
+  }
   function srcCell(tab, i, c) {
     var r = tab.order[i];
     return r == null ? null : tab.data.rows[r].tds[c];
@@ -1164,7 +1303,8 @@
     var c = Array.prototype.indexOf.call(tr.children, cell);
     if (tr.parentElement && tr.parentElement.tagName === 'THEAD') return { t: t, c: c, head: true };
     var r = tab.rowOf.get(tr);
-    return r == null ? { t: t } : { t: t, r: r, c: c };
+    if (r != null && tab.data.merges && tab.data.merges.length) c = tab.data.rows[r].tds.indexOf(cell); // [format] past merged cells
+    return r == null || c < 0 ? { t: t } : { t: t, r: r, c: c };
   }
   // Geometry for a source element the grid stands in for: the cell where it
   // is drawn, else the header, else the grid itself.
@@ -1175,8 +1315,8 @@
     if (at.head) return ui.head.querySelector('.ts-h[data-c="' + at.c + '"]') || ui.grid;
     if (at.r == null) return ui.grid;
     var i = cur().pos[at.r];
-    // A row the search or a filter hides: the note under the toolbar.
-    if (i < 0) return !ui.offHidden.hidden ? ui.offHidden : ui.count;
+    // A row the search or a filter hides (or a hidden column): the note under the toolbar.
+    if (i < 0 || !S.colShown(cur(), at.c)) return !ui.offHidden.hidden ? ui.offHidden : ui.count;
     var where = rowPlace(i);
     // Scrolled out of the grid: the "N comments above / below" marker at
     // that edge, so the pin points the way to scroll.
@@ -1187,7 +1327,8 @@
   // -1 above the grid's visible rows, 1 below, 0 in view.
   function rowPlace(i) {
     var tab = cur(), top = rowTop(tab, i), view = ui.grid.clientHeight - HEAD_H - footH();
-    if (top + rowH(tab, i) <= ui.grid.scrollTop + 2) return -1;
+    if (i < S.frozenRows(tab)) return 0; // [structure] a frozen row is always in view
+    if (top + rowH(tab, i) <= ui.grid.scrollTop + S.frozenH(tab) + 2) return -1;
     if (top >= ui.grid.scrollTop + view - 2) return 1;
     return 0;
   }
@@ -1223,7 +1364,12 @@
     if (!a.row) return ths[c];
     var tr = null, rows = table.querySelectorAll('tr[data-row]');
     for (var n = 0; n < rows.length; n++) if (rows[n].getAttribute('data-row') === String(a.row)) { tr = rows[n]; break; }
-    return tr ? tr.cells[c] || null : null;
+    if (!tr) return null;
+    // [format] past merged cells: the column's cell as the viewer reads it
+    var at = book && book.tabs.find(function (x) { return x.table === table; });
+    var ri = at ? at.rowOf.get(tr) : null;
+    if (ri != null && at.data.merges && at.data.merges.length) return at.data.rows[ri].tds[c] || null;
+    return tr.cells[c] || null;
   };
   // Full screen, the sheet spans the frame: its right edge is the column the
   // page's pins sit beside.
@@ -1237,8 +1383,10 @@
     if (!at) return false;
     if (at.t !== book.active) { book.active = at.t; renderAll(); }
     if (at.r == null) { ui.root.scrollIntoView({ block: 'nearest' }); return true; }
+    S.expandTo(cur(), at.r, at.c); // [structure] its collapsed group opens (the reader's view)
+    if (at.c != null && !S.colShown(cur(), at.c)) { toast('That cell is in a hidden column.'); return false; }
     var i = cur().pos[at.r];
-    if (i < 0) { toast('That cell is hidden by the search or a filter on this sheet.'); return false; }
+    if (i < 0) { toast(S.hiddenRow(cur(), at.r) ? 'That cell is in a hidden row.' : 'That cell is hidden by the search or a filter on this sheet.'); return false; }
     ui.root.scrollIntoView({ block: 'nearest' });
     select(i, at.c || 0, false);
     return true;
@@ -1272,7 +1420,7 @@
       var at = locate(el);
       if (!at || at.t !== book.active || at.r == null) return;
       var i = tab.pos[at.r];
-      if (i < 0) { hidden += ids.length; return; }
+      if (i < 0 || (at.c != null && !S.colShown(tab, at.c))) { hidden += ids.length; return; } // [structure] hidden columns too
       var where = rowPlace(i);
       if (where < 0) above.push({ i: i, ids: ids });
       else if (where > 0) below.push({ i: i, ids: ids });
@@ -1288,7 +1436,7 @@
     show(ui.offAbove, above, 'above');
     show(ui.offBelow, below, 'below');
     ui.offHidden.hidden = !hidden;
-    ui.offHidden.textContent = hidden ? hidden + (hidden === 1 ? ' comment is' : ' comments are') + ' on rows the search or filters hide' : '';
+    ui.offHidden.textContent = hidden ? hidden + (hidden === 1 ? ' comment is' : ' comments are') + ' on rows this view hides (a search, a filter, a collapsed group or hidden rows)' : '';
     var g = ui.grid.offsetTop;
     ui.offAbove.style.top = (g + HEAD_H + 6) + 'px';
     ui.offBelow.style.top = (g + ui.grid.offsetHeight - 36) + 'px';
@@ -1450,10 +1598,14 @@
       items.push({ header: 'Type' });
       Q.TYPES.forEach(function (t) { items.push({ label: TYPE_LABEL[t], checked: t === type, onSelect: function () { if (t !== type) setColumnType(c, t); } }); });
       items.push('sep');
-      items.push({ label: 'Insert column left', onSelect: function () { insertColumn(c); } });
-      items.push({ label: 'Insert column right', onSelect: function () { insertColumn(c + 1); } });
+      // [structure] as many columns as are selected (one when this column is not).
+      var ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2), nc = c >= ca && c <= cb ? cb - ca + 1 : 1;
+      items.push({ label: nc > 1 ? 'Insert ' + nc + ' columns left' : 'Insert column left', onSelect: function () { insertColumn(nc > 1 ? ca : c, nc); } });
+      items.push({ label: nc > 1 ? 'Insert ' + nc + ' columns right' : 'Insert column right', onSelect: function () { insertColumn((nc > 1 ? cb : c) + 1, nc); } });
       items.push({ label: 'Delete column', danger: true, disabled: tab.data.columns.length < 2, onSelect: function () { deleteColumn(c); } });
+      if (rulesExt) items = items.concat(rulesExt.menuItems(c)); // [sheet-rules]
     }
+    items = items.concat(S.columnItems(tab, c)); // [structure] hide, freeze
     openMenu(anchor, items, col.name + ' column');
   }
   function rowMenu(i, anchor) {
@@ -1462,19 +1614,21 @@
     if (i < ra || i > rb) { ra = rb = i; select(i, sel.c, false); }
     var n = rb - ra + 1;
     openMenu(anchor, [
-      { label: 'Insert row above', onSelect: function () { insertRows(cur().order[ra], 1, true); } },
-      { label: 'Insert row below', onSelect: function () { insertRows(cur().order[rb], 1, false); } },
+      // [structure] as many rows as are selected
+      { label: n > 1 ? 'Insert ' + n + ' rows above' : 'Insert row above', onSelect: function () { insertRows(cur().order[ra], n, true); } },
+      { label: n > 1 ? 'Insert ' + n + ' rows below' : 'Insert row below', onSelect: function () { insertRows(cur().order[rb], n, false); } },
       { label: n > 1 ? 'Delete ' + n + ' rows' : 'Delete row', danger: true, onSelect: function () { deleteRows(ra, rb); } },
-    ], 'Row menu');
+    ].concat(S.rowItems(cur(), ra, rb)).concat(rulesExt ? rulesExt.menuItems(sel.c) : []), 'Row menu'); // [structure] hide, group, freeze; [sheet-rules]
   }
+  // [structure] move left / right, and a delete the toast can undo:
+  // server/sheets-structure.js
   function tabMenu(i, anchor) {
     openMenu(anchor, [
       { label: 'Rename…', onSelect: function () { renameTab(i, anchor); } },
-      { label: 'Delete tab', danger: true, disabled: book.tabs.length < 2, onSelect: function () {
-        // The sandbox has no confirm(): a second menu asks.
-        openMenu(anchor, [{ header: 'Delete "' + book.tabs[i].name + '" and its ' + fmt(book.tabs[i].index.size) + ' rows?' }, { label: 'Delete tab', danger: true, onSelect: function () { deleteTab(i); } }, { label: 'Cancel', onSelect: function () {} }], 'Confirm delete');
-      } },
-    ], 'Tab menu');
+    ].concat(S.tabItems(i, anchor), [
+      'sep',
+      { label: 'Delete tab', danger: true, disabled: book.tabs.length < 2, onSelect: function () { S.deleteTabWithUndo(i); } },
+    ]), 'Tab menu');
   }
 
   // ---- layout changes -------------------------------------------------------------------
@@ -1569,6 +1723,264 @@
     return Math.round(Math.max(M.MIN_WIDTH, Math.min(800, w)));
   }
 
+  // ---- formulas ----------------------------------------------------------------------
+  // The engine is shared/sheet-formula.mjs (FX): one workbook of every tab.
+  // A formula cell is a <td data-formula="=…"> whose text is the value last
+  // computed. On load every formula is computed and the grid shows the
+  // results; the document is not touched (a reader changes nothing). After
+  // an edit in Edit mode the cells that changed get their new values written
+  // into their <td>s, with the edit, so a save keeps formula and value
+  // together. Values are only ever text in the grid (cellHtml escapes).
+  // unwritten: formula <td>s whose text is not their value yet (computed
+  // while nothing was being edited); the next edit writes them too.
+  var fm = { wb: null, ready: false, writing: false, off: false, clip: null, unwritten: new Set(), edited: new Set() };
+  function fxDeps() { return { parseNumber: Q.parseNumber, parseDate: Q.parseDate }; }
+  function fxFormulaOf(td) {
+    var f = td && td.getAttribute('data-formula');
+    if (!f) return null;
+    f = String(f).trim();
+    if (!f) return null;
+    return f[0] === '=' ? f : '=' + f;
+  }
+  // A tab as the engine reads it: values from the cells' text (typed by
+  // their column), formulas from data-formula.
+  function fxInput(tab) {
+    var data = tab.data, cols = data.columns, rows = data.rows, deps = fxDeps();
+    return {
+      name: tab.name, rows: rows.length, cols: cols.length,
+      types: cols.map(function (c) { return c.type; }),
+      cell: function (r, c) {
+        var row = rows[r], f = fxFormulaOf(row.tds[c]);
+        if (f) return { f: f };
+        return FM.cellValue(cols[c].type, row.cells[c], deps);
+      },
+    };
+  }
+  function fxHas(tab) {
+    var t = tab.table;
+    return !!(t && t.querySelector('td[data-formula]'));
+  }
+  // Every tab again: on load, a reload, and when tabs come or go.
+  // Formulas never take the sheet down: if the engine fails, the grid shows
+  // the cells' stored values, as it would without JavaScript.
+  function fxSafe(fn) {
+    try { fn(); } catch (e) {
+      fm.wb = null; fm.off = true; fm.unwritten.clear();
+      try { console.error('tdoc sheets: formulas turned off', e); } catch (x) {}
+    }
+  }
+  function fxInit() { fxSafe(fxInitNow); }
+  function fxInitNow() {
+    fm.ready = true;
+    if (!book || fm.off) return;
+    var any = book.tabs.some(fxHas);
+    if (!any && !fm.wb) return;
+    fm.wb = FM.createWorkbook();
+    fm.wb.load(book.tabs.map(fxInput));
+    book.tabs.forEach(function (tab) { fxPatch(tab, fm.wb.formulas(tab.name)); if (rulesExt) rulesExt.readTab(tab); }); // [sheet-rules] rules see computed values
+    fxFlush();
+  }
+  function fxSameTabs() {
+    var wb = fm.wb;
+    return wb.sheets.length === book.tabs.length && book.tabs.every(function (t) { return !!wb.sheet(t.name); });
+  }
+  // A tab was read again (an edit, an undo): the engine takes its cells,
+  // recomputes what depends on what changed, and every tab shows that.
+  function fxRead(tab) { fxSafe(function () { fxReadNow(tab); }); }
+  function fxReadNow(tab) {
+    if (fm.off) return;
+    if (!fm.ready || !book || book.tabs.indexOf(tab) < 0) return;
+    if (!fm.wb) { if (!fxHas(tab)) return; fxInitNow(); return; }
+    // A tab added, removed or renamed (or put back by an undo): all again.
+    if (!fxSameTabs()) { fxInitNow(); return; }
+    var changedCells = fm.wb.update(fxInput(tab));
+    var byTab = new Map();
+    changedCells.forEach(function (x) { var k = x.sheet.toLowerCase(); if (!byTab.has(k)) byTab.set(k, []); byTab.get(k).push(x); });
+    // This tab's cells were just read from their <td> text: all of its
+    // formula cells are shown from the engine again.
+    fxPatch(tab, fm.wb.formulas(tab.name));
+    book.tabs.forEach(function (t) { var list = byTab.get(t.name.toLowerCase()); if (t !== tab && list) { fxPatch(t, list); if (rulesExt) rulesExt.readTab(t); } }); // [sheet-rules] another tab's rules see its new values
+    fxFlush();
+  }
+  // During an edit: the cells computed earlier get their values written.
+  function fxFlush() {
+    if (!fm.writing || !fm.unwritten.size) return;
+    var list = Array.from(fm.unwritten);
+    fm.unwritten.clear();
+    list.forEach(function (td) {
+      if (!td.isConnected) return;
+      var tab = book.tabs.filter(function (t) { return t.table.contains(td); })[0];
+      // [format] with merges a cell's index in its <tr> is not its column
+      var r = tab && tab.rowOf.get(td.parentElement), c = r == null ? -1 : tab.data.rows[r].tds.indexOf(td);
+      if (r == null || !tab.index.cols[c]) return;
+      var text = fm.wb.display(tab.name, r, c);
+      if (text == null) return;
+      var col = tab.index.cols[c], value = col.tags ? Q.splitTags(text) : text;
+      if (!fxMayWrite(tab, r, c, td)) { fm.unwritten.add(td); return; }
+      if (M.readCell(td, col.type) + '' === (col.type === 'checkbox' ? (Q.parseCheckbox(text) || text === 'TRUE' ? Q.CHECK_MARK : '') : value) + '') return;
+      M.writeCell(td, col.type, value);
+    });
+  }
+  // Show computed values in a tab's index (what the grid draws, searches,
+  // filters and sorts), and in Edit mode, during an edit, in its <td>s.
+  function fxPatch(tab, cells) {
+    if (!tab.index || !cells.length || !fm.wb) return;
+    // Only this tab's own sheet in the engine (names are unique, but never
+    // write one tab's values into another's cells).
+    var sheet = fm.wb.sheet(tab.name);
+    if (!sheet || sheet.name !== tab.name) return;
+    for (var k = 0; k < cells.length; k++) {
+      var r = cells[k].r, c = cells[k].c;
+      var col = tab.index.cols[c], row = tab.data.rows[r];
+      if (!col || !row) continue;
+      var text = fm.wb.display(tab.name, r, c);
+      if (text == null) continue;
+      var shown = text;
+      if (col.tags) { col.tags[r] = Q.splitTags(text); shown = col.tags[r].join(', '); }
+      else if (col.type === 'checkbox') shown = Q.parseCheckbox(text) || text === 'TRUE' ? Q.CHECK_MARK : '';
+      if (col.text[r] !== shown) {
+        col.text[r] = shown;
+        col.lower[r] = shown.toLowerCase();
+        if (col.num) {
+          var v = col.type === 'number' ? Q.parseNumber(shown) : col.type === 'date' ? Q.parseDate(shown) : (Q.parseCheckbox(shown) ? 1 : 0);
+          col.num[r] = v == null ? NaN : v;
+        }
+        row.cells[c] = col.tags ? col.tags[r] : shown;
+      }
+      var td = row.tds[c];
+      if (!td || M.readCell(td, col.type) + '' === (col.tags ? col.tags[r] : shown) + '') { if (td) fm.unwritten.delete(td); continue; }
+      if (fm.writing && canEdit() && fxMayWrite(tab, r, c, td)) { M.writeCell(td, col.type, col.tags ? col.tags[r] : text); fm.unwritten.delete(td); }
+      else fm.unwritten.add(td);
+    }
+  }
+  // A value that follows TODAY() or NOW() (the engine traces it) changes by
+  // itself: written only when someone edits that formula, not by every
+  // other edit.
+  // Nor is anything from a recalculation that ran out of budget (#BUSY!
+  // cells, and values computed from them): the cell keeps its last good
+  // stored value and stays unwritten until a recalculation completes.
+  function fxMayWrite(tab, r, c, td) {
+    if (fm.wb.stats.busy) return false;
+    return !fm.wb.volatile(tab.name, r, c) || fm.edited.has(td);
+  }
+  function fxAttr(td, f) { if (f) td.setAttribute('data-formula', f); else td.removeAttribute('data-formula'); }
+  // Write what was typed: '=…' is a formula (its value comes with the
+  // recompute after this edit); '\'=…' is the text '=…'.
+  function fxWrite(td, type, value) {
+    if (typeof value === 'string' && FM.isFormula(value.trim()) && type !== 'tags' && type !== 'checkbox') {
+      fm.edited.add(td);
+      td.setAttribute('data-formula', value.trim());
+      M.writeCell(td, type, '');
+      return;
+    }
+    if (typeof value === 'string' && value[0] === "'" && value[1] === '=') value = value.slice(1);
+    td.removeAttribute('data-formula');
+    M.writeCell(td, type, value);
+  }
+  function fxSource(tab, r, c) {
+    var row = tab.data.rows[r];
+    return row ? fxFormulaOf(row.tds[c]) : null;
+  }
+  // What the cell editor starts from: the formula, or text that would read
+  // as one marked as text.
+  function fxEditText(tab, r, c) {
+    var f = fxSource(tab, r, c);
+    if (f) return f;
+    var text = tab.index.cols[c].text[r];
+    return text[0] === '=' && text.length > 1 ? "'" + text : text;
+  }
+  // References follow rows and columns inserted or deleted on `tab`, in
+  // every tab's formulas. This tab's are inside the caller's snapshot; the
+  // others' come back as { undo, redo }.
+  function fxShift(tab, axis, at, count) {
+    return fxRewrite(tab, function (src, t) { return FM.shiftFormula(src, { target: tab.name, host: t.name, axis: axis, at: at, count: count }); });
+  }
+  // Rows deleted (document positions, maybe not adjacent): from the bottom
+  // up, a run of adjacent rows at a time.
+  function fxShiftRows(tab, docRows) {
+    var list = docRows.slice().sort(function (a, b) { return b - a; }), runs = [];
+    for (var k = 0; k < list.length; k++) {
+      var last = runs[runs.length - 1];
+      if (last && list[k] === last.at - 1) { last.at--; last.n++; } else runs.push({ at: list[k], n: 1 });
+    }
+    return fxRewrite(tab, function (src, t) {
+      runs.forEach(function (run) { src = FM.shiftFormula(src, { target: tab.name, host: t.name, axis: 'row', at: run.at, count: -run.n }); });
+      return src;
+    });
+  }
+  function fxRename(from, to) {
+    var owner = book.tabs.filter(function (t) { return t.name === from; })[0];
+    return fxRewrite(owner, function (src) { return FM.renameSheetIn(src, from, to); });
+  }
+  function fxRewrite(home, fn) {
+    if (!fm.wb) return null;
+    var others = [];
+    book.tabs.forEach(function (t) {
+      t.data.rows.forEach(function (row) {
+        for (var c = 0; c < row.tds.length; c++) {
+          var td = row.tds[c], src = fxFormulaOf(td);
+          if (!src) continue;
+          var next = fn(src, t);
+          if (next === src) continue;
+          if (t !== home) others.push({ td: td, before: td.getAttribute('data-formula'), after: next });
+          td.setAttribute('data-formula', next);
+        }
+      });
+    });
+    if (!others.length) return null;
+    var touched = [];
+    book.tabs.forEach(function (t) { if (t !== home && others.some(function (o) { return t.table.contains(o.td); })) touched.push(t); });
+    // The other tabs are read again (their formulas moved); the values they
+    // show settle when the changed tab is read, after this change.
+    touched.forEach(function (t) { readTab(t.table, t); });
+    return {
+      undo: function () { others.forEach(function (o) { o.td.setAttribute('data-formula', o.before); }); touched.forEach(function (t) { readTab(t.table, t); }); },
+      redo: function () { others.forEach(function (o) { o.td.setAttribute('data-formula', o.after); }); touched.forEach(function (t) { readTab(t.table, t); }); },
+    };
+  }
+  // Copy: remember where the formulas came from; a paste of the same text
+  // in this sheet brings them, moved by where it lands.
+  function fxCopy(tab, ra, rb, ca, cb, text) {
+    fm.clip = null;
+    var cells = [], any = false;
+    for (var i = ra; i <= rb; i++) {
+      var r = tab.order[i], line = [];
+      for (var c = ca; c <= cb; c++) { var f = fxSource(tab, r, c); if (f) any = true; line.push(f ? { f: f, r: r, c: c } : null); }
+      cells.push(line);
+    }
+    if (any) fm.clip = { text: text, cells: cells };
+  }
+  function fxPasted(text, g, c, r, col, value) {
+    var clip = fm.clip;
+    if (!clip || r < 0 || String(text).replace(/\r?\n$/, '') !== clip.text) return value;
+    var line = clip.cells[g % clip.cells.length], src = line && line[c % line.length];
+    return src ? FM.offsetFormula(src.f, r - src.r, col - src.c) : value;
+  }
+  // The formula bar: in Edit mode, the active cell's formula, in the
+  // toolbar row in place of the editing hint. Enter applies an edit.
+  function fxBar() {
+    if (!ui.fx || !book) return;
+    var tab = cur(), r = tab.order[sel.r];
+    var f = canEdit() && r != null && sel.c < tab.data.columns.length ? fxSource(tab, r, sel.c) : null;
+    ui.fx.hidden = !f;
+    if (f) ui.note.hidden = true;
+    if (f && document.activeElement !== ui.fxInput) { ui.fxInput.value = f; ui.fxInput.setAttribute('aria-label', 'Formula in ' + refLabel(tab, r, sel.c)); }
+  }
+  function fxWire() {
+    ui.fxInput.addEventListener('keydown', function (e) {
+      e.stopPropagation();
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        var tab = cur(), r = tab.order[sel.r], v = ui.fxInput.value;
+        if (r != null && canEdit() && v !== fxSource(tab, r, sel.c)) setCells(tab, [{ r: r, c: sel.c, value: v }], r);
+        ui.grid.focus({ preventScroll: true });
+        fxBar();
+      } else if (e.key === 'Escape') { e.preventDefault(); ui.fxInput.blur(); ui.grid.focus({ preventScroll: true }); fxBar(); }
+    });
+    ['input', 'beforeinput', 'paste', 'copy', 'cut', 'keyup'].forEach(function (t) { ui.fxInput.addEventListener(t, function (e) { e.stopPropagation(); }); });
+    ui.fxInput.addEventListener('blur', function () { setTimeout(fxBar, 0); });
+  }
+
   // ---- editing ------------------------------------------------------------------------
   // Every change lands in the author's table, then the editor's own draft
   // and dirty state are told, exactly as typing in the page would.
@@ -1603,12 +2015,17 @@
     if (op.tab) op.tab.measured = new Map();
     if (redo) op.redo(); else op.undo();
     to.push(op);
+    // [sheet-rules] a Replace all over every tab touched several
+    if (op.tabs) op.tabs.forEach(function (t) { if (t !== op.tab && book.tabs.indexOf(t) >= 0) readTab(t.table, t); });
     afterChange(op.tab);
+    // The tab on screen was among them (another than the op's own): draw it.
+    if (op.tabs && op.tab !== cur() && op.tabs.indexOf(cur()) >= 0) { runTab(cur()); renderBar(); layout(); renderHead(); renderBody(true); }
   }
   function afterChange(tab, keepSel) {
     var t = book.tabs.indexOf(tab);
-    if (t < 0) { renderAll(); changed(); return; }
-    readTab(tab.table, tab);
+    if (t < 0) { fxInit(); renderAll(); changed(); return; }
+    fm.writing = canEdit(); // fx: computed values go into the cells with this edit
+    try { readTab(tab.table, tab); } finally { fm.writing = false; fm.edited.clear(); }
     if (t === book.active) {
       var activeRow = keepSel != null ? keepSel : null;
       runTab(tab);
@@ -1616,7 +2033,7 @@
       sel.r = Math.min(sel.r, Math.max(0, tab.order.length - 1)); sel.r2 = Math.min(sel.r2, Math.max(0, tab.order.length - 1));
       sel.c = Math.min(sel.c, tab.widths.length - 1); sel.c2 = Math.min(sel.c2, tab.widths.length - 1);
       renderTabs(); renderBar(); layout(); renderHead(); renderBody(true);
-    }
+    } else renderTabs(); // [structure] a tab's undo (order, colour, a copy) shows in the strip
     changed();
     relayout();
   }
@@ -1632,21 +2049,29 @@
   }
   // [{ r, c, value }] → one undoable change.
   function setCells(tab, list, keepRow) {
+    var op = writeCells(tab, list);
+    if (!op) return; // [format] only covered slots: nothing written
+    record(op);
+    afterChange(tab, keepRow);
+  }
+  // The cells written; the undo step returned, not yet recorded.
+  function writeCells(tab, list) {
     var before = [], after = [];
+    list = list.filter(function (ch) { return !FX.covered(tab, ch.r, ch.c); }); // [format] a merge's covered slots hold nothing
+    if (!list.length) return null;
     list.forEach(function (ch) {
       var row = tab.data.rows[ch.r];
       tab.measured.delete(row.tr);
       var hadCells = row.tr.cells.length;
       var td = ensureCell(tab, ch.r, ch.c);
-      before.push({ tr: row.tr, td: td, html: td.innerHTML, cells: hadCells });
-      M.writeCell(td, tab.index.cols[ch.c].type, ch.value);
-      after.push({ td: td, html: td.innerHTML });
+      before.push({ tr: row.tr, td: td, html: td.innerHTML, cells: hadCells, f: td.getAttribute('data-formula') });
+      fxWrite(td, tab.index.cols[ch.c].type, ch.value); // fx: '=…' is a formula
+      after.push({ td: td, html: td.innerHTML, f: td.getAttribute('data-formula') });
     });
     var op = { tab: tab,
-      undo: function () { before.slice().reverse().forEach(function (b) { b.td.innerHTML = b.html; while (b.tr.cells.length > b.cells) b.tr.removeChild(b.tr.lastElementChild); }); },
-      redo: function () { after.forEach(function (a, k) { var b = before[k]; while (b.tr.cells.length < b.cells || !b.td.isConnected && b.tr.cells.length <= Array.prototype.indexOf.call(b.tr.cells, b.td)) b.tr.appendChild(document.createElement('td')); if (!b.td.isConnected) b.tr.appendChild(b.td); a.td.innerHTML = a.html; }); } };
-    record(op);
-    afterChange(tab, keepRow);
+      undo: function () { before.slice().reverse().forEach(function (b) { b.td.innerHTML = b.html; fxAttr(b.td, b.f); while (b.tr.cells.length > b.cells) b.tr.removeChild(b.tr.lastElementChild); }); },
+      redo: function () { after.forEach(function (a, k) { var b = before[k]; while (b.tr.cells.length < b.cells || !b.td.isConnected && b.tr.cells.length <= Array.prototype.indexOf.call(b.tr.cells, b.td)) b.tr.appendChild(document.createElement('td')); if (!b.td.isConnected) b.tr.appendChild(b.td); a.td.innerHTML = a.html; fxAttr(a.td, a.f); }); } };
+    return op;
   }
   // Structural changes (rows, columns, types, tabs, pastes) snapshot the
   // table; the undo puts the snapshot back.
@@ -1654,10 +2079,13 @@
     var table = tab.table;
     var before = { html: table.innerHTML, name: table.getAttribute('data-name') };
     tab.measured = new Map();
-    fn();
+    // fn may return { undo, redo } for what it changed outside this table
+    // (fx: formulas on other tabs that point here).
+    var extra;
+    FX.wrap(tab, function () { extra = fn(); }); // [format] on the table laid out flat, merged again after
     var after = { html: table.innerHTML, name: table.getAttribute('data-name') };
     var put = function (s) { table.innerHTML = s.html; if (s.name == null) table.removeAttribute('data-name'); else table.setAttribute('data-name', s.name); };
-    record({ tab: tab, undo: function () { put(before); }, redo: function () { put(after); } });
+    record({ tab: tab, undo: function () { put(before); if (extra) extra.undo(); }, redo: function () { put(after); if (extra) extra.redo(); } });
   }
 
   var editor = null;
@@ -1670,6 +2098,8 @@
     ensureVisible(i, c);
     var cell = cellAt(i, c);
     if (!cell) return;
+    // [sheet-rules] a dropdown cell opens its list
+    if (rulesExt && rulesExt.startEdit(tab, r, c, cell, initial)) return;
     if (type === 'checkbox') { setCells(tab, [{ r: r, c: c, value: tab.index.cols[c].num[r] === 1 ? '' : Q.CHECK_MARK }], r); return; }
     if (type === 'tags') { openTagPicker(tab, r, c, cell, initial); return; }
     // A text box that holds line breaks: Alt/Option+Enter or Ctrl+Enter puts
@@ -1687,7 +2117,7 @@
     input.style.top = (cr.top - g.top + ui.grid.scrollTop - 1) + 'px';
     input.style.width = Math.max(cr.width + 2, Math.min(420, cr.width * 1.6)) + 'px';
     input.style.height = (cr.height + 2) + 'px';
-    input.value = initial != null ? initial : tab.index.cols[c].text[r];
+    input.value = initial != null ? initial : fxEditText(tab, r, c); // fx: a formula cell edits its formula
     ui.grid.appendChild(input);
     var minH = cr.height + 2;
     var grow = function () { if (!multi) return; input.style.height = minH + 'px'; input.style.height = Math.min(320, Math.max(minH, input.scrollHeight + 4)) + 'px'; };
@@ -1716,7 +2146,7 @@
     var ed = editor; editor = null;
     var value = ed.input.value;
     ed.input.remove();
-    if (value !== ed.tab.index.cols[ed.c].text[ed.r]) setCells(ed.tab, [{ r: ed.r, c: ed.c, value: value }], ed.r);
+    if (value !== fxEditText(ed.tab, ed.r, ed.c)) setCells(ed.tab, [{ r: ed.r, c: ed.c, value: value }], ed.r);
     ui.grid.focus({ preventScroll: true });
   }
   function cancelEdit() {
@@ -1816,9 +2246,11 @@
     return b;
   }
   // Insert after (or before) the document row r; at the end when r is null.
+  var MAX_INSERT = 1000;
   function insertRows(r, count, before) {
     if (!canEdit()) return;
-    var tab = cur(), next = rowIds(tab), added;
+    if (count > MAX_INSERT) { toast('At most ' + fmt(MAX_INSERT) + ' rows at a time: adding ' + fmt(MAX_INSERT) + '.'); count = MAX_INSERT; }
+    var tab = cur(), next = rowIds(tab), added, list = [];
     snapshotOp(tab, function () {
       var ref = r == null ? null : tab.data.rows[r].tr;
       for (var k = 0; k < count; k++) {
@@ -1827,20 +2259,29 @@
         else if (before) ref.parentNode.insertBefore(tr, ref);
         else ref.parentNode.insertBefore(tr, ref.nextSibling);
         if (!added) added = tr;
+        list.push(tr);
         if (ref && !before) ref = tr;
       }
+      S.inheritGroup(list); // [structure] rows added inside a group join it
+      if (r != null) return fxShift(tab, 'row', before ? r : r + 1, count); // fx
     });
     readTab(tab.table, tab); runTab(tab);
     var newR = tab.rowOf.get(added);
     afterChange(tab, newR);
     var p = tab.pos[newR];
     if (p >= 0) select(p, r == null ? 0 : sel.c, false);
-    else toast('Row added. The current search or filter hides it.');
+    else toast('Row added. This view hides it (a search, a filter or a collapsed group).');
   }
   function deleteRows(ra, rb) {
     var tab = cur(), trs = [];
     for (var i = ra; i <= rb; i++) trs.push(tab.data.rows[tab.order[i]].tr);
-    snapshotOp(tab, function () { trs.forEach(function (tr) { tr.remove(); }); });
+    var docRows = [];
+    for (var j = ra; j <= rb; j++) docRows.push(tab.order[j]);
+    snapshotOp(tab, function () {
+      S.keepCollapsed(trs); // [structure] a deleted first row hands its group's collapsed default on
+      trs.forEach(function (tr) { tr.remove(); });
+      return fxShiftRows(tab, docRows); // fx
+    });
     trs.forEach(function (tr) { tab.measured.delete(tr); });
     sel.r2 = sel.r = ra;
     afterChange(tab);
@@ -1870,30 +2311,35 @@
       th.setAttribute('data-key', M.nextColumnKey(keys));
     });
   }
-  function insertColumn(at) {
-    var tab = cur(), name = 'Column ' + (tab.data.columns.length + 1);
+  function insertColumn(at, count) {
+    var tab = cur(), n = Math.max(1, Math.min(MAX_COLUMNS - tab.data.columns.length, count || 1));
+    if (n < 1 || tab.data.columns.length >= MAX_COLUMNS) { toast('A sheet has at most ' + MAX_COLUMNS + ' columns.'); return; }
     snapshotOp(tab, function () {
       var hr = headRow(tab);
       ensureKeys(hr);
-      var th = newHeader(hr, name);
-      hr.insertBefore(th, hr.cells[at] || null);
+      for (var k = 0; k < n; k++) {
+        var th = newHeader(hr, 'Column ' + (tab.data.columns.length + k + 1));
+        hr.insertBefore(th, hr.cells[at + k] || null);
+      }
       tab.data.rows.forEach(function (row) {
         var tr = row.tr;
         while (tr.cells.length < at) tr.appendChild(document.createElement('td'));
-        tr.insertBefore(document.createElement('td'), tr.cells[at] || null);
+        for (var j = 0; j < n; j++) tr.insertBefore(document.createElement('td'), tr.cells[at] || null);
       });
+      return fxShift(tab, 'col', at, 1); // fx
     });
-    tab.widths.splice(at, 0, 140);
-    tab.query = Q.shiftQueryColumns(tab.query, at, 1);
+    for (var w = 0; w < n; w++) tab.widths.splice(at, 0, 140);
+    tab.query = Q.shiftQueryColumns(tab.query, at, n);
     afterChange(tab);
     select(sel.r, at, false);
-    renameColumn(at);
+    if (n === 1) renameColumn(at);
   }
   function deleteColumn(c) {
     var tab = cur();
     snapshotOp(tab, function () {
       var th = tab.data.columns[c].th; th.remove();
       tab.data.rows.forEach(function (row) { if (row.tr.cells[c]) row.tr.removeChild(row.tr.cells[c]); });
+      return fxShift(tab, 'col', c, -1); // fx
     });
     tab.widths.splice(c, 1);
     tab.query = Q.shiftQueryColumns(tab.query, c, -1);
@@ -1948,10 +2394,12 @@
   function renameTab(i, anchor) {
     var tab = book.tabs[i];
     inlineInput(anchor, tab.name, 'Tab name', function (v) {
-      if (book.tabs.some(function (t, k) { return k !== i && t.name === v; })) { toast('Another tab already has that name.'); return; }
+      if (book.tabs.some(function (t, k) { return k !== i && t.name.toLowerCase() === v.toLowerCase(); })) { toast('Another tab already has that name.'); return; }
+      var old = tab.name;
       snapshotOp(tab, function () {
         tab.table.setAttribute('data-name', v);
         var cap = tab.table.caption; if (cap) cap.textContent = v;
+        return fxRename(old, v); // fx
       });
       tab.name = v;
       afterChange(tab);
@@ -1985,8 +2433,10 @@
     node.remove();
     book.tabs.splice(i, 1);
     book.active = Math.max(0, Math.min(book.active, book.tabs.length - 1));
-    record({ tab: book.tabs[0], undo: function () { parent.insertBefore(node, nextSib); book.tabs.splice(i, 0, tab); book.active = i; }, redo: function () { node.remove(); book.tabs.splice(book.tabs.indexOf(tab), 1); book.active = Math.max(0, Math.min(book.active, book.tabs.length - 1)); } });
+    record({ tab: tab, undo: function () { parent.insertBefore(node, nextSib); book.tabs.splice(i, 0, tab); book.active = i; }, redo: function () { node.remove(); book.tabs.splice(book.tabs.indexOf(tab), 1); book.active = Math.max(0, Math.min(book.active, book.tabs.length - 1)); } });
     sel = { r: 0, c: 0, r2: 0, c2: 0 };
+    fm.writing = canEdit(); // fx: references to the tab are #REF! now
+    try { fxInit(); } finally { fm.writing = false; }
     renderAll(); changed(); relayout(); saveView();
   }
   // A range copied from Excel or Google Sheets arrives as tab-separated text.
@@ -2004,7 +2454,7 @@
     if (single && (sel.r !== sel.r2 || sel.c !== sel.c2)) {
       // One value into a selected range fills the range.
       var fill = [];
-      forRange(function (r, c) { fill.push({ r: r, c: c, value: grid[0][0] }); });
+      forRange(function (r, c) { fill.push({ r: r, c: c, value: fxPasted(text, 0, 0, r, c, grid[0][0]) }); });
       setCells(tab, fill, tab.order[i0]);
       return;
     }
@@ -2038,7 +2488,8 @@
         }
         lastTr = tr;
         while (tr.cells.length < c0 + width) tr.appendChild(document.createElement('td'));
-        for (var c = 0; c < grid[g].length; c++) M.writeCell(tr.cells[c0 + c], types[c0 + c], types[c0 + c] === 'tags' ? Q.splitTags(grid[g][c]) : grid[g][c]);
+        var tr0 = tab.rowOf.has(tr) ? tab.rowOf.get(tr) : -1;
+        for (var c = 0; c < grid[g].length; c++) fxWrite(tr.cells[c0 + c], types[c0 + c], types[c0 + c] === 'tags' ? Q.splitTags(grid[g][c]) : fxPasted(text, g, c, tr0, c0 + c, grid[g][c]));
       }
       if (needCols > 0) tab.data.rows.forEach(function (row) { while (row.tr.cells.length < types.length) row.tr.appendChild(document.createElement('td')); });
     });
@@ -2062,13 +2513,17 @@
       for (var c = ca; c <= cb; c++) { var v = safeForSpreadsheet(tab.index.cols[c].text[r]); cells.push(/[\t\n"]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v); }
       lines.push(cells.join('\t'));
     }
-    return lines.join('\n');
+    var out = lines.join('\n');
+    fxCopy(tab, ra, rb, ca, cb, out); // fx: pasted back here, formulas come with their references moved
+    return out;
   }
 
   // ---- keyboard, pointer, clipboard ---------------------------------------------------
   function move(dr, dc, extend) {
     var tab = cur();
     var r = (extend ? sel.r2 : sel.r) + dr, c = (extend ? sel.c2 : sel.c) + dc;
+    var out = !extend && FX.past(tab, sel.r, sel.c, dr, dc); // [format] leave a merge from its far edge
+    if (out) { r = out.i; c = out.c; }
     if (!extend && dc && (c < 0 || c >= tab.widths.length) && !dr) {
       // Tab past the last column wraps to the next row, like a spreadsheet.
       if (c >= tab.widths.length) { c = 0; r += 1; } else { c = tab.widths.length - 1; r -= 1; }
@@ -2077,6 +2532,11 @@
   }
   function onKey(e) {
     if (!book || editor || (pop && pop.el.contains(e.target))) return;
+    var sk = S.onKey(e); // [structure] Alt+Shift+→/← group / ungroup rows
+    if (sk === 'skip') return;
+    if (sk) { e.preventDefault(); e.stopPropagation(); return; }
+    // [sheet-rules] Find and replace (⌘⇧H, Ctrl+H)
+    if (rulesExt && rulesExt.key(e)) { e.preventDefault(); e.stopPropagation(); return; }
     var tab = cur(), k = e.key, mod = e.metaKey || e.ctrlKey;
     var page = Math.max(1, rowAtY(tab, ui.grid.scrollTop + ui.grid.clientHeight - HEAD_H) - rowAtY(tab, ui.grid.scrollTop) - 1);
     var last = tab.order.length - 1, lastC = tab.widths.length - 1;
@@ -2146,6 +2606,8 @@
       var from = dir === 'down' ? { i: ra, c: c } : { i: i, c: ca };
       var r = tab.order[i], fr = tab.order[from.i], type = tab.index.cols[c].type, ftype = tab.index.cols[from.c].type;
       var value = ftype === 'tags' ? tab.index.cols[from.c].tags[fr].slice() : tab.index.cols[from.c].text[fr];
+      var fsrc = fxSource(tab, fr, from.c); // fx: a formula fills with its references moved
+      if (fsrc) value = FM.offsetFormula(fsrc, r - fr, c - from.c);
       if (type === 'tags' && !Array.isArray(value)) value = Q.splitTags(value);
       if (type !== 'tags' && Array.isArray(value)) value = value.join(', ');
       list.push({ r: r, c: c, value: value });
@@ -2160,14 +2622,19 @@
       var under = document.elementFromPoint(e.clientX, e.clientY);
       cell = under && under.closest && under.closest('.ts-c,.ts-n');
     }
-    if (!cell || !ui.rows.contains(cell)) return null;
+    if (!cell || !(ui.rows.contains(cell) || ui.frozen.contains(cell))) return null; // [structure]
     var row = cell.parentElement;
     var i = Number(row.getAttribute('data-i'));
     var c = cell.classList.contains('ts-n') ? -1 : Number(cell.getAttribute('data-c'));
     return { i: i, c: c, el: cell };
   }
   var drag = null, cellPress = null, rowPress = -1;
+  // [structure] the frozen rows (drawn over the body's top) take the same
+  // presses, double-clicks and menus as the rows under them.
+  function rowsOn(type, fn, capture) { ui.rows.addEventListener(type, fn, capture); ui.frozen.addEventListener(type, fn, capture); }
   function wire() {
+    S.wire(); // [structure] group toggles, unhide markers, the corner's view menu
+    fxWire();
     ui.grid.addEventListener('keydown', onKey);
     ['input', 'beforeinput', 'keyup'].forEach(function (t) { ui.root.addEventListener(t, function (e) { e.stopPropagation(); }); });
     ui.root.addEventListener('keydown', escapeClose);
@@ -2188,7 +2655,7 @@
       if (editor) commitEdit();
       if (ticking) return;
       ticking = true;
-      requestAnimationFrame(function () { ticking = false; renderBody(); placeOffscreen(); });
+      requestAnimationFrame(function () { ticking = false; renderBody(); placeOffscreen(); if (rulesExt) rulesExt.painted(); });
       clearTimeout(scrollSettle); scrollSettle = setTimeout(relayout, 200);
     }, { passive: true });
     ui.foot.addEventListener('click', function (e) {
@@ -2242,7 +2709,7 @@
     });
     // Row resize: drag the bottom edge of a row number (every selected row
     // when the row is one of them); a double-click there fits the row again.
-    ui.rows.addEventListener('pointerdown', function (e) {
+    rowsOn('pointerdown', function (e) {
       var grip = e.target.closest('.ts-rresize');
       if (!grip || e.button > 0) return;
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
@@ -2263,7 +2730,7 @@
         setLayout(tab, { rows: rows });
       });
     }, true);
-    ui.rows.addEventListener('dblclick', function (e) {
+    rowsOn('dblclick', function (e) {
       var grip = e.target.closest('.ts-rresize');
       if (!grip) return;
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
@@ -2271,7 +2738,7 @@
       var rows = {}; rows[r] = 0;
       setLayout(tab, { rows: rows });
     }, true);
-    ui.rows.addEventListener('pointerdown', function (e) {
+    rowsOn('pointerdown', function (e) {
       if (e.button !== 0) return;
       var at = cellFromEvent(e);
       if (!at) return;
@@ -2301,6 +2768,8 @@
       }
       var wasActive = sel.r === at.i && sel.c === at.c && sel.r === sel.r2 && sel.c === sel.c2;
       select(at.i, at.c, e.shiftKey);
+      // [sheet-rules] a dropdown chip opens its list
+      if (canEdit() && !e.shiftKey && rulesExt && rulesExt.press(e, at)) { e.preventDefault(); return; }
       cellPress = e.shiftKey ? null : { i: at.i, c: at.c };
       ui.grid.focus({ preventScroll: true });
       if (e.pointerType === 'mouse') drag = { i: at.i, c: at.c };
@@ -2315,10 +2784,10 @@
     // Selecting re-renders the rows, which detaches the element the press
     // began on; left to itself the browser would then move focus to <body>
     // and the keyboard would stop reaching the grid. Focus is ours to move.
-    ui.rows.addEventListener('mousedown', function (e) {
+    rowsOn('mousedown', function (e) {
       if (!e.target.closest('a[href],input,button')) e.preventDefault();
     });
-    ui.rows.addEventListener('pointermove', function (e) {
+    rowsOn('pointermove', function (e) {
       if (!drag || !(e.buttons & 1)) { drag = null; return; }
       var at = cellFromEvent(e);
       if (at && at.c >= 0 && (at.i !== sel.r2 || at.c !== sel.c2)) select(at.i, at.c, true);
@@ -2328,7 +2797,7 @@
     // thread. On the click, the last event of a press, and after the page's
     // own click handling (which closes what was open), so the composer this
     // opens is not closed by the same press.
-    ui.rows.addEventListener('click', function (e) {
+    rowsOn('click', function (e) {
       var press = cellPress; cellPress = null;
       if (!press || mode() !== 'comment' || e.button > 0) return;
       var at = cellFromEvent(e);
@@ -2341,18 +2810,18 @@
         commentOnCell();
       }, 0);
     });
-    ui.rows.addEventListener('dblclick', function (e) {
+    rowsOn('dblclick', function (e) {
       var at = cellFromEvent(e);
       if (!at || at.c < 0) return;
       if (canEdit()) { e.preventDefault(); select(at.i, at.c, false); startEdit(); }
     });
-    ui.rows.addEventListener('contextmenu', function (e) {
+    rowsOn('contextmenu', function (e) {
       var at = cellFromEvent(e);
       if (!at || !canEdit()) return;
       e.preventDefault();
       rowMenu(at.i, { left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY });
     });
-    ui.rows.addEventListener('click', function (e) {
+    rowsOn('click', function (e) {
       var at = cellFromEvent(e);
       var again = rowPress; rowPress = -1;
       if (at && at.c < 0 && canEdit() && again === at.i) rowMenu(at.i, at.el);
@@ -2391,7 +2860,7 @@
     }
   }
   function heightLive(tab, list) {
-    var rows = ui.rows.children;
+    var rows = Array.prototype.slice.call(ui.rows.children).concat(Array.prototype.slice.call(ui.frozen.children)); // [structure]
     for (var k = 0; k < rows.length; k++) {
       var i = Number(rows[k].getAttribute('data-i'));
       if (list.indexOf(tab.order[i]) !== -1) rows[k].style.height = rowH(tab, i) + 'px';
@@ -2527,6 +2996,9 @@
       // After this message's other listeners: the editor (frame-probe.js)
       // turns Edit mode on, and takes its baseline, in its own.
       var pending = pendingLayout; pendingLayout = null;
+      S.onMode(d.mode); // [structure] a structure change that asked for Edit mode
+      // Leaving Edit mode saves or discards the draft: its undo history goes with it.
+      if (d.mode !== 'edit') { undoStack = []; redoStack = []; }
       if (pending) setTimeout(function () {
         if (d.mode === 'edit' && mode() === 'edit' && book && book.tabs.indexOf(pending.tab) >= 0) applyLayout(pending.tab, pending.change);
         else relayoutTab(pending.tab);
@@ -2555,8 +3027,22 @@
     if (!book) return;
     var tables = Array.prototype.slice.call(document.querySelectorAll(SEL));
     var old = book.tabs;
-    book.tabs = tables.map(function (t) { var o = old.find(function (x) { return x.name === (t.getAttribute('data-name') || ''); }); return readTab(t, o); });
+    fm.ready = false;
+    book.tabs = [];
+    // Each table keeps its own tab object (its view state): the same
+    // element first, else the first unused tab of that name, never one
+    // object for two tables (names may repeat: "data", "data (2)").
+    var used = new Set();
+    tables.forEach(function (t) {
+      var name = t.getAttribute('data-name') || '';
+      var o = old.find(function (x) { return x.table === t && !used.has(x); }) ||
+        old.find(function (x) { return !used.has(x) && (x.table.getAttribute('data-name') || '') === name; });
+      if (o) used.add(o);
+      book.tabs.push(readTab(t, o));
+    });
+    book.tabs = S.stripOrder(book.tabs); // [structure] data-order: the strip's order
     if (!book.tabs.length) { ui.root.remove(); book = null; return; }
+    fxInit();
     book.active = Math.min(book.active, book.tabs.length - 1);
     renderAll();
   }
@@ -2572,8 +3058,28 @@
     tabs: function () { return book ? book.tabs.map(function (t) { return { name: t.name, rows: t.index.size, shown: t.order ? t.order.length : 0, query: Q.cloneQuery(t.query) }; }) : []; },
     active: function () { return book ? book.active : -1; },
     selection: function () { return Object.assign({}, sel); },
+    // [format] apply formats as the toolbar does (tests)
+    format: FX.api,
+    formula: function (t, r, c) { var tab = book && book.tabs[t]; return tab ? fxSource(tab, r, c) : null; },
+    shown: function (t, r, c) { var tab = book && book.tabs[t]; return tab ? tab.index.cols[c].text[r] : null; },
+    formulaStats: function () { return fm.wb ? Object.assign({}, fm.wb.stats) : null; },
     expanded: function () { return { on: expand.on, alone: expand.alone, sheetOnly: expand.sheetOnly, embed: expand.embed, fit: expand.fit, flat: !!book && flatView() }; },
+    // [structure] the active tab's outline, hidden and frozen state, as shown.
+    structure: function () { return book ? S.describe(cur()) : null; },
   };
+  // [sheet-rules] find & replace, conditional formatting, data validation and
+  // the fill handle (server/sheets-rules-ui.js, shared/sheet-rules.mjs).
+  var rulesExt = typeof SheetRulesUI !== 'undefined' ? SheetRulesUI.install({
+    Q: Q, M: M, R: SheetRules, h: h, provider: provider, esc: esc, mark: mark, ICON: ICON, fmt: fmt, HEAD_H: HEAD_H, NARROW: NARROW,
+    book: function () { return book; }, cur: cur, ui: ui, sel: function () { return sel; }, canEdit: canEdit, mode: mode,
+    select: select, setCells: setCells, writeCells: writeCells, record: record, afterChange: afterChange, readTab: readTab,
+    renderAll: renderAll, renderHead: renderHead, renderBody: renderBody, saveView: saveView,
+    openPop: openPop, closePop: closePop, pop: function () { return pop; }, openMenu: openMenu, toast: toast, iconButton: iconButton, tagStyle: tagStyle,
+    ensureKeys: function (tab) { ensureKeys(headRow(tab)); },
+    refLabel: refLabel, colKey: colKey, rowTop: rowTop, rowH: rowH, numW: numW, cellFromEvent: cellFromEvent,
+    S: S, FX: FX, // [structure] hidden rows and columns, groups, freeze; [format] merges
+    FM: FM, formulaOf: fxSource, // fx: find & replace and the fill handle work on a formula cell's formula
+  }) : null;
   // Mounted: the tables are hidden by the viewer's own style now, so the
   // frame's 200-row hold (#tdoc-sheets-pending) is no longer needed.
   if (mount()) { window.__tdocSheets.mounted = true; relayout(); }

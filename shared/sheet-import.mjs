@@ -9,6 +9,9 @@
 
 import { inferType } from './sheet-query.mjs';
 import { sheetDocumentHtml, parseDelimited, detectDelimiter } from './sheet-markup.mjs';
+import { fromExcelFormat, isNumeric, formatAttrString, mergeFormat, nonOverlapping, MAX_MERGES } from './sheet-format.mjs';
+import { readXlsxStyles, colName } from './sheet-xlsx-style.mjs';
+import { fromExcel, unsupportedFunctions, referencedSheets, isExternalSheetName, LIMITS as FORMULA_LIMITS } from './sheet-formula.mjs';
 
 export { parseDelimited, detectDelimiter };
 
@@ -61,7 +64,8 @@ function trimGrid(grid) {
 
 // A 2D array (first row = headers) into { name, columns, rows } with inferred
 // types. Blank or duplicate headers get a name; ragged rows are padded.
-export function sheetFromGrid(name, grid, { warnings = [] } = {}) {
+// formulas (optional): a grid of '=…' (or null) the same shape as `grid`.
+export function sheetFromGrid(name, grid, { warnings = [], formulas = null } = {}) {
   const { rows, width } = trimGrid(grid);
   if (!rows.length || !width) return null;
   if (width > LIMITS.columns) throw new SheetImportError(`"${name}" has ${width} columns. A sheet can have up to ${LIMITS.columns}.`, 'too_many_columns');
@@ -95,10 +99,12 @@ export function sheetFromGrid(name, grid, { warnings = [] } = {}) {
     // One line: a worksheet name with a line break would split a tab.
     name: String(name || 'Sheet 1').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 100) || 'Sheet 1',
     columns,
-    rows: data.map((cells, i) => ({
-      id: `r${i + 1}`,
-      cells: cells.map((v, c) => normalizeForType(columns[c].type, v)),
-    })),
+    rows: data.map((cells, i) => {
+      const row = { id: `r${i + 1}`, cells: cells.map((v, c) => normalizeForType(columns[c].type, v)) };
+      const fx = formulas && formulas[i + 1];
+      if (fx && fx.some(Boolean)) row.formulas = Array.from({ length: width }, (_, c) => fx[c] || null);
+      return row;
+    }),
   };
 }
 
@@ -136,6 +142,19 @@ export function sheetsFromWorkbook(XLSX, wb, { warnings = [] } = {}) {
     names.length = LIMITS.sheets;
   }
   const sheets = [];
+  // Cell styles (bold, colours, fills, borders, alignment): read from the
+  // workbook's own XML, as SheetJS keeps only fills (shared/sheet-xlsx-style.mjs).
+  const styles = wb.files ? readXlsxStyles(XLSX, wb, { maxRows: LIMITS.rows + 2 }) : new Map();
+  // Formulas: Excel's row 1 is the header, a sheet's A1 the row under it,
+  // and a worksheet may start lower or further right (its !ref).
+  const starts = new Map();
+  for (const name of names) {
+    const ws = wb.Sheets[name];
+    if (ws && ws['!ref']) starts.set(String(name).toLowerCase(), XLSX.utils.decode_range(ws['!ref']).s);
+  }
+  const tabName = (name) => String(name || 'Sheet 1').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 100) || 'Sheet 1';
+  const sheetNames = new Map(names.map((n) => [String(n).toLowerCase(), tabName(n)]));
+  const fxStats = { kept: 0, dropped: 0, names: new Set() };
   for (const name of names) {
     const ws = wb.Sheets[name];
     if (!ws || !ws['!ref']) continue;
@@ -143,11 +162,148 @@ export function sheetsFromWorkbook(XLSX, wb, { warnings = [] } = {}) {
     const rowsN = range.e.r - range.s.r + 1, colsN = range.e.c - range.s.c + 1;
     if (rowsN * colsN > LIMITS.cells * 4) throw new SheetImportError(`"${name}" is too large to import (${rowsN.toLocaleString('en-US')} rows × ${colsN} columns).`, 'too_many_cells');
     isoDates(XLSX, ws);
-    const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: false });
-    const sheet = sheetFromGrid(name, grid, { warnings });
-    if (sheet) sheets.push(sheet);
+    const numFormats = numberFormats(XLSX, ws, range);
+    const formulas = formulaGrid(ws, range, { name, starts, sheetNames, stats: fxStats });
+    // Blank rows are left out, as before, except inside a merged range or
+    // when the sheet has formulas (a reference counts rows); each row kept
+    // remembers its row in the worksheet, for styles and merges.
+    // Each merge is clipped to the worksheet's range before anything else
+    // walks it, and at most MAX_MERGES of them are read.
+    const merges = clipMerges(ws['!merges'], range);
+    // Rows inside a merge, as sorted, joined intervals (never row by row).
+    const spans = [];
+    merges.slice().sort((a, b) => a.s.r - b.s.r).forEach((m) => {
+      const last = spans[spans.length - 1];
+      if (last && m.s.r <= last[1] + 1) last[1] = Math.max(last[1], m.e.r); else spans.push([m.s.r, m.e.r]);
+    });
+    const all = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true });
+    const grid = [], at = [];
+    let sp = 0;
+    all.forEach((row, k) => {
+      const r = range.s.r + k;
+      while (sp < spans.length && spans[sp][1] < r) sp++;
+      const inMerge = sp < spans.length && spans[sp][0] <= r;
+      // formulaGrid indexes rows from the range's top, so with formulas every row stays.
+      if (!formulas && !inMerge && (!Array.isArray(row) || row.every((v) => String(v == null ? '' : v) === ''))) return;
+      grid.push(row); at.push(r);
+    });
+    const sheet = sheetFromGrid(name, grid, { warnings, formulas });
+    if (!sheet) continue;
+    addFormats(sheet, at, range.s.c, styles.get(name), numFormats, merges);
+    sheets.push(sheet);
+  }
+  if (fxStats.dropped) {
+    const list = Array.from(fxStats.names).slice(0, 5).join(', ');
+    warnings.push(`${fxStats.dropped} formula${fxStats.dropped === 1 ? '' : 's'} use${fxStats.dropped === 1 ? 's' : ''} what tdoc does not compute yet (${list}): ${fxStats.dropped === 1 ? 'its value was' : 'their values were'} kept as text.`);
   }
   return sheets;
+}
+
+// A worksheet's merges, each clipped to its range (the rows SheetJS read),
+// spanning more than one cell, at most MAX_MERGES: the only form any later
+// step walks.
+function clipMerges(list, range) {
+  const out = [];
+  if (!Array.isArray(list)) return out;
+  for (const m of list) {
+    if (out.length >= MAX_MERGES) break;
+    if (!m || !m.s || !m.e) continue;
+    const s = { r: Math.max(range.s.r, m.s.r | 0), c: Math.max(range.s.c, m.s.c | 0) };
+    const e = { r: Math.min(range.e.r, m.e.r | 0), c: Math.min(range.e.c, m.e.c | 0) };
+    if (s.r !== (m.s.r | 0) || s.c !== (m.s.c | 0)) continue; // its top-left cell is outside
+    if (e.r < s.r || e.c < s.c || (e.r === s.r && e.c === s.c)) continue;
+    out.push({ s, e });
+  }
+  return out;
+}
+
+// Number formats tdoc shows (shared/sheet-format.mjs): such a cell keeps its
+// value as written in the file (1234.5, 0.25) and the format says how it
+// shows ($1,234.50, 25%), as in Excel and Google Sheets. Dates stay ISO, with
+// the format only where it is not ISO already. Map('A1' → format).
+function numberFormats(XLSX, ws, range) {
+  const out = new Map();
+  const rows = Array.isArray(ws['!data']) ? ws['!data'] : null;
+  const visit = (cell, ref) => {
+    if (!cell || cell.t !== 'n' || !cell.z) return;
+    const n = fromExcelFormat(cell.z);
+    if (!n || n.kind === 'text') return;
+    if (isNumeric(n)) { cell.w = String(Number(cell.v.toPrecision(15))); out.set(ref, n); }
+    else if (!(n.kind === 'date' || n.kind === 'datetime') || n.style !== 'iso') out.set(ref, n);
+  };
+  if (rows) rows.forEach((row, r) => { if (Array.isArray(row)) row.forEach((cell, c) => visit(cell, `${colName(c)}${r + 1}`)); });
+  else Object.keys(ws).forEach((ref) => { if (ref[0] !== '!') visit(ws[ref], ref); });
+  return out;
+}
+
+// The kept rows' formats and merges onto the sheet: row.attrs (markup, from
+// the validated format) and sheet.merges, by body row and column.
+function addFormats(sheet, at, c0, styled, nums, merges) {
+  const width = sheet.columns.length;
+  const bodyAt = at.slice(1);
+  if ((styled && styled.size) || nums.size) {
+    sheet.rows.forEach((row, i) => {
+      const r = bodyAt[i] + 1;
+      for (let c = 0; c < width; c++) {
+        const ref = `${colName(c0 + c)}${r}`;
+        const style = styled && styled.get(ref), num = nums.get(ref);
+        if (!style && !num) continue;
+        // Tags and checkboxes show their own way: a number format does not apply.
+        const type = sheet.columns[c].type;
+        const f = mergeFormat(style, { num: type === 'tags' || type === 'checkbox' ? null : num || null });
+        if (!f) continue;
+        (row.attrs || (row.attrs = []))[c] = formatAttrString(f);
+      }
+    });
+  }
+  if (merges.length) {
+    // Rows kept in order: the body row of a worksheet row by binary search.
+    const firstAtOrAfter = (r) => { let lo = 0, hi = bodyAt.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (bodyAt[mid] < r) lo = mid + 1; else hi = mid; } return lo; };
+    const list = [];
+    for (const m of merges) {
+      const r = firstAtOrAfter(m.s.r);
+      if (r >= bodyAt.length || bodyAt[r] !== m.s.r) continue; // its top row is the header or was not kept
+      const r1 = firstAtOrAfter(m.e.r + 1) - 1;
+      const c = m.s.c - c0, c1 = Math.min(width - 1, m.e.c - c0);
+      if (c < 0 || c >= width || (r1 === r && c1 === c)) continue;
+      list.push({ r, c, rs: r1 - r + 1, cs: c1 - c + 1 });
+    }
+    sheet.merges = nonOverlapping(list);
+  }
+}
+
+// A worksheet's formulas as a grid in sheet_to_json's shape (row 0 the
+// header), translated to tdoc's A1; null when it has none. A formula with a
+// function the engine lacks keeps only its value (counted in stats).
+function formulaGrid(ws, range, { name, starts, sheetNames, stats }) {
+  const out = [];
+  let any = false;
+  const own = starts.get(String(name).toLowerCase()) || range.s;
+  const rowOffset = (sheet) => { const s = sheet == null ? own : starts.get(String(sheet).toLowerCase()); return (s ? s.r : 0) + 1; };
+  const colOffset = (sheet) => { const s = sheet == null ? own : starts.get(String(sheet).toLowerCase()); return s ? s.c : 0; };
+  const visit = (cell, r, c) => {
+    if (!cell || typeof cell.f !== 'string' || !cell.f) return;
+    const g = r - range.s.r, k = c - range.s.c;
+    if (g < 1 || k < 0) return;
+    if (cell.f.length > FORMULA_LIMITS.formulaChars) { stats.dropped++; return; }
+    const missing = unsupportedFunctions(cell.f);
+    if (!missing || missing.length) { stats.dropped++; (missing || ['?']).forEach((n) => stats.names.add(n)); return; }
+    // Only references to this workbook's own sheets: an external or path
+    // reference keeps its value.
+    const sheetsUsed = referencedSheets(cell.f) || [];
+    if (sheetsUsed.some((n) => isExternalSheetName(n) || !sheetNames.has(String(n).toLowerCase()))) { stats.dropped++; stats.names.add('a reference outside this workbook'); return; }
+    (out[g] = out[g] || [])[k] = fromExcel(cell.f, { names: sheetNames, rowOffset, colOffset });
+    stats.kept++;
+    any = true;
+  };
+  if (Array.isArray(ws['!data'])) {
+    ws['!data'].forEach((row, r) => { if (Array.isArray(row)) row.forEach((cell, c) => visit(cell, r, c)); });
+  } else {
+    // Sparse sheets keep cells under their A1 address.
+    const XLSXdecode = (addr) => { const m = /^([A-Z]+)(\d+)$/.exec(addr); if (!m) return null; let c = 0; for (const ch of m[1]) c = c * 26 + ch.charCodeAt(0) - 64; return { r: Number(m[2]) - 1, c: c - 1 }; };
+    Object.keys(ws).forEach((key) => { if (key[0] === '!') return; const at = XLSXdecode(key); if (at) visit(ws[key], at.r, at.c); });
+  }
+  return any ? out : null;
 }
 
 // A date cell is a serial number with a date format. Write its text as ISO
@@ -196,7 +352,9 @@ export async function importSheetFile(file, { loadXlsx, title, kind: asKind } = 
       // sheetRows stops reading a worksheet past what an import may keep
       // (the header, the row limit, and one more to say it was over), and
       // dense storage keeps a big sheet's cells in arrays, not one object.
-      wb = XLSX.read(bytes, { type: 'array', cellDates: false, cellNF: true, sheetStubs: false, dense: true, sheetRows: LIMITS.rows + 2 });
+      // bookFiles keeps the workbook's XML for the cell styles SheetJS
+      // does not read (shared/sheet-xlsx-style.mjs).
+      wb = XLSX.read(bytes, { type: 'array', cellDates: false, cellNF: true, sheetStubs: false, dense: true, sheetRows: LIMITS.rows + 2, bookFiles: true });
     } catch (error) {
       throw new SheetImportError('This file could not be read as an Excel workbook. If it is password-protected, remove the password and try again.', 'unreadable');
     }

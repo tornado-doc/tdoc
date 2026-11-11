@@ -97,10 +97,14 @@ function ToolButton({ label, icon, command, value, onFormat }) {
   );
 }
 
-export function EditorToolbar({ dirty, checking, saving, onFormat, onInsertDiagram, onDiscard, onSave }) {
+// proseTools false (a doc that is only its sheet): the bar keeps Undo, Redo,
+// the status and Save / Discard, and the sheet's own format row is the only
+// formatting row. A prose doc keeps the prose tools.
+export function EditorToolbar({ dirty, checking, saving, onFormat, onInsertDiagram, onDiscard, onSave, proseTools = true }) {
   return (
     <div className="tdoc-editor-toolbar" role="toolbar" aria-label="Document editing">
       <div className="tdoc-editor-tools">
+        {proseTools ? (<>
         <ToolButton label="Bold" icon={<Bold size={16} />} command="bold" onFormat={onFormat} />
         <ToolButton label="Italic" icon={<Italic size={16} />} command="italic" onFormat={onFormat} />
         <span className="tdoc-editor-divider" />
@@ -116,6 +120,7 @@ export function EditorToolbar({ dirty, checking, saving, onFormat, onInsertDiagr
           <Shapes size={17} />
         </button>
         <span className="tdoc-editor-divider" />
+        </>) : null}
         <ToolButton label="Undo" icon={<Undo2 size={16} />} command="undo" onFormat={onFormat} />
         <ToolButton label="Redo" icon={<Redo2 size={16} />} command="redo" onFormat={onFormat} />
       </div>

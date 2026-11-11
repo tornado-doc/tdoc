@@ -109,13 +109,130 @@ header row is the last row of `<thead>`; each `<th>` declares its column type.
   `gray`, `red`, `orange`, `yellow`, `green`, `teal`, `blue`, `purple`, `pink`.
   A tag the palette does not name gets a stable colour of its own.
 - **Tabs.** Several sheet tables in one doc are tabs of one grid, shown where
-  the first table is. Give each a distinct `data-name`. With more than one,
+  the first table is. Give each a distinct `data-name` (case does not make
+  names distinct: a second "data" shows, and is named in formulas and
+  exports, as "data (2)"). With more than one,
   add `<caption>Name</caption>` so the plain page still names each table.
-- Plain text in cells: no nested tables, no `rowspan`/`colspan`, no markup
-  except `<a>` in a `url` column and `<span data-tag>` in a `tags` column.
+- Plain text in cells: no nested tables, no markup except `<a>` in a `url`
+  column and `<span data-tag>` in a `tags` column. Formatting is attributes
+  on the `<td>` (below), never `style` or `<b>`.
+- **Conditional formatting and dropdowns.** Rules live on the `<table>` as
+  JSON, never as CSS. `data-format-rules` fills cells by value (the first
+  rule that matches wins); `data-validation` gives a column a dropdown of
+  values, shown as chips (a value outside the list is marked while editing).
+  Columns are named by `data-key`; a fill is a palette name, drawn as its
+  soft tint. A rule's fill wins over the cell's own `data-fill`.
+
+  ```html
+  <table data-tdoc-sheet data-name="Tasks"
+    data-format-rules='[{"cols":["c2"],"when":"gt","value":"10","fill":"red"},
+                        {"cols":["c4"],"when":"textContains","value":"blocked","fill":"orange"}]'
+    data-validation='[{"cols":["c4"],"kind":"list","values":["open","done","blocked"]}]'>
+  ```
+
+  `when` is `gt`, `lt`, `eq` (a number, or a date in a date column),
+  `textContains` or `empty`. Anything else is ignored.
 - Write prose around the sheet as usual: a heading, a line on what the sheet
   is and where it came from. Filters, sort and search are the reader's view
   and are never written into the doc.
+
+## Cell formats
+
+Optional, and only what the data needs: a total row in bold, a status
+filled, money as money. Each is an attribute on the `<td>`; a value outside
+this list is ignored. The cell keeps its value as written (`1234.5`,
+`2026-03-01`); the format says how it shows.
+
+| Attribute | Values |
+|---|---|
+| `data-fmt` | any of `b` (bold), `i` (italic), `s` (strikethrough): `data-fmt="b i"` |
+| `data-color`, `data-fill` | a palette colour: `gray` `red` `orange` `yellow` `green` `teal` `blue` `purple` `pink` |
+| `data-align`, `data-valign` | `left` `center` `right`; `top` `middle` `bottom` |
+| `data-border` | the ruled edges, any of `t r b l` |
+| `data-num` | `number:2`, `currency:USD:2` (also EUR GBP JPY CNY INR KRW CAD AUD CHF HKD SGD), `percent:1` (0.25 shows 25.0%), `date:iso\|us\|eu\|medium\|long`, `time:24\|12`, `datetime:iso\|medium`, `text` |
+
+Merge cells with `colspan` / `rowspan` on the top-left cell and leave the
+cells it covers out of the markup, as in any HTML table. A merge keeps one
+value. Use it for a label that spans a group of rows, not to lay out a page.
+
+```html
+<tr data-row="r1"><td data-fmt="b" rowspan="2">Hardware</td><td>Laptops</td><td data-num="currency:USD:2">1899</td></tr>
+<tr data-row="r2"><td>Monitors</td><td data-num="currency:USD:2">420.5</td></tr>
+<tr data-row="r3"><td data-fmt="b" colspan="2">Total</td><td data-fmt="b" data-num="currency:USD:2" data-border="t">2319.5</td></tr>
+```
+
+## Groups, hidden rows, frozen rows
+
+Optional attributes, each read through a cleaner (an unknown value is the
+default), never a style:
+
+```html
+<table data-tdoc-sheet data-name="Budget" data-freeze-rows="1" data-freeze-cols="2">
+  <thead><tr><th data-key="c1">Item</th><th data-key="c2">Q1</th><th data-key="c3">Q2</th><th data-key="c4" data-hidden>Notes</th></tr></thead>
+  <tbody>
+    <tr data-row="r1"><td>Team A</td>…</tr>
+    <tr data-row="r2" data-group="1"><td>Travel</td>…</tr>
+    <tr data-row="r3" data-group="2" data-collapsed="2"><td>Flights</td>…</tr>
+    <tr data-row="r4" data-group="2"><td>Hotels</td>…</tr>
+    <tr data-row="r5" data-hidden><td>Old line</td>…</tr>
+  </tbody>
+</table>
+```
+
+- **Groups.** `data-group="1"` to `"3"` on a `<tr>` is its outline level.
+  Neighbouring rows at a level or deeper are one group, so a level-2 run
+  inside a level-1 run is a nested group. Put the summary row (a team, a
+  total) just above its group at a lower level.
+- **Collapsed by default.** `data-collapsed="2"` on a group's first row folds
+  the group of that level starting there (`"1 2"` for both). Readers open
+  and close groups for themselves; that never changes the doc.
+- **Hidden.** `data-hidden` on a `<tr>` or `<th>` hides it until an editor
+  unhides it. Its cells stay in the doc and in exports.
+- **Frozen.** `data-freeze-rows` freezes that many rows under the header (up
+  to 10); `data-freeze-cols` that many columns (default 1, the first).
+- **Tab order.** Tabs follow the tables' order in the doc. `data-order="0"`,
+  `"1"`, … on the tables puts them in another order in the strip (the editor
+  writes it when someone drags a tab in a doc with prose around the sheet).
+
+## Formulas
+
+A cell can compute its value as in Google Sheets or Excel: put the formula
+in `data-formula` on the `<td>` and the value it gives as the cell's text,
+so a reader without the viewer, an export or another agent sees the value.
+The reader recomputes on load and after every edit; in Edit mode people type
+`=…` into a cell, and the formula bar shows the selected cell's formula.
+
+```html
+<tr data-row="r4"><td>Total</td><td data-formula="=SUM(B1:B3)">25.5</td><td data-formula="=IF(B4>20,&quot;over&quot;,&quot;ok&quot;)">over</td></tr>
+```
+
+- **A1 is the first body row**, the row numbers the grid shows; the header
+  row is not a row. Columns are letters in header order: A, B, … AA.
+- References: `B3`, `$B$3` (absolute), `B1:B9`, whole columns `B:B` and rows
+  `2:4`, another tab `Rates!A1` or `'Tab name'!A1:B9`. Operators
+  `+ - * / ^ & % = <> < > <= >=` with the usual precedence.
+- Functions: SUM AVERAGE MIN MAX COUNT COUNTA COUNTIF COUNTIFS SUMIF SUMIFS
+  AVERAGEIF AVERAGEIFS IF IFS IFERROR AND OR NOT ROUND ROUNDUP ROUNDDOWN ABS
+  VLOOKUP HLOOKUP XLOOKUP INDEX MATCH CONCAT CONCATENATE TEXTJOIN LEFT RIGHT
+  MID LEN TRIM UPPER LOWER SUBSTITUTE TEXT VALUE TODAY NOW DATE YEAR MONTH DAY
+  DATEDIF. Another name shows `#NAME?`.
+- Errors show in the cell: `#DIV/0!`, `#VALUE!`, `#REF!` (a deleted cell or
+  unknown tab), `#NAME?`, `#N/A`, `#NUM!`, `#ERROR!` (a formula that does
+  not parse), `#CYCLE!` (a cell that depends on itself), `#BUSY!` (a sheet
+  too heavy to compute in time).
+- Dates are day numbers as in a spreadsheet; a formula over a `date` column
+  or from DATE/TODAY shows as `2026-03-01`.
+- Escape `"` in the attribute as `&quot;` and `<` `>` as `&lt;` `&gt;`.
+  Text that starts with `=` but is not a formula: a cell without
+  `data-formula` is always text.
+- Editing in the reader moves references the way a spreadsheet does
+  (inserting or deleting rows and columns, fill down, copy and paste, renaming
+  a tab). When you edit the HTML yourself, keep references pointing at the
+  right rows, and write each formula cell's current value as its text.
+- Excel import keeps formulas the engine computes (and moves them under the
+  header); others keep their value. Excel export writes them back.
+- With merges, hidden rows and groups: a cell a merge covers reads as
+  empty; hidden rows and rows in a collapsed group still compute and count.
 
 ## Size
 
@@ -130,7 +247,9 @@ split the data into several docs or summarise it.
 ## From a file
 
 `tdoc-new --slug <slug> --from-csv data.csv` (or `--from-tsv`, `--from-xlsx`,
-one tab per worksheet) writes this markup with column types inferred. To
+one tab per worksheet) writes this markup with column types inferred; an
+.xlsx keeps its number formats, bold, italics, colours (to the nearest
+palette colour), fills, borders, alignment and merged cells. To
 change a published sheet, edit its HTML: add `<tr>` rows with new ids, change
 a `<td>`, or change a `<th data-type>` and rewrite that column's cells.
 

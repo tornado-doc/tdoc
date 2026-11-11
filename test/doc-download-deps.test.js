@@ -88,6 +88,86 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(ws['!cols'] && ws['!cols'][0] && Math.abs((ws['!cols'][0].wpx || 0) - 240) < 8, JSON.stringify(ws['!cols']));
   });
 
+  await t('Excel: cell formats go along (number formats, bold, colours, fills, borders, alignment, merges) and an import keeps them', async () => {
+    const XLSX = require(path.join(ROOT, 'node_modules', 'xlsx', 'dist', 'xlsx.mini.min.js'));
+    const M = await import(path.join(ROOT, 'shared', 'sheet-markup.mjs'));
+    const F = await import(path.join(ROOT, 'shared', 'sheet-format.mjs'));
+    const I = await import(path.join(ROOT, 'shared', 'sheet-import.mjs'));
+    const X = await import(path.join(ROOT, 'shared', 'sheet-xlsx-style.mjs'));
+    const a = (f) => F.formatAttrString(f);
+    const doc = parseHtml(`<body>${M.tableHtml({ name: 'Budget', columns: [{ name: 'Item', type: 'text' }, { name: 'Amount', type: 'number' }, { name: 'Share', type: 'number' }, { name: 'Due', type: 'date' }, { name: 'Note', type: 'text' }],
+      merges: [{ r: 0, c: 4, rs: 2, cs: 1 }],
+      rows: [
+        { id: 'r1', cells: ['Laptops', '1234.5', '0.25', '2026-03-01', 'Both rows'], attrs: [a({ b: true, fill: 'yellow' }), a({ num: 'currency:USD:2' }), a({ num: 'percent:1' }), a({ num: 'date:medium' }), a({ valign: 'middle', align: 'center' })] },
+        { id: 'r2', cells: ['Desks', '-80', '0.5', '2026-04-15', ''], attrs: [a({ i: true, s: true, color: 'red', border: 't r b l' }), a({ num: 'currency:EUR:0' }), '', ''] },
+      ] })}</body>`);
+    const bytes = S.xlsxBytes(XLSX, S.sheetsFromDocument(doc));
+    const book = XLSX.read(bytes, { type: 'array', cellNF: true, cellStyles: true, bookFiles: true });
+    const ws = book.Sheets.Budget;
+    assert(ws.B2.t === 'n' && ws.B2.v === 1234.5 && ws.B2.w === '$1,234.50', JSON.stringify(ws.B2));
+    assert(ws.C2.v === 0.25 && ws.C2.w === '25.0%', JSON.stringify(ws.C2));
+    assert(ws.D2.t === 'n' && ws.D2.v === 46082 && /mmm/.test(ws.D2.z), `a date is a serial with its format: ${JSON.stringify(ws.D2)}`);
+    assert(ws.B3.w === '-€80', JSON.stringify(ws.B3));
+    assert(JSON.stringify(ws['!merges']) === JSON.stringify([{ s: { c: 4, r: 1 }, e: { c: 4, r: 2 } }]), JSON.stringify(ws['!merges']));
+    assert(ws.A2.s && ws.A2.s.patternType === 'solid' && ws.A2.s.fgColor.rgb === 'FDF4CF', `SheetJS reads the fill back: ${JSON.stringify(ws.A2.s)}`);
+    const styles = X.readXlsxStyles(XLSX, book).get('Budget');
+    assert(JSON.stringify(styles.get('A2')) === JSON.stringify({ b: true, fill: 'yellow' }), JSON.stringify(styles.get('A2')));
+    assert(JSON.stringify(styles.get('A3')) === JSON.stringify({ i: true, s: true, color: 'red', border: 't r b l' }), JSON.stringify(styles.get('A3')));
+    assert(JSON.stringify(styles.get('E2')) === JSON.stringify({ align: 'center', valign: 'middle' }), JSON.stringify(styles.get('E2')));
+    // Imported back: the same values, formats and merge.
+    const out = await I.importSheetFile({ name: 'budget.xlsx', bytes }, { loadXlsx: async () => XLSX });
+    const back = M.readSheetTable(parseHtml(out.html).querySelector('table'));
+    assert(JSON.stringify(back.rows.map((r) => r.cells.slice(0, 4))) === JSON.stringify([['Laptops', '1234.5', '0.25', '2026-03-01'], ['Desks', '-80', '0.5', '2026-04-15']]), JSON.stringify(back.rows.map((r) => r.cells)));
+    assert(JSON.stringify(back.merges) === JSON.stringify([{ r: 0, c: 4, rs: 2, cs: 1 }]), JSON.stringify(back.merges));
+    const f = F.readFormats(back, back.table);
+    const at = (r, c) => F.formatAttrString(f.get(r * F.KEY + c));
+    assert(at(0, 0) === ' data-fmt="b" data-fill="yellow"', at(0, 0));
+    assert(at(0, 1) === ' data-num="currency:USD:2"' && at(0, 2) === ' data-num="percent:1"' && at(0, 3) === ' data-num="date:medium"', [at(0, 1), at(0, 2), at(0, 3)].join());
+    assert(at(1, 0) === ' data-fmt="i s" data-color="red" data-border="t r b l"' && at(1, 1) === ' data-num="currency:EUR:0"', [at(1, 0), at(1, 1)].join());
+    assert(at(0, 4) === ' data-align="center" data-valign="middle"', at(0, 4));
+  });
+
+  await t('Excel import: colours map to the palette; a blank row inside a merge is kept, others dropped as before', async () => {
+    const X = await import(path.join(ROOT, 'shared', 'sheet-xlsx-style.mjs'));
+    assert(X.nearestColor([255, 255, 0], 'fill') === 'yellow' && X.nearestColor([255, 0, 0], 'color') === 'red' && X.nearestColor([0, 112, 192], 'fill') === 'blue', 'hues');
+    assert(X.nearestColor([255, 255, 255], 'fill') === '' && X.nearestColor([0, 0, 0], 'color') === '' && X.nearestColor([128, 128, 128], 'fill') === 'gray', 'neutrals');
+    const XLSX = require(path.join(ROOT, 'node_modules', 'xlsx', 'dist', 'xlsx.mini.min.js'));
+    const I = await import(path.join(ROOT, 'shared', 'sheet-import.mjs'));
+    const M = await import(path.join(ROOT, 'shared', 'sheet-markup.mjs'));
+    const ws = XLSX.utils.aoa_to_sheet([['A', 'B'], ['x', 'tall'], [], ['y', 'z'], [], ['w', 'v']]);
+    ws['!merges'] = [{ s: { r: 1, c: 1 }, e: { r: 2, c: 1 } }];
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'S');
+    const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+    const out = await I.importSheetFile({ name: 's.xlsx', bytes }, { loadXlsx: async () => XLSX });
+    const back = M.readSheetTable(parseHtml(out.html).querySelector('table'));
+    assert(JSON.stringify(back.rows.map((r) => r.cells)) === JSON.stringify([['x', 'tall'], ['', ''], ['y', 'z'], ['w', 'v']]), JSON.stringify(back.rows.map((r) => r.cells)));
+    assert(JSON.stringify(back.merges) === JSON.stringify([{ r: 0, c: 1, rs: 2, cs: 1 }]), JSON.stringify(back.merges));
+  });
+
+  await t('Excel import: crafted merges (huge, overlapping, 100,000 of them) are clipped, capped and kept apart, in bounded time; export writes no overlap', async () => {
+    const XLSX = require(path.join(ROOT, 'node_modules', 'xlsx', 'dist', 'xlsx.mini.min.js'));
+    const I = await import(path.join(ROOT, 'shared', 'sheet-import.mjs'));
+    const M = await import(path.join(ROOT, 'shared', 'sheet-markup.mjs'));
+    const F = await import(path.join(ROOT, 'shared', 'sheet-format.mjs'));
+    const rows = [['A', 'B', 'C']].concat(Array.from({ length: 300 }, (_, k) => [`a${k}`, `b${k}`, `c${k}`]));
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!merges'] = [{ s: { r: 1, c: 0 }, e: { r: 1e9, c: 1e6 } }, { s: { r: 2, c: 1 }, e: { r: 4, c: 2 } }]
+      .concat(Array.from({ length: 100000 }, (_, k) => ({ s: { r: 1 + (k % 300), c: k % 3 }, e: { r: 1 + (k % 300) + (k % 5), c: 2 } })));
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'S');
+    const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+    const t0 = Date.now();
+    const out = await I.importSheetFile({ name: 's.xlsx', bytes }, { loadXlsx: async () => XLSX });
+    const ms = Date.now() - t0;
+    assert(ms < 8000, `import took ${ms}ms`);
+    const back = M.readSheetTable(parseHtml(out.html).querySelector('table'));
+    assert(back.merges.length >= 1 && back.merges.length <= F.MAX_MERGES, `${back.merges.length} merges`);
+    assert(JSON.stringify(back.merges[0]) === JSON.stringify({ r: 0, c: 0, rs: 300, cs: 3 }), `the huge one clipped to the sheet: ${JSON.stringify(back.merges[0])}`);
+    assert(back.rows.length === 300, `rows ${back.rows.length}`);
+    // Export: overlapping merges in a sheet model are never written as such.
+    const book = XLSX.read(S.xlsxBytes(XLSX, [{ name: 'O', columns: [{ name: 'a' }, { name: 'b' }, { name: 'c' }], rows: [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9']], formats: null,
+      merges: [{ r: 0, c: 0, rs: 2, cs: 2 }, { r: 1, c: 1, rs: 2, cs: 2 }, { r: 2, c: 0, rs: 1, cs: 1 }, { r: 0, c: 2, rs: 99, cs: 1 }] }]), { type: 'array' });
+    assert(JSON.stringify(book.Sheets.O['!merges']) === JSON.stringify([{ s: { c: 0, r: 1 }, e: { c: 1, r: 2 } }]), JSON.stringify(book.Sheets.O['!merges']));
+  });
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

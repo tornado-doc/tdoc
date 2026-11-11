@@ -26,6 +26,12 @@ class Node {
   get parentElement() { return this.parentNode && this.parentNode.nodeType === 1 ? this.parentNode : null; }
   appendChild(n) { if (n.parentNode) n.parentNode.removeChild(n); n.parentNode = this; this.childNodes.push(n); return n; }
   removeChild(n) { const i = this.childNodes.indexOf(n); if (i !== -1) this.childNodes.splice(i, 1); n.parentNode = null; return n; }
+  insertBefore(n, ref) {
+    if (!ref) return this.appendChild(n);
+    if (n.parentNode) n.parentNode.removeChild(n);
+    n.parentNode = this; this.childNodes.splice(this.childNodes.indexOf(ref), 0, n); return n;
+  }
+  remove() { if (this.parentNode) this.parentNode.removeChild(this); }
   get textContent() { return this.childNodes.map((c) => c.textContent).join(''); }
   set textContent(v) { this.childNodes.forEach((c) => { c.parentNode = null; }); this.childNodes = []; if (v !== '' && v != null) this.appendChild(this.ownerDocument.createTextNode(String(v))); }
 }
@@ -42,6 +48,7 @@ class Element extends Node {
   setAttribute(n, v) { this.attrs.set(n, String(v)); }
   hasAttribute(n) { return this.attrs.has(n); }
   removeAttribute(n) { this.attrs.delete(n); }
+  hasAttributes() { return this.attrs.size > 0; }
   get children() { return this.childNodes.filter((c) => c.nodeType === 1); }
   get firstElementChild() { return this.children[0] || null; }
   get nextElementSibling() {
