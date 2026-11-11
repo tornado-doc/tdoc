@@ -112,8 +112,8 @@ sheet updates every page that embeds it.
   nothing of it, not even its title. Share the sheet with the same people as
   the page, and embed only sheets you can read yourself.
 - Only the page's latest version shows the live view; an old version shows
-  the link. A page with versions from before writers were recorded shows the
-  link until it is published again.
+  the link. A page with a version from before writers were recorded (Nov 2026) shows
+  the link until it is published again.
 - Comments on the data go on the sheet; the embed shows their count and
   links there.
 - Markdown and Word downloads of the page show the embed as its link. The

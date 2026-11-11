@@ -247,8 +247,13 @@ const root = path.join(__dirname, '..');
     const old = await embed('s-private', { cookie: owner.cookie, page: 'page-guest-edit', pv: 2 });
     assert(old.status === 409 && old.body.error === 'old_version' && !/Secret|Acme/.test(old.text), `old version: ${old.status} ${old.text}`);
     // A version that names no account is never guessed to be the owner's.
-    refused(await embed('s-private', { cookie: owner.cookie, page: 'page-unnamed' }), 'unnamed browser save');
-    refused(await embed('s-private', { cookie: owner.cookie, page: 'page-legacy' }), 'version from before by_account');
+    // The page answers before the sheet is looked at (the link stays), the
+    // same for a sheet that exists and one that does not.
+    for (const pg of ['page-unnamed', 'page-legacy']) {
+      const r1 = await embed('s-private', { cookie: owner.cookie, page: pg });
+      const r2 = await embed('no-such-sheet', { cookie: owner.cookie, page: pg });
+      assert(r1.status === 409 && r1.body.error === 'page_unattributed' && r1.text === r2.text, `${pg}: ${r1.status} ${r1.text} / ${r2.text}`);
+    }
   });
 
   await t('a team page whose writers can all read the team sheet works; one who left the team stops it', async () => {

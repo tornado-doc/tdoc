@@ -20729,20 +20729,24 @@ async function handleSheetEmbed(env, req, url, ctx) {
   // could not read themselves.
   const pageGate = await enforceDocAccess(env, req, page, null);
   if (!pageGate.ok) return denied(await getSession(env, req));
+  if (feedbackScopeDenied(pageGate.session, page)) return denied(pageGate.session);
+  // Page-only answers first, before the sheet is looked at, so they say
+  // nothing about it: only the page's latest version embeds (an old one --
+  // history, a /v/<n> link -- shows the figure's link), and a page with a
+  // version that names no writer embeds nothing until it is republished.
+  const pageVersion = Number(url.searchParams.get('pv'));
+  if (pageVersion !== latestVersionNumber(pageGate.meta)) return sheetEmbedJson({ error: 'old_version' }, 409);
+  const writers = page === ref.slug ? [] : await sheetEmbedWriters(env, pageGate.meta);
+  if (!writers) return sheetEmbedJson({ error: 'page_unattributed' }, 409);
   const gate = await enforceDocAccess(env, req, ref.slug, null);
   if (!gate.ok) return denied(await getSession(env, req));
-  if (feedbackScopeDenied(gate.session, ref.slug) || feedbackScopeDenied(pageGate.session, page)) return denied(gate.session);
+  if (feedbackScopeDenied(gate.session, ref.slug)) return denied(gate.session);
   const meta = gate.meta;
   const latest = latestVersionNumber(meta);
   if (!meta || !latest || !pageGate.meta) return denied(gate.session);
-  // Only the page's latest version embeds; an old one (history, a /v/<n>
-  // link) shows the figure's link. Says nothing about the sheet.
-  const pageVersion = Number(url.searchParams.get('pv'));
-  if (pageVersion !== latestVersionNumber(pageGate.meta)) return sheetEmbedJson({ error: 'old_version' }, 409);
   if (page !== ref.slug) {
-    const writers = await sheetEmbedWriters(env, pageGate.meta);
     const access = accessFromMeta(meta);
-    if (!writers || !writers.every((w) => canReadDoc(access, w, env, meta))) return denied(gate.session);
+    if (!writers.every((w) => canReadDoc(access, w, env, meta))) return denied(gate.session);
   }
   const docKey = `docs/${ref.slug}/v${latest}/index.html`;
   const params = `${ref.tab}\n${ref.tabIndex}\n${ref.view}\n${ref.rows}\n${ref.columns}`;

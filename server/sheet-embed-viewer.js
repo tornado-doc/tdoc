@@ -347,9 +347,10 @@
     }
     var href = '/d/' + embed.slug;
     var err = String(msg.error || '');
-    // Off for this reader, or an old version of the page: nothing here is
-    // about the sheet, so the figure goes back to its link.
-    if (err === 'disabled' || err === 'old_version') return fallback(embed);
+    // Off for this reader, an old version of the page, or a page with a
+    // version that names no writer: nothing here is about the sheet, so the
+    // figure goes back to its link.
+    if (err === 'disabled' || err === 'old_version' || err === 'page_unattributed') return fallback(embed);
     setState(embed, err === 'no_access' ? 'no-access' : 'error');
     if (err === 'no_access') {
       renderMessage(embed, 'lock', 'You don’t have access to this sheet.', msg.signedIn === false ? 'Sign in, or ask its owner to share it.' : 'Ask its owner to share it with you.', href);
