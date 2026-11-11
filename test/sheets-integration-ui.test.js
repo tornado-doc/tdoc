@@ -13,6 +13,8 @@
 //     hidden cells too and the count says so
 //   - the fill handle x hidden rows, hidden columns and merges
 //   - insert / delete rows x merges x groups x rules
+//   - formulas (#1017) x merges, hidden rows and collapsed groups, rules,
+//     find & replace (in the formula) and the fill handle (references move)
 const fs = require('fs');
 const http = require('http');
 const os = require('os');
@@ -85,6 +87,23 @@ function fillDoc() {
   return doc('Fill', `<table data-tdoc-sheet data-name="Fill">${HEAD.replace('%HID%', ' data-hidden')}<tbody>\n${rows}\n</tbody></table>`);
 }
 
+// Formulas: Points (C) in rows r2-r3 (a collapsed group) and r4 (hidden)
+// still count; r1's Owner formula sits after a colspan and is stored with a
+// stale value (written with the next edit, into the right cell).
+function formulaDoc() {
+  const rows = [
+    '<tr data-row="r1"><td colspan="2">Merged</td><td>10</td><td>n</td><td data-formula="=C1*3">999</td></tr>',
+    '<tr data-row="r2" data-group="1" data-collapsed="1"><td>a</td><td>b</td><td>20</td><td>n</td><td>o</td></tr>',
+    '<tr data-row="r3" data-group="1"><td>a</td><td>b</td><td>30</td><td>n</td><td>o</td></tr>',
+    '<tr data-row="r4" data-hidden><td>a</td><td>h</td><td>40</td><td>n</td><td>o</td></tr>',
+    '<tr data-row="r5"><td>Total</td><td>x</td><td data-formula="=SUM(C1:C4)">100</td><td>n</td><td>o</td></tr>',
+    '<tr data-row="r6"><td>x</td><td>y</td><td data-formula="=C1+C2">30</td><td>n</td><td>o</td></tr>',
+    '<tr data-row="r7"><td>x</td><td>y</td><td></td><td>n</td><td>o</td></tr>',
+    '<tr data-row="r8"><td>x</td><td>y</td><td></td><td>n</td><td>o</td></tr>',
+  ].join('\n');
+  return doc('Formulas', `<table data-tdoc-sheet data-name="Formulas" ${RULES.replace('"100"', '"50"')}>${HEAD.replace('%HID%', ' data-hidden')}<tbody>\n${rows}\n</tbody></table>`);
+}
+
 (async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-sheets-integration-'));
   const writeDoc = (slug, html) => {
@@ -97,6 +116,7 @@ function fillDoc() {
   writeDoc('find', combo());
   writeDoc('rows', combo());
   writeDoc('fill', fillDoc());
+  for (const slug of ['fx-read', 'fx-find', 'fx-fill']) writeDoc(slug, formulaDoc());
 
   const port = await reservePort();
   const server = spawn(process.execPath, [path.join(__dirname, '..', 'server', 'server.js')], {
@@ -317,6 +337,87 @@ function fillDoc() {
       await f.locator('.ts-rows .ts-row[data-i="1"] .ts-c[data-c="1"]').click();
       await page.keyboard.press(`${MOD}+z`);
       await frame.waitForFunction(() => document.querySelector('tr[data-row="r1"]') && document.querySelector('tr[data-row="r1"]').cells[0].getAttribute('rowspan') === '3');
+      await page.getByRole('button', { name: /Discard/ }).click().catch(() => {});
+    });
+
+    // ---- formulas (#1017) ------------------------------------------------------------
+    const shown = (frame, r, c) => frame.evaluate(([a, b]) => window.__tdocSheets.shown(0, a, b), [r, c]);
+    // The <td> of document row r (0-based) and column c, merges taken into account.
+    const tdOf = (frame, r, c) => frame.evaluate(([rr, cc]) => {
+      const tr = document.querySelectorAll('table[data-tdoc-sheet] tbody tr')[rr];
+      let col = 0;
+      for (const td of tr.cells) { const span = Number(td.getAttribute('colspan') || 1); if (cc === col) return { text: td.textContent, f: td.getAttribute('data-formula') }; col += span; }
+      return null;
+    }, [r, c]);
+
+    await test('formulas x merges, hidden rows and collapsed groups, rules: rows out of view still compute; the rule colours a computed value', async () => {
+      const frame = await open('fx-read');
+      await frame.waitForFunction(() => window.__tdocSheets.structure().shown === 5);
+      assert(await shown(frame, 4, 2) === '100', `SUM over collapsed and hidden rows: ${await shown(frame, 4, 2)}`);
+      assert(await shown(frame, 0, 4) === '30', `a formula after a colspan: ${await shown(frame, 0, 4)}`);
+      assert(await shown(frame, 5, 2) === '30', 'C1+C2 (C2 in a collapsed group)');
+      const total = await gridCell(frame, 'r5', 2);
+      assert(total.bg === RED && total.text === '100', `the rule (> 50) on a computed value: ${JSON.stringify(total)}`);
+      assert((await tdOf(frame, 0, 4)).text === '999', 'Read writes nothing');
+      // Edit: a value typed into r1's Points; r1's stale Owner is written with it, into its own cell.
+      await chooseMode(page, 'Edit');
+      await frameMode(frame, 'edit');
+      await frameLoc().locator('.ts-rows .ts-row[data-i="0"] .ts-c[data-c="2"]').click();
+      await page.keyboard.type('15');
+      await page.keyboard.press('Enter');
+      await frame.waitForFunction(() => window.__tdocSheets.shown(0, 4, 2) === '105');
+      const owner = await tdOf(frame, 0, 4), notes = await tdOf(frame, 0, 3);
+      assert(owner.text === '45' && owner.f === '=C1*3' && notes.text === 'n', `r1 Owner written (not Notes): ${JSON.stringify([owner, notes])}`);
+      const sum = await tdOf(frame, 4, 2);
+      assert(sum.text === '105' && sum.f === '=SUM(C1:C4)', `formula and value agree: ${JSON.stringify(sum)}`);
+      await page.getByRole('button', { name: /Discard/ }).click().catch(() => {});
+    });
+
+    await test('find & replace x formulas: a formula cell is found and replaced in its formula and recomputed; a plain value starting with "=" stays text', async () => {
+      const frame = await edit('fx-find');
+      const f = frameLoc();
+      await f.locator('.ts-rows .ts-row[data-i="0"] .ts-c[data-c="2"]').click();
+      await page.keyboard.press(`${MOD}+Shift+h`);
+      const pop = f.locator('.ts-find');
+      await pop.waitFor();
+      await pop.getByRole('textbox', { name: 'Find' }).fill('SUM');
+      await frame.waitForFunction(() => /^1 match$/.test(document.querySelector('.ts-find-st').textContent));
+      await pop.getByRole('textbox', { name: 'Find' }).fill('C1:C4');
+      await pop.getByRole('textbox', { name: 'Replace with' }).fill('C1:C3');
+      await pop.getByRole('button', { name: 'Replace all' }).click();
+      await frame.waitForFunction(() => window.__tdocSheets.shown(0, 4, 2) === '60');
+      const sum = await tdOf(frame, 4, 2);
+      assert(sum.f === '=SUM(C1:C3)' && sum.text === '60', `formula and value agree: ${JSON.stringify(sum)}`);
+      // A plain "h" (the hidden row's Item) replaced by "=h": text, not a formula.
+      await pop.getByLabel('Entire cell').check();
+      await pop.getByRole('textbox', { name: 'Find' }).fill('h');
+      await pop.getByRole('textbox', { name: 'Replace with' }).fill('=h');
+      await pop.getByRole('button', { name: 'Replace all' }).click();
+      await frame.waitForFunction(() => /Replaced 1 cell/.test(document.querySelector('.ts-find-st').textContent));
+      const h = await tdOf(frame, 3, 1);
+      assert(h.text === '=h' && !h.f, `stays text: ${JSON.stringify(h)}`);
+      await page.keyboard.press('Escape');
+      await page.getByRole('button', { name: /Discard/ }).click().catch(() => {});
+    });
+
+    await test('fill handle x formulas: references move by document rows (over a collapsed group and a hidden row); one Undo', async () => {
+      const frame = await edit('fx-fill');
+      const f = frameLoc();
+      await frame.waitForFunction(() => window.__tdocSheets.structure().shown === 5);
+      // View rows: r1 r5 r6 r7 r8. r6 (=C1+C2) dragged down onto r7, r8.
+      const cell = (i, c) => f.locator(`.ts-rows .ts-row[data-i="${i}"] .ts-c[data-c="${c}"]`);
+      await cell(2, 2).click();
+      await f.locator('.ts-fill').waitFor();
+      await dragTo(f.locator('.ts-fill'), cell(4, 2));
+      await frame.waitForFunction(() => window.__tdocSheets.formula(0, 7, 2) === '=C3+C4');
+      assert(await frame.evaluate(() => window.__tdocSheets.formula(0, 6, 2)) === '=C2+C3', 'r7: =C2+C3');
+      assert(await shown(frame, 6, 2) === '50' && await shown(frame, 7, 2) === '70', `computed with the collapsed and hidden rows: ${await shown(frame, 6, 2)}, ${await shown(frame, 7, 2)}`);
+      const r8 = await tdOf(frame, 7, 2);
+      assert(r8.f === '=C3+C4' && r8.text === '70', `formula and value agree: ${JSON.stringify(r8)}`);
+      // One Undo takes the fill back.
+      await cell(0, 2).click();
+      await page.keyboard.press(`${MOD}+z`);
+      await frame.waitForFunction(() => !window.__tdocSheets.formula(0, 7, 2));
       await page.getByRole('button', { name: /Discard/ }).click().catch(() => {});
     });
 
