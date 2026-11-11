@@ -300,8 +300,13 @@ async function shot(page, name) {
       await shot(p, 'formulas-read-phone');
       await chooseMode(p, 'Edit');
       await frameMode(frame, 'edit');
+      // Once the editor's bar is in and the layout settled.
+      await frame.waitForFunction(() => !document.querySelector('.ts-add-row').hidden);
+      await p.waitForTimeout(300);
       await cell(3, 3, p).tap();
-      await frame.waitForFunction(() => !document.querySelector('.ts-fx').hidden);
+      await frame.waitForFunction(() => !document.querySelector('.ts-fx').hidden, null, { timeout: 5000 }).catch(async (e) => {
+        throw new Error(`no formula bar: ${JSON.stringify(await frame.evaluate(() => ({ sel: window.__tdocSheets.selection(), mode: document.documentElement.getAttribute('data-tdoc-interaction-mode') })))}`);
+      });
       const box = await frame.evaluate(() => { const r = document.querySelector('.ts-fx').getBoundingClientRect(); return { w: r.width, right: r.right, vw: innerWidth }; });
       assert(box.right <= box.vw + 1, `formula bar fits: ${JSON.stringify(box)}`);
       await shot(p, 'formulas-edit-phone');
