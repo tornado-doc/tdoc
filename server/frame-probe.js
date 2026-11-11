@@ -173,8 +173,9 @@
       'html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] body,html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] body *{cursor:auto!important;}' +
       'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href],html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href] *,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] button,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] label,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] summary{cursor:pointer!important;}' +
       'html[data-tdoc-site] [data-tdoc-diagram-tools]{display:none!important;}' +
-      'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
-      'html[data-tdoc-editing] [data-tdoc-editor-root]:focus{box-shadow:inset 0 0 0 1px rgba(22,82,240,.18);}';
+      // No frame around the editable area: the caret and the editor bar say
+      // it is Edit mode (a blue box around the page read as a selection).
+      'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}';
     (document.head || document.documentElement).appendChild(s);
   })();
 

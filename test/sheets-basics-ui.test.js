@@ -125,7 +125,7 @@ async function shot(page, name) {
       await page.keyboard.type('x');
       await cell.dblclick();
       await page.waitForTimeout(200);
-      const read = await frame.evaluate(() => ({ editor: !!document.querySelector('.ts-editor'), pill: !!document.querySelector('.ts-c .tdoc-comment-pill'), comment: !document.querySelector('.ts-bar .ts-btn').hidden, add: !document.querySelector('.ts-add-row').hidden }));
+      const read = await frame.evaluate(() => ({ editor: !!document.querySelector('.ts-editor'), pill: !!document.querySelector('.ts-c .tdoc-comment-pill'), comment: !!document.querySelector('.ts-bar [aria-label="Comment on sheet"]'), add: !document.querySelector('.ts-add-row').hidden }));
       assert(!read.editor && !read.pill && !read.comment && !read.add, `read: ${JSON.stringify(read)}`);
       assert(!(await page.locator('.tdoc-popup textarea').count()), 'no composer in Read');
       await shot(page, 'mode-read-desktop');
@@ -135,7 +135,8 @@ async function shot(page, name) {
       await f.locator('.ts-row[data-i="2"] .ts-c[data-c="1"]').click();
       await page.waitForSelector('.tdoc-popup textarea', { timeout: 5000 });
       await shot(page, 'mode-comment-desktop');
-      assert(await frame.evaluate(() => !document.querySelector('.ts-bar .ts-btn').hidden), '"Comment on sheet" in Comment mode');
+      // Comment mode is the one way in: no extra "Comment on sheet" button.
+      assert(await frame.evaluate(() => !document.querySelector('.ts-bar [aria-label="Comment on sheet"]')), 'no "Comment on sheet" button in Comment mode');
       await page.keyboard.press('Escape');
       // A drag over cells selects a range and opens nothing.
       await page.locator('.tdoc-popup').waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
