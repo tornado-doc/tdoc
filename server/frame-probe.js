@@ -1423,6 +1423,11 @@
   document.addEventListener('keydown', armCaretHints, true);
   function cleanEditorAttributes(root) {
     if (!root || !root.querySelectorAll) return;
+    // View state a viewer must never leave in a saved or exported page
+    // (the sheets viewer's full screen once marked <html> and the author's
+    // content; it uses a provider style now).
+    if (root.removeAttribute) root.removeAttribute('data-tdoc-sheet-expanded');
+    Array.prototype.forEach.call(root.querySelectorAll('[data-tdoc-sheet-expanded]'), function (node) { node.removeAttribute('data-tdoc-sheet-expanded'); });
     var roots = [];
     if (root.hasAttribute && root.hasAttribute('data-tdoc-editor-root')) roots.push(root);
     Array.prototype.push.apply(roots, root.querySelectorAll('[data-tdoc-editor-root]'));

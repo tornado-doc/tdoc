@@ -239,7 +239,6 @@
     // frame fill the window), so its view and comments carry over as they are.
     // Not the top layer: menus and filter panels open from <body> and must
     // stay above it, and the reader's dark inversion on <html> keeps applying.
-    'html[data-tdoc-sheet-expanded],html[data-tdoc-sheet-expanded] body{overflow:hidden!important}',
     '.tdoc-sheet.is-expanded{position:fixed;inset:0;z-index:2147483000;margin:0;display:flex;flex-direction:column;background:#fff;padding:10px max(16px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}',
     // A gutter on the right for the page's comment pins, where the window
     // has room for one (as beside a doc's reading column).
@@ -345,7 +344,9 @@
     tab.palettes = data.columns.map(function (c) { return Q.parsePalette(c.palette); });
     tab.rowOf = new Map();
     data.rows.forEach(function (row, r) { tab.rowOf.set(row.tr, r); });
-    tab.measured = new Map();
+    // Measured heights are kept by row element across a re-read: an edit
+    // forgets only the rows it touched (setCells), a layout change all.
+    if (!tab.measured) tab.measured = new Map();
     // Rows with a line break in a cell: as many lines tall as their longest
     // (as Excel and Sheets do once a break is typed). Found once per read.
     tab.lines = null;
@@ -366,7 +367,9 @@
   // The document's (data-width … on the markup) unless this reader set their
   // own (tab.local, by column key and row id); a reader who may edit the doc
   // has no own layout: what they change is the document's.
-  function emptyLocal() { return { w: {}, h: {}, wrap: {}, align: {} }; }
+  // Keyed by the author's column keys and row ids: no prototype, so a key
+  // such as "constructor" is only ever a key.
+  function emptyLocal() { return { w: Object.create(null), h: Object.create(null), wrap: Object.create(null), align: Object.create(null) }; }
   function colKey(tab, c) { return tab.data.columns[c].key || '#' + c; }
   function useLocal() { return !config.canEditDoc; }
   function readLayout(tab) {
@@ -395,7 +398,7 @@
     if (set) return set;
     var lines = (tab.lines && tab.lines.get(r)) || 1;
     if (!tab.anyWrap) return lines > 1 ? Math.min(M.MAX_HEIGHT, lines * LINE_H + PAD_Y) : ROW_H;
-    var m = tab.measured.get(r);
+    var m = tab.measured.get(tab.data.rows[r].tr);
     if (m) return m;
     for (var c = 0; c < tab.wrap.length; c++) {
       if (!tab.wrap[c]) continue;
@@ -468,7 +471,7 @@
   var ui = {};
   // Full screen: on, opened as the sheet's own page (alone: its tab, 1-based),
   // whether the doc is nothing but the sheet, and the doc path from the shell.
-  var expand = { on: false, alone: 0, sheetOnly: false, path: '', scroll: null, inert: [] };
+  var expand = { on: false, alone: 0, sheetOnly: false, path: '', scroll: null, style: null };
   var sel = { r: 0, c: 0, r2: 0, c2: 0 };
   var config = { editing: false, canEditDoc: false, received: false };
   var undoStack = [], redoStack = [];
@@ -765,8 +768,9 @@
         for (var j = 0; j < kids.length; j++) inner = Math.max(inner, kids[j].offsetTop + kids[j].offsetHeight);
         need = Math.max(need, Math.ceil(inner + 7 + 1));
       }
-      if (Math.abs(need - rowH(tab, i)) > 1) { tab.measured.set(r, need); changed = true; }
-      else if (!tab.measured.has(r)) tab.measured.set(r, rowH(tab, i));
+      var tr = tab.data.rows[r].tr;
+      if (Math.abs(need - rowH(tab, i)) > 1) { tab.measured.set(tr, need); changed = true; }
+      else if (!tab.measured.has(tr)) tab.measured.set(tr, rowH(tab, i));
     }
     if (!changed) return false;
     var keep = ui.grid.scrollTop;
@@ -844,13 +848,14 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
       // A reader's own layout per tab (widths, heights, wrap, alignment by
-      // column key and row id), kept by the shell beside the view. Small:
-      // at most 400 row heights a tab.
+      // column key and row id), kept by the shell beside the view: at most
+      // 2,000 row heights a tab, as many as a load reads back (the shell
+      // keeps up to 100,000 characters of it).
       var widths = {};
       if (useLocal()) book.tabs.forEach(function (t) {
         if (!t.resized) return;
         var h = {}, n = 0;
-        Object.keys(t.local.h).forEach(function (id) { if (n < 400 && t.local.h[id]) { h[id] = t.local.h[id]; n++; } });
+        Object.keys(t.local.h).forEach(function (id) { if (n < 2000 && t.local.h[id]) { h[id] = t.local.h[id]; n++; } });
         widths[t.name] = { w: t.local.w, h: h, wrap: t.local.wrap, align: t.local.align };
       });
       post({ type: 'tdoc:sheetView', hash: Q.encodeView(viewObject()), widths: widths });
@@ -1458,6 +1463,7 @@
     var before = [], after = [];
     list.forEach(function (ch) {
       var row = tab.data.rows[ch.r];
+      tab.measured.delete(row.tr);
       var hadCells = row.tr.cells.length;
       var td = ensureCell(tab, ch.r, ch.c);
       before.push({ tr: row.tr, td: td, html: td.innerHTML, cells: hadCells });
@@ -1475,6 +1481,7 @@
   function snapshotOp(tab, fn) {
     var table = tab.table;
     var before = { html: table.innerHTML, name: table.getAttribute('data-name') };
+    tab.measured = new Map();
     fn();
     var after = { html: table.innerHTML, name: table.getAttribute('data-name') };
     var put = function (s) { table.innerHTML = s.html; if (s.name == null) table.removeAttribute('data-name'); else table.setAttribute('data-name', s.name); };
@@ -2281,25 +2288,24 @@
     if (editor) commitEdit();
     closePop(true);
     expand.on = on;
-    var html = document.documentElement, root = ui.root;
+    var root = ui.root;
     if (on) {
       expand.scroll = { x: scrollX, y: scrollY };
-      html.setAttribute('data-tdoc-sheet-expanded', '');
       root.classList.add('is-expanded');
       root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true');
-      // The rest of the page is out of reach (focus, screen readers) under it.
-      expand.inert = [];
-      for (var branch = root; branch && branch !== document.body && branch.parentElement; branch = branch.parentElement) {
-        Array.prototype.forEach.call(branch.parentElement.children, function (sib) {
-          if (sib !== branch && !sib.hasAttribute('inert') && !sib.hasAttribute('data-tdoc-provider')) { sib.setAttribute('inert', ''); expand.inert.push(sib); }
-        });
-      }
+      // The rest of the page is out of reach (pointer, focus, screen readers)
+      // under it: hidden by a provider style, never by an attribute on the
+      // author's content, which a Save or an export would keep.
+      expand.style = provider(document.createElement('style'));
+      expand.style.textContent = 'html,body{overflow:hidden!important}'
+        + 'body :not([data-tdoc-provider]):not([data-tdoc-provider] *){visibility:hidden!important}'
+        + '.tdoc-sheet.is-expanded{visibility:visible!important}';
+      document.head.appendChild(expand.style);
     } else {
-      html.removeAttribute('data-tdoc-sheet-expanded');
       root.classList.remove('is-expanded');
       root.setAttribute('role', 'region'); root.removeAttribute('aria-modal');
-      expand.inert.forEach(function (n) { n.removeAttribute('inert'); });
-      expand.inert = [];
+      if (expand.style) expand.style.remove();
+      expand.style = null;
     }
     if (!quiet && !expand.alone) post({ type: 'tdoc:sheetExpand', open: on });
     renderTabs(); renderBar(); layout(); renderHead(); renderBody(true);

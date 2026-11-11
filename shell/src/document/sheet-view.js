@@ -78,7 +78,8 @@ export function useSheetView({ slug, send, persist = true, canEdit = false }) {
     const hash = typeof message.hash === 'string' ? message.hash.slice(0, 4000) : '';
     let widths = message.widths && typeof message.widths === 'object' ? message.widths : {};
     // The frame is author-controlled territory: keep what it hands over small.
-    if (JSON.stringify(widths).length > 20_000) widths = {};
+    // (A reader's own layout: up to 2,000 row heights a tab fit.)
+    if (JSON.stringify(widths).length > 100_000) widths = {};
     storeView(slug, { hash, widths });
     const next = withHashView(location.hash, hash);
     if (next !== (location.hash || '')) {

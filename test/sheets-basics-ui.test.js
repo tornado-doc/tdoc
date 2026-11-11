@@ -64,6 +64,8 @@ async function shot(page, name) {
     { name: 'Task', type: 'text' }, { name: 'Notes', type: 'text' }, { name: 'Points', type: 'number' }, { name: 'Status', type: 'tags' },
   ], rows: Array.from({ length: rows }, (_, k) => ({ id: `r${k + 1}`, cells: [k === 5 ? '' : `Task ${k + 1}`, k % 3 === 0 ? LONG : `note ${k + 1}`, String(k * 3), [k % 2 ? 'open' : 'done']] })) }] });
   for (const slug of ['modes', 'resize', 'rows', 'wrap', 'lines', 'keys', 'phone']) writeDoc(slug, sheet());
+  // A prose doc with a sheet, for full screen and its own page (?sheet=1).
+  writeDoc('fullpage', `<!doctype html><html><head><meta charset="utf-8"><title>Full</title></head><body><main><h1>Full</h1><p id="before">Before the sheet.</p>${M.tableHtml({ name: 'Runs', columns: [{ name: 'Run', type: 'text' }, { name: 'Notes', type: 'text' }], rows: Array.from({ length: 8 }, (_, k) => ({ id: `r${k + 1}`, cells: [`run ${k + 1}`, 'n'] })) })}<p>After.</p></main></body></html>`);
   // A reader who may not edit: an older version (local canEdit is latest-only).
   writeDoc('reader', sheet(), 2);
   // 10,000 rows, one long text column.
@@ -184,6 +186,37 @@ async function shot(page, name) {
       const html = saved('resize', 2);
       assert(/<th[^>]*data-key="c2"[^>]*data-width="\d+"/.test(html), 'v2 holds the width');
       assert(!/<th[^>]*data-key="c1"[^>]*data-width/.test(html), 'the undone width is not saved');
+    });
+
+    await test('full screen leaves nothing in the document: ?sheet=1 in Edit, resize, export and Save hold no viewer state', async () => {
+      await page.goto('about:blank');
+      await page.goto(`${base}/d/fullpage/v/1?sheet=1`);
+      await frameLoc().locator('.tdoc-sheet.is-expanded .ts-row').first().waitFor({ timeout: 15000 });
+      const frame = page.frames().find((x) => x.url().includes('/frame'));
+      const f = frameLoc();
+      await chooseMode(page, 'Edit');
+      await frameMode(frame, 'edit');
+      // The rest of the page is out of reach under it, by a provider style.
+      const hidden = await frame.evaluate(() => ({ p: getComputedStyle(document.getElementById('before')).visibility, grid: getComputedStyle(document.querySelector('.ts-grid')).visibility, inert: document.querySelectorAll('[inert]').length, attr: document.documentElement.hasAttribute('data-tdoc-sheet-expanded') }));
+      assert(hidden.p === 'hidden' && hidden.grid === 'visible' && !hidden.inert && !hidden.attr, JSON.stringify(hidden));
+      await dragBy(page, f.locator('.ts-h[data-c="1"] .ts-resize'), 60, 0);
+      await frame.waitForFunction(() => document.querySelectorAll('table[data-tdoc-sheet] thead th')[1].hasAttribute('data-width'));
+      // Export while full screen (Download & copy builds from this HTML).
+      const exported = await page.evaluate(() => new Promise((resolve) => {
+        const iframe = document.querySelector('iframe[aria-label="Document content"]');
+        const on = (e) => { if (e.data && e.data.type === 'tdoc:exportHtml' && e.data.requestId === 'probe-test') { window.removeEventListener('message', on); resolve(e.data.html); } };
+        window.addEventListener('message', on);
+        iframe.contentWindow.postMessage({ source: 'tdoc-shell', type: 'tdoc:exportHtml', requestId: 'probe-test' }, '*');
+      }));
+      const clean = (html, where) => {
+        assert(!/\sinert(=|\s|>)/.test(html), `${where}: no inert`);
+        assert(!/data-tdoc-sheet-expanded/.test(html), `${where}: no data-tdoc-sheet-expanded`);
+        assert(!/is-expanded|visibility:hidden!important/.test(html), `${where}: no full-screen style`);
+        assert(/data-width="\d+"/.test(html), `${where}: the resize is there`);
+      };
+      clean(exported, 'export');
+      await save('fullpage', 2);
+      clean(saved('fullpage', 2), 'saved v2');
     });
 
     await test('a reader who may not edit resizes and wraps for themselves: kept across a reload, never in the document', async () => {
