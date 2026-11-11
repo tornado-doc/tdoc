@@ -58,11 +58,10 @@ export function useDocumentEditor({
     const params = new URLSearchParams(location.search);
     const wantsEdit = params.get('edit') === '1';
     if (wantsEdit && config.canEdit) return 'edit';
-    // A sheet on its own page (?sheet=<n>) is for reading and commenting:
-    // its full-screen view has no Save, so it never opens in Edit mode.
-    const sheetAlone = params.has('sheet');
+    // Every doc type (a sheet on its own page too) keeps the same top bar,
+    // with the mode switch and Save: a remembered Edit mode is Edit here.
     const stored = getStoredMode(config);
-    if (stored === 'edit' && config.canEdit && !sheetAlone) return 'edit';
+    if (stored === 'edit' && config.canEdit) return 'edit';
     if (stored === 'comment' && (config.canComment || config.signInToComment)) return 'comment';
     if (stored === 'read') return 'read';
     return (config.canComment || config.signInToComment) ? 'comment' : 'read';

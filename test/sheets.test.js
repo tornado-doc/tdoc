@@ -257,6 +257,72 @@ async function t(name, fn) {
     assert.deepEqual(re.rows[0].cells, [['new', '<x>'], 'javascript:alert(1)', '<img src=x onerror=alert(1)>']);
   });
 
+  await t('layout round trip: widths, wrap, alignment, row heights; out-of-band values cleaned', () => {
+    const model = {
+      name: 'L',
+      columns: [
+        { name: 'Task', type: 'text', width: 220, wrap: true }, { name: 'Cost', type: 'number', align: 'center' },
+        { name: 'Bad', type: 'text', width: 99999, align: 'justify" onclick="x' }, { name: 'Plain', type: 'text', width: 'abc' },
+      ],
+      rows: [{ id: 'r1', height: 64, cells: ['a', '1', '', ''] }, { id: 'r2', height: 5, cells: ['b', '2', '', ''] }, { id: 'r3', cells: ['c', '3', '', ''] }],
+    };
+    const html = M.tableHtml(model);
+    assert.match(html, /<th data-key="c1" data-type="text" data-width="220" data-wrap="wrap">Task<\/th>/);
+    assert.match(html, /<th data-key="c2" data-type="number" data-align="center">Cost<\/th>/);
+    assert.match(html, /<th data-key="c3" data-type="text" data-width="1200">Bad<\/th>/, 'clamped, and a bad alignment dropped');
+    assert.match(html, /<th data-key="c4" data-type="text">Plain<\/th>/);
+    assert.match(html, /<tr data-row="r1" data-height="64">/);
+    assert.match(html, /<tr data-row="r2" data-height="24">/, 'a height is at least the minimum');
+    assert.match(html, /<tr data-row="r3">/);
+    const back = M.readSheetTable(parseHtml(`<body>${html}</body>`).querySelector('table[data-tdoc-sheet]'), Q.normalizeType);
+    assert.deepEqual(back.columns.map((c) => [c.width, c.wrap, c.align]), [[220, true, ''], [0, false, 'center'], [1200, false, ''], [0, false, '']]);
+    assert.deepEqual(back.rows.map((r) => r.height), [64, 24, 0]);
+    // model → HTML → model → HTML is a fixed point.
+    const again = M.tableHtml({ name: 'L', columns: back.columns.map((c) => ({ key: c.key, name: c.name, type: c.type, width: c.width, wrap: c.wrap, align: c.align })), rows: back.rows.map((r) => ({ id: r.id, height: r.height, cells: r.cells })) });
+    assert.equal(again, html);
+    // Written on the elements (the viewer's edit path), and removed again.
+    const th = back.columns[0].th, tr = back.rows[2].tr;
+    M.writeColumnLayout(th, { width: 300, wrap: false, align: 'right' });
+    M.writeRowHeight(tr, 48);
+    assert.equal(th.getAttribute('data-width'), '300');
+    assert.equal(th.hasAttribute('data-wrap'), false);
+    assert.equal(th.getAttribute('data-align'), 'right');
+    assert.equal(tr.getAttribute('data-height'), '48');
+    M.writeColumnLayout(th, { width: 0, align: '' });
+    M.writeRowHeight(tr, 0);
+    assert.equal(th.hasAttribute('data-width') || th.hasAttribute('data-align') || tr.hasAttribute('data-height'), false);
+  });
+
+  await t('line breaks in cells: written as <br>, read back as \\n, escaped, round trip; CSV keeps them quoted', async () => {
+    const model = { name: 'N', columns: [{ name: 'Note', type: 'text' }, { name: 'Tags', type: 'tags' }, { name: 'Link', type: 'url' }], rows: [
+      { id: 'r1', cells: ['first line\nsecond <b>line</b>\r\nthird', ['a', 'b'], 'https://example.com'] },
+      { id: 'r2', cells: ['one line', [], ''] },
+    ] };
+    const html = M.tableHtml(model);
+    assert.match(html, /<td>first line<br>second &lt;b&gt;line&lt;\/b&gt;<br>third<\/td>/);
+    const doc = parseHtml(`<body>${html}</body>`);
+    const back = M.readSheetTable(doc.querySelector('table[data-tdoc-sheet]'), Q.normalizeType);
+    assert.equal(back.rows[0].cells[0], 'first line\nsecond <b>line</b>\nthird');
+    assert.equal(back.rows[1].cells[0], 'one line');
+    assert.equal(M.tableHtml({ name: 'N', columns: back.columns.map((c) => ({ key: c.key, name: c.name, type: c.type })), rows: back.rows.map((r) => ({ id: r.id, cells: r.cells })) }), html);
+    // Author markup: whitespace runs read as one space, <br>s as breaks,
+    // breaks at the ends dropped; markup inside a cell keeps its text.
+    const hand = parseHtml('<body><table data-tdoc-sheet><thead><tr><th>A</th></tr></thead><tbody><tr data-row="r1"><td>\n  <br>a   b<br><em>c</em>\n d<br></td></tr></tbody></table></body>');
+    assert.equal(M.readSheetTable(hand.querySelector('table'), Q.normalizeType).rows[0].cells[0], 'a b\nc d');
+    // The editor's write: text nodes and <br>, never HTML.
+    const td = back.rows[1].tds[0];
+    M.writeCell(td, 'text', 'x\n<img src=y onerror=z>\n');
+    assert.equal(td.innerHTML, 'x<br>&lt;img src=y onerror=z&gt;<br>');
+    assert.equal(M.readCell(td, 'text'), 'x\n<img src=y onerror=z>');
+    // Download: CSV quotes a field with a break (RFC 4180), so Excel and
+    // Sheets read one cell.
+    const X = await import('../shell/src/document/sheet-export.mjs');
+    const csv = X.sheetCsv(X.sheetsFromDocument(doc)[0]);
+    assert.ok(csv.includes('"first line\nsecond <b>line</b>\nthird"'), csv);
+    // A pasted range: a quoted field keeps its break.
+    assert.deepEqual(M.parseDelimited('"one\ntwo"\tb\r\nc\td', '\t'), [['one\ntwo', 'b'], ['c', 'd']]);
+  });
+
   await t('a header row made of <th> in <tbody> is read as the header; short rows read blank', () => {
     const doc = parseHtml('<table data-tdoc-sheet><tr><th>A</th><th data-type="number">B</th></tr><tr><td>1</td></tr></table>');
     const s = M.readSheetTable(doc.querySelector('table[data-tdoc-sheet]'), Q.normalizeType);

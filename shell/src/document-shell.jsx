@@ -554,7 +554,7 @@ export function DocumentShell({ boot, config }) {
   const exportHtml = useMemo(() => createExportHtmlRequest(sendToFrame), [sendToFrame]);
   const [docShape, setDocShape] = useState({ sheets: 0, sheetDoc: false });
   // The signed-out homepage remembers nothing about a visitor's view.
-  const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity) });
+  const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity), canEdit: Boolean(config.canEdit) });
   const bridge = useFrameBridge({
     ...sheetHandlers,
     'tdoc:demoRewriteDone': (message) => {
@@ -628,6 +628,16 @@ export function DocumentShell({ boot, config }) {
     'tdoc:key': (message) => {
       if (message.key !== 'Alt' && message.key !== 'Escape') return;
       document.dispatchEvent(new KeyboardEvent('keydown', { key: message.key, bubbles: true, cancelable: true }));
+    },
+    // A change only an editor keeps for everyone (a sheet's column width or
+    // wrap, made in Read or Comment mode): the doc goes into Edit mode, the
+    // change lands there, and Save / Discard are the editor's own. Nothing
+    // is written without that Save, so a doc's own script asking is harmless.
+    'tdoc:requestMode': (message) => {
+      const current = editorRef.current;
+      if (message.mode !== 'edit' || !config.canEdit || !current || current.mode === 'edit') return;
+      current.changeMode('edit');
+      showToast('Edit mode: Save to keep this for everyone, or Discard');
     },
     'tdoc:editState': (message) => editorRef.current?.frameHandlers.editState(message),
     'tdoc:editBaseline': (message) => editorRef.current?.frameHandlers.editBaseline(message),
@@ -2410,9 +2420,9 @@ export function DocumentShell({ boot, config }) {
         src={boot.frameSrc}
       />
 
-      <DocumentFooter visible={bridge.layout.footerVisible} />
+      <DocumentFooter visible={bridge.layout.footerVisible && !bridge.layout.fullBleed} />
 
-      {!narrow && commentFilterControl && !comparing && !historyOpen && !sidePanelOpen ? (
+      {!narrow && commentFilterControl && !comparing && !historyOpen && !sidePanelOpen && !bridge.layout.fullBleed ? (
         <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.max(8, Math.min(pinLeft - 4, window.innerWidth - 336)) }}>
           <CommentListControls filter={commentFilterControl}
             unreadCount={unreadAgentReplies}

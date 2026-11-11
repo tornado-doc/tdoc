@@ -1042,6 +1042,10 @@
   // gutter just right of the reading column — not pinned to the viewport edge.
   // Mirrors overlay.js getArticleMetrics: widest wrapper, else widest prose.
   function articleRight() {
+    // A viewer showing content across the frame's whole width (a sheet in
+    // full screen) names its own right edge and leaves the gutter free.
+    var own = elementHooks.articleRight && elementHooks.articleRight();
+    if (own > 0) return own;
     // A qualifying wrapper must plausibly BE the reading column: at least half
     // the viewport wide (an interior grid cell can match .content/.container
     // and would park pins mid-screen) but narrower than the viewport itself.
@@ -1266,7 +1270,8 @@
     // Frame-local: the slides presenter counts the threads on the slide shown.
     try { document.dispatchEvent(new CustomEvent('tdoc:anchors-resolved', { detail: { targets: _anchorTargets, comments: (comments || []).filter(function (c) { return c && !c.hidden && !c.deleted; }).map(function (c) { return c.id; }) } })); } catch (x) {}
     post({ type: 'tdoc:pins', pins: pins, documentComments: documentPoint,
-      scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
+      scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight,
+      fullBleed: !!(elementHooks.articleRight && elementHooks.articleRight() > 0) });
   }
 
   // Geometry can settle AFTER the first pin report (images/fonts load, layout
@@ -1631,6 +1636,13 @@
   }
   function formatEdit(command, value) {
     if (interactionMode !== 'edit') return;
+    // Undo / Redo from the editor's bar: a viewer that keeps its own history
+    // (a sheet's cell and layout edits never reach the browser's) takes it
+    // when its edit was the last one.
+    if (command === 'undo' || command === 'redo') {
+      var history = new CustomEvent('tdoc:edit-history', { cancelable: true, detail: { command: command } });
+      if (!document.dispatchEvent(history)) return;
+    }
     var nextValue = value;
     if (command === 'createLink') {
       if (!nextValue) return;

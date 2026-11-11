@@ -12,7 +12,16 @@
 // summary row at the grid's foot (Sum / Average / Count / Unique per column,
 // over the rows the view shows), picked from a column's menu or the row itself.
 //
-// In Edit mode (doc owners and editors, behind the `sheets` flag) a cell is
+// Column widths, row heights, Wrap text and alignment are the document's
+// (data-width / data-height / data-wrap / data-align, sheet-markup.mjs) when
+// someone who may edit the doc changes them: the change goes through Edit
+// mode and the editor's own draft and Save, from whichever mode it was
+// made in. A reader without edit rights changes them for themselves only:
+// view state, kept by the shell beside the #hash, never saved. A wrapped
+// column grows its rows: row tops are a prefix sum over estimated heights,
+// corrected by measuring the rows on screen, so 10,000 rows still scroll.
+//
+// In Edit mode (doc owners and editors) a cell is
 // edited in place and written back into its <td>, rows and columns are added
 // and removed, a column's type is set, tags are picked from the column's
 // own, and a range pasted from Excel or Google Sheets fills the grid. Every
@@ -116,8 +125,18 @@
     // is hover; the column menu (always shown) has Filter too.
     '.ts-h [data-act="filter"]:not(.is-on){display:none}',
     '@media (hover:hover){.ts-h:hover [data-act="filter"],.ts-h:focus-within [data-act="filter"]{display:inline-flex}}',
-    '.ts-resize{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:3;touch-action:none}',
-    '.ts-resize:hover,.ts-resize.is-on{background:linear-gradient(90deg,transparent 3px,var(--ts-accent) 3px,var(--ts-accent) 5px,transparent 5px)}',
+    // Column resize: a 12px grip over the header's right edge (24px where
+    // the pointer is a finger), a 2px line where it is.
+    '.ts-resize{position:absolute;top:0;right:-6px;width:12px;height:100%;cursor:col-resize;z-index:3;touch-action:none}',
+    '.ts-resize:hover,.ts-resize.is-on{background:linear-gradient(90deg,transparent 5px,var(--ts-accent) 5px,var(--ts-accent) 7px,transparent 7px)}',
+    '@media (pointer:coarse){.ts-resize{right:-12px;width:24px}.ts-resize:hover,.ts-resize.is-on{background:linear-gradient(90deg,transparent 11px,var(--ts-accent) 11px,var(--ts-accent) 13px,transparent 13px)}}',
+    '.ts-head.is-sizing,.ts-head.is-sizing *{cursor:col-resize!important}',
+    '.ts-rows.is-sizing,.ts-rows.is-sizing *{cursor:row-resize!important}',
+    '.tdoc-sheet.is-sizing{-webkit-user-select:none;user-select:none}',
+    // Row resize: the same grip along the row number's bottom edge.
+    '.ts-rresize{position:absolute;left:0;right:0;bottom:-5px;height:10px;cursor:row-resize;z-index:3;touch-action:none}',
+    '.ts-rresize:hover,.ts-rresize.is-on{background:linear-gradient(180deg,transparent 4px,var(--ts-accent) 4px,var(--ts-accent) 6px,transparent 6px)}',
+    '@media (pointer:coarse){.ts-rresize{bottom:-10px;height:20px}.ts-rresize:hover,.ts-rresize.is-on{background:linear-gradient(180deg,transparent 9px,var(--ts-accent) 9px,var(--ts-accent) 11px,transparent 11px)}}',
     '.ts-h-add{flex:none;width:40px;display:flex;align-items:center;justify-content:center}',
     '.ts-body{position:relative}',
     // summary row: stuck to the grid's foot, one figure per column
@@ -134,13 +153,23 @@
     '.ts-rows{position:absolute;left:0;top:0}',
     '.ts-row{display:flex;height:' + ROW_H + 'px;background:#fff}',
     '.ts-row:hover{background:#fafafc}',
-    '.ts-n{position:sticky;left:0;z-index:2;flex:none;display:flex;align-items:center;justify-content:flex-end;padding:0 8px;border-right:1px solid var(--ts-line);border-bottom:1px solid var(--ts-line);background:var(--ts-head);color:#8a8a94;font-size:11px;font-variant-numeric:tabular-nums}',
+    '.ts-n{position:sticky;left:0;z-index:2;flex:none;display:flex;align-self:stretch;align-items:center;justify-content:flex-end;padding:0 8px;border-right:1px solid var(--ts-line);border-bottom:1px solid var(--ts-line);background:var(--ts-head);color:#8a8a94;font-size:11px;font-variant-numeric:tabular-nums}',
     '.ts-n.is-sel{background:#e6ecfb;color:var(--ts-ink)}',
     '.ts-c{position:relative;flex:none;display:flex;align-items:center;gap:4px;padding:0 8px;border-right:1px solid var(--ts-line);border-bottom:1px solid var(--ts-line);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;background:inherit}',
     '.ts-c>span.ts-t{overflow:hidden;text-overflow:ellipsis}',
+    // A line break shows: clipped, the cell keeps its first line in place
+    // (and more in a taller row); wrapped, the text wraps and the row grows.
+    '.ts-c.is-ml{align-items:flex-start;padding-top:7px}',
+    '.ts-c.is-ml>span.ts-t{white-space:pre}',
+    '.ts-c.is-wrap{align-items:flex-start;flex-wrap:wrap;align-content:flex-start;padding-top:7px;padding-bottom:7px;white-space:normal}',
+    '.ts-c.is-wrap>span.ts-t,.ts-c.is-wrap>a{white-space:pre-wrap;overflow-wrap:anywhere;text-overflow:clip;min-width:0;max-width:100%}',
+    '.ts-c.is-num-t{font-variant-numeric:tabular-nums}',
+    '.ts-c.al-left{justify-content:flex-start;text-align:left}',
+    '.ts-c.al-center{justify-content:center;text-align:center}',
+    '.ts-c.al-right{justify-content:flex-end;text-align:right}',
     '.ts-c.is-first{position:sticky;z-index:1;background:#fff}',
     '.ts-row:hover .ts-c.is-first{background:#fafafc}',
-    '.ts-c.is-num{justify-content:flex-end;font-variant-numeric:tabular-nums}',
+    '.ts-c.is-num{justify-content:flex-end;text-align:right;font-variant-numeric:tabular-nums}',
     '.ts-c.is-sel{background:var(--ts-sel)}',
     '.ts-c.is-first.is-sel{background:#eef2fd}',
     '.ts-c.is-active{box-shadow:inset 0 0 0 2px var(--ts-accent)}',
@@ -165,7 +194,7 @@
     '.ts-add-row:hover{border-color:var(--ts-accent);color:var(--ts-accent)}',
     '.ts-add-row[hidden]{display:none}',
     // in-place editor
-    '.ts-editor{position:absolute;z-index:6;margin:0;padding:0 8px;border:2px solid var(--ts-accent);border-radius:2px;background:#fff;font:inherit;font-size:13px;color:inherit;outline:0;box-shadow:0 4px 14px rgba(0,0,0,.12);-webkit-user-select:text;user-select:text}',
+    '.ts-editor{position:absolute;z-index:6;margin:0;padding:6px 8px;resize:none;overflow:hidden;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;border:2px solid var(--ts-accent);border-radius:2px;background:#fff;font:inherit;font-size:13px;color:inherit;outline:0;box-shadow:0 4px 14px rgba(0,0,0,.12);-webkit-user-select:text;user-select:text}',
     // popovers (menus, filter panels, tag picker): one component for all
     '.ts-pop{box-sizing:border-box;position:fixed;z-index:2147483600;min-width:200px;max-width:min(340px,calc(100vw - 16px));max-height:min(440px,calc(100vh - 16px));overflow:auto;padding:6px;border:1px solid #dedee3;border-radius:10px;background:#fff;box-shadow:0 10px 30px rgba(0,0,0,.14),0 2px 6px rgba(0,0,0,.06);font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:#17171a;-webkit-user-select:none;user-select:none}',
     '.ts-pop *{box-sizing:border-box}',
@@ -204,12 +233,17 @@
     '.ts-tagbox .ts-tag svg{width:12px;height:12px}',
     '.ts-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483600;padding:10px 14px;border-radius:10px;background:#17171a;color:#fff;font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.2);max-width:calc(100vw - 32px)}',
     'html[data-tdoc-interaction-mode="comment"] .tdoc-sheet .ts-c{cursor:cell}',
+    // Read mode shows no comment affordances, as on a prose page.
+    'html:not([data-tdoc-interaction-mode="comment"]):not([data-tdoc-interaction-mode="edit"]) .tdoc-sheet .ts-c.has-comment::after{display:none}',
     // Full screen: the same grid, fixed over the page (the shell makes the
     // frame fill the window), so its view and comments carry over as they are.
     // Not the top layer: menus and filter panels open from <body> and must
     // stay above it, and the reader's dark inversion on <html> keeps applying.
     'html[data-tdoc-sheet-expanded],html[data-tdoc-sheet-expanded] body{overflow:hidden!important}',
     '.tdoc-sheet.is-expanded{position:fixed;inset:0;z-index:2147483000;margin:0;display:flex;flex-direction:column;background:#fff;padding:10px max(16px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}',
+    // A gutter on the right for the page's comment pins, where the window
+    // has room for one (as beside a doc's reading column).
+    '@media (min-width:900px){.tdoc-sheet.is-expanded{padding-right:56px}}',
     '.tdoc-sheet.is-expanded .ts-grid{flex:1 1 auto;min-height:0;width:100%;max-width:none}',
     '.tdoc-sheet.is-expanded .ts-tabs,.tdoc-sheet.is-expanded .ts-bar,.tdoc-sheet.is-expanded .ts-add-row{flex:none}',
     '.ts-xhead{display:flex;align-items:center;gap:8px;min-height:36px;margin:0 0 8px}',
@@ -303,7 +337,7 @@
   var book = null;
   function readTab(table, old) {
     var data = M.readSheetTable(table, Q.normalizeType);
-    var tab = old || { query: Q.emptyQuery(), widths: [], matchAt: -1 };
+    var tab = old || { query: Q.emptyQuery(), widths: [], matchAt: -1, local: emptyLocal(), defW: {} };
     tab.table = table;
     tab.data = data;
     tab.name = cleanName(data.name) || 'Sheet ' + (book ? book.tabs.indexOf(tab) + 1 || book.tabs.length + 1 : 1);
@@ -311,9 +345,88 @@
     tab.palettes = data.columns.map(function (c) { return Q.parsePalette(c.palette); });
     tab.rowOf = new Map();
     data.rows.forEach(function (row, r) { tab.rowOf.set(row.tr, r); });
-    var cols = data.columns.length;
-    if (tab.widths.length !== cols) tab.widths = data.columns.map(function (c, i) { return tab.widths[i] || defaultWidth(tab, i); });
+    tab.measured = new Map();
+    // Rows with a line break in a cell: as many lines tall as their longest
+    // (as Excel and Sheets do once a break is typed). Found once per read.
+    tab.lines = null;
+    tab.index.cols.forEach(function (col) {
+      if (col.type === 'tags' || col.type === 'checkbox') return;
+      for (var r = 0; r < col.text.length; r++) {
+        var t = col.text[r];
+        if (t.indexOf('\n') === -1) continue;
+        var n = t.split('\n').length;
+        if (!tab.lines) tab.lines = new Map();
+        if (n > (tab.lines.get(r) || 1)) tab.lines.set(r, n);
+      }
+    });
+    readLayout(tab);
     return tab;
+  }
+  // ---- layout: widths, heights, wrap, alignment ------------------------------
+  // The document's (data-width … on the markup) unless this reader set their
+  // own (tab.local, by column key and row id); a reader who may edit the doc
+  // has no own layout: what they change is the document's.
+  function emptyLocal() { return { w: {}, h: {}, wrap: {}, align: {} }; }
+  function colKey(tab, c) { return tab.data.columns[c].key || '#' + c; }
+  function useLocal() { return !config.canEditDoc; }
+  function readLayout(tab) {
+    var loc = useLocal() ? tab.local : emptyLocal();
+    tab.widths = tab.data.columns.map(function (col, c) {
+      var k = colKey(tab, c);
+      if (loc.w[k]) return loc.w[k];
+      if (col.width) return col.width;
+      return tab.defW[k] || (tab.defW[k] = defaultWidth(tab, c));
+    });
+    tab.wrap = tab.data.columns.map(function (col, c) { var k = colKey(tab, c); return k in loc.wrap ? !!loc.wrap[k] : col.wrap; });
+    tab.align = tab.data.columns.map(function (col, c) { var k = colKey(tab, c); return loc.align[k] || col.align || ''; });
+    tab.anyWrap = tab.wrap.some(Boolean);
+    var hs = null;
+    tab.data.rows.forEach(function (row, r) {
+      var v = (row.id && loc.h[row.id]) || row.height;
+      if (v) { if (!hs) hs = new Map(); hs.set(r, v); }
+    });
+    tab.heights = hs;
+  }
+  // A row's height: set by hand, else one line, else (a wrapped column) as
+  // tall as its longest wrapped cell: measured once drawn, estimated before.
+  var LINE_H = 18, PAD_Y = 14, CHAR_W = 7.1;
+  function rowHeight(tab, r) {
+    var set = tab.heights && tab.heights.get(r);
+    if (set) return set;
+    var lines = (tab.lines && tab.lines.get(r)) || 1;
+    if (!tab.anyWrap) return lines > 1 ? Math.min(M.MAX_HEIGHT, lines * LINE_H + PAD_Y) : ROW_H;
+    var m = tab.measured.get(r);
+    if (m) return m;
+    for (var c = 0; c < tab.wrap.length; c++) {
+      if (!tab.wrap[c]) continue;
+      var text = tab.index.cols[c].text[r];
+      if (!text) continue;
+      var room = Math.max(8, (tab.widths[c] - 18) / CHAR_W), n = 0, seg = text.split('\n');
+      for (var k = 0; k < seg.length; k++) n += Math.max(1, Math.ceil(seg[k].length / room));
+      if (n > lines) lines = n;
+    }
+    return Math.min(M.MAX_HEIGHT, Math.max(ROW_H, lines * LINE_H + PAD_Y));
+  }
+  // Row geometry in view order: tops[i] is row i's top, tops[n] the total.
+  // null while every row is ROW_H tall (most sheets): i * ROW_H then.
+  function buildTops(tab) {
+    var n = tab.order.length;
+    if (!tab.heights && !tab.anyWrap && !tab.lines) { tab.tops = null; return; }
+    var tops = new Float64Array(n + 1), y = 0;
+    for (var i = 0; i < n; i++) { tops[i] = y; y += rowHeight(tab, tab.order[i]); }
+    tops[n] = y;
+    tab.tops = tops;
+  }
+  function rowTop(tab, i) { return tab.tops ? tab.tops[i] : i * ROW_H; }
+  function rowH(tab, i) { return tab.tops ? tab.tops[i + 1] - tab.tops[i] : ROW_H; }
+  function rowsHeight(tab) { return tab.tops ? tab.tops[tab.order.length] : tab.order.length * ROW_H; }
+  // The row at y (in the body), by binary search over the tops.
+  function rowAtY(tab, y) {
+    var n = tab.order.length;
+    if (!tab.tops) return Math.max(0, Math.min(n - 1, Math.floor(y / ROW_H)));
+    var lo = 0, hi = n - 1;
+    while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (tab.tops[mid] <= y) lo = mid; else hi = mid - 1; }
+    return lo;
   }
   // A tab name is one line: line breaks and tabs read as a space.
   function cleanName(name) { return String(name || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 100); }
@@ -337,6 +450,17 @@
     var x = numW();
     for (var c = 0; c < tab.widths.length; c++) { tab.colLeft.push(x); x += tab.widths[c]; }
     tab.totalW = x;
+    buildTops(tab);
+  }
+  // Widths changed (a resize): the columns' lefts and, where a column
+  // wraps, the rows' heights follow.
+  function reflow(tab) {
+    tab.colLeft = [];
+    var x = numW();
+    for (var c = 0; c < tab.widths.length; c++) { tab.colLeft.push(x); x += tab.widths[c]; }
+    tab.totalW = x;
+    if (tab.anyWrap) tab.measured = new Map();
+    buildTops(tab);
   }
   function cur() { return book && book.tabs[book.active]; }
 
@@ -346,7 +470,7 @@
   // whether the doc is nothing but the sheet, and the doc path from the shell.
   var expand = { on: false, alone: 0, sheetOnly: false, path: '', scroll: null, inert: [] };
   var sel = { r: 0, c: 0, r2: 0, c2: 0 };
-  var config = { editing: false, received: false };
+  var config = { editing: false, canEditDoc: false, received: false };
   var undoStack = [], redoStack = [];
 
   function mount() {
@@ -425,7 +549,7 @@
     b.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); fn(); });
     return b;
   }
-  function canEdit() { return config.editing && mode() === 'edit' && !expand.alone; }
+  function canEdit() { return config.editing && mode() === 'edit'; }
 
   // ---- rendering -----------------------------------------------------------------
   function renderAll() {
@@ -496,7 +620,7 @@
     ui.xtitle.textContent = expand.alone ? docTitle() + ' · ' + tab.name : docTitle();
     if (expand.on) linkHrefs();
     ui.note.hidden = !(m2 === 'edit');
-    ui.note.textContent = canEdit() ? 'Type or double-click to edit · paste a range from Excel or Sheets' : m2 === 'edit' ? 'Editing sheets in the browser is not available yet' : '';
+    ui.note.textContent = canEdit() ? 'Type or double-click to edit · Alt+Enter for a new line · paste a range from Excel or Sheets' : m2 === 'edit' ? 'Editing sheets in the browser is not available yet' : '';
   }
   function describeFilter(tab, c, f) {
     var type = tab.index.cols[c].type;
@@ -514,12 +638,12 @@
   // short sheet reads like a table and a long one scrolls inside its frame.
   function layout() {
     var tab = cur();
-    var rowsH = Math.max(1, tab.order.length) * ROW_H;
+    var rowsH = Math.max(ROW_H, rowsHeight(tab));
     var room = Math.max(240, innerHeight - (NARROW && NARROW.matches ? 150 : 170));
     var hgt = Math.min(HEAD_H + rowsH + footH() + 2 + (tab.totalW > ui.grid.clientWidth ? 14 : 0), room);
     // Full screen, the grid takes whatever the window leaves it.
     ui.grid.style.height = expand.on ? '' : hgt + 'px';
-    ui.body.style.height = (tab.order.length ? tab.order.length * ROW_H : 80) + 'px';
+    ui.body.style.height = (tab.order.length ? rowsHeight(tab) : 80) + 'px';
     ui.body.style.width = tab.totalW + 'px';
     ui.head.style.width = (tab.totalW + (canEdit() ? 40 : 0)) + 'px';
   }
@@ -592,14 +716,14 @@
       ui.rows.style.top = '0px';
       ui.rows.innerHTML = '<div class="ts-empty" style="width:' + ui.grid.clientWidth + 'px">' + (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.') + '</div>';
       rendered.key = 'empty';
-      return;
+      return true;
     }
     var top = ui.grid.scrollTop, viewH = ui.grid.clientHeight - HEAD_H;
-    var first = Math.max(0, Math.floor(top / ROW_H) - OVERSCAN);
-    var last = Math.min(n - 1, Math.ceil((top + viewH) / ROW_H) + OVERSCAN);
+    var first = Math.max(0, rowAtY(tab, top) - OVERSCAN);
+    var last = Math.min(n - 1, rowAtY(tab, top + viewH) + OVERSCAN);
     var cols = tab.widths.length > 30 ? visibleCols(tab) : [0, tab.widths.length - 1];
-    var key = first + ':' + last + ':' + cols[0] + ':' + cols[1];
-    if (!force && key === rendered.key) return;
+    var key = first + ':' + last + ':' + cols[0] + ':' + cols[1] + ':' + (tab.tops ? tab.tops[n] : 0);
+    if (!force && key === rendered.key) return false;
     rendered.key = key;
     var W = numW(), needle = tab.query.search.trim().toLowerCase();
     var ra = Math.min(sel.r, sel.r2), rb = Math.max(sel.r, sel.r2), ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2);
@@ -611,7 +735,7 @@
     for (var i = first; i <= last; i++) {
       var r = tab.order[i];
       var rowSel = i >= ra && i <= rb;
-      html += '<div class="ts-row" role="row" data-i="' + i + '" style="width:' + tab.totalW + 'px"><div class="ts-n' + (rowSel ? ' is-sel' : '') + '" role="rowheader" style="width:' + W + 'px">' + (r + 1) + '</div>';
+      html += '<div class="ts-row" role="row" data-i="' + i + '" style="width:' + tab.totalW + 'px' + (tab.tops ? ';height:' + rowH(tab, i) + 'px' : '') + '"><div class="ts-n' + (rowSel ? ' is-sel' : '') + '" role="rowheader" style="width:' + W + 'px">' + (r + 1) + '<span class="ts-rresize" data-act="rresize" aria-hidden="true"></span></div>';
       for (var k = 0; k < list.length; k++) {
         var cc = list[k];
         if (k === 1 && list[0] === 0 && cols[0] > 1) html += '<div style="flex:none;width:' + (tab.colLeft[cols[0]] - tab.colLeft[1]) + 'px"></div>';
@@ -619,10 +743,38 @@
       }
       html += '</div>';
     }
-    ui.rows.style.top = (first * ROW_H) + 'px';
+    ui.rows.style.top = rowTop(tab, first) + 'px';
     ui.rows.innerHTML = html;
+    if (tab.anyWrap && measureRows(tab, first, last)) return true;
     placePill();
     placeOffscreen();
+    return true;
+  }
+  // Wrapped rows drawn: their real heights replace the estimates. true when
+  // one changed (the body is drawn again with the new tops).
+  function measureRows(tab, first, last) {
+    var changed = false, rows = ui.rows.children;
+    for (var k = 0; k < rows.length; k++) {
+      var el = rows[k], i = Number(el.getAttribute('data-i')), r = tab.order[i];
+      if (r == null || (tab.heights && tab.heights.get(r))) continue;
+      var ln = (tab.lines && tab.lines.get(r)) || 1;
+      var need = ln > 1 ? Math.min(M.MAX_HEIGHT, ln * LINE_H + PAD_Y) : ROW_H;
+      for (var c = el.firstChild; c; c = c.nextSibling) {
+        if (!c.classList || !c.classList.contains('is-wrap')) continue;
+        var kids = c.children, inner = 0;
+        for (var j = 0; j < kids.length; j++) inner = Math.max(inner, kids[j].offsetTop + kids[j].offsetHeight);
+        need = Math.max(need, Math.ceil(inner + 7 + 1));
+      }
+      if (Math.abs(need - rowH(tab, i)) > 1) { tab.measured.set(r, need); changed = true; }
+      else if (!tab.measured.has(r)) tab.measured.set(r, rowH(tab, i));
+    }
+    if (!changed) return false;
+    var keep = ui.grid.scrollTop;
+    buildTops(tab);
+    layout();
+    ui.grid.scrollTop = keep;
+    renderBody(true);
+    return true;
   }
   function tagStyle(tag, palette) {
     var colors = Q.TAG_COLORS[Q.tagColor(tag, palette)];
@@ -631,7 +783,11 @@
   function cellHtml(tab, r, c, i, isSel, isActive, needle, isHitOn) {
     var col = tab.index.cols[c], type = col.type, inner = '', cls = 'ts-c';
     if (c === 0) cls += ' is-first';
-    if (type === 'number') cls += ' is-num';
+    if (type === 'number' && !tab.align[c]) cls += ' is-num';
+    else if (type === 'number') cls += ' is-num-t';
+    if (tab.align[c]) cls += ' al-' + tab.align[c];
+    if (tab.wrap[c] && type !== 'checkbox') cls += ' is-wrap';
+    else if (type !== 'tags' && type !== 'checkbox' && col.text[r].indexOf('\n') !== -1) cls += ' is-ml';
     if (type === 'checkbox') cls += ' is-check';
     if (isSel) cls += ' is-sel';
     if (isActive) cls += ' is-active';
@@ -687,8 +843,16 @@
   function saveView() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
+      // A reader's own layout per tab (widths, heights, wrap, alignment by
+      // column key and row id), kept by the shell beside the view. Small:
+      // at most 400 row heights a tab.
       var widths = {};
-      book.tabs.forEach(function (t) { if (t.resized) widths[t.name] = t.widths; });
+      if (useLocal()) book.tabs.forEach(function (t) {
+        if (!t.resized) return;
+        var h = {}, n = 0;
+        Object.keys(t.local.h).forEach(function (id) { if (n < 400 && t.local.h[id]) { h[id] = t.local.h[id]; n++; } });
+        widths[t.name] = { w: t.local.w, h: h, wrap: t.local.wrap, align: t.local.align };
+      });
       post({ type: 'tdoc:sheetView', hash: Q.encodeView(viewObject()), widths: widths });
     }, 250);
   }
@@ -704,7 +868,18 @@
         t.query = q;
       }
       var w = widths && widths[t.name];
-      if (Array.isArray(w) && w.length === t.data.columns.length) { t.widths = w.map(function (x, i) { return Math.max(48, Math.min(1200, Number(x) || t.widths[i])); }); t.resized = true; }
+      var loc = emptyLocal();
+      var size = function (v, lo, hi) { return M.cleanSize(v, lo, hi) || undefined; };
+      // Before layouts had keys: a plain array of widths by position.
+      if (Array.isArray(w) && w.length === t.data.columns.length) w.forEach(function (x, i) { loc.w[colKey(t, i)] = size(x, M.MIN_WIDTH, M.MAX_WIDTH); });
+      else if (w && typeof w === 'object') {
+        var each = function (o, fn) { if (o && typeof o === 'object' && !Array.isArray(o)) Object.keys(o).slice(0, 2000).forEach(function (k) { fn(k, o[k]); }); };
+        each(w.w, function (k, v) { loc.w[k] = size(v, M.MIN_WIDTH, M.MAX_WIDTH); });
+        each(w.h, function (k, v) { var x = size(v, M.MIN_HEIGHT, M.MAX_HEIGHT); if (x) loc.h[k] = x; });
+        each(w.wrap, function (k, v) { if (typeof v === 'boolean') loc.wrap[k] = v; });
+        each(w.align, function (k, v) { if (M.cleanAlign(v)) loc.align[k] = M.cleanAlign(v); });
+      }
+      if (w) { t.local = loc; t.resized = true; readLayout(t); }
     });
     var at = book.tabs.findIndex(function (t) { return t.name === view.active; });
     if (at >= 0) book.active = at;
@@ -726,15 +901,38 @@
   // ---- selection & scrolling -------------------------------------------------------
   function ensureVisible(i, c) {
     var tab = cur(), g = ui.grid;
-    var top = i * ROW_H, viewH = g.clientHeight - HEAD_H - footH();
+    var top = rowTop(tab, i), hgt = rowH(tab, i), viewH = g.clientHeight - HEAD_H - footH();
     if (top < g.scrollTop) g.scrollTop = top;
-    else if (top + ROW_H > g.scrollTop + viewH) g.scrollTop = top + ROW_H - viewH;
+    else if (top + hgt > g.scrollTop + viewH) g.scrollTop = Math.min(top, top + hgt - viewH);
     if (c > 0) {
       var left = tab.colLeft[c] - tab.colLeft[0] - tab.widths[0], right = tab.colLeft[c] + tab.widths[c];
       if (left < g.scrollLeft) g.scrollLeft = left;
       else if (right > g.scrollLeft + g.clientWidth) g.scrollLeft = right - g.clientWidth;
     }
-    renderBody(true);
+    if (!renderBody()) paintSelection();
+  }
+  // The selection drawn on the rows already there. Redrawing the rows under
+  // a press would take the pressed cell out of the page, and the browser
+  // then sends no click and no double-click.
+  function paintSelection() {
+    var tab = cur();
+    if (!tab.order.length) return;
+    var ra = Math.min(sel.r, sel.r2), rb = Math.max(sel.r, sel.r2), ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2);
+    var rows = ui.rows.children;
+    for (var k = 0; k < rows.length; k++) {
+      var row = rows[k], i = Number(row.getAttribute('data-i'));
+      if (!row.classList.contains('ts-row')) continue;
+      var rowSel = i >= ra && i <= rb;
+      for (var el = row.firstElementChild; el; el = el.nextElementSibling) {
+        if (el.classList.contains('ts-n')) { el.classList.toggle('is-sel', rowSel); continue; }
+        if (!el.classList.contains('ts-c')) continue;
+        var c = Number(el.getAttribute('data-c')), active = i === sel.r && c === sel.c;
+        el.classList.toggle('is-sel', rowSel && c >= ca && c <= cb);
+        el.classList.toggle('is-active', active);
+        if (active) el.setAttribute('aria-selected', 'true'); else el.removeAttribute('aria-selected');
+      }
+    }
+    placePill();
   }
   function select(i, c, extend) {
     var tab = cur(), n = tab.order.length, cols = tab.widths.length;
@@ -820,8 +1018,8 @@
   };
   // -1 above the grid's visible rows, 1 below, 0 in view.
   function rowPlace(i) {
-    var top = i * ROW_H, view = ui.grid.clientHeight - HEAD_H - footH();
-    if (top + ROW_H <= ui.grid.scrollTop + 2) return -1;
+    var tab = cur(), top = rowTop(tab, i), view = ui.grid.clientHeight - HEAD_H - footH();
+    if (top + rowH(tab, i) <= ui.grid.scrollTop + 2) return -1;
     if (top >= ui.grid.scrollTop + view - 2) return 1;
     return 0;
   }
@@ -858,6 +1056,12 @@
     var tr = null, rows = table.querySelectorAll('tr[data-row]');
     for (var n = 0; n < rows.length; n++) if (rows[n].getAttribute('data-row') === String(a.row)) { tr = rows[n]; break; }
     return tr ? tr.cells[c] || null : null;
+  };
+  // Full screen, the sheet spans the frame: its right edge is the column the
+  // page's pins sit beside.
+  hooks.articleRight = function () {
+    if (!book || !expand.on || !ui.grid) return 0;
+    return Math.round(ui.grid.getBoundingClientRect().right);
   };
   // Bring a source element into view: its tab, its row, its cell selected.
   hooks.reveal = function (el) {
@@ -1054,6 +1258,18 @@
       { label: 'Filter…', onSelect: function () { openFilter(c, anchor); } },
       { header: 'Summary row' },
     ].concat(totalItems(c));
+    // Wrap and alignment: anyone (a reader's own view; an editor's document).
+    var wrapped = !!tab.wrap[c], al = tab.align[c] || (type === 'number' ? 'right' : type === 'checkbox' ? 'center' : 'left');
+    if (type !== 'checkbox') {
+      items.push({ header: 'Text' });
+      items.push({ label: 'Wrap text', checked: wrapped, onSelect: function () { if (!wrapped) setLayout(tab, { cols: colChange(c, { wrap: true }) }); } });
+      items.push({ label: 'Clip', checked: !wrapped, onSelect: function () { if (wrapped) setLayout(tab, { cols: colChange(c, { wrap: false }) }); } });
+    }
+    items.push({ header: 'Align' });
+    [['left', 'Left'], ['center', 'Center'], ['right', 'Right']].forEach(function (o) {
+      items.push({ label: o[1], checked: al === o[0], onSelect: function () { if (al !== o[0]) setLayout(tab, { cols: colChange(c, { align: o[0] }) }); } });
+    });
+    items.push({ label: 'Fit width to content', onSelect: function () { setLayout(tab, { cols: colChange(c, { width: fitWidth(tab, c) }) }); } });
     if (mode() === 'comment') items.push({ label: 'Comment on this column', onSelect: function () { commentOn(col.th, anchor.getBoundingClientRect(), 'Column ' + Q.columnLetter(c) + ' · ' + col.name); } });
     if (canEdit()) {
       items.push('sep');
@@ -1088,6 +1304,96 @@
     ], 'Tab menu');
   }
 
+  // ---- layout changes -------------------------------------------------------------------
+  // change = { cols: { c: { width?, wrap?, align? } }, rows: { r: height } }
+  // (a height of 0 is "fit": back to the row's own height).
+  function colChange(c, v) { var o = {}; o[c] = v; return o; }
+  // A reader's: their view only. An editor's: the document's, in Edit mode
+  // (asked for when they are in another; the change lands once it is on, so
+  // the editor's baseline is the page before it and Save is offered).
+  var pendingLayout = null;
+  function setLayout(tab, change) {
+    if (!config.canEditDoc) {
+      var loc = tab.local;
+      Object.keys(change.cols || {}).forEach(function (c) {
+        var k = colKey(tab, Number(c)), v = change.cols[c];
+        if (v.width !== undefined) loc.w[k] = M.cleanSize(v.width, M.MIN_WIDTH, M.MAX_WIDTH) || undefined;
+        if (v.wrap !== undefined) loc.wrap[k] = !!v.wrap;
+        if (v.align !== undefined) loc.align[k] = M.cleanAlign(v.align) || undefined;
+      });
+      Object.keys(change.rows || {}).forEach(function (r) {
+        var id = tab.data.rows[r] && tab.data.rows[r].id;
+        if (!id) return;
+        var hgt = M.cleanSize(change.rows[r], M.MIN_HEIGHT, M.MAX_HEIGHT);
+        if (hgt) loc.h[id] = hgt; else delete loc.h[id];
+      });
+      tab.resized = true;
+      relayoutTab(tab);
+      saveView();
+      return;
+    }
+    if (mode() !== 'edit') {
+      pendingLayout = { tab: tab, change: change };
+      post({ type: 'tdoc:requestMode', mode: 'edit' });
+      return;
+    }
+    applyLayout(tab, change);
+  }
+  function relayoutTab(tab) {
+    readLayout(tab);
+    if (tab === cur()) { tab.measured = new Map(); runTab(tab); layout(); renderHead(); renderBody(true); relayout(); }
+  }
+  var LAYOUT_ATTRS = ['data-width', 'data-wrap', 'data-align', 'data-height'];
+  function attrsOf(el) { var o = {}; LAYOUT_ATTRS.forEach(function (a) { o[a] = el.getAttribute(a); }); return o; }
+  function putAttrs(el, o) { LAYOUT_ATTRS.forEach(function (a) { if (o[a] == null) el.removeAttribute(a); else el.setAttribute(a, o[a]); }); }
+  function applyLayout(tab, change) {
+    var list = [];
+    Object.keys(change.cols || {}).forEach(function (c) {
+      var col = tab.data.columns[c];
+      if (!col) return;
+      var before = attrsOf(col.th);
+      M.writeColumnLayout(col.th, change.cols[c]);
+      list.push({ el: col.th, before: before, after: attrsOf(col.th) });
+    });
+    Object.keys(change.rows || {}).forEach(function (r) {
+      var row = tab.data.rows[r];
+      if (!row) return;
+      var before = attrsOf(row.tr);
+      M.writeRowHeight(row.tr, change.rows[r]);
+      list.push({ el: row.tr, before: before, after: attrsOf(row.tr) });
+    });
+    if (!list.some(function (x) { return JSON.stringify(x.before) !== JSON.stringify(x.after); })) { relayoutTab(tab); return; }
+    record({ tab: tab, undo: function () { list.forEach(function (x) { putAttrs(x.el, x.before); }); }, redo: function () { list.forEach(function (x) { putAttrs(x.el, x.after); }); } });
+    afterChange(tab, tab.order[sel.r]);
+  }
+  // The width that shows a column's longest value (and its header) whole,
+  // measured with the grid's own font over up to 5,000 rows.
+  var measureCtx = null;
+  function textW(text, bold) {
+    if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+    measureCtx.font = (bold ? '600 ' : '') + '13px system-ui,-apple-system,"Segoe UI",sans-serif';
+    return measureCtx.measureText(text).width;
+  }
+  function fitWidth(tab, c) {
+    var col = tab.index.cols[c], type = col.type;
+    var w = textW(tab.data.columns[c].name, true) + 96;
+    var n = Math.min(tab.index.size, 5000);
+    for (var r = 0; r < n; r++) {
+      if (type === 'tags') {
+        var t = col.tags[r], x = 16;
+        for (var k = 0; k < t.length; k++) x += Math.min(160, textW(t[k]) + 16) + 4;
+        if (x > w) w = x;
+      } else if (type === 'checkbox') { w = Math.max(w, 72); }
+      else {
+        var text = col.text[r];
+        if (!text || text.length * 14 < w) continue;
+        var lines = text.split('\n');
+        for (var j = 0; j < lines.length; j++) w = Math.max(w, textW(lines[j]) + 20);
+      }
+    }
+    return Math.round(Math.max(M.MIN_WIDTH, Math.min(800, w)));
+  }
+
   // ---- editing ------------------------------------------------------------------------
   // Every change lands in the author's table, then the editor's own draft
   // and dirty state are told, exactly as typing in the page would.
@@ -1097,7 +1403,19 @@
   function relayout() {
     document.dispatchEvent(new CustomEvent('tdoc:relayout'));
   }
+  // Undo / Redo on the editor's bar: the sheet's when its edit was the last
+  // one in the page (frame-probe.js asks before the browser's own).
+  var lastEditSheet = false;
+  document.addEventListener('tdoc:edit-history', function (e) {
+    if (!book || !canEdit() || !lastEditSheet) return;
+    var redo = e.detail && e.detail.command === 'redo';
+    if (!(redo ? redoStack : undoStack).length) return;
+    e.preventDefault();
+    undo(redo);
+  });
+  document.addEventListener('input', function (e) { if (!(ui.root && ui.root.contains(e.target))) lastEditSheet = false; }, true);
   function record(op) {
+    lastEditSheet = true;
     undoStack.push(op);
     if (undoStack.length > 200) undoStack.shift();
     redoStack = [];
@@ -1175,8 +1493,11 @@
     if (!cell) return;
     if (type === 'checkbox') { setCells(tab, [{ r: r, c: c, value: tab.index.cols[c].num[r] === 1 ? '' : Q.CHECK_MARK }], r); return; }
     if (type === 'tags') { openTagPicker(tab, r, c, cell, initial); return; }
-    var input = provider(h('input', 'ts-editor'));
-    input.type = 'text';
+    // A text box that holds line breaks: Alt/Option+Enter or Ctrl+Enter puts
+    // one in, Enter commits (as in Excel and Google Sheets).
+    var multi = type === 'text';
+    var input = provider(h(multi ? 'textarea' : 'input', 'ts-editor'));
+    if (multi) input.rows = 1; else input.type = 'text';
     input.setAttribute('aria-label', 'Edit ' + refLabel(tab, r, c));
     input.spellcheck = type === 'text';
     if (type === 'date') input.placeholder = 'YYYY-MM-DD';
@@ -1189,12 +1510,22 @@
     input.style.height = (cr.height + 2) + 'px';
     input.value = initial != null ? initial : tab.index.cols[c].text[r];
     ui.grid.appendChild(input);
+    var minH = cr.height + 2;
+    var grow = function () { if (!multi) return; input.style.height = minH + 'px'; input.style.height = Math.min(320, Math.max(minH, input.scrollHeight + 4)) + 'px'; };
+    grow();
+    input.addEventListener('input', grow);
     editor = { input: input, tab: tab, r: r, c: c, i: i };
     input.focus({ preventScroll: true });
     if (initial == null) input.select(); else input.setSelectionRange(input.value.length, input.value.length);
     input.addEventListener('keydown', function (e) {
       e.stopPropagation();
-      if (e.key === 'Enter') { e.preventDefault(); commitEdit(); move(e.shiftKey ? -1 : 1, 0); }
+      if (e.key === 'Enter' && multi && (e.altKey || e.ctrlKey || e.metaKey) && !e.shiftKey) {
+        e.preventDefault();
+        var a = input.selectionStart, b = input.selectionEnd;
+        input.setRangeText('\n', a, b, 'end');
+        grow();
+      }
+      else if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); commitEdit(); move(e.shiftKey ? -1 : 1, 0); }
       else if (e.key === 'Tab') { e.preventDefault(); commitEdit(); move(0, e.shiftKey ? -1 : 1); }
       else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
     });
@@ -1482,7 +1813,11 @@
   // It fills from the active cell, adding rows and columns it needs.
   function pasteText(text) {
     if (!canEdit()) return;
-    var grid = M.parseDelimited(String(text).replace(/\r?\n$/, ''), text.indexOf('\t') !== -1 ? '\t' : M.detectDelimiter(text));
+    // Excel and Google Sheets copy tab-separated, a cell with line breaks
+    // in quotes ("one\ntwo"): one quoted value is one cell, breaks kept.
+    var body = String(text).replace(/\r?\n$/, '');
+    var oneQuoted = /^"(?:[^"]|"")*"$/.test(body);
+    var grid = M.parseDelimited(body, body.indexOf('\t') !== -1 || oneQuoted ? '\t' : M.detectDelimiter(body));
     if (!grid.length) return;
     var tab = cur(), i0 = sel.r, c0 = sel.c;
     var single = grid.length === 1 && grid[0].length === 1;
@@ -1563,13 +1898,18 @@
   function onKey(e) {
     if (!book || editor || (pop && pop.el.contains(e.target))) return;
     var tab = cur(), k = e.key, mod = e.metaKey || e.ctrlKey;
-    var page = Math.max(1, Math.floor((ui.grid.clientHeight - HEAD_H) / ROW_H) - 1);
+    var page = Math.max(1, rowAtY(tab, ui.grid.scrollTop + ui.grid.clientHeight - HEAD_H) - rowAtY(tab, ui.grid.scrollTop) - 1);
     var last = tab.order.length - 1, lastC = tab.widths.length - 1;
     var handled = true;
-    if (k === 'ArrowDown') { if (mod) select(e.shiftKey ? last : last, e.shiftKey ? sel.c2 : sel.c, e.shiftKey); else move(1, 0, e.shiftKey); }
-    else if (k === 'ArrowUp') { if (mod) select(0, e.shiftKey ? sel.c2 : sel.c, e.shiftKey); else move(-1, 0, e.shiftKey); }
-    else if (k === 'ArrowRight') { if (mod) select(e.shiftKey ? sel.r2 : sel.r, lastC, e.shiftKey); else move(0, 1, e.shiftKey); }
-    else if (k === 'ArrowLeft') { if (mod) select(e.shiftKey ? sel.r2 : sel.r, 0, e.shiftKey); else move(0, -1, e.shiftKey); }
+    // ⌘/Ctrl+arrow: to the edge of the data, as in a spreadsheet.
+    if (k === 'ArrowDown') { if (mod) jump(1, 0, e.shiftKey); else move(1, 0, e.shiftKey); }
+    else if (k === 'ArrowUp') { if (mod) jump(-1, 0, e.shiftKey); else move(-1, 0, e.shiftKey); }
+    else if (k === 'ArrowRight') { if (mod) jump(0, 1, e.shiftKey); else move(0, 1, e.shiftKey); }
+    else if (k === 'ArrowLeft') { if (mod) jump(0, -1, e.shiftKey); else move(0, -1, e.shiftKey); }
+    // Shift+Space the row, Ctrl+Space the column.
+    else if (k === ' ' && e.shiftKey && !mod) { selectRows(sel.r, sel.r2); }
+    else if (k === ' ' && e.ctrlKey && !e.shiftKey) { selectColumns(sel.c, sel.c2); }
+    else if (mod && !e.shiftKey && !e.altKey && (k.toLowerCase() === 'd' || k.toLowerCase() === 'r') && canEdit()) fill(k.toLowerCase() === 'd' ? 'down' : 'right');
     else if (k === 'Tab') { move(0, e.shiftKey ? -1 : 1); }
     else if (k === 'Home') { if (mod) select(0, 0, e.shiftKey); else select(e.shiftKey ? sel.r2 : sel.r, 0, e.shiftKey); }
     else if (k === 'End') { if (mod) select(last, lastC, e.shiftKey); else select(e.shiftKey ? sel.r2 : sel.r, lastC, e.shiftKey); }
@@ -1590,15 +1930,63 @@
     else handled = false;
     if (handled) { e.preventDefault(); e.stopPropagation(); }
   }
+  // ⌘/Ctrl+arrow: from a filled cell to the last filled one before a blank
+  // (or past blanks to the next filled one), else to the sheet's edge.
+  function jump(dr, dc, extend) {
+    var tab = cur(), i = extend ? sel.r2 : sel.r, c = extend ? sel.c2 : sel.c;
+    var n = tab.order.length, cols = tab.widths.length;
+    var filled = function (ii, cc) { return ii >= 0 && ii < n && cc >= 0 && cc < cols && tab.index.cols[cc].text[tab.order[ii]] !== ''; };
+    var ni = i + dr, nc = c + dc;
+    if (filled(i, c) && filled(ni, nc)) { while (filled(ni + dr, nc + dc)) { ni += dr; nc += dc; } }
+    else { while (ni >= 0 && ni < n && nc >= 0 && nc < cols && !filled(ni, nc)) { ni += dr; nc += dc; } }
+    ni = Math.max(0, Math.min(n - 1, ni)); nc = Math.max(0, Math.min(cols - 1, nc));
+    select(ni, nc, extend);
+  }
+  function selectRows(a, b) {
+    var tab = cur();
+    sel.r = Math.min(a, b); sel.r2 = Math.max(a, b); sel.c = 0; sel.c2 = tab.widths.length - 1; sel.touched = true;
+    renderHead(); renderBody(true);
+  }
+  function selectColumns(a, b) {
+    var tab = cur();
+    sel.c = Math.min(a, b); sel.c2 = Math.max(a, b); sel.r = 0; sel.r2 = Math.max(0, tab.order.length - 1); sel.touched = true;
+    renderHead(); renderBody(true);
+  }
+  // ⌘/Ctrl+D fills the selection's first row down it, ⌘/Ctrl+R its first
+  // column right; with one cell selected, from the cell above / to the left.
+  function fill(dir) {
+    var tab = cur(), ra = Math.min(sel.r, sel.r2), rb = Math.max(sel.r, sel.r2), ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2);
+    var single = ra === rb && ca === cb;
+    if (dir === 'down' && single) { if (ra === 0) return; ra -= 1; }
+    if (dir === 'right' && single) { if (ca === 0) return; ca -= 1; }
+    var list = [];
+    for (var i = ra; i <= rb; i++) for (var c = ca; c <= cb; c++) {
+      if (dir === 'down' && i === ra) continue;
+      if (dir === 'right' && c === ca) continue;
+      var from = dir === 'down' ? { i: ra, c: c } : { i: i, c: ca };
+      var r = tab.order[i], fr = tab.order[from.i], type = tab.index.cols[c].type, ftype = tab.index.cols[from.c].type;
+      var value = ftype === 'tags' ? tab.index.cols[from.c].tags[fr].slice() : tab.index.cols[from.c].text[fr];
+      if (type === 'tags' && !Array.isArray(value)) value = Q.splitTags(value);
+      if (type !== 'tags' && Array.isArray(value)) value = value.join(', ');
+      list.push({ r: r, c: c, value: value });
+    }
+    if (list.length) setCells(tab, list, tab.order[sel.r]);
+  }
   function cellFromEvent(e) {
     var cell = e.target.closest && e.target.closest('.ts-c,.ts-n');
+    // A click or double-click whose press redrew the rows lands on the rows'
+    // container: the cell is the one under the pointer.
+    if ((!cell || !cell.isConnected) && e.clientX != null) {
+      var under = document.elementFromPoint(e.clientX, e.clientY);
+      cell = under && under.closest && under.closest('.ts-c,.ts-n');
+    }
     if (!cell || !ui.rows.contains(cell)) return null;
     var row = cell.parentElement;
     var i = Number(row.getAttribute('data-i'));
     var c = cell.classList.contains('ts-n') ? -1 : Number(cell.getAttribute('data-c'));
     return { i: i, c: c, el: cell };
   }
-  var drag = null;
+  var drag = null, cellPress = null, rowPress = -1;
   function wire() {
     ui.grid.addEventListener('keydown', onKey);
     ['input', 'beforeinput', 'keyup'].forEach(function (t) { ui.root.addEventListener(t, function (e) { e.stopPropagation(); }); });
@@ -1637,30 +2025,72 @@
       var h = b.closest('.ts-h'), c = h ? Number(h.getAttribute('data-c')) : -1, act = b.getAttribute('data-act');
       if (act === 'sort') {
         if (mode() === 'comment' && e.altKey) { commentOn(cur().data.columns[c].th, b.getBoundingClientRect(), 'Column ' + cur().data.columns[c].name); return; }
+        // In Edit mode a header selects its column (shift: through it), as
+        // in a spreadsheet; sorting is in the column's menu. Elsewhere a
+        // header sorts.
+        if (canEdit()) { selectColumns(e.shiftKey ? sel.c : c, c); ui.grid.focus({ preventScroll: true }); return; }
         setQuery(Q.toggleSort(cur().query, c, e.shiftKey));
       } else if (act === 'filter') openFilter(c, b);
       else if (act === 'menu') columnMenu(c, b);
       else if (act === 'addcol') insertColumn(cur().widths.length);
     });
-    // Column resize: drag the right edge of a header.
+    // Column resize: drag the right edge of a header (the frozen first
+    // column's too); a double-click there fits the column to its content.
+    // The drag is followed on the document, not the grip: the header is
+    // drawn again as the width changes, and the grip with it.
     ui.head.addEventListener('pointerdown', function (e) {
       var grip = e.target.closest('.ts-resize');
-      if (!grip) return;
+      if (!grip || e.button > 0) return;
       e.preventDefault(); e.stopPropagation();
       var c = Number(grip.parentElement.getAttribute('data-c')), tab = cur(), x0 = e.clientX, w0 = tab.widths[c];
-      grip.classList.add('is-on');
-      grip.setPointerCapture(e.pointerId);
-      var onMove = function (ev) { tab.widths[c] = Math.max(48, Math.min(1200, w0 + ev.clientX - x0)); runTab(tab); layout(); renderHead(); renderBody(true); var g2 = ui.head.querySelector('.ts-h[data-c="' + c + '"] .ts-resize'); if (g2) g2.classList.add('is-on'); };
-      var onUp = function () { grip.removeEventListener('pointermove', onMove); tab.resized = true; saveView(); var g2 = ui.head.querySelector('.ts-resize.is-on'); if (g2) g2.classList.remove('is-on'); };
-      grip.addEventListener('pointermove', onMove);
-      grip.addEventListener('pointerup', onUp, { once: true });
-      grip.addEventListener('pointercancel', onUp, { once: true });
+      startSizing(ui.head, e, function (ev) {
+        var w = Math.max(M.MIN_WIDTH, Math.min(M.MAX_WIDTH, Math.round(w0 + ev.clientX - x0)));
+        if (w === tab.widths[c]) return;
+        tab.widths[c] = w; reflow(tab); layout(); widthLive(tab, c);
+      }, function () {
+        if (tab.widths[c] !== w0) setLayout(tab, { cols: colChange(c, { width: tab.widths[c] }) });
+      });
+      var g1 = ui.head.querySelector('.ts-h[data-c="' + c + '"] .ts-resize'); if (g1) g1.classList.add('is-on');
     });
     ui.head.addEventListener('dblclick', function (e) {
       var h = e.target.closest('.ts-h');
-      if (!h || e.target.closest('.ts-resize') || !canEdit()) return;
-      renameColumn(Number(h.getAttribute('data-c')));
+      if (!h) return;
+      var c = Number(h.getAttribute('data-c'));
+      if (e.target.closest('.ts-resize')) { e.preventDefault(); e.stopPropagation(); setLayout(cur(), { cols: colChange(c, { width: fitWidth(cur(), c) }) }); return; }
+      if (!canEdit()) return;
+      renameColumn(c);
     });
+    // Row resize: drag the bottom edge of a row number (every selected row
+    // when the row is one of them); a double-click there fits the row again.
+    ui.rows.addEventListener('pointerdown', function (e) {
+      var grip = e.target.closest('.ts-rresize');
+      if (!grip || e.button > 0) return;
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      var tab = cur(), i = Number(grip.closest('.ts-row').getAttribute('data-i')), y0 = e.clientY, h0 = rowH(tab, i);
+      var ra = Math.min(sel.r, sel.r2), rb = Math.max(sel.r, sel.r2);
+      var whole = sel.c === 0 && Math.max(sel.c, sel.c2) === tab.widths.length - 1 || Math.min(sel.c, sel.c2) === 0 && Math.max(sel.c, sel.c2) === tab.widths.length - 1;
+      var list = [];
+      if (whole && i >= ra && i <= rb && rb > ra) for (var k = ra; k <= rb; k++) list.push(tab.order[k]); else list.push(tab.order[i]);
+      var hgt = h0;
+      startSizing(ui.rows, e, function (ev) {
+        hgt = Math.max(M.MIN_HEIGHT, Math.min(M.MAX_HEIGHT, Math.round(h0 + ev.clientY - y0)));
+        if (!tab.heights) tab.heights = new Map();
+        list.forEach(function (r) { tab.heights.set(r, hgt); });
+        buildTops(tab); layout(); heightLive(tab, list);
+      }, function () {
+        if (hgt === h0) return;
+        var rows = {}; list.forEach(function (r) { rows[r] = hgt; });
+        setLayout(tab, { rows: rows });
+      });
+    }, true);
+    ui.rows.addEventListener('dblclick', function (e) {
+      var grip = e.target.closest('.ts-rresize');
+      if (!grip) return;
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      var tab = cur(), r = tab.order[Number(grip.closest('.ts-row').getAttribute('data-i'))];
+      var rows = {}; rows[r] = 0;
+      setLayout(tab, { rows: rows });
+    }, true);
     ui.rows.addEventListener('pointerdown', function (e) {
       if (e.button !== 0) return;
       var at = cellFromEvent(e);
@@ -1669,10 +2099,13 @@
       if (e.target.closest('.tdoc-comment-pill')) return;
       if (editor) commitEdit();
       if (at.c < 0) {
-        // The row number selects the whole row.
-        if (e.shiftKey) { sel.r2 = at.i; } else { sel.r = sel.r2 = at.i; }
-        sel.c = 0; sel.c2 = cur().widths.length - 1;
-        renderHead(); renderBody(true);
+        // The row number selects the whole row; pressed again (a selected
+        // row), in Edit mode it opens the row's menu.
+        var rowWas = sel.c === 0 && sel.c2 === cur().widths.length - 1 && at.i >= Math.min(sel.r, sel.r2) && at.i <= Math.max(sel.r, sel.r2);
+        if (e.shiftKey) { sel.r2 = at.i; } else if (!rowWas) { sel.r = sel.r2 = at.i; }
+        sel.c = 0; sel.c2 = cur().widths.length - 1; sel.touched = true;
+        rowPress = rowWas && !e.shiftKey ? at.i : -1;
+        renderHead(); paintSelection();
         ui.grid.focus({ preventScroll: true });
         return;
       }
@@ -1688,6 +2121,7 @@
       }
       var wasActive = sel.r === at.i && sel.c === at.c && sel.r === sel.r2 && sel.c === sel.c2;
       select(at.i, at.c, e.shiftKey);
+      cellPress = e.shiftKey ? null : { i: at.i, c: at.c };
       ui.grid.focus({ preventScroll: true });
       if (e.pointerType === 'mouse') drag = { i: at.i, c: at.c };
       // In Edit mode a click on a checkbox toggles it, a second click on a
@@ -1710,6 +2144,23 @@
       if (at && at.c >= 0 && (at.i !== sel.r2 || at.c !== sel.c2)) select(at.i, at.c, true);
     });
     document.addEventListener('pointerup', function () { drag = null; });
+    // Comment mode: a click (a tap) on a cell comments on it, or opens its
+    // thread. On the click, the last event of a press, and after the page's
+    // own click handling (which closes what was open), so the composer this
+    // opens is not closed by the same press.
+    ui.rows.addEventListener('click', function (e) {
+      var press = cellPress; cellPress = null;
+      if (!press || mode() !== 'comment' || e.button > 0) return;
+      var at = cellFromEvent(e);
+      if (!at || at.i !== press.i || at.c !== press.c || sel.r !== sel.r2 || sel.c !== sel.c2) return;
+      if (e.target.closest('a[href],.tdoc-comment-pill')) return;
+      setTimeout(function () {
+        if (mode() !== 'comment' || sel.r !== at.i || sel.c !== at.c) return;
+        var td = srcCell(cur(), at.i, at.c);
+        if (td && commented.has(td)) { post({ type: 'tdoc:anchorClick', id: commented.get(td)[0] }); return; }
+        commentOnCell();
+      }, 0);
+    });
     ui.rows.addEventListener('dblclick', function (e) {
       var at = cellFromEvent(e);
       if (!at || at.c < 0) return;
@@ -1723,7 +2174,8 @@
     });
     ui.rows.addEventListener('click', function (e) {
       var at = cellFromEvent(e);
-      if (at && at.c < 0 && canEdit()) rowMenu(at.i, at.el);
+      var again = rowPress; rowPress = -1;
+      if (at && at.c < 0 && canEdit() && again === at.i) rowMenu(at.i, at.el);
     });
     ui.grid.addEventListener('copy', function (e) {
       if (editor || !book) return;
@@ -1743,14 +2195,62 @@
     });
   }
   var scrollSettle = null;
+  // While a drag lasts, the cells already drawn take the new size in place:
+  // drawing them again would take the grip being dragged out of the page,
+  // and a finger's drag (its pointer captured by the grip) with it.
+  function widthLive(tab, c) {
+    var w = tab.widths[c] + 'px', total = tab.totalW + 'px';
+    var hc = ui.head.querySelector('.ts-h[data-c="' + c + '"]'); if (hc) hc.style.width = w;
+    var fc = ui.foot.querySelector('.ts-fc[data-c="' + c + '"]'); if (fc) fc.style.width = w;
+    ui.foot.style.width = (tab.totalW + (canEdit() ? 40 : 0)) + 'px';
+    var rows = ui.rows.children;
+    for (var k = 0; k < rows.length; k++) {
+      if (!rows[k].classList.contains('ts-row')) continue;
+      rows[k].style.width = total;
+      var cell = rows[k].querySelector('.ts-c[data-c="' + c + '"]'); if (cell) cell.style.width = w;
+    }
+  }
+  function heightLive(tab, list) {
+    var rows = ui.rows.children;
+    for (var k = 0; k < rows.length; k++) {
+      var i = Number(rows[k].getAttribute('data-i'));
+      if (list.indexOf(tab.order[i]) !== -1) rows[k].style.height = rowH(tab, i) + 'px';
+    }
+  }
+  // One drag (a column's width, a row's height), followed on the document
+  // so it keeps going wherever the pointer goes and whatever is redrawn.
+  function startSizing(surface, e, onMove, onDone) {
+    var frame = 0, last = null;
+    surface.classList.add('is-sizing'); ui.root.classList.add('is-sizing');
+    var move = function (ev) {
+      if (ev.pointerId !== e.pointerId) return;
+      ev.preventDefault();
+      last = ev;
+      if (!frame) frame = requestAnimationFrame(function () { frame = 0; if (last) onMove(last); });
+    };
+    var up = function (ev) {
+      if (ev.pointerId !== e.pointerId) return;
+      document.removeEventListener('pointermove', move, true);
+      document.removeEventListener('pointerup', up, true);
+      document.removeEventListener('pointercancel', up, true);
+      if (frame) { cancelAnimationFrame(frame); frame = 0; }
+      if (last) onMove(last);
+      surface.classList.remove('is-sizing'); ui.root.classList.remove('is-sizing');
+      Array.prototype.forEach.call(ui.root.querySelectorAll('.is-on'), function (x) { if (x.classList.contains('ts-resize') || x.classList.contains('ts-rresize')) x.classList.remove('is-on'); });
+      onDone();
+    };
+    document.addEventListener('pointermove', move, true);
+    document.addEventListener('pointerup', up, true);
+    document.addEventListener('pointercancel', up, true);
+  }
 
   // ---- full screen ----------------------------------------------------------------------
   // The grid itself goes full screen (never a copy), so search, filters,
   // sort, selection, scroll and cell comments are the same before and after.
-  // The shell is told through the slides presenter's bridge: tdoc:visualState
-  // makes the frame fill the window, tdoc:presentState keeps the composer and
-  // comment cards above it. Not in Edit mode, where Save lives in the shell.
-  function canExpand() { return mode() !== 'edit' || !!expand.alone; }
+  // Full screen is the doc frame's whole area: the page's top bar (title,
+  // history, Ask AI, Comment, Share, ⋯ with Read / Comment / Edit) and, in
+  // Edit mode, the editor's bar with Save stay above it, as on every doc.
+  function canExpand() { return true; }
   function docTitle() {
     var h1 = document.querySelector('h1:not([data-tdoc-provider] h1)');
     return cleanName((h1 && h1.textContent) || document.title || 'Sheet');
@@ -1801,8 +2301,6 @@
       expand.inert.forEach(function (n) { n.removeAttribute('inert'); });
       expand.inert = [];
     }
-    post({ type: 'tdoc:visualState', open: on });
-    post({ type: 'tdoc:presentState', open: on });
     if (!quiet && !expand.alone) post({ type: 'tdoc:sheetExpand', open: on });
     renderTabs(); renderBar(); layout(); renderHead(); renderBody(true);
     // The frame changes size with the shell's next layout: fit again then.
@@ -1833,10 +2331,21 @@
     if (d.type === 'tdoc:mode') {
       if (editor) commitEdit();
       closePop(true);
-      if (expand.on && !canExpand()) setExpanded(false);
+      // A layout change that asked for Edit mode lands now (the editor took
+      // its baseline from the page before it), or is let go.
+      // After this message's other listeners: the editor (frame-probe.js)
+      // turns Edit mode on, and takes its baseline, in its own.
+      var pending = pendingLayout; pendingLayout = null;
+      if (pending) setTimeout(function () {
+        if (d.mode === 'edit' && mode() === 'edit' && book && book.tabs.indexOf(pending.tab) >= 0) applyLayout(pending.tab, pending.change);
+        else relayoutTab(pending.tab);
+      }, 0);
       renderTabs(); renderBar(); layout(); renderHead(); renderBody(true);
     } else if (d.type === 'tdoc:sheetConfig') {
       config.editing = d.editing === true;
+      var could = config.canEditDoc;
+      config.canEditDoc = d.canEdit === true;
+      if (could !== config.canEditDoc) book.tabs.forEach(readLayout);
       if (typeof d.path === 'string' && /^\/(?!\/)/.test(d.path)) expand.path = d.path;
       if (!config.received) {
         config.received = true;
