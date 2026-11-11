@@ -38,7 +38,7 @@ const page = (body, root = ' data-tdoc-design="tdoc"', css = '') => `<!doctype h
 const DOCS = {
   fit: page(table8() + '<h2>Owners</h2>' + small),
   many: page(many),
-  styled: page(table8(' class="pricing"') + table8(' style="width:100%"') + '<figure>' + table8() + '<figcaption>In a figure</figcaption></figure>' + table8(' data-tdoc-table="fixed"'), ' data-tdoc-design="tdoc"', '.pricing td{color:#333}'),
+  styled: page(table8(' class="pricing"') + table8(' style="width:100%"') + '<figure>' + table8() + '<figcaption>In a figure</figcaption></figure>' + table8(' data-tdoc-table="fixed"') + `<div class="tdoc-table-scroll"><table><tr><td>${table8()}</td></tr></table></div>`, ' data-tdoc-design="tdoc"', '.pricing td{color:#333}'),
   custom: page(table8() + '<figure data-tdoc-wide><div style="height:40px;background:#eee"></div><figcaption>Wide figure</figcaption></figure>', ' data-tdoc-design="custom"', 'main{max-width:560px;margin:0 auto}'),
 };
 
@@ -73,7 +73,7 @@ const DOCS = {
   const tables = (frame) => frame.evaluate(() => [...document.querySelectorAll('table')].map((t) => {
     const w = t.parentElement, main = document.querySelector('main');
     const long = [...t.querySelectorAll('td')].find((td) => td.textContent.length > 60);
-    return { w: Math.round(w.getBoundingClientRect().width), left: Math.round(w.getBoundingClientRect().left), col: main.clientWidth, vw: innerWidth,
+    return { nested: !!t.parentElement.closest('td'), w: Math.round(w.getBoundingClientRect().width), left: Math.round(w.getBoundingClientRect().left), col: main.clientWidth, vw: innerWidth,
       scrolls: w.scrollWidth > w.clientWidth + 1, display: getComputedStyle(t).display, row: getComputedStyle(t.rows[1] || t.rows[0]).display,
       lines: long ? Math.round(long.getBoundingClientRect().height / parseFloat(getComputedStyle(long).lineHeight)) : 0,
       sticky: getComputedStyle(t.rows[1] ? t.rows[1].cells[0] : t.rows[0].cells[0]).position,
@@ -110,6 +110,9 @@ const DOCS = {
       const [wide, two] = await tables(frame);
       assert(wide.display === 'block' && wide.row === 'block' && !wide.scrolls && wide.label === '"Owner: "', `cards: ${JSON.stringify(wide)}`);
       assert(two.display === 'table', `two columns: ${JSON.stringify(two)}`);
+      // A comment on a header cell still has somewhere to pin: the top of the cards.
+      const th = await frame.evaluate(() => { const r = document.querySelector('thead th').getBoundingClientRect(), t = document.querySelector('table').getBoundingClientRect(); return { w: r.width, h: r.height, dy: Math.abs(r.top - t.top) }; });
+      assert(th.w >= 1 && th.h >= 1 && th.dy < 12, `header cell rect: ${JSON.stringify(th)}`);
       assert(await overflow(frame) <= 1, 'no sideways page scroll');
       if (SHOTS) await p.screenshot({ path: path.join(SHOTS, 'table-fit-phone.png'), fullPage: true });
       await p.emulateMedia({ media: 'print' });
@@ -117,12 +120,12 @@ const DOCS = {
       await p.close();
     });
 
-    await test('tables the author laid out are left alone: own class, own style, in a figure, data-tdoc-table="fixed", a custom design', async () => {
+    await test('tables the author laid out are left alone: own class, own style, in a figure, data-tdoc-table="fixed", inside another table, a custom design', async () => {
       for (const ctx of [desktop, phone]) {
         for (const slug of ['styled', 'custom']) {
           const { p, frame } = await open(ctx, slug);
           const list = await tables(frame);
-          for (const t of list) assert(t.w <= t.col + 1 && t.display === 'table' && t.sticky !== 'sticky', `${slug}: ${JSON.stringify(t)}`);
+          for (const t of list) assert((t.nested || t.w <= t.col + 1) && t.display === 'table' && t.sticky !== 'sticky', `${slug}: ${JSON.stringify(t)}`);
           await p.close();
         }
       }

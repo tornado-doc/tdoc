@@ -37,7 +37,7 @@
   var MAX_CLASSES = 8;
   // A sheet with at most this many body rows and columns, and no cell longer
   // than SHORT_CELL characters, in a prose doc, is a small table.
-  var SMALL_SHEET_ROWS = 20, SMALL_SHEET_COLS = 5, SHORT_CELL = 80;
+  var SMALL_SHEET_ROWS = 20, SMALL_SHEET_COLS = 5, SHORT_CELL = 80, MAX_SHEETS = 200;
   // Text blocks outside the sheets past which a doc is prose, not a sheet doc
   // (the same rule as the viewer's compact embed, server/sheets-viewer.js).
   var PROSE_BLOCKS = 3;
@@ -139,56 +139,51 @@
     return html.length;
   }
 
-  // Body rows of the sheet between its open tag (from) and its end (to),
-  // counted up to `cap`: a <tr> holding a <td> (a header row holds only <th>).
-  // The next <td> is looked up once and kept until a row passes it, so each
-  // byte of the table is read a bounded number of times.
-  var TR = /<tr(?=[\s>])/ig, TD = /<td(?=[\s>])/ig, CELL = /<t[hd](?=[\s>])/ig;
-  function sheetRows(html, from, to, cap) {
-    var n = 0, td = null, tdAt = -1;
-    TR.lastIndex = from;
-    var tr = TR.exec(html);
-    while (tr && tr.index < to && n < cap) {
+  // A sheet's shape, read from its own bytes only (`seg`, the table sliced
+  // once), so no search ever runs past the sheet. Rows are counted up to
+  // `cap` (a <tr> holding a <td>; a header row holds only <th>); columns are
+  // the first row's cells; the longest cell is looked for only in a small
+  // sheet, over at most SMALL_SHEET_ROWS + 1 rows of SMALL_SHEET_COLS cells,
+  // and stops at the first long one.
+  var TR = /<tr(?=[\s>])/ig, TD = /<td(?=[\s>])/ig, CELL = /<t[hd](?=[\s>])/ig, CELL_END = /<\/?(?:t[dhr]|tbody|thead|tfoot|table)(?=[\s>])/ig;
+  function sheetShape(seg, cap) {
+    var rows = 0, cols = 0, td = null, tdAt = -1, first = true;
+    TR.lastIndex = 0;
+    var tr = TR.exec(seg);
+    while (tr && rows < cap) {
       TR.lastIndex = tr.index + 3;
-      var next = TR.exec(html);
-      var rowEnd = next && next.index < to ? next.index : to;
+      var next = TR.exec(seg);
+      var rowEnd = next ? next.index : seg.length;
+      if (first) {
+        first = false;
+        CELL.lastIndex = tr.index + 3;
+        var m;
+        while ((m = CELL.exec(seg)) && m.index < rowEnd && cols <= SMALL_SHEET_COLS) cols++;
+      }
       if (tdAt !== Infinity && tdAt < tr.index) {
         TD.lastIndex = tr.index + 3;
-        td = TD.exec(html);
-        tdAt = td && td.index < to ? td.index : Infinity;
+        td = TD.exec(seg);
+        tdAt = td ? td.index : Infinity;
       }
-      if (tdAt < rowEnd) n++;
+      if (tdAt < rowEnd) rows++;
       tr = next;
     }
-    return n;
+    return { rows: rows, cols: cols };
   }
-  // Columns: the cells of the first row (the header).
-  function sheetCols(html, from, to) {
-    TR.lastIndex = from;
-    var tr = TR.exec(html);
-    if (!tr || tr.index >= to) return 0;
-    TR.lastIndex = tr.index + 3;
-    var next = TR.exec(html);
-    var end = next && next.index < to ? next.index : to;
-    var n = 0, m;
-    CELL.lastIndex = tr.index + 3;
-    while ((m = CELL.exec(html)) && m.index < end) n++;
-    return n;
-  }
-  // The longest body cell's text, in characters (called only on a small sheet).
-  function longestCell(html, from, to) {
-    var max = 0, at = from, m;
-    while (true) {
-      TD.lastIndex = at;
-      m = TD.exec(html);
-      if (!m || m.index >= to) return max;
-      var close = html.indexOf('</td', m.index);
-      var next = html.indexOf('<td', m.index + 3);
-      var end = Math.min(close === -1 ? to : close, next === -1 ? to : next, to);
-      var text = html.slice(m.index, end).replace(/^<td[^>]*>/i, '').replace(/<[^>]*>/g, '').replace(/&[#\w]+;/g, ' ').replace(/\s+/g, ' ').trim();
-      if (text.length > max) max = text.length;
-      at = end;
+  function hasLongCell(seg) {
+    var seen = 0, limit = (SMALL_SHEET_ROWS + 1) * SMALL_SHEET_COLS, m;
+    TD.lastIndex = 0;
+    while (seen++ < limit && (m = TD.exec(seg))) {
+      var open = seg.indexOf('>', m.index);
+      if (open === -1) return false;
+      CELL_END.lastIndex = open + 1;
+      var end = CELL_END.exec(seg);
+      var stop = Math.min(end ? end.index : seg.length, open + 1 + SHORT_CELL * 20);
+      var text = seg.slice(open + 1, stop).replace(/<[^>]*>/g, '').replace(/&[#\w]+;/g, ' ').replace(/\s+/g, ' ').trim();
+      if (text.length > SHORT_CELL) return true;
+      TD.lastIndex = stop;
     }
+    return false;
   }
 
   function hasText(s) {
@@ -281,14 +276,22 @@
       if (PROSE_TEXT[name] && !(parent && parent.exempt) && !/(?:^|\s)sheet-note(?:\s|$)/.test(attr(attrs, CLASS_ATTR) || '')) proseBlocks++;
       if (SKIP[name]) {
         if (!/\/\s*$/.test(attrs)) {
-          var after = skipEnd(html, name, pos);
+          var after = skipEnd(html, name, pos), counted = false;
           if (sheet) {
-            var shape = { name: attr(attrs, NAME_ATTR) || 'Sheet ' + (sheets.length + 1), rows: sheetRows(html, pos, after, SMALL_SHEET_ROWS + 1), cols: 0, small: false };
-            if (shape.rows <= SMALL_SHEET_ROWS) shape.cols = sheetCols(html, pos, after);
-            shape.small = shape.rows <= SMALL_SHEET_ROWS && shape.cols <= SMALL_SHEET_COLS && longestCell(html, pos, after) <= SHORT_CELL;
+            var shape = { name: attr(attrs, NAME_ATTR) || 'Sheet ' + (sheets.length + 1), rows: SMALL_SHEET_ROWS + 1, cols: 0, small: false };
+            // A sheet's shape is read for the first MAX_SHEETS sheets; the
+            // bytes read count towards the scan's cap like any others.
+            if (sheets.length < MAX_SHEETS && pos - start - skipped + (after - pos) <= MAX_BYTES) {
+              var seg = html.slice(pos, after);
+              var sh = sheetShape(seg, SMALL_SHEET_ROWS + 1);
+              shape.rows = sh.rows; shape.cols = sh.cols;
+              shape.small = sh.rows <= SMALL_SHEET_ROWS && sh.cols <= SMALL_SHEET_COLS && !hasLongCell(seg);
+              counted = true;
+            }
             sheets.push(shape);
           }
-          skipped += after - pos; pos = after;
+          if (!counted) skipped += after - pos;
+          pos = after;
         }
         continue;
       }

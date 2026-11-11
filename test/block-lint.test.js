@@ -141,14 +141,22 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     assert(r.small_sheet_count === 9 && r.small_sheets.length === 5, JSON.stringify(r.small_sheets));
   });
 
-  await t('counting a sheet\'s rows stays linear: 60k-row sheets, header-only rows, rows without cells', () => {
+  await t('reading a sheet\'s shape stays linear: 60k-row sheets, header-only rows, rows without cells, hostile sheets', () => {
     const big = page(prose + sheetTable('Big', 60000));
     const thOnly = page(prose + '<table data-tdoc-sheet>' + '<tr><th>x</th></tr>'.repeat(200000) + '</table>');
     const bare = page(prose + '<table data-tdoc-sheet>' + '<tr>'.repeat(300000) + '</table><p>' + 'z'.repeat(1e6) + '</p>');
-    let r;
-    const times = [big, thOnly, bare].map((h) => ms(() => { r = lint(h); }));
-    assert(lint(thOnly).small_sheets[0].rows === 0, 'header rows are not body rows');
+    // The review's inputs: a row of 200k unclosed cells, 40k header-only sheets, 60k empty sheets.
+    const pre = '<html><body><main class="wrap"><h1>x</h1><p>a</p><p>b</p><p>c</p>';
+    const noCloseTd = pre + '<table data-tdoc-sheet><tr><th>a</th></tr><tr>' + '<td>x'.repeat(200000) + '</tr></table>' + 'z'.repeat(2e6) + '</main></body></html>';
+    const headerOnly = pre + '<table data-tdoc-sheet><tr><th>a</th></tr></table>'.repeat(40000) + '</main></body></html>';
+    const noTr = pre + '<table data-tdoc-sheet></table>'.repeat(60000) + '</main></body></html>';
+    const times = [big, thOnly, bare].map((h) => ms(() => lint(h)));
     assert(Math.max(...times) < 400, `times ${times.map((x) => x.toFixed(0)).join(', ')}ms`);
+    const hostile = [noCloseTd, headerOnly, noTr].map((h) => ms(() => lint(h)));
+    assert(Math.max(...hostile) < 100, `hostile ${hostile.map((x) => x.toFixed(0)).join(', ')}ms`);
+    assert(lint(page(prose + '<table data-tdoc-sheet>' + '<tr><th>x</th></tr>'.repeat(30) + '</table>')).small_sheets[0].rows === 0, 'header rows are not body rows');
+    const many = lint(headerOnly);
+    assert(many.small_sheet_count <= 200 && many.small_sheets.length === 5, 'at most 200 sheets are read');
   });
 
   await t('reader.css styles every house block, and the guide shows each one\'s markup', () => {

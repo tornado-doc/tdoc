@@ -915,6 +915,15 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
         if (m.cards) assert(m.first === 'EGI' && m.labels[0] === 'Status:' && m.labels[1] === 'Next action:', `card title and labels: ${JSON.stringify(m)}`);
         assert(m.bar <= 32 && m.search <= 30 && m.input < 1, `${name}: one short row of controls, search an icon: ${JSON.stringify(m)}`);
         await shot(p, `sheet-flat-${name}`);
+        // Idle, nothing renders again: no flat re-render, no table relayout loop.
+        const idle = await frame.evaluate(() => new Promise((done) => {
+          const n = { flat: 0, layout: 0 };
+          const style = document.querySelector('style#tdoc-provider-table-layout');
+          const a = new MutationObserver(() => n.flat++); a.observe(document.querySelector('.ts-flat'), { childList: true });
+          const b = new MutationObserver(() => n.layout++); if (style) b.observe(style, { childList: true, characterData: true, subtree: true });
+          setTimeout(() => { a.disconnect(); b.disconnect(); done(n); }, 3000);
+        }));
+        assert(idle.flat <= 1 && idle.layout <= 1, `${name}: idle for 3 s: ${JSON.stringify(idle)}`);
         // Search filters the flat view; the icon opens it.
         await f.locator('.ts-search').click();
         await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('potato');

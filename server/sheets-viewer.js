@@ -763,6 +763,9 @@
       }
       html += '</tbody></table>';
     }
+    // Unchanged: leave the DOM alone (no mutation, no relayout downstream).
+    if (html === ui.flatHtml && cards === ui.flat.classList.contains('is-cards') && ui.flat.firstChild) return;
+    ui.flatHtml = html;
     ui.flat.classList.toggle('is-cards', cards);
     ui.flat.innerHTML = html;
     // At most EMBED_ROWS rows (or cards) tall, however tall each one wraps.
@@ -1027,6 +1030,7 @@
   var commented = new Map();
   document.addEventListener('tdoc:anchors-resolved', function (e) {
     var d = e.detail || {};
+    var before = commented;
     commented = new Map();
     var targets = d.targets || {};
     (d.comments || []).forEach(function (id) {
@@ -1037,7 +1041,10 @@
         commented.set(t.element, list);
       }
     });
-    if (book) { renderBody(true); placeOffscreen(); }
+    // Only a change in which cells carry comments needs a new render.
+    var same = before.size === commented.size;
+    if (same) commented.forEach(function (ids, el) { var was = before.get(el); if (!was || was.join() !== ids.join()) same = false; });
+    if (book && !same) { renderBody(true); placeOffscreen(); }
   });
   // Comments on rows that are off-screen or filtered out, counted at the
   // grid's edges; a press goes to the nearest one and opens it.

@@ -35,10 +35,17 @@ function layoutTables({ apply = true } = {}) {
   if (apply) style.textContent = '';
   // DOM paths avoid adding attributes/styles to author cells (which would
   // contaminate edit drafts, artifact identity and saved versions).
+  // Sibling positions are read once per parent, so a table of many rows costs
+  // one pass over each row's cells, not one per cell.
+  const nth = new Map();
+  const position = el => {
+    if (!nth.has(el)) { let i = 0; for (const c of el.parentElement.children) nth.set(c, ++i); }
+    return nth.get(el);
+  };
   const path = el => {
     const parts = [];
     for (; el && el !== document.documentElement; el = el.parentElement) {
-      parts.unshift(`${el.localName}:nth-child(${[...el.parentElement.children].indexOf(el) + 1})`);
+      parts.unshift(`${el.localName}:nth-child(${position(el)})`);
     }
     return 'html>' + parts.join('>');
   };
@@ -67,6 +74,7 @@ function layoutTables({ apply = true } = {}) {
   const HOUSE = /^(wrap|content|container|tdoc-table-scroll|note|tdoc-card|tdoc-cards)$/;
   const standard = table => {
     if (designed || isSheet(table) || table.closest('[data-tdoc-table="fixed"]')) return false;
+    if (table.parentElement.closest('table')) return false;
     if (table.hasAttribute('style') || table.hasAttribute('width') || table.className.trim() ||
         table.querySelector('[style],[width],table,colgroup')) return false;
     for (let el = table.parentElement; el && el !== document.body && el !== html; el = el.parentElement) {
@@ -179,11 +187,13 @@ function layoutTables({ apply = true } = {}) {
         // "Column: value" line labelled from the header row.
         const labels = [...r.head.cells].map(c => c.textContent.replace(/\s+/g, ' ').trim());
         css += `${t},${t}>tbody,${t}>tbody>tr,${t}>tbody>tr>*,${t}>tr,${t}>tr>*{display:block!important;width:auto!important;min-width:0!important;max-width:none!important}` +
-          `${t}>thead{display:none!important}` +
+          // The header row is out of sight, not out of the layout: a comment on
+        // a header cell still has a place to pin (the top of the cards).
+        `${t}{position:relative!important}${t}>thead{position:absolute!important;top:0;left:0;width:1px!important;height:1px!important;overflow:hidden!important;clip-path:inset(50%)!important}` +
           `${t}>tbody>tr,${t}>tr{margin:0 0 10px;padding:8px 12px;border:1px solid var(--td-line,#e5e5e5);border-radius:8px}` +
           `${t}>tbody>tr>*,${t}>tr>*{padding:2px 0!important;border:0!important;background:transparent!important;text-align:left!important;white-space:normal!important}` +
           `${t}>tbody>tr>:first-child,${t}>tr>:first-child{font-weight:600;padding-bottom:4px!important}`;
-        if (!(r.table.tHead && r.table.tHead.rows.length)) css += `${path(r.head)}{display:none!important}`;
+        if (!(r.table.tHead && r.table.tHead.rows.length)) css += `${path(r.head)}{position:absolute!important;top:0;left:0;width:1px!important;height:1px!important;overflow:hidden!important;clip-path:inset(50%)!important;margin:0!important;padding:0!important;border:0!important}`;
         labels.forEach((label, i) => { if (i && label) css += `${t}>tbody>tr>:nth-child(${i + 1})::before,${t}>tr>:nth-child(${i + 1})::before{content:${esc(label + ': ')};color:var(--td-muted,#666)}`; });
         css += `${w}{overflow:visible!important}`;
         continue;
