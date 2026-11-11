@@ -1732,7 +1732,11 @@
   // A value that follows TODAY() or NOW() (the engine traces it) changes by
   // itself: written only when someone edits that formula, not by every
   // other edit.
+  // Nor is anything from a recalculation that ran out of budget (#BUSY!
+  // cells, and values computed from them): the cell keeps its last good
+  // stored value and stays unwritten until a recalculation completes.
   function fxMayWrite(tab, r, c, td) {
+    if (fx.wb.stats.busy) return false;
     return !fx.wb.volatile(tab.name, r, c) || fx.edited.has(td);
   }
   function fxAttr(td, f) { if (f) td.setAttribute('data-formula', f); else td.removeAttribute('data-formula'); }

@@ -1419,23 +1419,13 @@ export class Workbook {
       }
     }
     if (!n) return [];
-    if (formulaEdits.length > 500) {
+    // A formula added, changed or removed may make or break a cycle, and
+    // which cells a cycle marks depends on the walk: compute everything
+    // again, so an edit always ends where a fresh load would.
+    if (formulaEdits.length) {
       for (const e of formulaEdits) old.vals[e.r][e.c] = e.src === undefined ? next.vals[e.r][e.c] : PENDING;
       old.fsrc = next.fsrc;
       return this._rebuild();
-    }
-    for (const e of formulaEdits) {
-      const k = keyOf(e.r, e.c);
-      const f = old.fx.get(k);
-      if (f) { this._unlink(f); this.refCount -= f.refs || 0; }
-      if (e.src === undefined) { old.fx.delete(k); old.vals[e.r][e.c] = next.vals[e.r][e.c]; removeSorted(old.fcols[e.c], e.r); }
-      else {
-        const nf = this._compile(old, e.r, e.c, e.src);
-        old.fx.set(k, nf);
-        this._link(nf);
-        if (!f) insertSorted(old.fcols[e.c], e.r);
-      }
-      changed.push(k);
     }
     old.fsrc = next.fsrc;
     return this._recompute(old, changed);
@@ -1606,6 +1596,8 @@ export class Workbook {
     const deadline = Date.now() + this.limits.timeMs;
     const queue = this._dependents(sheet, changedKeys, Date.now() + this.limits.timeMs / 4);
     if (!queue) return this._rebuild(deadline);
+    // A cycle among what changes: the fresh-load answer (see update()).
+    if (queue.some((f) => f.cyc || f.sheet.vals[f.r][f.c] === E['#CYCLE!'])) return this._rebuild(deadline);
     this.stats.full = false;
     this._evaluate(queue, deadline);
     return queue.map((f) => ({ sheet: f.sheet.name, r: f.r, c: f.c }));
@@ -1848,8 +1840,6 @@ function lowerBound(arr, x) {
   while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] < x) lo = m + 1; else hi = m; }
   return lo;
 }
-function insertSorted(arr, x) { const i = lowerBound(arr, x); if (arr[i] !== x) arr.splice(i, 0, x); }
-function removeSorted(arr, x) { const i = lowerBound(arr, x); if (arr[i] === x) arr.splice(i, 1); }
 
 function scalar(v, cx) {
   if (v instanceof Area) {

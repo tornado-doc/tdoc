@@ -205,6 +205,37 @@ async function t(name, fn) {
     assert.equal(wb.volatile('T', 0, 0), true);
   });
 
+  await t('randomized: after every edit, incremental equals a fresh load (cycles included)', () => {
+    let seed = 7;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    const R = 20, C = 5, names = ['A', 'b'];
+    const L = (c) => String.fromCharCode(65 + c);
+    const ref = (i) => (i === 1 && rnd(2) ? 'A!' : '') + L(rnd(C)) + (rnd(R) + 1);
+    const rng = (i) => { const a = rnd(R); return (i === 1 && rnd(2) ? 'A!' : '') + L(rnd(C)) + (a + 1) + ':' + L(rnd(C)) + (a + 1 + rnd(5)); };
+    const formula = (i) => pick([() => '=' + ref(i) + '+' + ref(i), () => '=SUM(' + rng(i) + ')', () => '=IF(' + ref(i) + '>5,' + ref(i) + ',1)', () => '=COUNTIF(' + rng(i) + ',">3")', () => '=IFERROR(' + ref(i) + ',0)*2'])();
+    const pick = (a) => a[rnd(a.length)];
+    const mk = (i) => (rnd(3) === 0 ? { f: formula(i) } : rnd(10));
+    const grids = names.map((_, i) => Array.from({ length: R }, () => Array.from({ length: C }, () => mk(i))));
+    const input = (i) => ({ name: names[i], rows: R, cols: C, cell: (r, c) => grids[i][r][c] });
+    const wb = F.createWorkbook({ now: () => NOW });
+    wb.load([input(0), input(1)]);
+    let bad = 0, cycles = 0;
+    for (let step = 0; step < 300; step++) {
+      const i = rnd(2);
+      grids[i][rnd(R)][rnd(C)] = mk(i);
+      wb.update(input(i));
+      const fresh = F.createWorkbook({ now: () => NOW });
+      fresh.load([input(0), input(1)]);
+      for (let s2 = 0; s2 < 2; s2++) for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+        const want = fresh.display(names[s2], r, c);
+        if (want === '#CYCLE!') cycles++;
+        if (wb.display(names[s2], r, c) !== want) bad++;
+      }
+    }
+    assert.equal(bad, 0, `${bad} cells differ from a fresh load`);
+    assert.ok(cycles > 0, 'the run made cycles');
+  });
+
   await t('a missing tab is #REF!; adding it fixes the reference', () => {
     const wb = book(sheet('Main', [['=Later!A1+1']]));
     assert.equal(wb.display('Main', 0, 0), '#REF!');

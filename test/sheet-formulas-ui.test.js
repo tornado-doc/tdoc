@@ -280,6 +280,19 @@ async function shot(page, name) {
       await frame.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
       assert(Date.now() - t1 < 1000, 'responsive');
       console.log(`    (hostile: opened in ${ms} ms, formulas stopped after ${stats.ms} ms)`);
+      // An edit whose recalculation runs out of budget saves no #BUSY!: the
+      // cells keep their last stored values.
+      await chooseMode(page, 'Edit');
+      await frameMode(frame, 'edit');
+      await cell(0, 0).click();
+      await page.keyboard.type('y');
+      await page.keyboard.press('Enter');
+      await frame.waitForFunction(() => document.querySelector('tr[data-row="r1"]').cells[0].textContent === 'y');
+      assert((await frame.evaluate(() => window.__tdocSheets.formulaStats())).busy, 'the edit ran out of budget');
+      await save('hostile', 2);
+      const html = saved('hostile', 2);
+      assert(html.includes('data-formula="=CONCAT(A:A)'), 'formulas saved');
+      assert(!html.includes('#BUSY!'), 'no #BUSY! in the saved document');
     });
 
     await test('10,000 formulas open in budget', async () => {
