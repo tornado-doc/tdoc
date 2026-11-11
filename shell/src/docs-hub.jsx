@@ -7,8 +7,9 @@ import { AppSelect } from './ui/select.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { SheetDropHint, SheetFilePicker, SheetImportDialog, createBlankSheet, isSheetFileName, sheetErrorText, useSheetFileDrop } from './sheet-import.jsx';
-import { DocList, DocRow, FolderRow, day } from './docs-hub/rows.jsx';
+import { DocList, DocRow, FolderRow, day, shareMenuItem } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
+import { onboardingChecklistShown } from './docs-hub/row-meta.js';
 import { ConnectorsBody } from './connectors-page.jsx';
 import { DevicesBody } from './tokens-page.jsx';
 import { ConnectAiAppsSection } from './connect-ai-apps.jsx';
@@ -501,8 +502,9 @@ function FlatList({ docs, label, viewer, empty, onToggleStar, layout }) {
       layout={layout}
       rowProps={(doc) => ({
         className: 'flat-row',
-        meta: [ownerLabel(doc, viewer), `${label} ${day(doc.at)}`].filter(Boolean).join(' · '),
+        meta: [ownerLabel(doc, viewer), { label, at: doc.at }],
         onToggleStar,
+        menuItems: [shareMenuItem(doc)],
       })}
     />
   );
@@ -860,6 +862,7 @@ export function DocsHub({ boot }) {
   };
 
   const docMenu = (slugs, doc) => [
+    doc ? shareMenuItem(doc) : null,
     doc && (doc.mine || !doc.owner || doc.owner === viewer) ? {
       label: 'Rename',
       className: 'row-rename',
@@ -1012,6 +1015,7 @@ export function DocsHub({ boot }) {
 
   const teamDocMenu = (doc) => [
     { label: 'Open', onSelect: () => { location.href = `/d/${encodeURIComponent(doc.slug)}`; } },
+    shareMenuItem(doc),
     doc.can_file ? {
       label: 'Move to folder',
       className: 'row-move',
@@ -1165,7 +1169,7 @@ export function DocsHub({ boot }) {
         ) : (
         <>
 
-        <OnboardingChecklist record={boot.onboarding} docs={hub.docs} />
+        {onboardingChecklistShown({ view, docCount: hub.docs.length }) ? <OnboardingChecklist record={boot.onboarding} docs={hub.docs} /> : null}
         {view === 'docs' ? (
           <section className="pane" id="pane-mine">
             <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort}>
@@ -1231,14 +1235,14 @@ export function DocsHub({ boot }) {
               layout={layout}
               selecting={hub.selected.size > 0}
               rowProps={(doc) => ({
+                // Your own docs need no "me"; one date, the latest.
                 meta: [
-                  ownerLabel(doc, viewer),
-                  day(doc.created) ? `published ${day(doc.created)}` : null,
-                  day(doc.updated) && day(doc.updated) !== day(doc.created)
-                    ? `updated ${day(doc.updated)}`
-                    : null,
+                  ownerLabel(doc, viewer) === 'me' ? null : ownerLabel(doc, viewer),
+                  doc.updated && doc.updated !== doc.created
+                    ? { label: 'updated', at: doc.updated }
+                    : { label: 'published', at: doc.created },
                   doc.folder ? `in ${hub.folderById.get(doc.folder)?.name || ''}` : null,
-                ].filter(Boolean).join(' · '),
+                ],
                 path: hub.query.trim() ? hub.pathForDoc(doc) : '',
                 selection: { checked: hub.selected.has(doc.slug), onChange: () => hub.toggleSelected(doc.slug) },
                 starrable: capabilities.star,

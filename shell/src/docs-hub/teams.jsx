@@ -29,7 +29,7 @@ import {
   updateTeam,
 } from '../document/api.js';
 import { isFeatureOn } from '../feature-flags.js';
-import { DocList, day } from './rows.jsx';
+import { DocList } from './rows.jsx';
 import { ConnectorsBody } from '../connectors-page.jsx';
 import './teams.css';
 
@@ -85,8 +85,8 @@ export function TeamPane({ team, docs, viewer, menuFor, inFolder = false, layout
         rowProps={(doc) => ({
           meta: [
             `by ${doc.mine ? 'me' : doc.author || 'unknown'}${doc.former_member ? ' (former member)' : ''}`,
-            day(doc.updated) ? `updated ${day(doc.updated)}` : null,
-          ].filter(Boolean).join(' · '),
+            { label: 'updated', at: doc.updated },
+          ],
           starrable: false,
           path: pathForDoc ? pathForDoc(doc) : '',
           menuItems: menuFor(doc),

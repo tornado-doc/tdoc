@@ -75,6 +75,7 @@ const OFFLINE = [
   'agent-native.test.js',      // doc pages point agents at /raw + skill; /llms.txt; Bearer /raw for team/invited docs
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
+  'me-rows.test.js',            // My docs rows: doc/sheet/slides, sharing (own docs only), unread comments + agent replies without per-row reads, Recent/Starred dates, checklist on Docs below 3 docs
   'shell-scan-cap.test.js',     // big docs: the page scans only the head (Cloudflare 1102)
   'inline-media.test.js',       // base64 video/audio refused at publish: link it instead
   'catalog-index.test.js',      // My docs costs what the viewer owns, not the platform (1102)
@@ -213,6 +214,7 @@ const BROWSER = [
   'profile-picks-ui.test.js', // /@handle owner removes picks: card control + Undo, every pin in the picker, errors shown
   'full-text-search-ui.test.js', // My docs search: text results from /api/search, English + Chinese, marked passages, doc markup shown as text
   'trash-ui.test.js',          // Delete → Trash with Undo, link gone, Trash tab Restore / Delete forever, folders, desktop + phone
+  'me-rows-ui.test.js',        // My docs rows: type icon + label, sharing, unread badge, Recent/Starred relative dates, ⋯ Share opens the doc's Share dialog, checklist only on Docs below 3 docs; desktop + phone
   'agent-view-ui.test.js', // doc text for agents: no visible space without JS, removed once the app starts
   'layout-preflight.test.js', // development-only Raft geometry audit
   'table-layout.test.js', // provider table protection

@@ -184,9 +184,13 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
   assert.deepEqual(rowsAfter.map((row) => [row.slug, row.updated, row.latest]), rowsBefore.map((row) => [row.slug, row.updated, row.latest]),
     'a refresh changes neither updated, the hub order nor the version');
   assert.notEqual(rowsAfter.find((row) => row.slug === 'mine-0').image, rowsBefore.find((row) => row.slug === 'mine-0').image);
-  assert.equal(await env.META.get('meta:mine-authored'), authoredBefore, 'an authored card is untouched by the lazy fill');
-  assert.equal(await env.META.get('meta:mine-shot'), shotBefore, 'a screenshot is untouched by the lazy fill');
-  assert.equal(await env.META.get('meta:mine-current'), currentBefore);
+  // The same loads stamp each doc's type (doc / sheet / slides) on its
+  // preview (fillDocTypes); nothing else of the card may change.
+  const cardOnly = (raw) => { const meta = JSON.parse(raw); delete meta.preview.kind; return JSON.stringify(meta); };
+  assert.equal(JSON.parse(await env.META.get('meta:mine-authored')).preview.kind, 'doc');
+  assert.equal(cardOnly(await env.META.get('meta:mine-authored')), authoredBefore, 'an authored card is untouched by the lazy fill');
+  assert.equal(cardOnly(await env.META.get('meta:mine-shot')), shotBefore, 'a screenshot is untouched by the lazy fill');
+  assert.equal(cardOnly(await env.META.get('meta:mine-current')), currentBefore);
 
   // A doc that keeps failing steps aside instead of holding a slot forever.
   for (let i = 0; i < 6; i++) await seed(`fail-${i}`, { owner: ann });

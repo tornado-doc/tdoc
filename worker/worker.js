@@ -8202,7 +8202,7 @@ async function joinedFeedbackSpaceSlugs(env, session) {
   return slugs.filter((s) => typeof s === 'string' && isValidSlug(s));
 }
 
-async function indexData(env, session, origin, { ctx = null, searchScopes: searchScopesWanted = false } = {}) {
+async function indexData(env, session, origin, { ctx = null, searchScopes: searchScopesWanted = false, activity: activityWanted = false } = {}) {
   const defer = deferIndexWork(ctx);
   // Which rows this viewer could possibly see, decided from the index alone:
   // their own (by account, handle or owner key), their teams', and the ones
@@ -8227,6 +8227,11 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
   }));
   const invitesP = sessionPrincipal(session) ? pendingTeamInvitesFor(env, session, defer).catch(() => []) : Promise.resolve([]);
   const joinedP = joinedFeedbackSpaceSlugs(env, session);
+  // My docs' unread badges: the person's own records, read whole (see
+  // viewerDocActivity). Not for search or the profile, which show no badge.
+  const activityP = activityWanted && sessionPrincipal(session)
+    ? viewerDocActivity(env, session).catch(() => new Map())
+    : Promise.resolve(new Map());
   folderStateP.catch(() => {}); teamsP.catch(() => {}); joinedP.catch(() => {});
   const savedEarlyP = viewerKeyEarly
     ? Promise.all([loadStars(env, viewerKeyEarly), loadRecents(env, viewerKeyEarly)])
@@ -8344,10 +8349,13 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
     : [[], [], { folders: [], docs: {} }];
   const starred = new Set(starItems.map((item) => item.slug));
   const bySlug = new Map(catalog.map((row) => [row.slug, row]));
+  const activity = await activityP;
+  // Recent and Starred rows carry when (visited / starred): publicRow lists
+  // only catalog fields, so the stamp is added after it.
   const savedRows = (items) => items.map((item) => {
     const row = bySlug.get(item.slug);
     if (!row || isFeedbackSpace(row.meta) || !docReadableBy(env, session, row.meta)) return null;
-    return { ...row, at: item.at };
+    return { ...ownRow(row), at: typeof item.at === 'string' ? item.at : '' };
   }).filter(Boolean);
   const ownerDisplay = (row) => {
     if (row.owner) return row.owner;
@@ -8387,12 +8395,17 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
       ? !!(session && session.account_id && row.meta.hosted && row.meta.hosted.account_id === session.account_id)
       : isDocOwnerSession(env, session, row.meta),
     starred: starred.has(row.slug),
+    // doc, sheet or slides: stamped on the meta at publish (docTypeOfMeta).
+    doc_type: docTypeOfMeta(row.meta),
+    ...docActivityFields(activity.get(row.slug)),
   });
   // The owner's own rows say how they are shared, so pinning one that is not
-  // Public can say first that pinning makes it Public (searchable).
+  // Public can say first that pinning makes it Public (searchable), and the
+  // row can say who can open it. Never on somebody else's doc: who they
+  // invited is theirs.
   const ownRow = (row) => {
     const out = publicRow(row);
-    if (out.mine) out.visibility = accessFromMeta(row.meta).visibility;
+    if (out.mine) Object.assign(out, docSharingFields(row.meta));
     return out;
   };
 
@@ -8422,6 +8435,7 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
       author: author ? (authorNames.get(author.account_id) || author.name) : ownerDisplay(row),
       former_member: !author,
       can_manage: isDocOwnerSession(env, session, row.meta),
+      ...(isDocOwnerSession(env, session, row.meta) ? docSharingFields(row.meta) : {}),
       can_file: canFileTeamDoc(session, team, row.meta),
       folder: resolveTeamFolder(teamFolderStates.get(team.id), row.meta.team_folder),
     };
@@ -8432,11 +8446,21 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
   // team insider may: teamWriteAccess): a few per load, in the background, no
   // admin step. The pending marker in buildDocPreview keeps reloads from
   // queueing twice; a doc that keeps failing steps aside (previewCardFillDue).
+  const cardFilling = new Set();
   if (ctx && typeof ctx.waitUntil === 'function' && env.PREVIEW_QUEUE) {
     const due = [...mine, ...teamDocs.filter((row) => !isFeedbackSpace(row.meta))]
       .filter((row) => previewCardFillDue(row.meta && row.meta.preview, row.slug, row.latest))
       .slice(0, PREVIEW_FILL_PER_LOAD);
+    for (const row of due) cardFilling.add(row.slug);
     if (due.length) ctx.waitUntil(fillMissingPreviewCards(env, due.map((row) => row.slug)));
+  }
+  // The same for a doc's type (doc / sheet / slides) on docs published
+  // before it was stamped. Not a doc whose card is being filled this load:
+  // both rewrite meta.preview, and the card's rebuild stamps the type too.
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    const due = [...mine, ...teamDocs].filter((row) => !isFeedbackSpace(row.meta) && !cardFilling.has(row.slug) && docTypeFillDue(row.meta))
+      .slice(0, DOC_TYPE_FILL_PER_LOAD);
+    if (due.length) ctx.waitUntil(fillDocTypes(env, due.map((row) => row.slug)));
   }
 
   // Docs indexed before full-text search, or whose index fell behind, are
@@ -8464,8 +8488,8 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
   return {
     docs: mine.map((row) => ({ ...ownRow(row), folder: folderState.docs[row.slug] || '' })),
     feedback,
-    recent: savedRows(recentItems).map(publicRow),
-    starred: savedRows(starItems).map(publicRow),
+    recent: savedRows(recentItems),
+    starred: savedRows(starItems),
     folders: folderState.folders.map((folder) => publicFolder(folder)),
     teams: teamRecords.map((team) => teamSummary(team, viewerAccount)),
     team_docs: teamDocs.map(teamDocRow),
@@ -11720,7 +11744,7 @@ const ACCOUNT_DELETE_STEP_FNS = {
       keys.push(...await listKeyNames(env, `notify-webhook:${id}:`));
     }
     for (const k of record.actor_keys) {
-      keys.push(personalKey('stars', k), personalKey('recents', k), personalKey('folders', k), inboxKey(k), `push-subs:${k}`, `notify-email-off:${k}`);
+      keys.push(personalKey('stars', k), personalKey('recents', k), personalKey('folders', k), inboxKey(k), agentUnreadKey(k), `push-subs:${k}`, `notify-email-off:${k}`);
       keys.push(...await listKeyNames(env, `feedback:space:${k}:`));
       keys.push(...await listKeyNames(env, `trashfolder:u:${k}:`));
     }
@@ -12859,11 +12883,29 @@ async function putAccountProfile(env, accountId, patch) {
   return next;
 }
 
+// What a doc is, for its row in My docs: a sheet (a <table data-tdoc-sheet>,
+// the sheets viewer's own test), slides (a [data-tdoc-slide] section, the
+// slides viewer's), or a doc. Stamped on meta.preview at every write, so the
+// list reads it off the meta it already holds -- never the HTML per row.
+const DOC_TYPE_SHEET_RE = /<table\b[^>]*\sdata-tdoc-sheet(?=[\s=/>])/i;
+const DOC_TYPE_SLIDE_RE = /<[a-z][\w-]*\b[^>]*\sdata-tdoc-slide(?=[\s=/>])/i;
+function docTypeFromHtml(html) {
+  const text = typeof html === 'string' ? html : '';
+  if (text.indexOf('data-tdoc-sheet') !== -1 && DOC_TYPE_SHEET_RE.test(text)) return 'sheet';
+  if (text.indexOf('data-tdoc-slide') !== -1 && DOC_TYPE_SLIDE_RE.test(text)) return 'slides';
+  return 'doc';
+}
+function docTypeOfMeta(meta) {
+  const kind = meta && meta.preview && typeof meta.preview === 'object' ? meta.preview.kind : '';
+  return kind === 'sheet' || kind === 'slides' ? kind : 'doc';
+}
+
 function docPreviewFromHtml(html, { slug, version, title } = {}) {
   if (!SHELL || typeof SHELL.previewFromHtml !== 'function') {
-    return { excerpt: '', image: '' };
+    return { excerpt: '', image: '', kind: docTypeFromHtml(html) };
   }
   const preview = SHELL.previewFromHtml(html, { slug, version, title, maxLen: 220, skipHeading: true });
+  preview.kind = docTypeFromHtml(html);
   // Images inside the document are not share cards. The publisher supplies a
   // card or the server makes one from these words below.
   preview.image = '';
@@ -13299,6 +13341,34 @@ async function fillMissingPreviewCards(env, slugs) {
       await fillPreviewCard(env, slug, meta, version);
     } catch (error) {
       console.error('[preview-card] fill failed:', slug, error && error.message || String(error));
+    }
+  }
+}
+
+// Docs published before the type was stamped (meta.preview.kind) get it the
+// first time a hub lists them: a few per load, after the response, from the
+// head of the latest version (a sheet's table and a deck's first slide come
+// first). Written only if the doc has not moved on meanwhile.
+const DOC_TYPE_FILL_PER_LOAD = 6;
+const DOC_TYPE_SCAN_BYTES = 256 * 1024;
+function docTypeFillDue(meta) {
+  return !!(meta && meta.preview && typeof meta.preview === 'object' && !Array.isArray(meta.preview)
+    && typeof meta.preview.kind !== 'string');
+}
+async function fillDocTypes(env, slugs) {
+  for (const slug of slugs) {
+    try {
+      const meta = await loadDocMeta(env, slug);
+      if (!docTypeFillDue(meta)) continue;
+      const version = latestVersionNumber(meta) || 1;
+      const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`, { range: { offset: 0, length: DOC_TYPE_SCAN_BYTES } });
+      if (!obj) continue;
+      const kind = docTypeFromHtml((await obj.text()).slice(0, DOC_TYPE_SCAN_BYTES));
+      const current = await loadDocMeta(env, slug);
+      if (!docTypeFillDue(current) || latestVersionNumber(current) !== version) continue;
+      await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview: { ...current.preview, kind } }));
+    } catch (error) {
+      console.error('[doc-type] fill failed:', slug, error && error.message || String(error));
     }
   }
 }
@@ -16070,6 +16140,97 @@ async function loadInbox(env, login) {
   }
 }
 
+// ---- My docs row fields: sharing state and unread activity ----
+
+// Who can open a doc, in the words its row uses: public, link (anyone with
+// it), team (everyone in the doc's team), people (named invitees) or private
+// (only the owner). For rows the viewer manages only (indexData): the invite
+// list is the owner's business.
+function docSharingFields(meta) {
+  const access = accessFromMeta(meta);
+  const people = access.allowed_users.length;
+  const sharing = access.visibility === 'public' ? 'public'
+    : access.visibility === 'unlisted' ? 'link'
+      : access.team && meta && meta.workspace_id ? 'team'
+        : people ? 'people' : 'private';
+  return { visibility: access.visibility, sharing, ...(people && sharing !== 'public' && sharing !== 'link' ? { shared_with: people } : {}) };
+}
+
+// Unread on a row: comments (the bell's unread comment, reply and mention
+// rows for that doc, counted as the bell counts them) and agent replies (the
+// threads an agent answered that the person has not opened since; see
+// noteAgentUnread). Both come from the person's own records, read whole once
+// per load -- never a comment or read-state read per row.
+const DOC_ACTIVITY_INBOX_KINDS = new Set(['comment', 'reply', 'mention']);
+async function viewerDocActivity(env, session) {
+  const [inboxes, agentParts] = await Promise.all([loadViewerInboxes(env, session), loadAgentUnread(env, session)]);
+  const out = new Map();
+  const forSlug = (slug) => {
+    if (!out.has(slug)) out.set(slug, { comments: 0, agent: 0 });
+    return out.get(slug);
+  };
+  for (const item of mergeInboxes(inboxes).items) {
+    if (!item || item.read || !isValidSlug(item.slug) || !DOC_ACTIVITY_INBOX_KINDS.has(item.kind)) continue;
+    forSlug(item.slug).comments += Math.max(1, Math.floor(Number(item.count)) || 1);
+  }
+  const threads = new Set();
+  for (const part of agentParts) {
+    for (const item of part.items) {
+      const id = `${item.slug}\n${item.thread}`;
+      if (threads.has(id)) continue;
+      threads.add(id);
+      forSlug(item.slug).agent += 1;
+    }
+  }
+  return out;
+}
+function docActivityFields(entry) {
+  if (!entry || (!entry.comments && !entry.agent)) return {};
+  return { activity: { comments: entry.comments, agent: entry.agent } };
+}
+
+// An agent's reply is not a notification (no bell row, push or email), yet
+// My docs says which docs hold one the person has not read. The comments-core
+// read state (thread-seen) lives per doc, so asking it for every row would be
+// a KV read and a comment read per doc. The reply is noted here instead,
+// under the person whose thread it answers, and the note goes when they mark
+// that thread seen (handleThreadSeen) -- the same moment its pin stops
+// saying unread. One small record per actor key.
+const AGENT_UNREAD_MAX = 100;
+const AGENT_UNREAD_TTL_SECONDS = 30 * 86400;
+function agentUnreadKey(who) {
+  const n = normalizeActorKey(who);
+  return n ? `agent-unread:${n}` : null;
+}
+function agentUnreadItems(raw) {
+  let parsed = null;
+  try { parsed = JSON.parse(raw || 'null'); } catch {}
+  const items = parsed && Array.isArray(parsed.items) ? parsed.items : [];
+  const cutoff = Date.now() - AGENT_UNREAD_TTL_SECONDS * 1000;
+  return items.filter((i) => i && isValidSlug(i.slug) && typeof i.thread === 'string'
+    && THREAD_SEEN_ID_RE.test(i.thread) && Date.parse(i.at) > cutoff);
+}
+async function noteAgentUnread(env, who, { slug, thread, at }) {
+  const key = agentUnreadKey(who);
+  if (!key || !isValidSlug(slug) || !THREAD_SEEN_ID_RE.test(String(thread || ''))) return;
+  const items = agentUnreadItems(await env.META.get(key)).filter((i) => !(i.slug === slug && i.thread === thread));
+  items.unshift({ slug, thread, at });
+  await env.META.put(key, JSON.stringify({ items: items.slice(0, AGENT_UNREAD_MAX) }), { expirationTtl: AGENT_UNREAD_TTL_SECONDS });
+}
+async function loadAgentUnread(env, session) {
+  const keys = [...new Set(actorKeys(session).map(agentUnreadKey).filter(Boolean))];
+  return Promise.all(keys.map(async (key) => ({ key, items: agentUnreadItems(await env.META.get(key)) })));
+}
+// `seen`: thread id -> ms the person has seen it up to.
+async function clearAgentUnread(env, session, slug, seen) {
+  for (const part of await loadAgentUnread(env, session)) {
+    const kept = part.items.filter((i) => !(i.slug === slug && Number(seen[i.thread] || 0) >= Date.parse(i.at)));
+    if (kept.length === part.items.length) continue;
+    if (kept.length) await env.META.put(part.key, JSON.stringify({ items: kept }), { expirationTtl: AGENT_UNREAD_TTL_SECONDS });
+    else await env.META.delete(part.key);
+  }
+}
+
 // Every inbox row is written here, so every row also leaves the building:
 // web push to the browsers the recipient turned alerts on in (#771) and an
 // email (#772). Both run after the row is stored and never fail the write.
@@ -18532,9 +18693,19 @@ async function handleThreadSeen(env, req, url) {
   const headers = { 'Cache-Control': 'no-store' };
   if (req.method === 'GET') return json({ seen: stored }, { headers });
 
+  // My docs' unread agent replies for this doc (noteAgentUnread) go with
+  // the threads marked seen: on this device or, already, on another.
+  const clearAgent = async (seen) => {
+    const upTo = { ...seen };
+    for (const [id, stamp] of Object.entries(cleanThreadSeen(body.seen))) upTo[id] = Math.max(stamp, Number(upTo[id]) || 0);
+    try { await clearAgentUnread(env, session, slug, upTo); } catch {}
+  };
   // Nothing newer than what is kept: no comment read, no write.
   const asked = Object.entries(cleanThreadSeen(body.seen)).filter(([id, stamp]) => stamp > (stored[id] || 0));
-  if (!asked.length) return json({ ok: true, seen: stored }, { headers });
+  if (!asked.length) {
+    await clearAgent(stored);
+    return json({ ok: true, seen: stored }, { headers });
+  }
   if (await rateLimited(env, `seen:${who}`, THREAD_SEEN_WRITES_PER_HOUR, 3600)) {
     return json({ error: 'rate_limited' }, { status: 429, headers: { ...headers, 'Retry-After': '60' } });
   }
@@ -18567,6 +18738,7 @@ async function handleThreadSeen(env, req, url) {
       return json({ error: 'seen_unavailable' }, { status: 503, headers: { ...headers, 'Retry-After': '60' } });
     }
   }
+  await clearAgent(kept);
   return json({ ok: true, seen: kept, unknown, capped }, { headers });
 }
 
@@ -25189,7 +25361,7 @@ const tdocHandlers = {
         });
       }
       const [data, profile] = await Promise.all([
-        indexData(env, s, url.origin, { ctx }),
+        indexData(env, s, url.origin, { ctx, activity: true }),
         hostedRegistrationEnabled(env, url.origin) ? profileBootForSession(env, s) : null,
       ]);
       const pinSet = new Set((profile && profile.pins) || []);
@@ -25624,7 +25796,7 @@ const tdocHandlers = {
       // Independent reads, side by side: My docs used to wait for each in
       // turn after the catalog, and a slow page reads as a dead click.
       const [data, profile, onboarding, dev] = await Promise.all([
-        indexData(env, s, url.origin, { ctx }),
+        indexData(env, s, url.origin, { ctx, activity: true }),
         hostedRegistrationEnabled(env, url.origin) ? profileBootForSession(env, s) : null,
         (async () => {
           try {
@@ -30596,6 +30768,15 @@ const tdocHandlers = {
       if (res.status === 200 && !downgradedFrom && (verdict === 'answered' || verdict === 'question' || verdict === 'applied')
           && auth.actor.kind === 'hosted' && !auth.actor.team_agent) {
         await settleSuggestLocks(env, slug, { ...suggestLockActor(replyingAgent), comment_ids: [parent.id, parent_id] });
+      }
+      // The person whose thread this answers sees it on the doc's row in My
+      // docs until they open the thread. Never fails the reply.
+      const asker = parent.author && parent.author.kind !== 'agent' && parent.author.kind !== 'system' ? parent.author.login : '';
+      if (res.status === 200 && asker) {
+        const noted = noteAgentUnread(env, asker, { slug, thread: parent.id, at: now }).catch((error) => {
+          console.error('[agent-unread] note failed:', error && error.message ? error.message : error);
+        });
+        if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(noted); else await noted;
       }
       const out = downgradedFrom && res.body && typeof res.body === 'object'
         ? { ...res.body, verdict, downgraded_from: downgradedFrom }
