@@ -15674,7 +15674,9 @@ async function loadContacts(env, actor) {
 // One write per post that named or answered someone; nothing for a plain note.
 async function recordContacts(env, actor, people, at) {
   const key = contactsKey(actor);
-  const fresh = (people || []).filter((p) => p && p.login && p.login !== actor && !isNonHumanAuthor(p));
+  // Someone a publisher's upload names is not a contact: the login and name
+  // are whatever the upload said.
+  const fresh = (people || []).filter((p) => p && p.login && p.login !== actor && !isNonHumanAuthor(p) && !p.imported);
   if (!key || !fresh.length) return;
   const prev = await loadContacts(env, actor);
   // Answering the people already at the front of the list again, within a
@@ -29215,10 +29217,12 @@ const tdocHandlers = {
       // An address this person is not entitled to is not offered at all: a
       // tag inserts the address into the comment text.
       const privacy = await emailPrivacyFor(env, s, slug, meta);
-      // A chosen name is filled in only for people this list already names
-      // (a snapshot name) or who are in this doc or team: an owner typing
-      // logins into the invite list must not learn whose account each is.
-      const known = (u) => Boolean(u.name) || (Array.isArray(u.tags) && (u.tags.includes('doc') || u.tags.includes('teammate')));
+      // A chosen name is filled in only for people in this doc or team, or
+      // an entry the worker stamped with an account (an inbox actor): an
+      // owner typing logins into the invite list, or a recent contact that
+      // came from someone's upload, must not learn whose account each is.
+      const known = (u) => (Array.isArray(u.tags) && (u.tags.includes('doc') || u.tags.includes('teammate')))
+        || (typeof u.account_id === 'string' && u.account_id) || (typeof u.github_id === 'string' && u.github_id);
       const users = (await withActorDisplayNames(env, await mentionDirectory(env, s, meta, access, list), { only: known })).filter((u) => {
         const m = String(u.login || '').match(EMAIL_KEY_RE);
         return !m || privacy.reveal.has(m[1].toLowerCase());

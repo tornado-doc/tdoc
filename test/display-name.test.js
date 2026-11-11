@@ -45,6 +45,8 @@ const PROVIDER_NAME = 'Jingyu Shi (Julie)';
     return `tdoc_sid=${sid}`;
   };
   const aliceCookie = await providerSession('alice', alice.account_id, PROVIDER_NAME, 'a1'.repeat(16));
+  let sidSeq = 0;
+  const providerSessionFor = (login, accountId) => providerSession(login, accountId, login, (++sidSeq).toString(16).padStart(32, 'e'));
 
   const up = await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'plan', version: 1, html: '<h1>Plan</h1><p>Billing first.</p>' } });
   assert(up.status === 200, `upload ${up.status} ${up.text}`);
@@ -407,6 +409,27 @@ const PROVIDER_NAME = 'Jingyu Shi (Julie)';
     assert(c && c.name === 'Forged Carl', `@ carl ${JSON.stringify(c)}`);
     assert(!m.users.some((u) => u.login === 'helperbot'), `agent offered: ${JSON.stringify(m.users)}`);
     assert(!/account_id|github_id/.test(JSON.stringify(m)), 'ids in the @ list');
+  });
+
+  await t('G1: replying to an uploaded author does not make a contact that resolves on other docs', async () => {
+    const otto = { cookie: null };
+    // otto (R1) owns opsdoc, where an upload named carl. otto answers it.
+    const ottoAcct = JSON.parse(env.META.map.get('hosted-account:otto')).account_id;
+    otto.cookie = await providerSessionFor('otto', ottoAcct);
+    const r = await call('/api/comments', { method: 'POST', cookie: otto.cookie, body: { slug: 'opsdoc', version: 1, parent_id: 'c_ops_forged', text: 'Thanks.' } });
+    assert(r.status === 200, `reply ${r.status} ${r.text}`);
+    const contacts = env.META.map.get('contacts:otto') || '[]';
+    assert(!contacts.includes('carl'), `uploaded author became a contact: ${contacts}`);
+    // Even a contact list that already holds carl (written before this
+    // fix) does not name carl's account on a doc carl never touched.
+    env.META.map.set('contacts:otto', JSON.stringify([{ login: 'carl', name: 'Forged Carl', avatar_url: '', at: '2026-01-07T00:00:00.000Z' }]));
+    const ottoToken = (await issue(worker, env, 'otto')).token;
+    const up = await call('/api/upload', { method: 'POST', token: ottoToken, body: { slug: 'ottodoc', version: 1, html: '<h1>Otto</h1><p>Fresh.</p>' } });
+    assert(up.status === 200, `upload ${up.status} ${up.text}`);
+    const m = (await call('/api/mentions?slug=ottodoc', { cookie: otto.cookie })).body;
+    const c = m.users.find((u) => u.login === 'carl');
+    assert(c, `contact not listed: ${JSON.stringify(m.users)}`);
+    assert(c.name !== 'Carl Chosen', 'a recent contact resolved to the account name');
   });
 
   await t('R2: real names pass; agent-ish, look-alike and host-shaped ones do not', async () => {
