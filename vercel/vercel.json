@@ -1,9 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/api/tdoc?__path=$1" }
-  ],
-  "functions": {
-    "api/tdoc.js": { "maxDuration": 60 }
-  }
-}

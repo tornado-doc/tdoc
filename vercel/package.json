@@ -1,9 +1,0 @@
-{
-  "name": "tdoc-vercel",
-  "private": true,
-  "type": "module",
-  "description": "tdoc publish target for Vercel — the bundled worker behind a catch-all function, with Blob (docs) + Upstash Redis (meta) storage shims.",
-  "dependencies": {
-    "@vercel/blob": "^0.27.0"
-  }
-}
