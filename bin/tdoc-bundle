@@ -86,7 +86,7 @@ const blockLintJs = fs.readFileSync(path.join(skill, 'server/block-lint.js'), 'u
 // The authoring guides, served to AI apps as MCP resources.
 const authoringGuides = require(path.join(skill, 'server/authoring-guides.js')).loadAuthoringGuides(skill);
 // The site pages' share card (worker HOME_CARD_PATH), served from memory.
-const homeCardPng = fs.readFileSync(path.join(skill, 'assets', 'tdoc_home-card-v2.png'));
+const homeCardPng = fs.readFileSync(path.join(skill, 'assets', 'tdoc_home-card-v3.png'));
 const bundlerSource = fs.readFileSync(__filename, 'utf8');
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {

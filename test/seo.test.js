@@ -339,12 +339,12 @@ function ldBlocks(page) {
     for (const p of ['/', '/pricing']) {
       const page = (await call(p)).text;
       for (const needle of [
-        'property="og:image" content="https://tdoc.dev/tdoc_home-card-v2.png"',
+        'property="og:image" content="https://tdoc.dev/tdoc_home-card-v3.png"',
         'property="og:image:width" content="1200"',
         'property="og:image:height" content="630"',
         'property="og:image:alt" content="tdoc: Your AI-native docs.',
         'name="twitter:card" content="summary_large_image"',
-        'name="twitter:image" content="https://tdoc.dev/tdoc_home-card-v2.png"',
+        'name="twitter:image" content="https://tdoc.dev/tdoc_home-card-v3.png"',
         'name="twitter:image:alt" content="tdoc: Your AI-native docs.',
       ]) assert(page.includes(needle), `${p} missing ${needle}`);
       assert(!page.includes('tdoc_logo-v2.png'), `${p} still shares the logo`);
@@ -353,7 +353,7 @@ function ldBlocks(page) {
     assert(doc.includes('property="og:image" content="https://tdoc.dev/tdoc_logo-v2.png"'), 'doc lost the logo fallback');
     assert(doc.includes('name="twitter:card" content="summary"'), 'logo fallback must stay summary');
     assert(!/tdoc_home-card|og:image:width|twitter:image:alt/.test(doc), 'doc took the home card tags');
-    const card = await worker.fetch(req('/tdoc_home-card-v2.png'), env, {});
+    const card = await worker.fetch(req('/tdoc_home-card-v3.png'), env, {});
     assert(card.status === 200 && card.headers.get('content-type') === 'image/png', `card ${card.status}`);
     const bytes = Buffer.from(await card.arrayBuffer());
     assert(bytes.readUInt32BE(16) === 1200 && bytes.readUInt32BE(20) === 630, 'card is not 1200x630');
