@@ -27,6 +27,7 @@ function sheetsViewerSource() {
     + moduleObject('SheetQuery', 'shared/sheet-query.mjs')
     + moduleObject('SheetMarkup', 'shared/sheet-markup.mjs')
     + moduleObject('DocType', 'shared/doc-type.mjs')
+    + moduleObject('SheetFormula', 'shared/sheet-formula.mjs')
     + fs.readFileSync(path.join(__dirname, 'sheets-viewer.js'), 'utf8')
     + '\n})();\n';
 }

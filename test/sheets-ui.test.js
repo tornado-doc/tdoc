@@ -477,7 +477,8 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await frame.evaluate(() => { const g = document.querySelector('.ts-grid'); g.scrollTop = 0; g.dispatchEvent(new Event('scroll')); });
       await f.locator('.ts-row[data-i="5"] .ts-c[data-c="0"]').waitFor();
       await f.locator('.ts-row[data-i="5"] .ts-c[data-c="0"]').click();
-      await page.keyboard.type('=HYPERLINK("http://evil.example")');
+      // (A leading ' makes it text: typed bare, =… is a formula now.)
+      await page.keyboard.type('\'=HYPERLINK("http://evil.example")');
       await page.keyboard.press('Enter');
       await f.locator('.ts-row[data-i="5"] .ts-c[data-c="0"]').click();
       await page.keyboard.press('Shift+ArrowRight');

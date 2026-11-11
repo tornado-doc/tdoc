@@ -24,6 +24,7 @@ const OFFLINE = [
   'thread-seen-api.test.js',   // server read state: authorized like reading the comments, no cross-doc reads, no thread-id leaks
   'feedback-team-agents.test.js', // the widget's @ lists team agents (answer only) only through tdoc's own-origin token door
   'version-diff.test.js', // bounded block matching and Unicode edits
+  'sheet-formula.test.js',     // sheets: formulas (parser, functions, errors, refs, cycles, incremental recompute, ref shifting, Excel, hostile input, 10k formulas < 200 ms)
   'sheets.test.js',            // sheets: view query (search/filter/sort/URL), CSV parsing + type inference, markup round trip
   'sheet-embed.test.js',      // a sheet embedded in a page by reference: the reference resolves only to /d/<slug>, data is text with the view applied, the SHEET's access for the reader (owner/link/sign-in/private/team/guest/anonymous), no title on refusal, linear on hostile markup
   'sheets-size.test.js',       // sheets: 8 MB sheet cap on every write path (not for prose or a token sheet), history row-count summary, sheet anchors never lost to the aid reconcile
@@ -239,6 +240,7 @@ const BROWSER = [
   'create-menu-ui.test.js', // My docs New: type tiles (Doc · Sheet · Slides) then methods pushed in place, New folder in the menu, Blank deck edits + saves slide text, agent lines per type, keyboard, drop import; desktop + phone, sheets flag on/off
   'sheet-embed-ui.test.js', // a sheet embedded in a page: live view (saved view, comment count, Open), no-access state with nothing of the sheet, keyless frames and requests get nothing, flag off is the link, desktop + phone
   'sheets-ui.test.js', // data-tdoc-sheet: grid, search/filter/sort/tags, view in #hash, cell comments, Edit + Save, CSV/XLSX import, CLI, 10k rows, phone
+  'sheet-formulas-ui.test.js', // sheet formulas: Read computes and changes nothing, Edit types =…, recompute across tabs, formula bar, Save keeps formula + value, insert/delete/fill/paste/rename move refs, undo, hostile sheet stays usable (#BUSY!), 10k formulas; desktop + phone
   'sheets-basics-ui.test.js', // sheet modes (Read edits nothing, a Comment click comments on a cell, Edit), column/row resize (drag, double-click fit, touch, frozen column) through the editor's Save, a reader's own layout, Wrap/Clip + align, line breaks (Alt/Ctrl+Enter, multi-line paste, <br>), fill down, ⌘-arrow edges, 10k rows wrapped; desktop + phone
   'doc-types-top-bar-ui.test.js', // doc, sheet and deck: the same top bar, ⋯ menu (Read / Comment / Edit) and editor bar; a sheet full screen or on its own page keeps them; desktop + phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing

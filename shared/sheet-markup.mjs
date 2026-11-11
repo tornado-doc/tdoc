@@ -27,6 +27,9 @@
 //
 // A line break inside a cell is a <br>: it survives any HTML tool, shows
 // as a break where no viewer runs, and reads back as "\n".
+//
+// A formula cell: <td data-formula="=SUM(C1:C9)">42</td>, the text being
+// the value it last computed (shared/sheet-formula.mjs).
 
 export function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -96,7 +99,10 @@ export function tableHtml(sheet, { caption = false } = {}) {
   }).join('');
   const body = (sheet.rows || []).map((row, i) => {
     const id = row.id || `r${i + 1}`;
-    const cells = cols.map((col, c) => `<td>${cellHtml(col.type, row.cells[c])}</td>`).join('');
+    // A formula cell (row.formulas[c] = '=…', shared/sheet-formula.mjs)
+    // keeps its formula beside the value it last showed.
+    const fx = row.formulas || [];
+    const cells = cols.map((col, c) => `<td${fx[c] ? ` data-formula="${escapeHtml(fx[c])}"` : ''}>${cellHtml(col.type, row.cells[c])}</td>`).join('');
     const ht = cleanSize(row.height, MIN_HEIGHT, MAX_HEIGHT);
     return `<tr data-row="${escapeHtml(id)}"${ht ? ` data-height="${ht}"` : ''}>${cells}</tr>`;
   }).join('\n');

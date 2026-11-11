@@ -117,6 +117,44 @@ header row is the last row of `<thead>`; each `<th>` declares its column type.
   is and where it came from. Filters, sort and search are the reader's view
   and are never written into the doc.
 
+## Formulas
+
+A cell can compute its value as in Google Sheets or Excel: put the formula
+in `data-formula` on the `<td>` and the value it gives as the cell's text,
+so a reader without the viewer, an export or another agent sees the value.
+The reader recomputes on load and after every edit; in Edit mode people type
+`=…` into a cell, and the formula bar shows the selected cell's formula.
+
+```html
+<tr data-row="r4"><td>Total</td><td data-formula="=SUM(B1:B3)">25.5</td><td data-formula="=IF(B4>20,&quot;over&quot;,&quot;ok&quot;)">over</td></tr>
+```
+
+- **A1 is the first body row**, the row numbers the grid shows; the header
+  row is not a row. Columns are letters in header order: A, B, … AA.
+- References: `B3`, `$B$3` (absolute), `B1:B9`, whole columns `B:B` and rows
+  `2:4`, another tab `Rates!A1` or `'Tab name'!A1:B9`. Operators
+  `+ - * / ^ & % = <> < > <= >=` with the usual precedence.
+- Functions: SUM AVERAGE MIN MAX COUNT COUNTA COUNTIF COUNTIFS SUMIF SUMIFS
+  AVERAGEIF AVERAGEIFS IF IFS IFERROR AND OR NOT ROUND ROUNDUP ROUNDDOWN ABS
+  VLOOKUP HLOOKUP XLOOKUP INDEX MATCH CONCAT CONCATENATE TEXTJOIN LEFT RIGHT
+  MID LEN TRIM UPPER LOWER SUBSTITUTE TEXT VALUE TODAY NOW DATE YEAR MONTH DAY
+  DATEDIF. Another name shows `#NAME?`.
+- Errors show in the cell: `#DIV/0!`, `#VALUE!`, `#REF!` (a deleted cell or
+  unknown tab), `#NAME?`, `#N/A`, `#NUM!`, `#ERROR!` (a formula that does
+  not parse), `#CYCLE!` (a cell that depends on itself), `#BUSY!` (a sheet
+  too heavy to compute in time).
+- Dates are day numbers as in a spreadsheet; a formula over a `date` column
+  or from DATE/TODAY shows as `2026-03-01`.
+- Escape `"` in the attribute as `&quot;` and `<` `>` as `&lt;` `&gt;`.
+  Text that starts with `=` but is not a formula: a cell without
+  `data-formula` is always text.
+- Editing in the reader moves references the way a spreadsheet does
+  (inserting or deleting rows and columns, fill down, copy and paste, renaming
+  a tab). When you edit the HTML yourself, keep references pointing at the
+  right rows, and write each formula cell's current value as its text.
+- Excel import keeps formulas the engine computes (and moves them under the
+  header); others keep their value. Excel export writes them back.
+
 ## Size
 
 A doc whose bulk is sheet tables may be up to 8 MB of HTML (10,000 rows of
