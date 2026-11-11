@@ -204,7 +204,7 @@ async function loadWorker({ previewRenderer = false } = {}) {
   const sheetsJs = sheets.sheetsViewerSource();
   src = src.replace(/const SHEETS_VIEWER_JS = `__TDOC_SHEETS_VIEWER_JS__`;/, () => 'const SHEETS_VIEWER_JS = ' + JSON.stringify(sheetsJs) + ';');
   src = src.replace(/const SHEETS_VIEWER_VERSION = "__TDOC_SHEETS_VIEWER_VERSION__";/, () => 'const SHEETS_VIEWER_VERSION = ' + JSON.stringify(sheets.sheetsViewerVersion(sheetsJs)) + ';');
-  src = src.replace(/const HOME_CARD_PNG_B64 = "__TDOC_HOME_CARD_PNG_B64__";/, () => 'const HOME_CARD_PNG_B64 = ' + JSON.stringify(fs.readFileSync(path.join(root, 'assets', 'tdoc_home-card-v1.png'), 'base64')) + ';');
+  src = src.replace(/const HOME_CARD_PNG_B64 = "__TDOC_HOME_CARD_PNG_B64__";/, () => 'const HOME_CARD_PNG_B64 = ' + JSON.stringify(fs.readFileSync(path.join(root, 'assets', 'tdoc_home-card-v2.png'), 'base64')) + ';');
   const guides = require(path.join(root, 'server', 'authoring-guides.js')).loadAuthoringGuides(root);
   src = src.replace(/const AUTHORING_GUIDES = "__TDOC_AUTHORING_GUIDES__";/, 'const AUTHORING_GUIDES = ' + JSON.stringify(guides) + ';');
   if (previewRenderer) {

@@ -49,8 +49,8 @@ const ONBOARD_SLUGS = new Set(['tornado-doc', 'tdoc-start']);
 // 1200x630 PNG in assets/, drawn from tools/home-card/card.html. Same path and
 // alt as worker HOME_CARD_PATH / HOME_CARD_ALT (test/no-drift.test.js).
 const SITE_PAGE_SLUGS = new Set(['tornado-doc', 'tdoc-start', 'tdoc-templates', 'tdoc-pricing', 'tdoc-privacy']);
-const HOME_CARD_PATH = '/tdoc_home-card-v1.png';
-const HOME_CARD_ALT = 'tdoc: Your AI-native docs. Agents draft, you comment, they rewrite. A doc with a margin comment that Claude answered and applied.';
+const HOME_CARD_PATH = '/tdoc_home-card-v2.png';
+const HOME_CARD_ALT = 'tdoc: Your AI-native docs. Agents draft, you comment, they rewrite. A Maui trip doc with comments from Serena and Julie and a reply from Claude.';
 // ---- onboarding (shared with server.js; test/no-drift.test.js pins these) ----
 // A step is a timestamp, never a boolean: resuming reads the first one that is
 // empty, the checklist renders from the same object, and the funnel is read

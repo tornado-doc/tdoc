@@ -2,15 +2,17 @@
 <!--
   The share card for tdoc.dev and the other site pages (/pricing, /start,
   /templates, /privacy): what X, Slack, LinkedIn etc. show when the homepage
-  link is pasted. Rendered to assets/tdoc_home-card-v1.png by
+  link is pasted. Rendered to assets/tdoc_home-card-v2.png by
   tools/home-card/render.mjs at 1200x630.
 
   Colours and type come from the landing page (landing/tornado-doc, latest
   version): --ink #10121a, --body #454a58, --muted #767c8b, --accent #1652f0,
   --soft #eef3ff, --rule #e4e7ee, --wash #f7f8fb, the system-ui stack, the
   stroke tornado mark, and the comment anchor yellow (--p-anchor #fff7d0),
-  --good and its #f4faf6 wash from the landing's version viz, Claude terracotta. The doc and thread restate the
-  hero's Maui demo (tdoc.dev/d/maui-trip).
+  Claude terracotta. The doc and thread restate the
+  hero's Maui demo (tdoc.dev/d/maui-trip). The comments are the live doc's
+  (Serena's question, Claude's reply, Julie's comment) with the avatars tdoc
+  shows for them, committed beside this file at 128px.
 
   X shows this card about 500px wide on a phone, so every text here is at
   least 24px at 1200 (about 10px there) and the headline is the largest thing.
@@ -22,7 +24,7 @@
   :root {
     --ink: #10121a; --body: #454a58; --muted: #767c8b; --accent: #1652f0;
     --soft: #eef3ff; --rule: #e4e7ee; --wash: #f7f8fb;
-    --anchor: #fff7d0; --good: #1a7340; --good-wash: #f4faf6; --claude: #d97757;
+    --anchor: #fff7d0; --claude: #d97757;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
@@ -38,29 +40,32 @@
   .sub { margin: 28px 0 0; font-size: 32px; line-height: 1.25; font-weight: 650; color: var(--ink); letter-spacing: -.02em; }
   .sub em { font-style: normal; color: var(--accent); }
 
-  /* The doc, cropped by the card's right and bottom edges. */
-  .doc { position: absolute; left: 640px; top: 48px; width: 640px; height: 640px; background: #fff;
+
+  /* The doc, cropped by the card's right and bottom edges. Two lines only:
+     the comments carry the card, so the excerpt is what gives way. */
+  .doc { position: absolute; left: 640px; top: 40px; width: 640px; height: 640px; background: #fff;
     border: 2px solid var(--rule); border-radius: 22px; box-shadow: 0 18px 48px rgba(16,18,26,.09);
-    padding: 40px 44px; }
-  .doc h2 { margin: 0 0 14px; font-size: 40px; line-height: 1.1; color: var(--ink); letter-spacing: -.025em; }
-  .doc p { margin: 0 0 12px; font-size: 25px; line-height: 1.5; color: var(--body); }
-  .doc .day { margin-top: 18px; margin-bottom: 4px; font-size: 22px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    padding: 30px 40px; }
+  .doc h2 { margin: 0 0 10px; font-size: 36px; line-height: 1.1; color: var(--ink); letter-spacing: -.025em; }
+  .doc p { margin: 0 0 4px; font-size: 24px; line-height: 1.5; color: var(--body); white-space: nowrap; }
+  .doc .stat { font-weight: 700; color: var(--ink); }
   .doc mark { background: var(--anchor); color: var(--ink); padding: 1px 3px; border-radius: 4px; }
 
-  /* The margin thread, over the doc's lower half. */
-  .thread { position: absolute; left: 708px; top: 340px; width: 452px; background: #fff;
-    border: 2px solid var(--accent); border-radius: 18px; box-shadow: 0 20px 50px rgba(16,18,26,.16);
-    padding: 18px 24px 18px; }
+  /* The margin comments, over the doc's lower part, in anchor order. */
+  .thread { position: absolute; left: 700px; width: 468px; background: #fff;
+    border: 2px solid var(--rule); border-radius: 18px; box-shadow: 0 16px 40px rgba(16,18,26,.13);
+    padding: 14px 22px; }
+  .thread.on { border-color: var(--accent); }
+  .t-julie { top: 210px; }
+  .t-serena { top: 326px; }
   .who { display: flex; align-items: center; gap: 12px; font-size: 22px; font-weight: 700; color: var(--ink); }
   .av { width: 36px; height: 36px; border-radius: 50%; flex: none; display: grid; place-items: center;
     background: var(--soft); color: var(--accent); font-size: 18px; font-weight: 700; }
+  img.av { object-fit: cover; background: #fff; box-shadow: 0 0 0 2px var(--rule); }
   .av.ai { background: none; }
   .av.ai svg { width: 32px; height: 32px; color: var(--claude); }
-  .msg { margin: 8px 0 0 48px; font-size: 25px; line-height: 1.32; color: var(--ink); text-wrap: balance; }
-  .at { color: var(--accent); font-weight: 650; }
-  .reply { margin-top: 14px; padding-top: 14px; border-top: 2px solid var(--rule); }
-  .chip { margin-left: auto; font-size: 18px; font-weight: 700; color: var(--good); background: var(--good-wash); border: 2px solid var(--good);
-    border-radius: 999px; padding: 4px 12px; }
+  .msg { margin: 6px 0 0 48px; font-size: 24px; line-height: 1.3; color: var(--ink); text-wrap: balance; }
+  .reply { margin-top: 12px; padding-top: 12px; border-top: 2px solid var(--rule); }
 </style>
 </head>
 <body>
@@ -72,19 +77,26 @@
     <p class="sub">Agents draft. You comment.<br><em>They rewrite.</em></p>
   </div>
 
+  <!-- Text, anchors, names and avatars from the live doc's comments
+       (GET /api/comments?slug=maui-trip); Claude's reply keeps its first two
+       sentences. -->
   <div class="doc">
     <h2>A week on Maui</h2>
-    <p>One base, two early mornings, and what to book before you fly.</p>
-    <p class="day">Day 4</p>
-    <p><mark>Road to Hana: 64 miles</mark> of coast road</p>
+    <p>7 days, one base in <mark>K&#299;hei/Wailea</mark></p>
+    <p><span class="stat">~64 mi</span> &#183; <mark>Kahului to H&#257;na, one way</mark></p>
   </div>
 
-  <div class="thread">
-    <div class="who"><span class="av">S</span>Serena</div>
-    <div class="msg"><span class="at">@claude</span> how long, with stops?</div>
+  <div class="thread t-julie">
+    <div class="who"><img class="av" src="avatar-julie.jpg" alt="">Jingyu Shi (Julie)</div>
+    <div class="msg">My fav place</div>
+  </div>
+
+  <div class="thread t-serena on">
+    <div class="who"><img class="av" src="avatar-serena.png" alt="">Serena Tan</div>
+    <div class="msg">64 miles doesn't sound bad. How long is it really with stops?</div>
     <div class="reply">
-      <div class="who"><span class="av ai"><svg viewBox="0 0 24 24" fill="currentColor"><use href="#i-claude"/></svg></span>Claude<span class="chip">&#10003; Applied</span></div>
-      <div class="msg">10&#8211;12 hours, so Day&nbsp;4 now starts at 6&nbsp;a.m.</div>
+      <div class="who"><span class="av ai"><svg viewBox="0 0 24 24" fill="currentColor"><use href="#i-claude"/></svg></span>Claude</div>
+      <div class="msg">Plan on the whole day. With stops it's 10&#8211;12 hours from K&#299;hei.</div>
     </div>
   </div>
 </body>

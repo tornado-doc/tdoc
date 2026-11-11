@@ -306,8 +306,8 @@ function waitReady(port, ms = 5000) {
     if (r.body[0] !== 0x89 || r.body[1] !== 0x50) throw new Error('body is not PNG');
   });
 
-  await t('GET /tdoc_home-card-v1.png is the 1200x630 site share card', async () => {
-    const r = await rawGet('/tdoc_home-card-v1.png');
+  await t('GET /tdoc_home-card-v2.png is the 1200x630 site share card', async () => {
+    const r = await rawGet('/tdoc_home-card-v2.png');
     if (r.status !== 200) throw new Error(`status ${r.status}`);
     if (!String(r.headers['content-type'] || '').includes('image/png')) throw new Error(`content-type ${r.headers['content-type']}`);
     if (r.body[0] !== 0x89 || r.body[1] !== 0x50) throw new Error('body is not PNG');
@@ -327,11 +327,11 @@ function waitReady(port, ms = 5000) {
     for (const site of ['tornado-doc', 'tdoc-pricing']) {
       const page = (await rawGet(`/d/${site}/v/1`)).body.toString('utf8');
       for (const needle of [
-        `property="og:image" content="${origin}/tdoc_home-card-v1.png"`,
+        `property="og:image" content="${origin}/tdoc_home-card-v2.png"`,
         'property="og:image:width" content="1200"',
         'property="og:image:height" content="630"',
         'name="twitter:card" content="summary_large_image"',
-        `name="twitter:image" content="${origin}/tdoc_home-card-v1.png"`,
+        `name="twitter:image" content="${origin}/tdoc_home-card-v2.png"`,
         'name="twitter:image:alt" content="tdoc: Your AI-native docs.',
       ]) if (!page.includes(needle)) throw new Error(`${site} missing ${needle}`);
     }
