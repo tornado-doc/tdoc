@@ -2068,6 +2068,10 @@
         rereportPins();
       }
     }
+    // Download (Word, CSV, Excel): the document as it is, without tdoc's UI.
+    else if (d.type === 'tdoc:exportHtml') {
+      post({ type: 'tdoc:exportHtml', requestId: d.requestId, html: serializeDocument() });
+    }
     else if (d.type === 'tdoc:editSerialize') {
       post({ type: 'tdoc:editDocument', requestId: d.requestId, html: serializeDocument() });
     }
@@ -2107,7 +2111,19 @@
     requestAnimationFrame(function () { ticking = false; reportScroll(); });
   }, { passive: true });
 
+  // What Download offers: a sheet doc (only sheet tables, a title and a
+  // note) downloads as CSV / Excel; a doc with prose, as Word and Markdown.
+  function docShape() {
+    var sheets = Array.prototype.filter.call(document.querySelectorAll('table[data-tdoc-sheet]'), function (t) { return !t.closest('[data-tdoc-provider]'); });
+    if (!sheets.length || !document.body) return { sheets: 0, sheetDoc: false };
+    var clone = document.body.cloneNode(true);
+    Array.prototype.forEach.call(clone.querySelectorAll('[data-tdoc-provider], table[data-tdoc-sheet], script, style, template, noscript, h1, .sheet-note'), function (n) { n.remove(); });
+    var prose = (clone.textContent || '').replace(/\s+/g, '');
+    var media = clone.querySelector('img, svg, canvas, video, iframe, table');
+    return { sheets: sheets.length, sheetDoc: !prose && !media };
+  }
   prepareDiagrams();
-  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, supportsTheme: supportsTheme, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null });
+  var shape = docShape();
+  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, supportsTheme: supportsTheme, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null, sheets: shape.sheets, sheetDoc: shape.sheetDoc });
   reportScroll(); // initial position so the shell can evaluate at-bottom for short docs
 })();

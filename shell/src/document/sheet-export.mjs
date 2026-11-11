@@ -1,0 +1,89 @@
+// Download a sheet doc as CSV (the tab on screen) or Excel (every tab), from
+// the document's own <table data-tdoc-sheet> markup: the same reader the
+// viewer uses (shared/sheet-markup.mjs), so a downloaded file holds what the
+// doc holds, not what a search or filter shows right now. No DOM globals: an
+// offline test runs this on a small DOM.
+import { SHEET_SELECTOR, readSheetTable } from '../../../shared/sheet-markup.mjs';
+
+export const CSV_MIME = 'text/csv';
+export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+// [{ name, columns: [{ name, type }], rows: [[text | string[]]] }]
+export function sheetsFromDocument(doc) {
+  const tables = Array.prototype.filter.call(doc.querySelectorAll(SHEET_SELECTOR), (t) => !(t.closest && t.closest('[data-tdoc-provider]')));
+  return tables.map((table, i) => {
+    const sheet = readSheetTable(table);
+    return {
+      name: sheet.name || `Sheet ${i + 1}`,
+      columns: sheet.columns.map((c) => ({ name: c.name, type: c.type })),
+      rows: sheet.rows.map((r) => r.cells),
+    };
+  });
+}
+
+const cellText = (v) => (Array.isArray(v) ? v.join(', ') : String(v == null ? '' : v));
+
+// A value Excel or Sheets would run as a formula when it opens a CSV.
+const FORMULA = /^[=+\-@\t\r]/;
+const PLAIN_NUMBER = /^-?(\d{1,3}(,\d{3})+|\d+)?(\.\d+)?([eE][-+]?\d+)?$/;
+
+function csvField(value) {
+  let s = cellText(value);
+  if (FORMULA.test(s) && !(s.length > 1 && PLAIN_NUMBER.test(s))) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// RFC 4180, CRLF rows, with a byte-order mark so Excel reads UTF-8.
+export function sheetCsv(sheet) {
+  const lines = [sheet.columns.map((c) => csvField(c.name)).join(',')];
+  for (const row of sheet.rows) lines.push(sheet.columns.map((_, c) => csvField(row[c])).join(','));
+  return `﻿${lines.join('\r\n')}\r\n`;
+}
+
+// Rows for a workbook: numbers and checkboxes as values, the rest as text
+// (a text cell is never read as a formula).
+export function sheetRows(sheet) {
+  const head = sheet.columns.map((c) => c.name);
+  const body = sheet.rows.map((row) => sheet.columns.map((col, c) => {
+    const s = cellText(row[c]).trim();
+    if (col.type === 'number' && s && PLAIN_NUMBER.test(s)) {
+      const n = Number(s.replace(/,/g, ''));
+      if (Number.isFinite(n)) return n;
+    }
+    if (col.type === 'checkbox') return s !== '';
+    return cellText(row[c]);
+  }));
+  return [head, ...body];
+}
+
+// Excel's sheet-name rules: 31 characters, none of []:*?/\, unique.
+export function workbookNames(sheets) {
+  const seen = new Set();
+  return sheets.map((sheet, i) => {
+    let base = String(sheet.name || `Sheet ${i + 1}`).replace(/\[/g, '(').replace(/\]/g, ')').replace(/[:*?/\\]/g, ' ')
+      .replace(/\s+/g, ' ').replace(/^'+|'+$/g, '').trim().slice(0, 31) || `Sheet ${i + 1}`;
+    let name = base;
+    for (let n = 2; seen.has(name.toLowerCase()); n++) name = `${base.slice(0, 31 - String(n).length - 1)} ${n}`;
+    seen.add(name.toLowerCase());
+    return name;
+  });
+}
+
+export function xlsxBytes(XLSX, sheets) {
+  const book = XLSX.utils.book_new();
+  const names = workbookNames(sheets);
+  sheets.forEach((sheet, i) => XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(sheetRows(sheet)), names[i]));
+  return new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'xlsx', compression: true }));
+}
+
+// The tab on screen: its name from the view in the page's #hash (the
+// viewer's encodeView `a`), else the first.
+export function activeSheet(sheets, activeName) {
+  return sheets.find((s) => s.name === activeName) || sheets[0] || null;
+}
+
+// A file name from the doc slug plus, for one tab of several, the tab.
+export function sheetFileName(slug, sheet, sheets, ext) {
+  const tab = sheets.length > 1 && sheet ? `-${String(sheet.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}` : '';
+  return `${slug}${tab && tab !== '-' ? tab : ''}.${ext}`;
+}

@@ -65,6 +65,12 @@ export const FLAGS = Object.freeze({
   // filter, sort) does not depend on this flag. On in dev mode and PR
   // previews until approved.
   sheets: Object.freeze({ label: 'Sheets: import spreadsheets and edit cells', owner: 'julie', added: '2026-11-09', default: false, preview: true }),
+  // Download as PDF (print rules: no tdoc chrome, one slide per page), Word
+  // (.docx built in the browser), Markdown (the server's text conversion,
+  // as a file), and for a sheet doc CSV (the tab on screen) and Excel (all
+  // tabs), from ⋯ → Download & copy. Same access as reading the doc. On in
+  // dev mode and PR previews until approved.
+  docDownload: Object.freeze({ label: 'Download as Word, Markdown, CSV and Excel', owner: 'julie', added: '2026-11-10', default: false, preview: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

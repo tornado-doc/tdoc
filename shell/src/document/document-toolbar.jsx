@@ -8,7 +8,10 @@ import {
   Copy,
   CopyPlus,
   Download,
+  FileCode,
   FileDown,
+  FileSpreadsheet,
+  FileText,
   FolderInput,
   History,
   Share2,
@@ -250,6 +253,12 @@ export function DocumentOverflowActions({
   onDuplicate,
   onDownload,
   onPrint,
+  // Download as Word / Markdown / CSV / Excel (flag docDownload): called
+  // with 'docx' | 'md' | 'csv' | 'xlsx'. Null keeps the menu as it was.
+  onDownloadAs = null,
+  // { sheets, sheetDoc } from the frame: a sheet doc downloads as CSV and
+  // Excel instead of Word and Markdown.
+  docShape = null,
   onMoveDocument,
   onDelete,
   onCompare,
@@ -353,15 +362,52 @@ export function DocumentOverflowActions({
           </>
         )}
       >
-        <AppMenuItem className="tdoc-action-menu-item" data-action="copy" onClick={onCopyMarkdown}>
-          <Copy size={15} /> Copy as Markdown
-        </AppMenuItem>
-        <AppMenuItem className="tdoc-action-menu-item" data-action="download" onClick={onDownload}>
-          <Download size={15} /> Download HTML
-        </AppMenuItem>
-        <AppMenuItem className="tdoc-action-menu-item" data-action="download-pdf" onClick={onPrint}>
-          <FileDown size={15} /> Download PDF
-        </AppMenuItem>
+        {onDownloadAs ? (
+          <>
+            {docShape?.sheetDoc ? (
+              <>
+                <AppMenuItem className="tdoc-action-menu-item" data-action="download-csv" onClick={() => onDownloadAs('csv')}>
+                  <FileSpreadsheet size={15} /> Download CSV{docShape.sheets > 1 ? ' (this tab)' : ''}
+                </AppMenuItem>
+                <AppMenuItem className="tdoc-action-menu-item" data-action="download-xlsx" onClick={() => onDownloadAs('xlsx')}>
+                  <FileSpreadsheet size={15} /> Download Excel
+                </AppMenuItem>
+              </>
+            ) : null}
+            <AppMenuItem className="tdoc-action-menu-item" data-action="download-pdf" onClick={onPrint}>
+              <FileDown size={15} /> Download PDF
+            </AppMenuItem>
+            {docShape?.sheetDoc ? null : (
+              <>
+                <AppMenuItem className="tdoc-action-menu-item" data-action="download-docx" onClick={() => onDownloadAs('docx')}>
+                  <FileText size={15} /> Download Word
+                </AppMenuItem>
+                <AppMenuItem className="tdoc-action-menu-item" data-action="download-md" onClick={() => onDownloadAs('md')}>
+                  <FileCode size={15} /> Download Markdown
+                </AppMenuItem>
+              </>
+            )}
+            <AppMenuItem className="tdoc-action-menu-item" data-action="download" onClick={onDownload}>
+              <Download size={15} /> Download HTML
+            </AppMenuItem>
+            <AppMenuSeparator />
+            <AppMenuItem className="tdoc-action-menu-item" data-action="copy" onClick={onCopyMarkdown}>
+              <Copy size={15} /> Copy as Markdown
+            </AppMenuItem>
+          </>
+        ) : (
+          <>
+            <AppMenuItem className="tdoc-action-menu-item" data-action="copy" onClick={onCopyMarkdown}>
+              <Copy size={15} /> Copy as Markdown
+            </AppMenuItem>
+            <AppMenuItem className="tdoc-action-menu-item" data-action="download" onClick={onDownload}>
+              <Download size={15} /> Download HTML
+            </AppMenuItem>
+            <AppMenuItem className="tdoc-action-menu-item" data-action="download-pdf" onClick={onPrint}>
+              <FileDown size={15} /> Download PDF
+            </AppMenuItem>
+          </>
+        )}
       </AppSubmenu>
       {config.mode === 'published' ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="duplicate" onClick={onDuplicate}>

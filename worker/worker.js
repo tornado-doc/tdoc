@@ -25603,6 +25603,37 @@ const tdocHandlers = {
       return res.response;
     }
 
+    // ---- doc download as Markdown ----
+    // /d/<slug>/v/<n>/export.md: the document's own text as a .md file (no
+    // tdoc preamble, no comments), through the same conversion as
+    // `Accept: text/markdown` (SHELL.documentMarkdown is its rich mode).
+    // Same gate as reading the doc.
+    const markdownMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/export\.md$/);
+    if (markdownMatch && (method === 'GET' || method === 'HEAD')) {
+      const [, slug, vStr] = markdownMatch;
+      if (!isValidSlug(slug)) return text('invalid slug', { status: 400 });
+      if (!SHELL || !SHELL.documentMarkdown) return text('Markdown download unavailable', { status: 503 });
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
+      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
+      if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
+      const title = (gate.meta && typeof gate.meta.title === 'string' && gate.meta.title.trim()) || slug;
+      const md = SHELL.documentMarkdown(await obj.text(), {
+        title,
+        baseUrl: `${url.origin}/d/${encodeURIComponent(slug)}/v/${Number(vStr)}/`,
+        docUrl: `${url.origin}/d/${encodeURIComponent(slug)}/v/${Number(vStr)}`,
+      });
+      return new Response(method === 'HEAD' ? null : md, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${slug}.md"`,
+          'Cache-Control': 'private, no-store',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+
     // ---- doc export / fork ----
     // /export → forces a file download (Content-Disposition: attachment) unless
     //           ?download=0. Stamps overlay reader CSS (no bar/comments) so the

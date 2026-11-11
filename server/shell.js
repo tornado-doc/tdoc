@@ -307,19 +307,32 @@
     });
   }
   const BREAK_TAGS = /^(p|div|section|article|header|footer|main|aside|nav|blockquote|pre|figure|figcaption|dl|dt|dd|ul|ol|table|thead|tbody|tfoot|details|summary|form|fieldset|hr|br|caption)$/;
-  function agentBlocksFromHtml(html, maxChars) {
+  // `opts` is for the Markdown download (documentMarkdown below) and leaves
+  // the agent view untouched when absent: { scanBytes } reads past the
+  // agent's 256 KB head; { rich: true } keeps what a file needs and the agent
+  // text does not: code blocks verbatim, numbered and nested list items,
+  // links and images as Markdown, and where one table ends.
+  function agentBlocksFromHtml(html, maxChars, opts) {
+    const o = opts || {};
+    const rich = o.rich === true;
+    const scan = Number(o.scanBytes) || AGENT_SCAN_BYTES;
     const limit = Number(maxChars) || AGENT_TEXT_CHARS;
     if (typeof html !== 'string' || !html) return { blocks: [], truncated: false };
-    const source = html.length > AGENT_SCAN_BYTES ? html.slice(0, AGENT_SCAN_BYTES) : html;
-    let truncated = html.length > AGENT_SCAN_BYTES;
+    const source = html.length > scan ? html.slice(0, scan) : html;
+    let truncated = html.length > scan;
+    // The agent path has always stopped here for a source past its scan
+    // (the worker only ever hands it the head); a download reads what it
+    // scanned and says it is cut short.
+    let cut = rich ? truncated : false;
+    if (rich) truncated = false;
     let body = source
       .replace(/<!--[\s\S]*?(-->|$)/g, ' ')
       .replace(/<[!?][^>]*>/g, ' ')
       .replace(/<head\b[\s\S]*?(<\/head\s*>|(?=<body\b))/i, ' ')
-      .replace(/<(script|style|noscript|template|svg|iframe|object|canvas|math)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>/gi, ' ');
+      .replace(/<(script|style|noscript|template|svg|iframe|object|canvas|math)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>/gi, rich ? ' \u0000embed\u0000 ' : ' ');
     // A cut source can end inside one of those blocks, or inside a tag.
     const open = body.search(/<(script|style|noscript|template|svg|iframe|object|canvas|math)\b/i);
-    if (open >= 0) { body = body.slice(0, open); truncated = true; }
+    if (open >= 0) { body = body.slice(0, open); if (rich) cut = true; else truncated = true; }
     body = body.replace(/<[^>]*$/, ' ');
     const blocks = [];
     let used = 0;
@@ -329,7 +342,25 @@
     let row = null;
     let cell = null;
     let href = null;
+    let linked = false;
+    let pre = null;
+    let preLang = '';
+    let item = null;
+    let quote = 0;
+    const marks = [];
+    const items = [];
+    const lists = [];
+    const base = rich && typeof o.baseUrl === 'string' ? o.baseUrl : '';
+    const resolve = (u) => {
+      if (!base || !u || /^[a-z][a-z0-9+.-]*:/i.test(u) || u[0] === '#') return u;
+      try { return new URL(u, base).href; } catch (e) { return u; }
+    };
+    const attr = (attrs, name) => {
+      const a = new RegExp('\\b' + name + '\\s*=\\s*("([^"]*)"|\'([^\']*)\'|([^\\s"\'>]+))', 'i').exec(attrs);
+      return a ? decodeEntities(a[2] != null ? a[2] : a[3] != null ? a[3] : a[4]).trim() : '';
+    };
     const clean = (s) => s.replace(/\s+/g, ' ').trim();
+    const add = (s) => { if (cell != null) cell += s; else buf += s; };
     const push = (block, size) => {
       if (used + size > limit) { truncated = true; return false; }
       blocks.push(block); used += size; return true;
@@ -337,19 +368,67 @@
     const flush = () => {
       const t = clean(buf);
       buf = '';
-      if (t) push(kind === 'h' ? { t: 'h', level: level, text: t } : { t: kind, text: t }, t.length);
+      if (t) {
+        if (kind === 'h') push({ t: 'h', level: level, text: t }, t.length);
+        else if (kind === 'li' && item) push({ t: 'li', text: t, depth: item.depth, n: item.n, cont: item.cont === true }, t.length);
+        else push(quote && kind === 'p' ? { t: 'p', text: t, quote: true } : { t: kind, text: t }, t.length);
+      }
       kind = 'p'; level = 0;
     };
     const re = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>|([^<]+|<)/g;
     let m;
     while ((m = re.exec(body)) && !truncated) {
       if (m[4] != null) {
-        const t = decodeEntities(m[4]);
-        if (cell != null) cell += t; else buf += t;
+        if (pre != null) { pre += decodeEntities(m[4]); continue; }
+        if (rich && m[4].indexOf('\u0000embed\u0000') !== -1) {
+          const parts = m[4].split('\u0000embed\u0000');
+          parts.forEach(function (part, i) {
+            if (i > 0 && cell == null) { const keep = kind; flush(); push({ t: 'embed' }, 0); if (keep === 'li') kind = keep; }
+            add(decodeEntities(part));
+          });
+          continue;
+        }
+        add(decodeEntities(m[4]));
         continue;
       }
       const close = m[1] === '/';
       const tag = m[2].toLowerCase();
+      if (pre != null) {
+        if (tag === 'pre' && close) {
+          const text = pre.replace(/^\n/, '').replace(/\s+$/, '');
+          pre = null;
+          if (text) push({ t: 'code', text: text, lang: preLang }, text.length);
+        } else if (tag === 'br') pre += '\n';
+        else if (tag === 'code' && !close && !pre) {
+          const lang = /(?:^|\s)(?:language|lang)-([\w+-]+)/.exec(attr(m[3], 'class'));
+          if (lang) preLang = lang[1];
+        }
+        continue;
+      }
+      if (rich && tag === 'pre' && !close) { flush(); pre = ''; preLang = ''; continue; }
+      // Bold, italic and inline code as Markdown. The marks hug the words:
+      // spaces inside an element move outside its marks.
+      if (rich && /^(b|strong|i|em|code|kbd)$/.test(tag)) {
+        const mark = tag === 'b' || tag === 'strong' ? '**' : tag === 'i' || tag === 'em' ? '*' : '`';
+        const inCell = cell != null;
+        if (!close) { marks.push({ tag: tag, at: (inCell ? cell : buf).length, inCell: inCell }); continue; }
+        let k = marks.length - 1;
+        while (k >= 0 && marks[k].tag !== tag) k--;
+        if (k < 0) continue;
+        const open = marks[k];
+        marks.splice(k);
+        if (open.inCell !== inCell) continue;
+        const text = inCell ? cell : buf;
+        const seg = text.slice(open.at);
+        const words = seg.replace(/^\s+|\s+$/g, '');
+        if (!words) continue;
+        const fence = mark === '`' && words.indexOf('`') !== -1 ? '`` ' : mark;
+        const end = fence === '`` ' ? ' ``' : mark;
+        const next = text.slice(0, open.at) + (/^\s/.test(seg) ? ' ' : '') + fence + words + end + (/\s$/.test(seg) ? ' ' : '');
+        if (inCell) cell = next; else buf = next;
+        continue;
+      }
+      if (rich && tag === 'blockquote') { flush(); quote += close ? -1 : 1; if (quote < 0) quote = 0; continue; }
       if (tag === 'tr') {
         if (cell != null) { if (row) row.push(clean(cell)); cell = null; }
         if (row && row.some(Boolean)) push({ t: 'row', cells: row }, row.join(' | ').length);
@@ -362,7 +441,26 @@
         if (!close && !row) row = [];
         continue;
       }
+      if (rich && tag === 'table') {
+        if (cell != null && row) row.push(clean(cell));
+        if (row && row.some(Boolean)) push({ t: 'row', cells: row }, row.join(' | ').length);
+        cell = null; row = null;
+        flush();
+        if (close) push({ t: 'end' }, 0);
+        continue;
+      }
       if (tag === 'a') {
+        if (rich) {
+          if (!close) {
+            const h = resolve(attr(m[3], 'href'));
+            linked = /^(https?:|mailto:)/i.test(h) ? h : false;
+            if (linked) add('[');
+          } else if (linked) {
+            add('](' + linked.replace(/\)/g, '%29').replace(/ /g, '%20') + ')');
+            linked = false;
+          }
+          continue;
+        }
         if (!close) {
           const h = /\bhref\s*=\s*("([^"]*)"|'([^']*)')/i.exec(m[3]);
           href = h ? decodeEntities(h[2] != null ? h[2] : h[3]).trim() : null;
@@ -373,13 +471,43 @@
         continue;
       }
       if (tag === 'img' && !close) {
-        const alt = /\balt\s*=\s*("([^"]*)"|'([^']*)')/i.exec(m[3]);
-        const a = alt ? clean(decodeEntities(alt[2] != null ? alt[2] : alt[3])) : '';
+        const a = clean(attr(m[3], 'alt'));
+        if (rich) {
+          const src = resolve(attr(m[3], 'src'));
+          if (/^https?:/i.test(src)) { add(' ![' + a.replace(/[\[\]]/g, '') + '](' + src.replace(/\)/g, '%29').replace(/ /g, '%20') + ') '); continue; }
+        }
         if (a) { const s = ' [image: ' + a + '] '; if (cell != null) cell += s; else buf += s; }
         continue;
       }
       if (/^h[1-6]$/.test(tag)) { flush(); if (!close) { kind = 'h'; level = Number(tag[1]); } continue; }
-      if (tag === 'li') { flush(); if (!close) kind = 'li'; continue; }
+      if (rich && (tag === 'ul' || tag === 'ol')) {
+        flush();
+        if (close) { lists.pop(); if (!lists.length) push({ t: 'end' }, 0); }
+        else {
+          const start = parseInt(attr(m[3], 'start'), 10);
+          lists.push({ ordered: tag === 'ol', n: Number.isFinite(start) ? start - 1 : 0 });
+        }
+        // Text after a nested list is still the outer item's.
+        item = items.length ? { depth: items[items.length - 1].depth, n: 0, cont: true } : null;
+        if (close && item) kind = 'li';
+        continue;
+      }
+      if (tag === 'li') {
+        flush();
+        if (!close) {
+          kind = 'li';
+          if (rich) {
+            const list = lists[lists.length - 1];
+            if (list) list.n += 1;
+            item = { depth: Math.max(0, lists.length - 1), n: list && list.ordered ? list.n : 0 };
+            items.push(item);
+          }
+        } else if (rich) {
+          items.pop();
+          item = null;
+        }
+        continue;
+      }
       if (BREAK_TAGS.test(tag)) {
         if (cell != null) { cell += ' '; continue; }
         const keep = kind;
@@ -390,7 +518,63 @@
       }
     }
     if (!truncated) flush();
-    return { blocks: blocks, truncated: truncated };
+    return { blocks: blocks, truncated: truncated || cut };
+  }
+
+  // A document as a Markdown file, for Download: its own text only (no tdoc
+  // preamble, no comments), headings at their own levels, tables with a
+  // header rule. Same parser as the agent text, in its `rich` mode.
+  const DOWNLOAD_SCAN_BYTES = 10 * 1024 * 1024;
+  const DOWNLOAD_TEXT_CHARS = 4 * 1024 * 1024;
+  function documentMarkdown(html, opts) {
+    const o = opts || {};
+    const doc = agentBlocksFromHtml(html, DOWNLOAD_TEXT_CHARS, { rich: true, scanBytes: DOWNLOAD_SCAN_BYTES, baseUrl: o.baseUrl });
+    const blocks = doc.blocks;
+    const line = (s) => String(s == null ? '' : s).replace(/\r?\n/g, ' ');
+    // Text that would otherwise read as Markdown syntax at a line start.
+    const lead = (s) => line(s).replace(/^(#{1,6}\s|>|[-+*]\s|\d+[.)]\s)/, '\\$1');
+    const cellText = (s) => line(s).replace(/\|/g, '\\|');
+    let out = '';
+    const title = line(o.title || '').trim();
+    const first = blocks.find(function (b) { return b.t !== 'end' && b.t !== 'embed'; });
+    if (title && !(first && first.t === 'h' && first.level === 1)) out += '# ' + title + '\n\n';
+    let i = 0;
+    while (i < blocks.length) {
+      const b = blocks[i];
+      if (b.t === 'row') {
+        const rows = [];
+        while (i < blocks.length && blocks[i].t === 'row') rows.push(blocks[i++].cells);
+        const width = Math.max.apply(null, rows.map(function (r) { return r.length; }));
+        const fit = function (r) { const c = r.slice(); while (c.length < width) c.push(''); return '| ' + c.map(cellText).join(' | ') + ' |\n'; };
+        out += fit(rows[0]);
+        out += '|' + new Array(width).fill(' --- ').join('|') + '|\n';
+        rows.slice(1).forEach(function (r) { out += fit(r); });
+        out += '\n';
+        continue;
+      }
+      if (b.t === 'li') {
+        while (i < blocks.length && blocks[i].t === 'li') {
+          const li = blocks[i++];
+          out += '  '.repeat(li.depth || 0) + (li.cont ? '  ' : li.n ? li.n + '. ' : '- ') + line(li.text) + '\n';
+        }
+        out += '\n';
+        continue;
+      }
+      if (b.t === 'h') out += '#'.repeat(Math.min(6, b.level || 1)) + ' ' + line(b.text) + '\n\n';
+      else if (b.t === 'code') {
+        const fence = /```/.test(b.text) ? '~~~~' : '```';
+        out += fence + (b.lang || '') + '\n' + b.text + '\n' + fence + '\n\n';
+      } else if (b.t === 'embed') {
+        if (o.docUrl) out += '*[Figure or interactive content: see the online document: ' + o.docUrl + ']*\n\n';
+      } else if (b.t === 'p' && b.quote) {
+        while (i < blocks.length && blocks[i].t === 'p' && blocks[i].quote) { out += '> ' + line(blocks[i++].text) + '\n>\n'; }
+        out = out.replace(/>\n$/, '') + '\n';
+        continue;
+      } else if (b.t === 'p') out += lead(b.text) + '\n\n';
+      i++;
+    }
+    if (doc.truncated) out += '*The document is longer than this file' + (o.docUrl ? ': the rest is at ' + o.docUrl : '') + '.*\n\n';
+    return out.replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
   }
 
   function commentLine(c) {
@@ -575,6 +759,7 @@ agentBodyHtml(d) +
     previewFromHtml: previewFromHtml,
     agentBlocksFromHtml: agentBlocksFromHtml,
     agentMarkdown: agentMarkdown,
+    documentMarkdown: documentMarkdown,
     linksFromHtml: linksFromHtml,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
