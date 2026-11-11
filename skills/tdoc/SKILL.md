@@ -127,6 +127,16 @@ inferred. **Before writing or editing a sheet, read
 `$SKILL_DIR/authoring/structure/sheets.md`**: when to use one, the markup, the
 types, tag colours, row ids and the size limit.
 
+To show a standalone sheet inside another page, embed it by reference
+instead of copying its rows: `<figure data-tdoc-embed="sheet"
+data-src="/d/<sheet-slug>" data-tab="Tab" data-rows="10"><a
+href="/d/<sheet-slug>">Sheet name</a></figure>`. Readers see the sheet's
+latest rows live, only if the reader and everyone who wrote the page
+(you included) can read the sheet; exports show the link. Use
+it when the data is kept up to date elsewhere or used by several pages; a
+small settled table stays a plain `<table>` (sheets.md, "Embed, or a table
+in the page?").
+
 ### Existing documents and comment handoff
 
 The handoff line a reader copies from a published doc is:

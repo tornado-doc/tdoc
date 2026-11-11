@@ -68,6 +68,12 @@ export const FLAGS = Object.freeze({
   // filter, sort) does not depend on this flag. Approved by Julie
   // (2026-11-10): on for everyone; off switch while it settles.
   sheets: Object.freeze({ label: 'Sheets: import spreadsheets and edit cells', owner: 'julie', added: '2026-11-09', default: true }),
+  // Sheet embeds: a <figure data-tdoc-embed="sheet" data-src="/d/<slug>">
+  // in a page shows a live view of that sheet (its first rows, the saved
+  // view applied, the comment count, Open), read under the SHEET's access
+  // for the person reading (shell/src/document/sheet-embed.js, worker
+  // /api/embed/sheet). Off: the figure is its fallback link, as in an export.
+  sheetEmbeds: Object.freeze({ label: 'Sheets embedded in pages (live, by reference)', owner: 'julie', added: '2026-11-11', default: false, preview: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;
