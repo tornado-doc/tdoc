@@ -70,9 +70,9 @@ export const FLAGS = Object.freeze({
   // Sheets: import a .csv / .tsv / .xlsx as a sheet (Create a doc, or a file
   // dropped on My docs) and edit a sheet's cells, rows, columns and tags in
   // Edit mode. Reading a sheet (<table data-tdoc-sheet>: grid, search,
-  // filter, sort) does not depend on this flag. On in dev mode and PR
-  // previews until approved.
-  sheets: Object.freeze({ label: 'Sheets: import spreadsheets and edit cells', owner: 'julie', added: '2026-11-09', default: false, preview: true }),
+  // filter, sort) does not depend on this flag. Approved by Julie
+  // (2026-11-10): on for everyone; off switch while it settles.
+  sheets: Object.freeze({ label: 'Sheets: import spreadsheets and edit cells', owner: 'julie', added: '2026-11-09', default: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;
