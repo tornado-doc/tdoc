@@ -125,7 +125,9 @@
       '::highlight(tdoc-anchor-flash){background:rgba(255,185,0,.98);text-decoration:underline solid #9a6200;text-decoration-thickness:3px;}' +
       '::highlight(tdoc-anchor-moved){background:' + moved + ';text-decoration:underline dashed rgba(184,134,11,.55);text-decoration-thickness:1.5px;}' +
       '::highlight(tdoc-selecting){background:' + selecting + ';}' +
-      '::highlight(tdoc-pending){background:' + pending + ';}';
+      '::highlight(tdoc-pending){background:' + pending + ';}' +
+      // Comments tdoc's own feedback widget left on this doc (fbAnchors).
+      '::highlight(tdoc-fb-quote){background:' + (dark ? 'rgba(255,200,0,.5)' : 'rgba(255,200,0,.32)') + ';}';
   }
   var st = null;
   if (HL) {
@@ -320,7 +322,14 @@
            occurrences: placed ? placed.occurrences : null,
            rect: selectionRect(range) });
   }
+  // While tdoc's feedback widget is picking on this doc (tdoc:fbPicking), a
+  // press is the widget's: the doc's own composer does not open as well.
+  // The tap that made the pick still sends its mouse events and click a
+  // moment later, after the widget's sheet is gone: they land here, so the
+  // press stays the widget's a little past the end of picking.
+  function fbOwnsPress() { return !!(fbState && (fbState.picking || Date.now() < fbState.until)); }
   function reportSelection() {
+    if (fbOwnsPress()) return;
     if (interactionMode !== 'comment' || visualViewerOpen()) return;
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
@@ -378,6 +387,7 @@
     return false;
   }
   function reportPointSelection(event) {
+    if (fbOwnsPress()) return false;
     if (interactionMode !== 'comment' || event.button !== 0) return false;
     if (SITE && !SITE_DEMO && !reanchorMode) return false;
     if (event.target && event.target.closest && event.target.closest('a,button,input,label,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return false;
@@ -2092,6 +2102,142 @@
       var clone = document.body.cloneNode(true);
       Array.prototype.forEach.call(clone.querySelectorAll('script, style, noscript, .tdoc-hover-outline, .tdoc-comment-pill'), function (n) { n.remove(); });
       post({ type: 'tdoc:docMarkdown', markdown: htmlToMarkdown(clone), requestId: d.requestId });
+    }
+  });
+
+
+  // --- tdoc's own feedback widget on this doc (feedbackDocFramePick) -------
+  // The feedback widget (feedback/src/main.jsx), when it runs on a tdoc doc
+  // page, lives in the shell's window above this frame and cannot see into
+  // it (sandboxed, opaque origin). While it picks, it asks here what is under
+  // a point, and where its comments' anchors are now, through the shared
+  // selection code (TdocSelection) the doc's own picking uses.
+  // Inbound: event.source === window.parent + { source:'tdoc-feedback' }; the
+  // frame is served with frame-ancestors 'self', so the parent is always a
+  // tdoc page. Everything goes out as data (selectors, words, rects in this
+  // frame's viewport) and only to the parent; the widget treats it as
+  // untrusted, since the author's own scripts share this window.
+  //   widget → frame:
+  //     { type:'tdoc:fbHover',   id, x, y }                → tdoc:fbHover { id, rect|null, onText }
+  //     { type:'tdoc:fbPick',    id, kind:'element'|'text'|'box', x, y, x2, y2 | width, height }
+  //                                                         → tdoc:fbPicked { id, anchor|null, rect|null }
+  //     { type:'tdoc:fbAnchors', anchors:[{ id, selector, tag, text, container, quote, region }] }
+  //                                                         → tdoc:fbPlaces { places:[{ id, rect }] } (again on scroll/resize)
+  //     { type:'tdoc:fbReveal',  id }   { type:'tdoc:fbScroll', dx, dy }   { type:'tdoc:fbClear' }
+  //     { type:'tdoc:fbPicking', on }   (the widget's pick owns presses: no doc composer opens)
+  var fbState = { anchors: [], resolved: [], ticking: false, picking: false, until: 0 };
+  function fbNum(v) { v = Number(v); return isFinite(v) ? v : 0; }
+  function fbRect(r) { return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : null; }
+  function fbExclude(el) { return isProbeUI(el); }
+  function fbPickable(el) { return el && el !== document.body && el !== document.documentElement && !isProbeUI(el) ? el : null; }
+  function fbDescribe(el) {
+    var d = TS.describeElement(el);
+    var out = { selector: hookCall('selector', el) || d.selector || cssPath(el) || el.localName, tag: d.tag, text: d.text, accessible_name: d.accessible_name };
+    if (d.container) out.container = d.container;
+    if (d.container_is_target) out.container_is_target = true;
+    var r = el.getBoundingClientRect();
+    out.rect = { x: Math.round(r.left + (window.scrollX || 0)), y: Math.round(r.top + (window.scrollY || 0)), width: Math.round(r.width), height: Math.round(r.height) };
+    return out;
+  }
+  function fbHover(d) {
+    var x = fbNum(d.x), y = fbNum(d.y);
+    var el = fbPickable(frameElementAt(x, y));
+    post({ type: 'tdoc:fbHover', id: String(d.id || ''), rect: el ? fbRect(clipRect(visibleFor(el))) : null, onText: frameStartsOnText(x, y) });
+  }
+  function fbPick(d) {
+    var x = fbNum(d.x), y = fbNum(d.y), anchor = null, rect = null;
+    if (d.kind === 'text') {
+      var range = TS.rangeBetweenPoints({ x: x, y: y }, { x: fbNum(d.x2), y: fbNum(d.y2) });
+      var holder = range ? range.commonAncestorContainer : null;
+      if (holder && holder.nodeType === 3) holder = holder.parentElement;
+      holder = fbPickable(holder) || (range ? document.body : null);
+      var quote = holder ? TS.captureTextAnchor(range, TS.collectTextNodes(holder, fbExclude)) : null;
+      if (quote) {
+        anchor = fbDescribe(holder);
+        anchor.quote = quote;
+        rect = selectionRect(range);
+        if (HL) { try { CSS.highlights.set('tdoc-pending', new Highlight(range.cloneRange())); } catch (e) {} }
+      }
+    } else if (d.kind === 'box') {
+      var box = TS.toRect({ left: x, top: y, width: Math.max(0, fbNum(d.width)), height: Math.max(0, fbNum(d.height)) });
+      var container = TS.enclosingFor(box, frameElementAt);
+      // A box in the page's margin is not inside <body> (a centred column):
+      // it is measured against the whole page.
+      if (container === document.body && !TS.rectContains(document.body.getBoundingClientRect(), box)) container = document.documentElement;
+      if (container) {
+        anchor = TS.regionOf(box, container, { exclude: fbExclude, describe: fbDescribe });
+        if (/ · (html|body)$/.test(anchor.label || '')) anchor.label = anchor.label.replace(/ · (html|body)$/, ' · page');
+        rect = box;
+      }
+    }
+    if (!anchor) {
+      var el = fbPickable(frameElementAt(x, y));
+      if (el) { anchor = fbDescribe(el); rect = clipRect(visibleFor(el)); }
+    }
+    post({ type: 'tdoc:fbPicked', id: String(d.id || ''), anchor: anchor, rect: fbRect(rect) });
+  }
+  // Each anchor found once (and again when the doc changes), measured on
+  // every scroll.
+  function fbResolve() {
+    fbState.resolved = fbState.anchors.map(function (a) {
+      var el = null, range = null;
+      try { el = resolveElementAnchor(a).element; } catch (e) { el = null; }
+      if (a.quote) {
+        try { range = TS.findTextRange(a.quote, TS.collectTextNodes(el || document.body, fbExclude)); } catch (e) { range = null; }
+        if (!range && el) { try { range = TS.findTextRange(a.quote, TS.collectTextNodes(document.body, fbExclude)); } catch (e) { range = null; } }
+      }
+      return { id: a.id, anchor: a, el: el, range: range };
+    });
+    if (HL) {
+      var ranges = fbState.resolved.filter(function (r) { return r.range; }).map(function (r) { return r.range; });
+      try {
+        if (!ranges.length) CSS.highlights.delete('tdoc-fb-quote');
+        else { var h = new Highlight(); ranges.forEach(function (r) { h.add(r); }); CSS.highlights.set('tdoc-fb-quote', h); }
+      } catch (e) {}
+    }
+    fbPlaces();
+  }
+  function fbPlaces() {
+    var places = [];
+    fbState.resolved.forEach(function (r) {
+      var rect = null;
+      if (r.range) rect = r.range.getBoundingClientRect();
+      else if (r.el && r.anchor.region) rect = TS.regionRect(r.anchor, visibleFor(r.el));
+      else if (r.el && !r.anchor.quote) rect = clipRect(visibleFor(r.el));
+      if (rect && (rect.width || rect.height)) places.push({ id: r.id, rect: fbRect(rect) });
+    });
+    post({ type: 'tdoc:fbPlaces', places: places });
+  }
+  function fbSchedule() {
+    if (!fbState.anchors.length || fbState.ticking) return;
+    fbState.ticking = true;
+    requestAnimationFrame(function () { fbState.ticking = false; fbPlaces(); });
+  }
+  window.addEventListener('scroll', fbSchedule, { passive: true });
+  window.addEventListener('resize', fbSchedule);
+  window.addEventListener('message', function (e) {
+    if (e.source !== window.parent) return;
+    var d = e.data; if (!d || typeof d !== 'object' || d.source !== 'tdoc-feedback') return;
+    if (d.type === 'tdoc:fbHover') fbHover(d);
+    else if (d.type === 'tdoc:fbPick') fbPick(d);
+    else if (d.type === 'tdoc:fbAnchors') {
+      fbState.anchors = (Array.isArray(d.anchors) ? d.anchors : []).slice(0, 500).filter(function (a) { return a && typeof a === 'object' && a.id; });
+      fbResolve();
+    }
+    else if (d.type === 'tdoc:fbReveal') {
+      var hit = fbState.resolved.filter(function (r) { return r.id === d.id; })[0];
+      var target = hit && (hit.range || hit.el);
+      if (target) {
+        var r = target.getBoundingClientRect();
+        try { window.scrollTo(0, Math.max(0, (window.scrollY || 0) + r.top - window.innerHeight / 3)); } catch (x) {}
+      }
+    }
+    else if (d.type === 'tdoc:fbScroll') { try { window.scrollBy(fbNum(d.dx), fbNum(d.dy)); } catch (x) {} }
+    else if (d.type === 'tdoc:fbClear') { if (HL) CSS.highlights.delete('tdoc-pending'); }
+    else if (d.type === 'tdoc:fbPicking') {
+      if (fbState.picking && !d.on) fbState.until = Date.now() + 700;
+      fbState.picking = !!d.on;
+      if (fbState.picking) { hideHover(); try { var s1 = window.getSelection(); if (s1) s1.removeAllRanges(); } catch (x1) {} }
     }
   });
 

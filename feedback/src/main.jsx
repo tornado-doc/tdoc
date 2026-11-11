@@ -765,6 +765,9 @@ ${uiCss}
   function elementFor(comment) {
     const anchor = comment && comment.anchor;
     if (!anchor || anchor.page) return null;
+    // Inside the doc frame: the frame stands for it here; where in it, the
+    // frame says (framePlaces). Without the flag it is the frame element.
+    if (anchor.frame) return docFrame() || null;
     const cached = found.get(comment.id);
     if (cached && cached.el && cached.el.isConnected) return cached.el;
     if (cached && !cached.el && cached.epoch === domEpoch) return null;
@@ -874,6 +877,146 @@ ${uiCss}
     anchor.rect = { x: Math.round(box.left + scrollX), y: Math.round(box.top + scrollY), width: anchor.region.rel.width, height: anchor.region.rel.height };
     anchor.region.scroll = { x: Math.round(scrollX), y: Math.round(scrollY) };
     return anchor;
+  }
+
+  // ---- tdoc's own doc page: inside the doc frame (feedbackDocFramePick) ----
+  // On a tdoc doc page the document is a sandboxed frame (opaque origin):
+  // from here it is one element, the whole page. With the flag on, a press,
+  // a drag or the pointer over it is asked of the frame instead, which
+  // answers with what is under it through the same selection code the doc's
+  // own picking uses (server/frame-probe.js, tdoc:fb*). Only on tdoc's own
+  // pages (this script came from this origin), only the doc frame, and only
+  // its answers: event.source must be that frame's window. What it says is
+  // the author's document talking (its scripts share that window): data
+  // only, every field checked and cut to size here, and where the comment
+  // belongs (the page, the space) never comes from it.
+  let framePickOn = false;
+  const onTdocPage = (() => { try { return new URL(base).origin === location.origin; } catch (_) { return false; } })();
+  // The doc frame on tdoc's own doc page, flag or not (tdoc:fbPicking: the
+  // doc's own composer stays shut while the widget picks).
+  function tdocDocFrame() {
+    if (!onTdocPage) return null;
+    const frame = document.querySelector('iframe.tdoc-doc-frame');
+    return frame && frame.contentWindow ? frame : null;
+  }
+  function docFrame() { return framePickOn ? tdocDocFrame() : null; }
+  function overFrame(x, y) {
+    const frame = docFrame();
+    if (!frame) return null;
+    const r = frame.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom ? frame : null;
+  }
+  const fnum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const fstr = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+  function cleanRect(r) {
+    if (!r || typeof r !== 'object') return null;
+    return { left: fnum(r.left), top: fnum(r.top), width: Math.max(0, fnum(r.width)), height: Math.max(0, fnum(r.height)) };
+  }
+  function cleanBox(r, keys = ['x', 'y', 'width', 'height']) {
+    if (!r || typeof r !== 'object') return null;
+    const out = {};
+    for (const k of keys) out[k] = fnum(r[k]);
+    return out;
+  }
+  function cleanFlat(o, max = 200) {
+    if (!o || typeof o !== 'object') return null;
+    const out = {};
+    for (const [k, v] of Object.entries(o).slice(0, 12)) {
+      if (typeof v === 'string') out[fstr(k, 40)] = v.slice(0, max);
+      else if (typeof v === 'number' && Number.isFinite(v)) out[fstr(k, 40)] = v;
+      else if (typeof v === 'boolean') out[fstr(k, 40)] = v;
+    }
+    return out;
+  }
+  // What the frame picked, as the anchor's `frame` part.
+  function cleanFrameAnchor(a) {
+    if (!a || typeof a !== 'object') return null;
+    const out = { selector: fstr(a.selector, 500), tag: fstr(a.tag, 40), text: fstr(a.text, 500), accessible_name: fstr(a.accessible_name, 200) };
+    if (!out.selector && !out.text) return null;
+    if (a.label) out.label = fstr(a.label, 120);
+    if (a.container) out.container = cleanFlat(a.container);
+    if (a.container_is_target === true) out.container_is_target = true;
+    if (a.rect) out.rect = cleanBox(a.rect);
+    if (a.quote && typeof a.quote === 'object' && typeof a.quote.text === 'string' && a.quote.text.trim()) {
+      out.quote = {
+        text: fstr(a.quote.text, 2000), context_before: fstr(a.quote.context_before, 300), context_after: fstr(a.quote.context_after, 300),
+        occurrence: Number.isInteger(a.quote.occurrence) ? a.quote.occurrence : null,
+        occurrences: Number.isInteger(a.quote.occurrences) ? a.quote.occurrences : null,
+      };
+    }
+    if (a.region && typeof a.region === 'object') {
+      const r = a.region;
+      out.region = {
+        container_text: fstr(r.container_text, 500),
+        rel: cleanBox(r.rel), frac: cleanBox(r.frac),
+        elements: Array.isArray(r.elements) ? r.elements.slice(0, 8).map((e) => cleanFlat(e, 80)).filter(Boolean) : [],
+      };
+    }
+    return out;
+  }
+  // The words to show for it, as for any anchor here.
+  function frameLabel(a) {
+    if (a.quote) return `“${a.quote.text.slice(0, 48)}${a.quote.text.length > 48 ? '…' : ''}”`;
+    if (a.region) return a.label || 'Area';
+    const text = String(a.text || '').trim();
+    return a.accessible_name || (text ? `${a.tag || 'element'} · “${text.slice(0, 48)}${text.length > 48 ? '…' : ''}”` : (a.tag || 'element'));
+  }
+  // A rect in the frame's viewport, in ours.
+  function fromFrame(rect, frame = docFrame()) {
+    if (!rect || !frame) return null;
+    const f = frame.getBoundingClientRect();
+    return toRect({ left: f.left + rect.left, top: f.top + rect.top, width: rect.width, height: rect.height });
+  }
+  let frameSeq = 0;
+  const frameWaits = new Map();
+  let framePlaces = new Map();
+  const frameListeners = new Set();
+  function toFrame(message, frame = docFrame()) {
+    if (!frame) return false;
+    try { frame.contentWindow.postMessage({ ...message, source: 'tdoc-feedback' }, '*'); return true; } catch (_) { return false; }
+  }
+  function askFrame(type, data, timeout = 1500) {
+    const id = `fb${++frameSeq}`;
+    return new Promise((resolve) => {
+      if (!toFrame({ type, id, ...data })) { resolve(null); return; }
+      const timer = setTimeout(() => { frameWaits.delete(id); resolve(null); }, timeout);
+      frameWaits.set(id, (reply) => { clearTimeout(timer); frameWaits.delete(id); resolve(reply); });
+    });
+  }
+  window.addEventListener('message', (event) => {
+    const frame = docFrame();
+    if (!frame || event.source !== frame.contentWindow) return;
+    const d = event.data;
+    if (!d || typeof d !== 'object' || d.source !== 'tdoc-frame' || typeof d.type !== 'string') return;
+    if ((d.type === 'tdoc:fbHover' || d.type === 'tdoc:fbPicked') && frameWaits.has(d.id)) {
+      frameWaits.get(d.id)(d.type === 'tdoc:fbHover'
+        ? { rect: cleanRect(d.rect), onText: d.onText === true }
+        : { anchor: cleanFrameAnchor(d.anchor), rect: cleanRect(d.rect) });
+    } else if (d.type === 'tdoc:fbPlaces') {
+      const next = new Map();
+      for (const place of (Array.isArray(d.places) ? d.places : []).slice(0, 500)) {
+        if (place && typeof place.id === 'string') next.set(place.id, cleanRect(place.rect));
+      }
+      framePlaces = next;
+      frameListeners.forEach((fn) => fn('places'));
+    } else if (d.type === 'tdoc:ready') {
+      frameListeners.forEach((fn) => fn('ready'));
+    }
+  });
+  // The anchor of a comment on something inside the doc frame: the frame
+  // element's own context (the page, its state) plus `frame`, what was
+  // picked inside it. The words and label are the inner thing's.
+  function frameContext(inner) {
+    const frame = docFrame() || document.querySelector('iframe.tdoc-doc-frame');
+    const outer = frame ? contextFor(frame) : pageContext();
+    return {
+      ...outer,
+      tag: inner.tag || outer.tag,
+      text: inner.quote ? inner.quote.text.slice(0, 500) : inner.text,
+      accessible_name: inner.accessible_name || '',
+      label: frameLabel(inner),
+      frame: inner,
+    };
   }
 
   async function loadSurface(session) {
@@ -1003,6 +1146,7 @@ ${uiCss}
   const labelOf = (anchor) => {
     const a = anchor || {};
     if (a.page) return 'This page';
+    if (a.frame) return a.label || 'Document content';
     if (a.quote) return a.label || `“${String(a.quote.text || '').slice(0, 48)}”`;
     if (a.region) return a.label || 'Area';
     const text = String(a.text || '').trim();
@@ -1169,6 +1313,8 @@ ${uiCss}
     // Comment on an area (feedbackAreaSelect): a preview host, or this
     // viewer's own dev mode, from the session answer.
     const areaSelectOn = flagOn('feedbackAreaSelect', session);
+    // Picking inside the doc frame on tdoc's own doc page (docFrame above).
+    framePickOn = flagOn('feedbackDocFramePick', session);
     const [hovered, setHovered] = useState(null);
     const [selected, setSelected] = useState(null);
     // A box being commented on: fractions of `selected` (its container).
@@ -1181,6 +1327,13 @@ ${uiCss}
     const [quoteSel, setQuoteSel] = useState(null);
     // A comment on the whole page (no element).
     const [pageSel, setPageSel] = useState(false);
+    // Something inside the doc frame being commented on: { anchor, rect }
+    // (cleanFrameAnchor; rect in our viewport). `selected` is the frame.
+    const [frameSel, setFrameSel] = useState(null);
+    // The element under the pointer inside the doc frame, in our viewport.
+    const [frameHover, setFrameHover] = useState(null);
+    // Moves when the frame reports where our comments are now.
+    const [, setFrameTick] = useState(0);
     const [openId, setOpenId] = useState(null);
     const [notice, setNotice] = useState(null);
     // Connecting, with the tdoc window cut off from us by signing in.
@@ -1464,9 +1617,42 @@ ${uiCss}
       if (selected) return undefined;
       const priorCursor = document.documentElement.style.cursor;
       document.documentElement.style.cursor = 'crosshair';
+      // The doc frame scrolls itself (its document is not ours to scroll).
+      const frameScroller = (x, y) => (overFrame(x, y)
+        ? { scrollBy: (dx, dy) => { setFrameHover(null); toFrame({ type: 'tdoc:fbScroll', dx, dy }); } }
+        : null);
       const fromShield = (event) => event.composedPath()[0] === shield;
       const pickable = (el) => el && el !== document.body && el !== document.documentElement && !isOurs(el);
-      const pickElement = async (element) => {
+      // Inside the doc frame: the frame answers what is at the point(s), in
+      // its own viewport; nothing it knows of → the frame as before.
+      const pickInFrame = async (req) => {
+        const docFrameEl = docFrame();
+        if (!docFrameEl) return;
+        const f = docFrameEl.getBoundingClientRect();
+        const ask = { kind: req.kind, x: req.x - f.left, y: req.y - f.top };
+        if (req.kind === 'text') { ask.x2 = req.x2 - f.left; ask.y2 = req.y2 - f.top; }
+        if (req.kind === 'box') { ask.width = req.width; ask.height = req.height; }
+        const reply = await askFrame('tdoc:fbPick', ask);
+        if (!reply || !reply.anchor) { pickPlain(docFrameEl); return; }
+        if (reanchorId) {
+          const result = await call({ type: 'tdoc-feedback-reanchor', id: reanchorId, anchor: frameContext(reply.anchor) });
+          if (apply(result)) setReanchorId(null);
+          setHovered(null); setFrameHover(null);
+          return;
+        }
+        setOpenId(null);
+        setAreaSel(null);
+        setQuoteSel(null);
+        setFrameSel({ anchor: reply.anchor, rect: fromFrame(reply.rect, docFrameEl) || toRect(f) });
+        setSelected(docFrameEl);
+        setHovered(null); setFrameHover(null);
+      };
+      const pickElement = async (element, point) => {
+        if (!pickable(element)) return;
+        if (point && docFrame() && element === docFrame()) { pickInFrame({ kind: 'element', x: point.x, y: point.y }); return; }
+        pickPlain(element);
+      };
+      const pickPlain = async (element) => {
         if (!pickable(element)) return;
         if (reanchorId) {
           const result = await call({ type: 'tdoc-feedback-reanchor', id: reanchorId, anchor: contextFor(element) });
@@ -1477,11 +1663,13 @@ ${uiCss}
         setOpenId(null);
         setAreaSel(null);
         setQuoteSel(null);
+        setFrameSel(null);
         setSelected(element);
-        setHovered(null);
+        setHovered(null); setFrameHover(null);
       };
       const pickArea = async (box) => {
         const container = enclosingFor(box);
+        if (docFrame() && container === docFrame()) { pickInFrame({ kind: 'box', x: box.left, y: box.top, width: box.width, height: box.height }); return; }
         if (reanchorId) {
           const result = await call({ type: 'tdoc-feedback-reanchor', id: reanchorId, anchor: regionContext(box, container) });
           if (apply(result)) setReanchorId(null);
@@ -1491,6 +1679,7 @@ ${uiCss}
         const c = container.getBoundingClientRect();
         setOpenId(null);
         setQuoteSel(null);
+        setFrameSel(null);
         setAreaSel(c.width && c.height
           ? { x: (box.left - c.left) / c.width, y: (box.top - c.top) / c.height, width: box.width / c.width, height: box.height / c.height, label: regionContext(box, container).label }
           : null);
@@ -1500,6 +1689,7 @@ ${uiCss}
       // A drag over words: a quote of them (selection/anchors/text-range.js),
       // anchored in the element that holds them all.
       const pickText = async (start, end) => {
+        if (overFrame(start.x, start.y)) { pickInFrame({ kind: 'text', x: start.x, y: start.y, x2: end.x, y2: end.y }); return; }
         const before = shield.style.pointerEvents;
         shield.style.pointerEvents = 'none';
         let range = null;
@@ -1517,6 +1707,7 @@ ${uiCss}
         }
         setOpenId(null);
         setAreaSel(null);
+        setFrameSel(null);
         setQuoteSel({ quote, rect: range.getBoundingClientRect() });
         setSelected(holder);
         setHovered(null);
@@ -1527,18 +1718,36 @@ ${uiCss}
       // (blank, an image, a canvas, a chart, an iframe) draws a box; on a
       // touch screen a tap picks, a hold then drag draws a box, a swipe scrolls.
       let frame = 0;
+      // Where the pointer is and where the press started (the frame is
+      // asked about points, not elements); whether the point in the doc
+      // frame is on text, from its last hover answer.
+      let pointer = null, pressPoint = null, frameOnText = false, frameOnTextAt = null, hoverSeq = 0, pendingDown = null;
       const gesture = createPickGesture({
         areaSelect: areaSelectOn,
         textSelect: true,
         elementAt: underPoint,
-        startsOnText,
+        startsOnText: (x, y) => (overFrame(x, y) ? frameOnText : startsOnText(x, y)),
         onHover: (el) => {
           if (frame) return;
-          frame = requestAnimationFrame(() => { frame = 0; setHovered(pickable(el) ? el : null); });
+          frame = requestAnimationFrame(() => {
+            frame = 0;
+            const inFrame = el && docFrame() === el ? el : null;
+            if (inFrame && pointer) {
+              const f = inFrame.getBoundingClientRect();
+              const seq = ++hoverSeq;
+              const at = { ...pointer };
+              askFrame('tdoc:fbHover', { x: at.x - f.left, y: at.y - f.top }, 800).then((reply) => {
+                if (seq !== hoverSeq) return;
+                frameOnText = Boolean(reply && reply.onText); frameOnTextAt = at;
+                setFrameHover(reply && reply.rect ? fromFrame(reply.rect, inFrame) : null);
+              });
+            } else { hoverSeq += 1; setFrameHover(null); }
+            setHovered(pickable(el) ? el : null);
+          });
         },
         onDrag: (box) => setDrag(box),
         onHold: () => { try { navigator.vibrate && navigator.vibrate(8); } catch (_) {} },
-        onElement: pickElement,
+        onElement: (el) => pickElement(el, pressPoint),
         onText: pickText,
         onBox: pickArea,
       });
@@ -1548,22 +1757,40 @@ ${uiCss}
       let touchScroll = null;
       const onPointerDown = (event) => {
         if (event.pointerType === 'mouse' && event.button !== 0) return;
+        pointer = pressPoint = { x: event.clientX, y: event.clientY };
         touchScroll = { x: event.clientX, y: event.clientY, lastX: null, lastY: null, scroller: undefined };
         if (event.pointerType === 'mouse') event.preventDefault();
-        gesture.down(event);
         if (event.pointerType === 'mouse') { try { shield.setPointerCapture(event.pointerId); } catch (_) {} }
+        // A mouse press in the doc frame: whether it starts on text (a drag
+        // quotes) or not (a drag draws a box) is the frame's to say. Unless
+        // its last hover answer was for this very point, ask first; the
+        // moves and the release wait for the answer, in order.
+        const docFrameEl = event.pointerType === 'mouse' ? overFrame(event.clientX, event.clientY) : null;
+        if (docFrameEl && !(frameOnTextAt && frameOnTextAt.x === event.clientX && frameOnTextAt.y === event.clientY)) {
+          const f = docFrameEl.getBoundingClientRect();
+          const at = { x: event.clientX, y: event.clientY };
+          pendingDown = askFrame('tdoc:fbHover', { x: at.x - f.left, y: at.y - f.top }, 800).then((reply) => {
+            frameOnText = Boolean(reply && reply.onText); frameOnTextAt = at;
+            gesture.down(event);
+          });
+          const mine = pendingDown;
+          mine.then(() => { if (pendingDown === mine) pendingDown = null; });
+          return;
+        }
+        gesture.down(event);
       };
+      const afterDown = (fn) => { if (pendingDown) pendingDown = pendingDown.then(fn); else fn(); };
       const onPointerMove = (event) => {
-        if (gesture.touching() && gesture.mode() === 'pending') { /* a touch decides on its own */ }
-        gesture.move(event);
+        pointer = { x: event.clientX, y: event.clientY };
+        afterDown(() => gesture.move(event));
       };
-      const onPointerUp = (event) => {
+      const onPointerUp = (event) => afterDown(() => {
         if (!gesture.pressing()) return;
         // The sheet goes away under the composer before this press's click
         // is sent: that click must not land on the app.
         swallowClickUntil = Date.now() + 400;
         gesture.up(event);
-      };
+      });
       // A finger that scrolls a modal's body: the sheet is not inside it,
       // so move that box ourselves. Once a long press made a box, the finger
       // draws instead of scrolling.
@@ -1576,11 +1803,11 @@ ${uiCss}
         const dx = p.lastX == null ? 0 : p.lastX - t.clientX;
         const dy = p.lastY == null ? 0 : p.lastY - t.clientY;
         p.lastX = t.clientX; p.lastY = t.clientY;
-        if (p.scroller === undefined && (dx || dy)) p.scroller = innerScroller(p.x, p.y, dx, dy);
+        if (p.scroller === undefined && (dx || dy)) p.scroller = innerScroller(p.x, p.y, dx, dy) || frameScroller(p.x, p.y);
         if (p.scroller && event.cancelable) { event.preventDefault(); p.scroller.scrollBy(dx, dy); }
       };
       const onWheel = (event) => {
-        const scroller = innerScroller(event.clientX, event.clientY, event.deltaX, event.deltaY);
+        const scroller = innerScroller(event.clientX, event.clientY, event.deltaX, event.deltaY) || frameScroller(event.clientX, event.clientY);
         if (!scroller) return;
         event.preventDefault();
         scroller.scrollBy(event.deltaX, event.deltaY);
@@ -1619,6 +1846,21 @@ ${uiCss}
       };
     }, [picking, reanchorId, selected, apply, areaSelectOn]);
 
+    // The doc frame (tdoc's own doc page): while picking, its presses are the
+    // widget's (no doc composer opens as well); a thing picked in it keeps
+    // its highlight until the composer closes.
+    const frameSelOpen = Boolean(frameSel);
+    useEffect(() => {
+      if (!shown) return undefined;
+      const on = Boolean((picking || reanchorId) && !selected);
+      // Not behind the flag: a tap that picks must not also open the doc's
+      // own composer under it (a bug, not the feature).
+      toFrame({ type: 'tdoc:fbPicking', on }, tdocDocFrame());
+      return () => { if (on) toFrame({ type: 'tdoc:fbPicking', on: false }, tdocDocFrame()); };
+    }, [shown, picking, reanchorId, selected, session]);
+    useEffect(() => { if (!selected) setFrameSel(null); }, [selected]);
+    useEffect(() => (frameSelOpen ? () => { toFrame({ type: 'tdoc:fbClear' }); } : undefined), [frameSelOpen]);
+
     // Esc steps back one level (comments/panel/keyboard.js): a press in
     // progress → composer → picking → card → list. Window capture: a host
     // modal underneath must not close on the same press.
@@ -1656,6 +1898,21 @@ ${uiCss}
       enabled: Boolean(shown && surface && session && session.token),
       paused: Boolean(selected),
     });
+
+    // Comments inside the doc frame: the frame finds them (and marks their
+    // quotes) and says where they are, again on every scroll; we draw the
+    // pins. Only their anchors go to the frame, never what was said.
+    const frameAnchors = useMemo(() => area.pageComments
+      .filter((c) => !c.deleted && c.anchor && c.anchor.frame)
+      .map((c) => ({ ...c.anchor.frame, id: c.id })), [area.pageComments]);
+    useEffect(() => {
+      if (!shown || !docFrame()) return undefined;
+      const send = () => toFrame({ type: 'tdoc:fbAnchors', anchors: frameAnchors });
+      send();
+      const listen = (what) => { if (what === 'ready') send(); else setFrameTick((t) => t + 1); };
+      frameListeners.add(listen);
+      return () => { frameListeners.delete(listen); };
+    }, [shown, frameAnchors, session]);
 
     // Quotes on this page are marked in the app's own text, through the CSS
     // Highlight API: one constructed stylesheet adopted by the page (an
@@ -1754,7 +2011,9 @@ ${uiCss}
       );
     }
 
-    const hoverRect = (picking || reanchorId) && !drag ? hovered?.getBoundingClientRect() : null;
+    const hoverRect = (picking || reanchorId) && !drag
+      ? (hovered && hovered === docFrame() ? (frameHover || null) : hovered?.getBoundingClientRect())
+      : null;
     const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     const bannerText = !areaSelectOn
       ? (reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it')
@@ -1777,12 +2036,21 @@ ${uiCss}
     })();
     // A whole-page comment has no element: its composer sits at the top.
     const pageRect = { top: 72, bottom: 72, left: Math.max(8, (innerWidth - rightInset - COMPOSER_WIDTH) / 2), right: 0, width: 0, height: 0 };
-    const composerRect = pageSel ? pageRect : quoteSel ? quoteSel.rect : (areaBox || selected?.getBoundingClientRect());
+    const composerRect = pageSel ? pageRect : frameSel ? frameSel.rect : quoteSel ? quoteSel.rect : (areaBox || selected?.getBoundingClientRect());
     const quoteLabel = (quote) => `“${quote.text.slice(0, 48)}${quote.text.length > 48 ? '…' : ''}”`;
     // Where a comment points on screen: its area, or its element.
-    const spotOf = (comment, element) => (comment.anchor && comment.anchor.quote ? quoteRangeFor(comment, element)?.getBoundingClientRect() : null)
-      || (comment.anchor && comment.anchor.region ? regionRect(comment.anchor, element) : null)
-      || element?.getBoundingClientRect();
+    // Inside the doc frame: where the frame last said, while it is in view.
+    const frameSpot = (comment) => {
+      const docFrameEl = docFrame();
+      const place = docFrameEl && framePlaces.get(comment.id);
+      const rect = place ? fromFrame(place, docFrameEl) : null;
+      const f = docFrameEl && docFrameEl.getBoundingClientRect();
+      return rect && f && rect.bottom > f.top && rect.top < f.bottom ? rect : null;
+    };
+    const spotOf = (comment, element) => (comment.anchor && comment.anchor.frame ? frameSpot(comment)
+      : (comment.anchor && comment.anchor.quote ? quoteRangeFor(comment, element)?.getBoundingClientRect() : null)
+        || (comment.anchor && comment.anchor.region ? regionRect(comment.anchor, element) : null)
+        || element?.getBoundingClientRect());
     const openSpot = openComment && openComment.anchor && openComment.anchor.region ? regionRect(openComment.anchor, elementFor(openComment)) : null;
     const placeCard = (element, comment) => {
       const rect = element ? spotOf(comment || {}, element) : null;
@@ -1802,7 +2070,8 @@ ${uiCss}
         return;
       }
       const el = elementFor(c);
-      if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (el && c.anchor && c.anchor.frame) toFrame({ type: 'tdoc:fbReveal', id: c.id });
+      else if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       else if (stateLabel(c.anchor)) say(`Left ${stateLabel(c.anchor)} — open it to see the comment in place.`);
       setPicking(false);
       setSelected(null);
@@ -1817,7 +2086,7 @@ ${uiCss}
           <div className="tdoc-fb-banner" role="status">
             {bannerText}
             {/* S6: a comment on the page as a whole, nothing picked. */}
-            {!reanchorId ? <button type="button" className="tdoc-fb-page-comment" onClick={() => { setHovered(null); setAreaSel(null); setQuoteSel(null); setPageSel(true); setSelected(document.body); }}>Comment on this page</button> : null}
+            {!reanchorId ? <button type="button" className="tdoc-fb-page-comment" onClick={() => { setHovered(null); setAreaSel(null); setQuoteSel(null); setFrameSel(null); setPageSel(true); setSelected(document.body); }}>Comment on this page</button> : null}
             <button type="button" onClick={() => { setPicking(false); setReanchorId(null); setHovered(null); }}>Cancel · Esc</button>
           </div>
         ) : null}
@@ -1828,7 +2097,7 @@ ${uiCss}
         {pins.map(({ comment, element }) => {
           if (!element) return null;
           const rect = spotOf(comment, element);
-          if (rect.bottom < 0 || rect.top > innerHeight) return null;
+          if (!rect || rect.bottom < 0 || rect.top > innerHeight) return null;
           const pinState = commentPinState(comment, { seenMap: area.seenMap, handoffViewer, isOwner: owner });
           return (
             <button
@@ -1849,7 +2118,7 @@ ${uiCss}
           /* The shared composer adds the document shell's 48px bar. Feedback
              already has viewport coordinates, so cancel that offset here. */
           <CommentComposer
-            selection={{ kind: 'element', label: pageSel ? 'This page' : quoteSel ? quoteLabel(quoteSel.quote) : areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)), rect: {
+            selection={{ kind: 'element', label: pageSel ? 'This page' : frameSel ? frameLabel(frameSel.anchor) : quoteSel ? quoteLabel(quoteSel.quote) : areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)), rect: {
               top: composerRect.top - TOP_BAR_HEIGHT,
               bottom: composerRect.bottom - TOP_BAR_HEIGHT,
               left: Math.min(composerRect.left, Math.max(8, innerWidth - rightInset - COMPOSER_WIDTH - 8)),
@@ -1861,6 +2130,7 @@ ${uiCss}
             onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); }}
             onSubmit={async (text, opts = {}) => {
               const anchor = pageSel ? pageContext()
+                : frameSel ? frameContext(frameSel.anchor)
                 : quoteSel ? { ...contextFor(selected), quote: quoteSel.quote, label: quoteLabel(quoteSel.quote) }
                 : areaBox ? regionContext(areaBox, selected) : contextFor(selected);
               const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: threadAskPick(opts) });

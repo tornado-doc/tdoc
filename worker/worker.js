@@ -7304,6 +7304,14 @@ function productAnchorWhere(anchor) {
       elements: Array.isArray(region.elements) ? region.elements.slice(0, 8) : [],
     };
   }
+  // Inside a tdoc doc's frame (the widget on tdoc's own doc page): what was
+  // picked in the document itself, which the outer selector (the frame) is not.
+  const frame = anchor.frame && typeof anchor.frame === 'object' ? anchor.frame : null;
+  if (frame) {
+    where.in_document = { selector: str(frame.selector, 500), tag: str(frame.tag, 40), text: str(frame.text, 500) || '' };
+    if (frame.quote && typeof frame.quote === 'object') where.in_document.quote = str(frame.quote.text, 2000) || '';
+    if (frame.region && typeof frame.region === 'object') where.in_document.area = { rel: frame.region.rel || null, frac: frame.region.frac || null };
+  }
   return where;
 }
 
@@ -7313,7 +7321,9 @@ function productAnchorLine(where) {
   try { const u = new URL(where.url); path = `${u.pathname}${u.search}${u.hash}`; } catch {}
   const rel = where.area && where.area.rel;
   const area = rel ? ` · area ${rel.width}×${rel.height} at (${rel.x}, ${rel.y}) inside it` : '';
-  return ` [page ${path}${where.selector ? ` · ${where.selector}` : ''}${area}]`;
+  const doc = where.in_document;
+  const inDoc = doc ? ` · in the document: ${doc.quote ? `“${doc.quote.slice(0, 80)}”` : doc.selector || doc.tag || ''}` : '';
+  return ` [page ${path}${where.selector ? ` · ${where.selector}` : ''}${area}${inDoc}]`;
 }
 
 function teamCommentRows(slug, meta, list) {
@@ -10260,7 +10270,7 @@ async function createFeedbackSiteSpace(env, req, session, { origins, team, title
 // them loses them when dev mode is turned off). Only flags the widget reads,
 // never the person's dev-mode status as such: the page holding the token
 // can read this answer. UI only -- nothing the server allows depends on it.
-const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['feedbackAreaSelect']);
+const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['feedbackAreaSelect', 'feedbackDocFramePick']);
 async function feedbackDevFlags(env, session) {
   if (!session) return [];
   let dev = null;
