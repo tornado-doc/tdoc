@@ -109,7 +109,9 @@ header row is the last row of `<thead>`; each `<th>` declares its column type.
   `gray`, `red`, `orange`, `yellow`, `green`, `teal`, `blue`, `purple`, `pink`.
   A tag the palette does not name gets a stable colour of its own.
 - **Tabs.** Several sheet tables in one doc are tabs of one grid, shown where
-  the first table is. Give each a distinct `data-name`. With more than one,
+  the first table is. Give each a distinct `data-name` (case does not make
+  names distinct: a second "data" shows, and is named in formulas and
+  exports, as "data (2)"). With more than one,
   add `<caption>Name</caption>` so the plain page still names each table.
 - Plain text in cells: no nested tables, no `rowspan`/`colspan`, no markup
   except `<a>` in a `url` column and `<span data-tag>` in a `tags` column.

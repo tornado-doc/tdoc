@@ -33,8 +33,11 @@ export const LIMITS = Object.freeze({
   // Range references in the whole workbook's dependency graph (a formula
   // over the limit is #BUSY!), and how many columns a range may span before
   // it is kept as one interval instead of one entry per column.
-  rangeRefs: 1000000,
-  narrowCols: 8,
+  rangeRefs: 300000,
+  // References written in all of a workbook's formulas together (each
+  // costs memory as parsed); a formula past it is #BUSY!.
+  refs: 400000,
+  narrowCols: 4,
 });
 
 // ---- errors ------------------------------------------------------------------
@@ -506,7 +509,9 @@ const PLAIN_NUM = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
 const ISO_DATE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
 // Text a formula reads as a number: 12, -3.5, 1,200, $12, 15%, 2026-03-01.
 export function textToNumber(text) {
-  let s = String(text).trim();
+  const raw = String(text);
+  if (raw.length > 1024) return null;
+  let s = raw.trim();
   if (!s || s.length > 64) return null;
   if (PLAIN_NUM.test(s)) return Number(s);
   let m = ISO_DATE.exec(s);
@@ -603,7 +608,7 @@ function compare(a, b) {
   if (b === null || b === undefined) b = typeof a === 'string' ? '' : typeof a === 'boolean' ? false : 0;
   const ra = typeRank(a), rb = typeRank(b);
   if (ra !== rb) return ra - rb;
-  if (ra === 1) { const x = a.toLowerCase(), y = b.toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; }
+  if (ra === 1) { charge(1 + (Math.max(a.length, b.length) >> 4)); const x = a.toLowerCase(), y = b.toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; }
   if (ra === 2) return (a ? 1 : 0) - (b ? 1 : 0);
   return a < b ? -1 : a > b ? 1 : 0;
 }
@@ -909,7 +914,11 @@ function argNum(cx, node, dflt) {
 }
 function argText(cx, node) {
   const v = cx.sc(node);
-  return isErr(v) ? v : toText(v);
+  if (isErr(v)) return v;
+  const s = toText(v);
+  // Whole-string work (LEN, LEFT, UPPER, SUBSTITUTE…) costs its length.
+  cx.tick(1 + (s.length >> 4));
+  return s;
 }
 
 def('SUM', 1, 255, (args, cx) => { const g = aggregate(cx, args); return isErr(g) ? g : checkNum(g.sum); });
@@ -1240,6 +1249,7 @@ def('VALUE', 1, 1, (args, cx) => {
   if (isErr(v) || typeof v === 'number') return v;
   if (v === null) return 0;
   if (typeof v === 'boolean') return E['#VALUE!'];
+  cx.tick(1 + (String(v).length >> 4));
   const n = textToNumber(v);
   return n === null ? E['#VALUE!'] : n;
 });
@@ -1342,6 +1352,8 @@ export class Workbook {
     this.sheets = [];
     this.byName = new Map();
     this.stats = { formulas: 0, evaluated: 0, ms: 0, busy: false, full: true };
+    this.rangeRefs = 0;
+    this.refCount = 0;
   }
   sheet(name) { return this.byName.get(String(name).toLowerCase()) || null; }
 
@@ -1415,7 +1427,7 @@ export class Workbook {
     for (const e of formulaEdits) {
       const k = keyOf(e.r, e.c);
       const f = old.fx.get(k);
-      if (f) this._unlink(f);
+      if (f) { this._unlink(f); this.refCount -= f.refs || 0; }
       if (e.src === undefined) { old.fx.delete(k); old.vals[e.r][e.c] = next.vals[e.r][e.c]; removeSorted(old.fcols[e.c], e.r); }
       else {
         const nf = this._compile(old, e.r, e.c, e.src);
@@ -1436,6 +1448,17 @@ export class Workbook {
       f.ast = parse(src);
     } catch (e) {
       f.err = E['#ERROR!'];
+    }
+    if (f.ast) {
+      let n = 0;
+      (function count(x) {
+        if (x.t === 'ref') n++;
+        else if (x.t === 'f') { if (x.name === 'TODAY' || x.name === 'NOW') f.ownVolatile = true; x.args.forEach(count); }
+        else if (x.t === 'bin') { count(x.a); count(x.b); }
+        else if (x.t === 'neg' || x.t === 'pct') count(x.a);
+      })(f.ast);
+      if (this.refCount + n > this.limits.refs) { f.ast = null; f.err = E['#BUSY!']; }
+      else { this.refCount += n; f.refs = n; }
     }
     return f;
   }
@@ -1481,16 +1504,20 @@ export class Workbook {
         f.links.push({ point: k, s });
         continue;
       }
-      if (++this.rangeRefs > this.limits.rangeRefs) { this.rangeRefs--; this._unlink(f); f.err = E['#BUSY!']; return; }
-      f.prec.push(p);
+      // A narrow range costs one entry per column it spans, a wide one one.
       const c2 = Math.min(p.c2, s.cols - 1);
-      if (c2 - p.c1 + 1 <= this.limits.narrowCols) {
-        for (let c = p.c1; c <= c2; c++) { const e = { r1: p.r1, r2: p.r2, f, dead: false }; s.areas[c].push(e); s.live++; f.links.push({ entry: e, s }); }
+      const narrow = c2 - p.c1 + 1 <= this.limits.narrowCols;
+      const cost = narrow ? Math.max(1, c2 - p.c1 + 1) : 1;
+      if (this.rangeRefs + cost > this.limits.rangeRefs) { this._unlink(f); f.err = E['#BUSY!']; return; }
+      this.rangeRefs += cost;
+      f.prec.push(p);
+      if (narrow) {
+        for (let c = p.c1; c <= c2; c++) { const e = { r1: p.r1, r2: p.r2, f, s, dead: false }; s.areas[c].push(e); s.live++; f.links.push(e); }
       } else {
-        const e = { r1: p.r1, r2: p.r2, c1: p.c1, c2, f, dead: false };
+        const e = { r1: p.r1, r2: p.r2, c1: p.c1, c2, f, s, dead: false };
         s.wide.push(e);
         s.live++;
-        f.links.push({ entry: e, s });
+        f.links.push(e);
       }
     }
     this._relinkKind(f);
@@ -1502,8 +1529,8 @@ export class Workbook {
       if (l.point !== undefined) {
         const set = l.s.points.get(l.point);
         if (set) { set.delete(f); if (!set.size) l.s.points.delete(l.point); }
-      } else if (!l.entry.dead) {
-        l.entry.dead = true;
+      } else if (!l.dead) {
+        l.dead = true;
         this.rangeRefs--;
         if (++l.s.dead > 1024 && l.s.dead * 2 > l.s.live) this._compact(l.s);
       }
@@ -1527,9 +1554,10 @@ export class Workbook {
     for (let i = 0; i < wide.length; i++) { const a = wide[i]; if (!a.dead && r >= a.r1 && r <= a.r2 && c >= a.c1 && c <= a.c2) out(a.f); }
   }
 
-  _rebuild() {
+  _rebuild(deadline) {
     let count = 0;
     this.rangeRefs = 0;
+    this.refCount = 0;
     for (const s of this.sheets) {
       s.fx = new Map();
       s.points = new Map();
@@ -1556,7 +1584,7 @@ export class Workbook {
     // Kinds that hang on other formulas' kinds: one more pass settles chains.
     for (const f of all) if (!f.kind && f.ast) this._relinkKind(f);
     this.stats.full = true;
-    this._evaluate(all);
+    this._evaluate(all, deadline);
     return all.map((f) => ({ sheet: f.sheet.name, r: f.r, c: f.c }));
   }
   _relinkKind(f) {
@@ -1572,31 +1600,86 @@ export class Workbook {
   // The formulas that depend on the changed cells of `sheet`, and theirs,
   // and so on: recomputed.
   _recompute(sheet, changedKeys) {
-    const dirty = new Set();
-    const queue = [];
-    const add = (g) => { if (!dirty.has(g)) { dirty.add(g); queue.push(g); } };
-    for (const k of changedKeys) {
-      const f = sheet.fx.get(k);
-      if (f) add(f);
-      this._readers(sheet, Math.floor(k / ROWK), k % ROWK, k, add);
-    }
-    for (let q = 0; q < queue.length; q++) {
-      const f = queue[q];
-      this._readers(f.sheet, f.r, f.c, keyOf(f.r, f.c), add);
-    }
+    // One time budget for the whole edit: tracing what depends on it gets a
+    // quarter; if that is not enough, everything is computed again within
+    // what is left (#BUSY! where it runs out).
+    const deadline = Date.now() + this.limits.timeMs;
+    const queue = this._dependents(sheet, changedKeys, Date.now() + this.limits.timeMs / 4);
+    if (!queue) return this._rebuild(deadline);
     this.stats.full = false;
-    this._evaluate(queue);
+    this._evaluate(queue, deadline);
     return queue.map((f) => ({ sheet: f.sheet.name, r: f.r, c: f.c }));
   }
 
-  _evaluate(list) {
+  // The formulas to recompute after the cells `changedKeys` of `sheet`
+  // changed: theirs, the ones that read them, the ones that read those…
+  // Walked a wave at a time: each wave's cells are grouped by sheet and
+  // column (rows sorted), so every range list is scanned once per wave, not
+  // once per cell. The walk is charged; past the budget it returns null.
+  _dependents(sheet, changedKeys, deadline) {
+    const maxWork = this.limits.work / 4;
+    let work = 0, nextCheck = 4096;
+    const spend = (n) => {
+      work += n;
+      if (work > maxWork) throw new Budget();
+      if (work >= nextCheck) { nextCheck = work + 4096; if (Date.now() > deadline) throw new Budget(); }
+    };
+    const dirty = new Set();
+    const queue = [];
+    let found = [];
+    const add = (g) => { if (!dirty.has(g)) { dirty.add(g); queue.push(g); found.push(g); } };
+    let frontier = changedKeys.map((k) => ({ s: sheet, r: Math.floor(k / ROWK), c: k % ROWK }));
+    for (const x of frontier) { const f = sheet.fx.get(keyOf(x.r, x.c)); if (f) add(f); }
+    try {
+      while (frontier.length) {
+        found = [];
+        const bySheet = new Map();
+        for (const x of frontier) {
+          spend(1);
+          const pts = x.s.points.get(keyOf(x.r, x.c));
+          if (pts) { spend(pts.size); for (const g of pts) add(g); }
+          let cols = bySheet.get(x.s);
+          if (!cols) bySheet.set(x.s, cols = new Map());
+          let rows = cols.get(x.c);
+          if (!rows) cols.set(x.c, rows = []);
+          rows.push(x.r);
+        }
+        for (const [s, cols] of bySheet) {
+          for (const rows of cols.values()) { spend(rows.length); rows.sort((a, b) => a - b); }
+          const hit = (rows, r1, r2) => { const i = lowerBound(rows, r1); return i < rows.length && rows[i] <= r2; };
+          for (const [c, rows] of cols) {
+            const list = s.areas[c];
+            if (!list) continue;
+            spend(list.length);
+            for (let i = 0; i < list.length; i++) { const a = list[i]; if (!a.dead && hit(rows, a.r1, a.r2)) add(a.f); }
+          }
+          if (s.wide.length) {
+            spend(s.wide.length * cols.size);
+            for (let i = 0; i < s.wide.length; i++) {
+              const a = s.wide[i];
+              if (a.dead) continue;
+              for (const [c, rows] of cols) if (c >= a.c1 && c <= a.c2 && hit(rows, a.r1, a.r2)) { add(a.f); break; }
+            }
+          }
+        }
+        frontier = found.map((f) => ({ s: f.sheet, r: f.r, c: f.c }));
+      }
+    } catch (e) {
+      if (e instanceof Budget) return null;
+      throw e;
+    }
+    return queue;
+  }
+
+  _evaluate(list, until) {
     const t0 = Date.now();
-    const deadline = t0 + this.limits.timeMs;
+    const deadline = until || t0 + this.limits.timeMs;
     let work = 0;
     const maxWork = this.limits.work;
     const self = this;
     let busy = false;
-    for (const f of list) { f.state = 0; f.cyc = false; f.frame = -1; f.sheet.vals[f.r][f.c] = PENDING; }
+    // volatile: reads TODAY() or NOW(), itself or through what it reads.
+    for (const f of list) { f.state = 0; f.cyc = false; f.frame = -1; f.volatile = !!f.ownVolatile; f.sheet.vals[f.r][f.c] = PENDING; }
     // The clock is read every 4096 units of work, whatever size the steps.
     let nextCheck = 4096;
     const tick = (n) => {
@@ -1651,7 +1734,9 @@ export class Workbook {
           for (; lo < rows.length && rows[lo] <= r2; lo++) {
             tick();
             const g = s.fx.get(keyOf(rows[lo], c));
-            if (g && g.state !== 2) out.push(g);
+            if (!g) continue;
+            if (g.state !== 2) out.push(g);
+            else if (g.volatile) f.volatile = true;
           }
         }
       }
@@ -1695,6 +1780,7 @@ export class Workbook {
           if (pushed) continue;
           stack.pop();
           tick();
+          for (let k = 0; k < top.deps.length && !top.f.volatile; k++) if (top.deps[k].volatile) top.f.volatile = true;
           finish(top.f, compute(top.f));
         }
       }
@@ -1717,6 +1803,13 @@ export class Workbook {
     if (!s || r < 0 || c < 0 || r >= s.rows || c >= s.cols) return null;
     const v = s.vals[r][c];
     return v === PENDING ? E['#BUSY!'] : v;
+  }
+  // Whether a formula cell's value changes by itself: it calls TODAY() or
+  // NOW(), or reads a cell that does (directly or not).
+  volatile(name, r, c) {
+    const s = this.sheet(name);
+    const f = s && s.fx.get(keyOf(r, c));
+    return !!(f && f.volatile);
   }
   formula(name, r, c) {
     const s = this.sheet(name);
@@ -1801,7 +1894,11 @@ function evalNode(node, cx) {
       if (isErr(a)) return a;
       if (isErr(b)) return b;
       const op = node.op;
-      if (op === '&') return checkText(toText(a) + toText(b));
+      if (op === '&') {
+        const x = toText(a), y = toText(b);
+        cx.tick(1 + ((x.length + y.length) >> 4));
+        return x.length + y.length > LIMITS.textChars ? E['#VALUE!'] : x + y;
+      }
       if (op === '=' ) return compare(a, b) === 0;
       if (op === '<>') return compare(a, b) !== 0;
       if (op === '<') return compare(a, b) < 0;

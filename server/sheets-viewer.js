@@ -1692,7 +1692,7 @@
       var text = fx.wb.display(tab.name, r, c);
       if (text == null) return;
       var col = tab.index.cols[c], value = col.tags ? Q.splitTags(text) : text;
-      if (!fxMayWrite(td)) { fx.unwritten.add(td); return; }
+      if (!fxMayWrite(tab, r, c, td)) { fx.unwritten.add(td); return; }
       if (M.readCell(td, col.type) + '' === (col.type === 'checkbox' ? (Q.parseCheckbox(text) || text === 'TRUE' ? Q.CHECK_MARK : '') : value) + '') return;
       M.writeCell(td, col.type, value);
     });
@@ -1725,15 +1725,15 @@
       }
       var td = row.tds[c];
       if (!td || M.readCell(td, col.type) + '' === (col.tags ? col.tags[r] : shown) + '') { if (td) fx.unwritten.delete(td); continue; }
-      if (fx.writing && canEdit() && fxMayWrite(td)) { M.writeCell(td, col.type, col.tags ? col.tags[r] : text); fx.unwritten.delete(td); }
+      if (fx.writing && canEdit() && fxMayWrite(tab, r, c, td)) { M.writeCell(td, col.type, col.tags ? col.tags[r] : text); fx.unwritten.delete(td); }
       else fx.unwritten.add(td);
     }
   }
-  // TODAY() and NOW() change by themselves: their cells are written only
-  // when someone edits that formula, not by every other edit.
-  function fxMayWrite(td) {
-    var f = fxFormulaOf(td);
-    return !(f && /\b(TODAY|NOW)\s*\(/i.test(f)) || fx.edited.has(td);
+  // A value that follows TODAY() or NOW() (the engine traces it) changes by
+  // itself: written only when someone edits that formula, not by every
+  // other edit.
+  function fxMayWrite(tab, r, c, td) {
+    return !fx.wb.volatile(tab.name, r, c) || fx.edited.has(td);
   }
   function fxAttr(td, f) { if (f) td.setAttribute('data-formula', f); else td.removeAttribute('data-formula'); }
   // Write what was typed: '=…' is a formula (its value comes with the
@@ -2859,7 +2859,17 @@
     var old = book.tabs;
     fx.ready = false;
     book.tabs = [];
-    tables.forEach(function (t) { var o = old.find(function (x) { return x.name === (t.getAttribute('data-name') || ''); }); book.tabs.push(readTab(t, o)); });
+    // Each table keeps its own tab object (its view state): the same
+    // element first, else the first unused tab of that name, never one
+    // object for two tables (names may repeat: "data", "data (2)").
+    var used = new Set();
+    tables.forEach(function (t) {
+      var name = t.getAttribute('data-name') || '';
+      var o = old.find(function (x) { return x.table === t && !used.has(x); }) ||
+        old.find(function (x) { return !used.has(x) && (x.table.getAttribute('data-name') || '') === name; });
+      if (o) used.add(o);
+      book.tabs.push(readTab(t, o));
+    });
     if (!book.tabs.length) { ui.root.remove(); book = null; return; }
     fxInit();
     book.active = Math.min(book.active, book.tabs.length - 1);

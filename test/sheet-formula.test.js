@@ -199,6 +199,12 @@ async function t(name, fn) {
     assert.equal(shown(wb, 'Main', 'C2'), '32');
   });
 
+  await t('volatility follows TODAY()/NOW() through what reads them', () => {
+    const wb = book(sheet('S', [['=TODAY()', '=A1+1', '=SUM(B1:B2)', '=1+1'], ['x', 5, '=D1', '=NOW()']]), sheet('T', [['=S!C1']]));
+    assert.deepEqual([[0, 0], [0, 1], [0, 2], [0, 3], [1, 2], [1, 3]].map(([r, c]) => wb.volatile('S', r, c)), [true, true, true, false, false, true]);
+    assert.equal(wb.volatile('T', 0, 0), true);
+  });
+
   await t('a missing tab is #REF!; adding it fixes the reference', () => {
     const wb = book(sheet('Main', [['=Later!A1+1']]));
     assert.equal(wb.display('Main', 0, 0), '#REF!');
@@ -340,6 +346,33 @@ async function t(name, fn) {
     assert.equal(wb2.display('S', 999, 0), '#BUSY!');
   });
 
+  await t('hostile: an edit with many readers and many wide ranges stays in budget', () => {
+    // 50,000 formulas read $A$1; 300 more each hold ~1,000 distinct whole-row ranges.
+    const Qn = 50000, nW = 300;
+    const wf = (r) => { const refs = []; for (let i = 0; i < 1000; i++) refs.push((i % 9 + 1) + ':' + (10 + Math.floor(i / 9) + r * 120)); const ch = []; for (let k = 0; k < refs.length; k += 250) ch.push('SUM(' + refs.slice(k, k + 250).join(',') + ')'); return '=' + ch.join('+'); };
+    const wfs = Array.from({ length: nW }, (_, r) => wf(r));
+    const rows = Qn + 1;
+    const cellAt = (a1) => (r, c) => (c === 1 && r >= 1 && r <= Qn ? { f: '=$A$1' } : c === 3 && r < nW ? { f: wfs[r] } : c === 0 && r === 0 ? a1 : null);
+    const wb = F.createWorkbook();
+    wb.load([{ name: 'S', rows, cols: 12, cell: cellAt(1) }]);
+    const t0 = Date.now();
+    wb.update({ name: 'S', rows, cols: 12, cell: cellAt(2) });
+    const ms = Date.now() - t0;
+    assert.ok(ms < 1200, `edit in ${ms} ms`);
+    console.log(`    (edit with 50,000 readers and 300,000 wide ranges: ${ms} ms${wb.stats.busy ? ', #BUSY! past the budget' : ''})`);
+  });
+
+  await t('hostile: whole-string work is charged by length (=A1=A1 ×650 over 2 MB, LEN)', () => {
+    const big = 'Xy'.repeat(1000000);
+    for (const f of ['=' + Array(650).fill('(A1=A1)').join('+'), '=' + Array(500).fill('LEN(UPPER(A1))').join('+')]) {
+      const t0 = Date.now();
+      const wb = F.createWorkbook();
+      wb.load([{ name: 'S', rows: 201, cols: 2, cell: (r, c) => (r === 0 ? (c === 0 ? big : null) : c === 1 ? { f } : null) }]);
+      const ms = Date.now() - t0;
+      assert.ok(ms < 1500 && wb.stats.busy, `${f.slice(0, 12)}: ${ms} ms, busy ${wb.stats.busy}`);
+    }
+  });
+
   await t('fuzz: random formulas never throw out of the engine', () => {
     let seed = 12345;
     const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
@@ -435,6 +468,14 @@ async function t(name, fn) {
     assert.equal(s1.D2.v, 13.5);
     assert.equal(s2.A2.f, "'Line items'!D5*2");
     assert.equal(s1.B5.f, undefined, 'no formula the sheet does not compute');
+    // Tabs named alike: the second is "data (2)", as the viewer shows it,
+    // and a formula naming it points at that tab in the workbook.
+    const dupes = parseHtml('<html><body>' + ['data', 'Data'].map((n) => `<table data-tdoc-sheet data-name="${n}"><thead><tr><th data-key="c1" data-type="number">A</th></tr></thead><tbody><tr data-row="r1"><td${n === 'data' ? ` data-formula="='data (2)'!A1"` : ''}>1</td></tr></tbody></table>`).join('') + '</body></html>');
+    const ds = X.sheetsFromDocument(dupes);
+    assert.deepEqual(ds.map((x) => x.name), ['data', 'Data (2)']);
+    const db = XLSX.read(X.xlsxBytes(XLSX, ds), { type: 'array' });
+    assert.deepEqual(db.SheetNames, ['data', 'Data (2)']);
+    assert.equal(db.Sheets.data.A2.f, "'Data (2)'!A2");
     // A formula naming a tab the workbook does not have stays a value.
     const lone = [{ name: 'A', columns: [{ name: 'x', type: 'number' }], rows: [['1']], formulas: [{ r: 0, c: 0, f: '=Missing!A1' }] }];
     const b2 = XLSX.read(X.xlsxBytes(XLSX, lone), { type: 'array' });

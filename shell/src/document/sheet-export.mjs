@@ -14,10 +14,19 @@ export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsh
 // rows is the value it last showed).
 export function sheetsFromDocument(doc) {
   const tables = Array.prototype.filter.call(doc.querySelectorAll(SHEET_SELECTOR), (t) => !(t.closest && t.closest('[data-tdoc-provider]')));
+  // Names as the viewer shows them: unique without regard to case (a second
+  // "data" is "data (2)"), so a formula naming "data (2)" finds that tab.
+  const seen = new Set();
+  const unique = (name) => {
+    let out = name, n = 1;
+    while (seen.has(out.toLowerCase())) out = `${name} (${++n})`;
+    seen.add(out.toLowerCase());
+    return out;
+  };
   return tables.map((table, i) => {
     const sheet = readSheetTable(table);
     return {
-      name: sheet.name || `Sheet ${i + 1}`,
+      name: unique(String(sheet.name || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 100) || `Sheet ${i + 1}`),
       columns: sheet.columns.map((c) => ({ name: c.name, type: c.type, width: c.width || 0 })),
       rows: sheet.rows.map((r) => r.cells),
       formulas: sheet.rows.flatMap((row, r) => row.tds.map((td, c) => {
