@@ -30,6 +30,9 @@
   var SEL = M.SHEET_SELECTOR;
   var NARROW = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
   var ROW_H = 32, HEAD_H = 34, OVERSCAN = 6, MAX_COLUMNS = 200;
+  // A sheet of COMPACT_ROWS rows or fewer in a prose doc is a small table
+  // (server/block-lint.js warns about it): compact, at most EMBED_ROWS tall.
+  var COMPACT_ROWS = 20, EMBED_ROWS = 15;
   function numW() { return NARROW && NARROW.matches ? 36 : 48; }
   var hooks = window.__tdocElementHooks = window.__tdocElementHooks || {};
 
@@ -227,6 +230,47 @@
     '.ts-mi{min-height:44px}.ts-val{min-height:40px}',
     '.ts-n{padding:0 4px}',
     '}',
+    // A small sheet in a prose doc is one block among paragraphs: one short row
+    // of controls. Search is its icon until clicked (or holding a query), the
+    // count and buttons are small, and the grid is as tall as its rows.
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar{gap:4px;min-height:28px;margin:0 0 6px}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search{order:0;height:28px;flex:1 1 180px;max-width:300px}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search:not(:focus-within):not(.has-q){flex:0 0 28px;padding:0 5px;border-color:transparent;cursor:pointer}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search:not(:focus-within):not(.has-q):hover{background:var(--ts-head)}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search:not(:focus-within):not(.has-q) input{flex:0 0 0;min-width:0;width:0;padding:0}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-count{order:1;margin-left:auto;font-size:12px}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-btn,.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-expand{order:2}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-btn{height:28px;padding:0 6px;border-color:transparent;background:transparent;color:var(--ts-muted)}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-btn:hover{background:var(--ts-head);color:var(--ts-ink)}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-btn span{display:none}',
+    // ...and its rows read as a table that fits the column: text wraps and
+    // rows grow, columns share the width, at most about 15 rows tall. On a
+    // phone, more than three columns read as one card per row. Full screen
+    // and Edit mode keep the grid.
+    '.tdoc-sheet.is-flat .ts-grid{display:none!important}.tdoc-sheet:not(.is-flat) .ts-flat{display:none}',
+    '.ts-flat{position:relative;overflow:auto;border:1px solid var(--ts-line);border-radius:8px;background:#fff;overscroll-behavior:auto}',
+    '.ts-flat table{width:100%;border-collapse:separate;border-spacing:0;table-layout:auto;margin:0;font:inherit}',
+    '.ts-flat th{position:sticky;top:0;z-index:2;padding:0;background:var(--ts-head);border-bottom:1px solid #d9d9df;text-align:left;vertical-align:bottom}',
+    '.ts-flat th button{display:flex;align-items:center;gap:4px;width:100%;min-height:' + HEAD_H + 'px;padding:6px 8px;border:0;background:transparent;font-weight:600;text-align:left;white-space:normal}',
+    '.ts-flat th button:hover{background:#ececf0}',
+    '.ts-flat td{position:relative;padding:7px 8px;border-bottom:1px solid var(--ts-line);vertical-align:top;white-space:normal;overflow-wrap:break-word;min-width:6em;max-width:28em;background:#fff}',
+    '.ts-flat tr:last-child td{border-bottom:0}',
+    '.ts-flat :is(th,td):first-child{position:sticky;left:0;z-index:1}.ts-flat th:first-child{z-index:3}',
+    '.ts-flat td.is-num{text-align:right;white-space:nowrap;min-width:0;font-variant-numeric:tabular-nums}',
+    '.ts-flat td.is-short{white-space:nowrap;min-width:0}',
+    '.ts-flat td.is-hit{background:#fffbe0}',
+    '.ts-flat .ts-tag{display:inline-block;margin:1px 4px 1px 0;max-width:none;white-space:nowrap}',
+    '.ts-flat mark{background:var(--ts-hit);color:inherit;border-radius:2px;padding:0}',
+    '.ts-flat a{color:var(--ts-accent);text-decoration:none}',
+    '.ts-flat .has-comment::after{content:"";position:absolute;top:0;right:0;border-style:solid;border-width:0 9px 9px 0;border-color:transparent #f5a524 transparent transparent}',
+    'html[data-tdoc-interaction-mode="comment"] .ts-flat :is(td,.ts-card-l,.ts-card-t){cursor:cell}',
+    '.ts-flat-empty{margin:0;padding:12px;color:var(--ts-muted)}',
+    '.ts-flat.is-cards{border:0;background:transparent}',
+    '.ts-card{border:1px solid var(--ts-line);border-radius:8px;padding:8px 12px;margin:0 0 8px;background:#fff}',
+    '.ts-card-t{position:relative;margin:0 0 4px;font-weight:600;font-size:14px}',
+    '.ts-card-l{position:relative;margin:2px 0;overflow-wrap:break-word}.ts-card-k{color:var(--ts-muted)}',
+    // A sheet the reading column cramps takes the page width beside it.
+    '@media screen{.tdoc-sheet.is-wide:not(.is-expanded){width:var(--ts-wide-w);max-width:none;margin-left:var(--ts-wide-ml)}}',
   ].join('');
   document.head.appendChild(style);
 
@@ -345,7 +389,7 @@
   var ui = {};
   // Full screen: on, opened as the sheet's own page (alone: its tab, 1-based),
   // whether the doc is nothing but the sheet, and the doc path from the shell.
-  var expand = { on: false, alone: 0, sheetOnly: false, path: '', scroll: null, inert: [] };
+  var expand = { on: false, alone: 0, sheetOnly: false, embed: false, fit: false, path: '', scroll: null, inert: [] };
   var sel = { r: 0, c: 0, r2: 0, c2: 0 };
   var config = { editing: false, received: false };
   var undoStack = [], redoStack = [];
@@ -374,7 +418,8 @@
     search.appendChild(ui.search); search.appendChild(ui.hits); search.appendChild(ui.prev); search.appendChild(ui.next);
     ui.bar.appendChild(search);
     ui.chips = h('div', 'ts-chips'); ui.bar.appendChild(ui.chips);
-    ui.comment = h('button', 'ts-btn'); ui.comment.type = 'button'; ui.comment.innerHTML = ICON.comment + '<span>Comment on sheet</span>';
+    ui.searchBox = search;
+    ui.comment = h('button', 'ts-btn'); ui.comment.type = 'button'; ui.comment.innerHTML = ICON.comment + '<span>Comment on sheet</span>'; ui.comment.setAttribute('aria-label', 'Comment on sheet'); ui.comment.title = 'Comment on sheet';
     // The whole sheet is an ordinary table comment (no label of its own), so
     // a new version reconciles it like any other table.
     ui.comment.addEventListener('click', function (e) { e.stopPropagation(); commentOn(cur().table, ui.comment.getBoundingClientRect()); });
@@ -404,6 +449,8 @@
     ui.body.appendChild(ui.rows);
     ui.foot = h('div', 'ts-foot'); ui.foot.setAttribute('role', 'row'); ui.foot.setAttribute('aria-label', 'Summary'); ui.foot.hidden = true;
     ui.grid.appendChild(ui.head); ui.grid.appendChild(ui.body); ui.grid.appendChild(ui.foot);
+    ui.flat = h('div', 'ts-flat');
+    ui.flat.addEventListener('click', flatClick);
     ui.addRow = h('button', 'ts-add-row'); ui.addRow.type = 'button'; ui.addRow.innerHTML = ICON.plus + '<span>Add row</span>';
     ui.addRow.addEventListener('click', function (e) { e.stopPropagation(); insertRows(null, 1); ui.grid.focus({ preventScroll: true }); });
     ui.offAbove = h('button', 'ts-off'); ui.offBelow = h('button', 'ts-off');
@@ -413,9 +460,16 @@
       b.addEventListener('click', function (e) { e.stopPropagation(); goOffscreen(b); });
     });
     ui.offHidden = h('div', 'ts-note ts-off-hidden'); ui.offHidden.hidden = true;
-    root.appendChild(ui.xhead); root.appendChild(ui.tabs); root.appendChild(ui.bar); root.appendChild(ui.offHidden); root.appendChild(ui.grid); root.appendChild(ui.offAbove); root.appendChild(ui.offBelow); root.appendChild(ui.addRow);
+    root.appendChild(ui.xhead); root.appendChild(ui.tabs); root.appendChild(ui.bar); root.appendChild(ui.offHidden); root.appendChild(ui.grid); root.appendChild(ui.flat); root.appendChild(ui.offAbove); root.appendChild(ui.offBelow); root.appendChild(ui.addRow);
     host.parentNode.insertBefore(root, host);
     expand.sheetOnly = isSheetOnly();
+    expand.embed = !expand.sheetOnly && isProseDoc();
+    // Fitted to the reader (flat view, page width) only in a house-style doc
+    // and not where the author opted out, as server/table-layout.js does.
+    expand.fit = expand.embed && document.documentElement.getAttribute('data-tdoc-design') !== 'custom' &&
+      !document.querySelector('[data-tdoc-slide]') && !first.closest('[data-tdoc-table="fixed"]');
+    // data-tdoc-wide on the sheet (or its wrapper): the author asks for the page width.
+    expand.wide = !expand.sheetOnly && !document.querySelector('[data-tdoc-slide]') && !!(first.hasAttribute('data-tdoc-wide') || host.hasAttribute('data-tdoc-wide'));
     wire();
     renderAll();
     post({ type: 'tdoc:sheetReady', tabs: book.tabs.map(function (t) { return t.name; }) });
@@ -461,6 +515,7 @@
   function renderBar() {
     var tab = cur();
     if (document.activeElement !== ui.search && ui.search.value !== tab.query.search) ui.search.value = tab.query.search;
+    ui.searchBox.classList.toggle('has-q', !!tab.query.search);
     var m = tab.matches;
     ui.hits.textContent = tab.query.search ? (m.total ? (tab.matchAt >= 0 ? (tab.matchAt + 1) + ' of ' : '') + fmt(m.total) + (m.capped ? '+' : '') : 'No matches') : '';
     ui.prev.hidden = ui.next.hidden = !m.total;
@@ -511,18 +566,29 @@
     if (f.min != null) return '≥ ' + show(f.min);
     return '≤ ' + show(f.max);
   }
-  // The grid is as tall as its rows, up to most of the frame's height, so a
-  // short sheet reads like a table and a long one scrolls inside its frame.
+  function compact() { return expand.embed && cur().index.size <= COMPACT_ROWS; }
+  function flatView() { return compact() && expand.fit && !expand.on && mode() !== 'edit'; }
+  // The grid is as tall as its rows, up to most of the frame's height (a small
+  // sheet in a prose doc, up to EMBED_ROWS rows), so a short sheet reads like a table and
+  // a long one scrolls inside its frame.
   function layout() {
     var tab = cur();
     var rowsH = Math.max(1, tab.order.length) * ROW_H;
     var room = Math.max(240, innerHeight - (NARROW && NARROW.matches ? 150 : 170));
-    var hgt = Math.min(HEAD_H + rowsH + footH() + 2 + (tab.totalW > ui.grid.clientWidth ? 14 : 0), room);
-    // Full screen, the grid takes whatever the window leaves it.
-    ui.grid.style.height = expand.on ? '' : hgt + 'px';
+    ui.root.classList.toggle('is-compact', compact());
+    ui.root.classList.toggle('is-flat', flatView());
+    pageWidth(tab);
+    if (flatView()) return;
+    if (compact()) room = Math.min(room, HEAD_H + EMBED_ROWS * ROW_H + footH() + 18);
     ui.body.style.height = (tab.order.length ? tab.order.length * ROW_H : 80) + 'px';
     ui.body.style.width = tab.totalW + 'px';
     ui.head.style.width = (tab.totalW + (canEdit() ? 40 : 0)) + 'px';
+    // Room for a horizontal scrollbar only where it takes room (none with
+    // overlay scrollbars): measured once the widths above are in.
+    var bar = ui.grid.offsetHeight ? Math.max(0, ui.grid.offsetHeight - ui.grid.clientHeight - 2) : (tab.totalW > ui.grid.clientWidth ? 14 : 0);
+    var hgt = Math.min(HEAD_H + rowsH + footH() + 2 + bar, room);
+    // Full screen, the grid takes whatever the window leaves it.
+    ui.grid.style.height = expand.on ? '' : hgt + 'px';
   }
   function renderHead() {
     var tab = cur(), W = numW();
@@ -587,6 +653,7 @@
     return [Math.max(0, c0 - 1), Math.min(tab.widths.length - 1, c1 + 1)];
   }
   function renderBody(force) {
+    if (flatView()) { renderFlat(); return; }
     var tab = cur();
     var n = tab.order.length;
     if (!n) {
@@ -654,6 +721,98 @@
     }
     var w = tab.widths[c];
     return '<div class="' + cls + '" role="gridcell" data-c="' + c + '" style="width:' + w + 'px' + (c === 0 ? ';left:' + numW() + 'px' : '') + '"' + (isActive ? ' aria-selected="true"' : '') + ' title="' + esc(col.text[r].slice(0, 300)) + '">' + inner + '</div>';
+  }
+  // ---- flat view: a small sheet in a prose doc, read as a table --------------------
+  function renderFlat() {
+    var tab = cur(), n = tab.order.length, cols = tab.data.columns, needle = tab.query.search.trim().toLowerCase();
+    var cards = ui.root.clientWidth <= 480 && cols.length > 3;
+    var html = '', i, r, c;
+    var cell = function (r, c) {
+      var col = tab.index.cols[c], type = col.type, td = tab.data.rows[r].tds[c], inner = '';
+      if (type === 'tags') { for (var t = 0; t < col.tags[r].length; t++) inner += '<span class="ts-tag" style="' + tagStyle(col.tags[r][t], tab.palettes[c]) + '">' + mark(col.tags[r][t], needle) + '</span>'; }
+      else if (type === 'checkbox') inner = col.num[r] === 1 ? '✓' : '';
+      else { var href = type === 'url' ? M.safeHref(col.text[r]) : ''; inner = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + mark(col.text[r], needle) + '</a>' : mark(col.text[r], needle); }
+      var cls = (type === 'number' ? ' is-num' : type === 'date' || type === 'checkbox' ? ' is-short' : '') + (needle && col.lower[r].indexOf(needle) !== -1 ? ' is-hit' : '') + (td && commented.has(td) ? ' has-comment' : '');
+      return { cls: cls, inner: inner };
+    };
+    if (!n) html = '<p class="ts-flat-empty">' + (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.') + '</p>';
+    else if (cards) {
+      for (i = 0; i < n; i++) {
+        r = tab.order[i];
+        var t0 = cell(r, 0);
+        html += '<div class="ts-card" role="listitem"><p class="ts-card-t' + t0.cls + '" data-i="' + i + '" data-c="0">' + (t0.inner || '&nbsp;') + '</p>';
+        for (c = 1; c < cols.length; c++) {
+          var x = cell(r, c);
+          if (!x.inner) continue;
+          html += '<p class="ts-card-l' + x.cls + '" data-i="' + i + '" data-c="' + c + '"><span class="ts-card-k">' + esc(cols[c].name) + ':</span> ' + x.inner + '</p>';
+        }
+        html += '</div>';
+      }
+      html = '<div role="list" aria-label="' + esc(tab.name) + '">' + html + '</div>';
+    } else {
+      html = '<table><thead><tr>';
+      for (c = 0; c < cols.length; c++) {
+        var s = tab.query.sort.filter(function (k) { return k.col === c; })[0];
+        html += '<th data-c="' + c + '"' + (s ? ' aria-sort="' + (s.dir === 'desc' ? 'descending' : 'ascending') + '"' : '') + '><button type="button" data-sort="' + c + '" title="Sort by ' + esc(cols[c].name) + '">' + esc(cols[c].name) + (s ? ' <span class="ts-sorted">' + (s.dir === 'desc' ? ICON.down : ICON.up) + '</span>' : '') + '</button></th>';
+      }
+      html += '</tr></thead><tbody>';
+      for (i = 0; i < n; i++) {
+        r = tab.order[i];
+        html += '<tr>';
+        for (c = 0; c < cols.length; c++) { var y = cell(r, c); html += '<td class="' + y.cls.trim() + '" data-i="' + i + '" data-c="' + c + '">' + y.inner + '</td>'; }
+        html += '</tr>';
+      }
+      html += '</tbody></table>';
+    }
+    // Unchanged: leave the DOM alone (no mutation, no relayout downstream),
+    // but the height still follows the width (rows rewrap on a resize).
+    if (!(html === ui.flatHtml && cards === ui.flat.classList.contains('is-cards') && ui.flat.firstChild)) {
+      ui.flatHtml = html;
+      ui.flat.classList.toggle('is-cards', cards);
+      ui.flat.innerHTML = html;
+    }
+    // At most EMBED_ROWS rows (or cards) tall, however tall each one wraps.
+    var items = ui.flat.querySelectorAll(cards ? '.ts-card' : 'tbody tr'), last = items[EMBED_ROWS - 1];
+    var maxH = items.length > EMBED_ROWS && last ? (last.offsetTop + last.offsetHeight + (cards ? 0 : 1)) + 'px' : '';
+    if (ui.flat.style.maxHeight !== maxH) ui.flat.style.maxHeight = maxH;
+  }
+  // A header sorts; in Comment mode a cell takes a comment; a commented cell
+  // opens its thread.
+  function flatClick(e) {
+    var b = e.target.closest('[data-sort]');
+    if (b) { e.stopPropagation(); setQuery(Q.toggleSort(cur().query, Number(b.getAttribute('data-sort')), e.shiftKey)); return; }
+    var el = e.target.closest('[data-i]');
+    if (!el || e.target.closest('a')) return;
+    var tab = cur(), i = Number(el.getAttribute('data-i')), c = Number(el.getAttribute('data-c')), r = tab.order[i];
+    var td = r != null && tab.data.rows[r].tds[c];
+    if (!td) return;
+    if (commented.has(td) && mode() !== 'edit') { e.stopPropagation(); post({ type: 'tdoc:anchorClick', id: commented.get(td)[0] }); return; }
+    if (mode() !== 'comment') return;
+    e.stopPropagation();
+    sel = { r: i, c: c, r2: i, c2: c, touched: true };
+    if (!tab.data.rows[r].id) toast('This row has no id yet, so a comment would not survive edits. Comment on the sheet instead.');
+    commentOn(td, el.getBoundingClientRect(), refLabel(tab, r, c) + ' · ' + tab.data.columns[c].name);
+  }
+  // The page width beside the reading column, for an embedded sheet that
+  // needs it: the flat view's columns at up to 240px each, or the grid.
+  function pageWidth(tab) {
+    var root = ui.root, parent = root.parentElement;
+    var on = (expand.fit || expand.wide) && !expand.on && innerWidth > 640 && parent;
+    if (on) {
+      var need = expand.wide ? Infinity : flatView() ? tab.widths.reduce(function (a, w) { return a + Math.min(w, 240); }, 2) : tab.totalW + 2;
+      var cs = getComputedStyle(parent), pr = parent.getBoundingClientRect();
+      var colLeft = pr.left + parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth);
+      var col = parent.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      var page = Math.min(1200, innerWidth - 48);
+      on = need > col + 1 && page > col + 1;
+      if (on) {
+        var w = Math.min(need, page), gap = (innerWidth - page) / 2;
+        var left = Math.max(gap, Math.min(colLeft + col / 2 - w / 2, innerWidth - gap - w));
+        root.style.setProperty('--ts-wide-w', Math.round(w) + 'px');
+        root.style.setProperty('--ts-wide-ml', Math.round(left - colLeft) + 'px');
+      }
+    }
+    root.classList.toggle('is-wide', !!on);
   }
   function mark(text, needle) {
     if (!needle) return esc(text);
@@ -875,6 +1034,7 @@
   var commented = new Map();
   document.addEventListener('tdoc:anchors-resolved', function (e) {
     var d = e.detail || {};
+    var before = commented;
     commented = new Map();
     var targets = d.targets || {};
     (d.comments || []).forEach(function (id) {
@@ -885,12 +1045,16 @@
         commented.set(t.element, list);
       }
     });
-    if (book) { renderBody(true); placeOffscreen(); }
+    // Only a change in which cells carry comments needs a new render.
+    var same = before.size === commented.size;
+    if (same) commented.forEach(function (ids, el) { var was = before.get(el); if (!was || was.join() !== ids.join()) same = false; });
+    if (book && !same) { renderBody(true); placeOffscreen(); }
   });
   // Comments on rows that are off-screen or filtered out, counted at the
   // grid's edges; a press goes to the nearest one and opens it.
   function placeOffscreen() {
     if (!book || !ui.offAbove) return;
+    if (flatView()) { ui.offAbove.hidden = ui.offBelow.hidden = ui.offHidden.hidden = true; return; }
     var tab = cur(), above = [], below = [], hidden = 0;
     commented.forEach(function (ids, el) {
       var at = locate(el);
@@ -1770,6 +1934,16 @@
     if (walker.nextNode()) return false;
     return !Array.prototype.some.call(document.body.querySelectorAll(DocType.SHEET_ONLY_MEDIA_SELECTOR), function (el) { return !el.closest(skip); });
   }
+  // A prose doc (as server/block-lint.js reads it): three or more text blocks
+  // outside the sheets, the title and the sheet note, or other doc content
+  // beside them (a plain table, a figure, an image). Its small sheets are compact.
+  function isProseDoc() {
+    var skip = SEL + ',[data-tdoc-provider],.sheet-note,caption';
+    var keep = function (el) { return !el.closest(skip); };
+    var blocks = Array.prototype.filter.call(document.body.querySelectorAll('p,li,blockquote,dd,h2,h3,h4,h5,h6'), function (el) { return keep(el) && el.textContent.trim(); });
+    if (blocks.length >= 3) return true;
+    return Array.prototype.some.call(document.body.querySelectorAll('table:not(' + SEL + '),figure,details,img,video,iframe'), keep);
+  }
   // The sheet's own page: this doc, this version, `?sheet=<tab>`, carrying
   // the view of the moment it is pressed.
   function linkHrefs() {
@@ -1875,7 +2049,7 @@
     tabs: function () { return book ? book.tabs.map(function (t) { return { name: t.name, rows: t.index.size, shown: t.order ? t.order.length : 0, query: Q.cloneQuery(t.query) }; }) : []; },
     active: function () { return book ? book.active : -1; },
     selection: function () { return Object.assign({}, sel); },
-    expanded: function () { return { on: expand.on, alone: expand.alone, sheetOnly: expand.sheetOnly }; },
+    expanded: function () { return { on: expand.on, alone: expand.alone, sheetOnly: expand.sheetOnly, embed: expand.embed, fit: expand.fit, flat: !!book && flatView() }; },
   };
   // Mounted: the tables are hidden by the viewer's own style now, so the
   // frame's 200-row hold (#tdoc-sheets-pending) is no longer needed.

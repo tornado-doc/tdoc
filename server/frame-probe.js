@@ -1318,9 +1318,12 @@
   new MutationObserver(function (records) {
     if (records.some(function (record) {
       var el = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      // What the reader draws itself (a sheet's grid or flat view, pills) is
+      // not the author's tables: re-laying out for it would loop.
+      if (el && el.closest('[data-tdoc-provider]')) return false;
       if (el && el.closest('table')) return true;
       return Array.from(record.addedNodes).concat(Array.from(record.removedNodes)).some(function (node) {
-        return node.nodeType === 1 && (node.matches('table') || node.querySelector('table'));
+        return node.nodeType === 1 && !node.matches('[data-tdoc-provider]') && (node.matches('table') || node.querySelector('table:not([data-tdoc-provider] table)'));
       });
     })) refreshTableLayout();
   }).observe(document.body, { childList:true, characterData:true, subtree:true });
