@@ -1,5 +1,5 @@
-// Download: PDF, Word, Markdown, and for a sheet doc CSV and Excel (flag
-// docDownload). The converters load only when a reader picks one:
+// Download: PDF, Word, Markdown, and for a sheet doc CSV and Excel. The
+// converters load only when a reader picks one:
 //   PDF       the browser's print of the reading column (/export), with the
 //             print rules below: no tdoc chrome, the author's colours kept,
 //             no heading left at the foot of a page, one slide per page.

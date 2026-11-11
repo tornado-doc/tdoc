@@ -1,7 +1,7 @@
-// Download in the real shell (flag docDownload), against the local server:
+// Download in the real shell, against the local server:
 //   - ⋯ → Download & copy lists PDF, Word, Markdown, HTML and Copy as
 //     Markdown for a prose doc; CSV (this tab), Excel, PDF, HTML for a
-//     sheet doc; desktop and phone; with the flag off the menu is as before
+//     sheet doc; desktop and phone; for every reader (no flag)
 //   - each item downloads a file of its type: .docx (a Word package with the
 //     doc's heading and an embedded picture of its chart), .md (text/markdown,
 //     an attachment), .csv (the tab on screen), .xlsx (every tab)
@@ -65,11 +65,7 @@ async function shot(page, name) {
     process.exit(0);
   }
 
-  const context = async (viewport, flag = true, extra = {}) => {
-    const ctx = await browser.newContext({ viewport, acceptDownloads: true, ...extra });
-    await ctx.addInitScript((on) => { if (window === window.top) window.__TDOC_FLAGS__ = Object.assign({}, window.__TDOC_FLAGS__, { docDownload: on }); }, flag);
-    return ctx;
-  };
+  const context = (viewport, extra = {}) => browser.newContext({ viewport, acceptDownloads: true, ...extra });
   const openDoc = async (ctx, slug, ready = 'h1') => {
     const page = await ctx.newPage();
     await page.goto(`${base}/d/${slug}/v/1`);
@@ -184,7 +180,7 @@ async function shot(page, name) {
     });
 
     await test('a phone: the same rows, inside the screen', async () => {
-      const phone = await context({ width: 390, height: 844 }, true, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+      const phone = await context({ width: 390, height: 844 }, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
       const page = await openDoc(phone, 'q3-plan');
       await openMenu(page, true);
       const list = (await items(page)).map((s) => s.trim());
@@ -198,13 +194,17 @@ async function shot(page, name) {
       await phone.close();
     });
 
-    await test('with the flag off the menu is as it was', async () => {
-      const off = await context({ width: 1280, height: 860 }, false);
-      const page = await openDoc(off, 'q3-plan');
+    await test('Copy as Markdown copies exactly what Download Markdown saves', async () => {
+      const ctx = await context({ width: 1280, height: 860 }, { permissions: ['clipboard-read', 'clipboard-write'] });
+      const page = await openDoc(ctx, 'q3-plan');
       await openMenu(page);
-      const list = (await items(page)).map((s) => s.trim());
-      assert(JSON.stringify(list) === JSON.stringify(['Copy as Markdown', 'Download HTML', 'Download PDF']), JSON.stringify(list));
-      await off.close();
+      await page.getByRole('menuitem', { name: 'Copy as Markdown' }).click();
+      await page.getByText('Copied as Markdown').waitFor();
+      const copied = await page.evaluate(() => navigator.clipboard.readText());
+      const saved = await (await page.request.get(`${base}/d/q3-plan/v/1/export.md`)).text();
+      assert(copied === saved, `clipboard differs from the download:\n${copied.slice(0, 300)}`);
+      assert(copied.startsWith('# Q3 launch plan\n') && copied.includes('**importer**'), copied.slice(0, 200));
+      await ctx.close();
     });
   } finally {
     if (browser) await browser.close();

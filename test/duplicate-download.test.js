@@ -19,6 +19,7 @@ const overlay = [
   'shell/src/document-shell.jsx',
   'shell/src/document/document-toolbar.jsx',
   'shell/src/document/api.js',
+  'shell/src/document/doc-download.js',
 ].map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
 const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
 

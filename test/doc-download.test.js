@@ -1,4 +1,4 @@
-// Download as PDF / Word / Markdown / CSV / Excel (flag docDownload), offline:
+// Download as PDF / Word / Markdown / CSV / Excel, offline:
 //   - Markdown: the server's text conversion as a file (/export.md): the
 //     document's own text, headings at their levels, lists, tables with a
 //     header rule, code fences, links; no preamble, no comments; the same
@@ -237,15 +237,19 @@ function wellFormed(name, text) {
   });
 
   // ---- wiring ----
-  await t('the frame sends its HTML and its shape; the menu offers each format behind docDownload', async () => {
+  await t('the frame sends its HTML and its shape; the menu offers each format to everyone; one Markdown converter', async () => {
     const probe = fs.readFileSync(path.join(ROOT, 'server', 'frame-probe.js'), 'utf8');
     assert(/d\.type === 'tdoc:exportHtml'\) \{\s*post\(\{ type: 'tdoc:exportHtml', requestId: d\.requestId, html: serializeDocument\(\) \}\)/.test(probe), 'exportHtml answer');
     assert(probe.includes('sheets: shape.sheets, sheetDoc: shape.sheetDoc'), 'shape in ready');
     const toolbar = fs.readFileSync(path.join(ROOT, 'shell', 'src', 'document', 'document-toolbar.jsx'), 'utf8');
     for (const action of ['download-pdf', 'download-docx', 'download-md', 'download-csv', 'download-xlsx', 'download', 'copy']) assert(toolbar.includes(`data-action="${action}"`), action);
     const flags = fs.readFileSync(path.join(ROOT, 'shell', 'src', 'feature-flags.js'), 'utf8');
-    assert(/docDownload: Object\.freeze\(\{[^}]*default: false, preview: true \}\)/.test(flags), 'flag');
+    assert(!flags.includes('docDownload'), 'Download ships to everyone: no flag');
     const shell = fs.readFileSync(path.join(ROOT, 'shell', 'src', 'document-shell.jsx'), 'utf8');
+    assert(!shell.includes("isFeatureOn('docDownload')") && shell.includes('onDownloadAs={downloadAs}'), 'menu not gated');
+    // Copy as Markdown and Download Markdown are the same text: both /export.md.
+    assert(/const copyMarkdown = async \(\) => \{\s*const text = fetch\(`\$\{versionBase\}\/export\.md`/.test(shell) && shell.includes('onCopyMarkdown={copyMarkdown}'), 'Copy as Markdown uses /export.md');
+    assert(!probe.includes('function htmlToMarkdown') && !probe.includes("'tdoc:copyDoc'") && !shell.includes('tdoc:copyDoc'), 'the frame\'s second Markdown converter is gone');
     assert(shell.includes("import('./document/doc-download.js')"), 'converters load on demand, not with the page');
     assert(!/from '\.\/document\/(docx-export|sheet-export|doc-download)/.test(shell), 'a converter is in the page bundle');
   });

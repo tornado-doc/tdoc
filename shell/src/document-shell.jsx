@@ -549,10 +549,9 @@ export function DocumentShell({ boot, config }) {
   }, [comments.moveAnchor, config.canComment, config.signInToComment]);
 
   const sendToFrame = useCallback((message) => bridgeRef.current?.(message), []);
-  // Download (flag docDownload): Word, CSV and Excel are built from the
-  // document's HTML, which the frame sends; what the doc is (a sheet, or
-  // prose) comes with the frame's ready message.
-  const [downloadFlag] = useState(() => isFeatureOn('docDownload'));
+  // Download: Word, CSV and Excel are built from the document's HTML, which
+  // the frame sends; what the doc is (a sheet, or prose) comes with the
+  // frame's ready message.
   const exportHtml = useMemo(() => createExportHtmlRequest(sendToFrame), [sendToFrame]);
   const [docShape, setDocShape] = useState({ sheets: 0, sheetDoc: false });
   // The signed-out homepage remembers nothing about a visitor's view.
@@ -644,11 +643,6 @@ export function DocumentShell({ boot, config }) {
       copyText(message.text);
       showToast(`Prompt copied. Opening ${link.name}…`);
       openAppLink(link.href);
-    },
-    'tdoc:docMarkdown': (message) => {
-      copyText(message.markdown || '').then((copied) => {
-        showToast(copied ? 'Copied as Markdown' : 'Copy failed', !copied);
-      });
     },
     'tdoc:anchorClick': (message) => {
       if (!visibleCommentsById.has(message.id)) return;
@@ -1647,23 +1641,32 @@ export function DocumentShell({ boot, config }) {
     anchor.click();
   };
 
+  // The browser's print of the reading column, with the print rules
+  // (doc-download.js).
   const printPdf = () => {
     const src = `/d/${encodeURIComponent(config.slug)}/v/${config.version}/export?download=0`;
-    // With docDownload the print carries the print rules (doc-download.js).
-    if (downloadFlag) { loadDownloads().then(({ printDocument }) => printDocument(src)); return; }
-    const frame = document.createElement('iframe');
-    frame.hidden = true;
-    frame.src = src;
-    frame.onload = () => {
-      frame.contentWindow?.focus();
-      frame.contentWindow?.print();
-      window.setTimeout(() => frame.remove(), 1_000);
-    };
-    document.body.appendChild(frame);
+    loadDownloads().then(({ printDocument }) => printDocument(src));
   };
 
-  // Download as Word / Markdown / CSV / Excel (flag docDownload).
+  // Download as Word / Markdown / CSV / Excel.
   const versionBase = `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
+  // Copy as Markdown: the same Markdown as Download Markdown (/export.md).
+  // The fetch rides inside a ClipboardItem so Safari keeps the click's
+  // permission to write; elsewhere the text is written when it arrives.
+  const copyMarkdown = async () => {
+    const text = fetch(`${versionBase}/export.md`, { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))));
+    let copied = false;
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then((t) => new Blob([t], { type: 'text/plain' })) })]);
+        copied = true;
+      }
+    } catch {}
+    if (!copied) copied = await text.then(copyText, () => false);
+    showToast(copied ? 'Copied as Markdown' : 'Copy failed', !copied);
+  };
+
   const downloadAs = async (kind) => {
     const { buildSheetFile, buildWord, downloadBlob, downloadUrl } = await loadDownloads();
     if (kind === 'md') {
@@ -2257,11 +2260,11 @@ export function DocumentShell({ boot, config }) {
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
             onShare={() => setDialog({ type: 'share' })}
-            onCopyMarkdown={() => bridge.send({ type: 'tdoc:copyDoc', requestId: Date.now() })}
+            onCopyMarkdown={copyMarkdown}
             onDuplicate={duplicate}
             onDownload={download}
             onPrint={printPdf}
-            onDownloadAs={downloadFlag ? downloadAs : null}
+            onDownloadAs={downloadAs}
             docShape={docShape}
             onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
