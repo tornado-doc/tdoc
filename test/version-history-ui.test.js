@@ -310,14 +310,14 @@ async function startServer(worker, env) {
         const strip = v.page.locator('.tdoc-oldver-strip');
         await strip.waitFor();
         assert.match(await strip.innerText(), /You're viewing v2 - the latest is v5/);
-        assert.equal(await strip.locator('a').getAttribute('href'), `/d/${slug}/v/5`);
+        assert.equal(await strip.locator('a').getAttribute('href'), `/d/${slug}`, 'the live doc, not a pinned version');
         if (!phone) {
           assert.equal(await v.page.locator('.tdoc-bar .tdoc-edited').evaluate((el) => el.tagName), 'SPAN');
           assert.equal(await v.page.locator('[role="menu"]').count(), 0);
         }
         await shot(v.page, `history-reader-old-version-${name}.png`);
         await strip.locator('a').click();
-        await v.page.waitForURL(new RegExp(`/d/${slug}/v/5$`));
+        await v.page.waitForURL(new RegExp(`/d/${slug}$`));
         await v.page.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 15000 });
         assert.equal(await v.page.locator('.tdoc-oldver-strip').count(), 0, 'no strip on the latest');
         await v.ctx.close();

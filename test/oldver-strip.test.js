@@ -31,8 +31,9 @@ function shouldShowStrip(mode, version, versions, docVersions = versions) {
   return typeof version === 'number' && version < latest;
 }
 
-function latestUrl(slug, latest) {
-  return `/d/${encodeURIComponent(slug)}/v/${latest}`;
+// The live doc (canonical), not the pinned /v/<latest>.
+function latestUrl(slug) {
+  return `/d/${encodeURIComponent(slug)}`;
 }
 
 const V = [{ n: 1 }, { n: 2 }, { n: 3 }];
@@ -73,9 +74,9 @@ t('SHOW: a viewer without history rights (list is only the version on screen) on
   assert(shouldShowStrip('published', 3, [{ n: 3 }], V) === false);
 });
 
-t('link points at the latest version with encoded slug', () => {
-  assert(latestUrl('my-doc', 3) === '/d/my-doc/v/3');
-  assert(latestUrl('a b/c', 2) === '/d/a%20b%2Fc/v/2', 'slug must be URL-encoded');
+t('link points at the live doc with encoded slug', () => {
+  assert(latestUrl('my-doc') === '/d/my-doc');
+  assert(latestUrl('a b/c') === '/d/a%20b%2Fc', 'slug must be URL-encoded');
 });
 
 // Source-coupling guards. The cases above run against a MIRROR of the
@@ -93,6 +94,7 @@ t('worker shellDocumentWorker still derives the strip from the doc\'s own latest
   // the doc's meta, not only the viewer's (possibly one-entry) list.
   assert(/const latestVersion = Math\.max\(Number\(version\) \|\| 0, latestVersionNumber\(docMeta\), \.\.\.vlist\.map/.test(src),
     'latestVersion must be derived from the doc\'s versions');
+  assert(src.includes('latestUrl: `/d/${encodeURIComponent(slug)}`,'), 'the strip links to the live doc, not /v/<latest>');
   const react = fs.readFileSync(path.join(__dirname, '..', 'shell/src/document-shell.jsx'), 'utf8');
   assert(react.includes('tdoc-oldver-strip'), 'strip markup missing from the React shell');
 

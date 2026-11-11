@@ -2296,7 +2296,7 @@ export function DocumentShell({ boot, config }) {
       <OldVersionNotice value={boot.oldVersion || (liveLatest > Number(config.version) ? {
         current: Number(config.version),
         latest: liveLatest,
-        latestUrl: `/d/${encodeURIComponent(config.slug)}/v/${liveLatest}`,
+        latestUrl: `/d/${encodeURIComponent(config.slug)}`,
         fresh: true,
       } : null)} />
 

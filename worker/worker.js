@@ -3615,7 +3615,9 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     oldVersion = {
       current: version,
       latest: latestVersion,
-      latestUrl: `/d/${encodeURIComponent(slug)}/v/${latestVersion}`,
+      // The live doc (canonical), not the pinned /v/<latest>: the reader goes
+      // back to the document, which keeps following new versions.
+      latestUrl: `/d/${encodeURIComponent(slug)}`,
     };
   }
   // Share cards and search engines never enter the sandboxed /frame. Put a
