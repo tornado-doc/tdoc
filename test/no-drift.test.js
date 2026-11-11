@@ -113,5 +113,17 @@ for (const name of ['isAnthropicCompanyMark', 'logoForAgentLogin', 'isGenericAge
   });
 }
 
+t('the site share card path and alt match in worker.js and server.js', () => {
+  for (const name of ['HOME_CARD_PATH', 'HOME_CARD_ALT']) {
+    const re = new RegExp(`const ${name} = '([^']+)';`);
+    const a = (worker.match(re) || [])[1];
+    const b = (server.match(re) || [])[1];
+    assert(a && b, `${name} missing from one of the files`);
+    assert(a === b, `${name} has DRIFTED: worker ${a} / server ${b}`);
+  }
+  const file = path.join(root, 'assets', worker.match(/const HOME_CARD_PATH = '\/([^']+)';/)[1]);
+  assert(fs.existsSync(file), `${file} missing`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
