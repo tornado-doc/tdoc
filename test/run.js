@@ -222,6 +222,7 @@ const BROWSER = [
   'visual-viewer.test.js', // visual expansion preserves interactive state and reading mode
   'slides-scale.test.js', // slide view scales cards once: cqw type the same in WebKit and Chromium, desktop and phone
   'slides-mode.test.js', // data-tdoc-slide decks present one slide at a time, fitted, and restore on exit
+  'landing-hero-rotate-ui.test.js', // homepage hero: four demos rotate every 5 s with a filling tab bar, hover/focus pause, tab click restarts there (even the checked tab), reduced motion stands still, phone swipe, a CTA per demo to a real route, no layout shift
   'landing-sheets-ui.test.js', // the homepage's live sample sheet: viewer fetched only for it; search, tag filter, sort, comment composer on a cell, desktop + phone, nothing written
   'sheets-ui.test.js', // data-tdoc-sheet: grid, search/filter/sort/tags, view in #hash, cell comments, Edit + Save, CSV/XLSX import, CLI, 10k rows, phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
