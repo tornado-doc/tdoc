@@ -311,7 +311,20 @@
   // sides in one coordinate space is what makes the comparison mean anything.
   function placeInView(range, text) { return TS.placeInView(range, text, docView()); }
 
+  // An embedded sheet (sheet-embed-viewer.js) is not the page's text: a
+  // selection that starts or ends in one is not a quote, and one that spans
+  // one keeps only the page's own words around it.
+  function inEmbedHost(node) {
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    return !!(el && el.closest && el.closest('[data-tdoc-embed-host]'));
+  }
   function postTextSelection(range, text) {
+    if (inEmbedHost(range.startContainer) || inEmbedHost(range.endContainer)) return;
+    var hosts = document.querySelectorAll('[data-tdoc-embed-host]');
+    for (var hi = 0; hi < hosts.length; hi++) {
+      if (range.intersectsNode(hosts[hi])) { text = String(range.toString() || '').trim(); break; }
+    }
+    if (!text) return;
     var placed = placeInView(range, text);
     var ctx = placed ? { before: placed.before, after: placed.after } : context(range, 60);
     // Keep the selected passage visible while the shell composer has focus.
@@ -1042,6 +1055,10 @@
   // gutter just right of the reading column — not pinned to the viewport edge.
   // Mirrors overlay.js getArticleMetrics: widest wrapper, else widest prose.
   function articleRight() {
+    // A viewer showing content across the frame's whole width (a sheet in
+    // full screen) names its own right edge and leaves the gutter free.
+    var own = elementHooks.articleRight && elementHooks.articleRight();
+    if (own > 0) return own;
     // A qualifying wrapper must plausibly BE the reading column: at least half
     // the viewport wide (an interior grid cell can match .content/.container
     // and would park pins mid-screen) but narrower than the viewport itself.
@@ -1266,7 +1283,8 @@
     // Frame-local: the slides presenter counts the threads on the slide shown.
     try { document.dispatchEvent(new CustomEvent('tdoc:anchors-resolved', { detail: { targets: _anchorTargets, comments: (comments || []).filter(function (c) { return c && !c.hidden && !c.deleted; }).map(function (c) { return c.id; }) } })); } catch (x) {}
     post({ type: 'tdoc:pins', pins: pins, documentComments: documentPoint,
-      scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
+      scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight,
+      fullBleed: !!(elementHooks.articleRight && elementHooks.articleRight() > 0) });
   }
 
   // Geometry can settle AFTER the first pin report (images/fonts load, layout
@@ -1318,9 +1336,12 @@
   new MutationObserver(function (records) {
     if (records.some(function (record) {
       var el = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      // What the reader draws itself (a sheet's grid or flat view, pills) is
+      // not the author's tables: re-laying out for it would loop.
+      if (el && el.closest('[data-tdoc-provider]')) return false;
       if (el && el.closest('table')) return true;
       return Array.from(record.addedNodes).concat(Array.from(record.removedNodes)).some(function (node) {
-        return node.nodeType === 1 && (node.matches('table') || node.querySelector('table'));
+        return node.nodeType === 1 && !node.matches('[data-tdoc-provider]') && (node.matches('table') || node.querySelector('table:not([data-tdoc-provider] table)'));
       });
     })) refreshTableLayout();
   }).observe(document.body, { childList:true, characterData:true, subtree:true });
@@ -1418,6 +1439,11 @@
   document.addEventListener('keydown', armCaretHints, true);
   function cleanEditorAttributes(root) {
     if (!root || !root.querySelectorAll) return;
+    // View state a viewer must never leave in a saved or exported page
+    // (the sheets viewer's full screen once marked <html> and the author's
+    // content; it uses a provider style now).
+    if (root.removeAttribute) root.removeAttribute('data-tdoc-sheet-expanded');
+    Array.prototype.forEach.call(root.querySelectorAll('[data-tdoc-sheet-expanded]'), function (node) { node.removeAttribute('data-tdoc-sheet-expanded'); });
     var roots = [];
     if (root.hasAttribute && root.hasAttribute('data-tdoc-editor-root')) roots.push(root);
     Array.prototype.push.apply(roots, root.querySelectorAll('[data-tdoc-editor-root]'));
@@ -1631,6 +1657,13 @@
   }
   function formatEdit(command, value) {
     if (interactionMode !== 'edit') return;
+    // Undo / Redo from the editor's bar: a viewer that keeps its own history
+    // (a sheet's cell and layout edits never reach the browser's) takes it
+    // when its edit was the last one.
+    if (command === 'undo' || command === 'redo') {
+      var history = new CustomEvent('tdoc:edit-history', { cancelable: true, detail: { command: command } });
+      if (!document.dispatchEvent(history)) return;
+    }
     var nextValue = value;
     if (command === 'createLink') {
       if (!nextValue) return;

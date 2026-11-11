@@ -124,7 +124,7 @@ export function EditorToolbar({ dirty, checking, saving, onFormat, onInsertDiagr
         <button type="button" title="Discard draft" aria-label="Discard draft" disabled={!dirty || saving} onClick={onDiscard}>
           <RotateCcw size={15} />
         </button>
-        <button type="button" className="primary" disabled={!dirty || checking || saving} onClick={onSave}>
+        <button type="button" className="primary" aria-label={saving ? 'Saving' : 'Save'} disabled={!dirty || checking || saving} onClick={onSave}>
           <Save size={15} /> <span>{saving ? 'Saving...' : 'Save'}</span>
         </button>
       </div>

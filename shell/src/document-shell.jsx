@@ -69,6 +69,8 @@ import { CommentDocVersionContext } from './document/comment-card.jsx';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
+import { createSheetEmbedHandler, embedFrameSrc } from './document/sheet-embed.js';
+import { AllowSheetEmbedsDialog } from './document/sheet-embed-dialog.jsx';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
@@ -226,6 +228,8 @@ export function DocumentShell({ boot, config }) {
   }, [historyEnabled]);
   const [historyDevMode] = useState(() => Boolean(readDevMode()?.on));
   const narrow = useNarrowViewport({ bodyClass: 'tdoc-narrow' });
+  // The frame's address carries this page's embed key (sheet-embed.js).
+  const [frameSrc] = useState(() => embedFrameSrc(boot.frameSrc));
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
   const editorRef = useRef(null);
@@ -554,9 +558,26 @@ export function DocumentShell({ boot, config }) {
   const exportHtml = useMemo(() => createExportHtmlRequest(sendToFrame), [sendToFrame]);
   const [docShape, setDocShape] = useState({ sheets: 0, sheetDoc: false });
   // The signed-out homepage remembers nothing about a visitor's view.
-  const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity) });
+  const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity), canEdit: Boolean(config.canEdit) });
+  const [embedsHeld, setEmbedsHeld] = useState(false);
+  const pageRef = useRef(null);
+  pageRef.current = { slug: config.slug, version: Number(config.version) || 0, latest: Math.max(...(config.versions || []).map((v) => Number(v.n) || 0), Number(config.version) || 0) };
+  // Sheets embedded in the page (flag sheetEmbeds): the frame asks, this
+  // fetches as the reader and answers on the request's own port.
+  const sheetEmbed = useMemo(() => createSheetEmbedHandler({
+    enabled: () => isFeatureOn('sheetEmbeds'),
+    page: () => pageRef.current,
+    onPageUnattributed: () => { if (config.isOwner) setEmbedsHeld(true); },
+  }), []);
+  const embedsAllowed = useCallback(() => {
+    setDialog(null);
+    setEmbedsHeld(false);
+    showToast('Sheet embeds allowed on this page');
+    if (bridge.frameRef.current) bridge.frameRef.current.src = embedFrameSrc(boot.frameSrc, true);
+  }, [boot.frameSrc, showToast]);
   const bridge = useFrameBridge({
     ...sheetHandlers,
+    'tdoc:sheetEmbed': sheetEmbed,
     'tdoc:demoRewriteDone': (message) => {
       const pending = demoRewriteWait.current;
       if (pending && pending.id === message.id) pending.resolve(message.ok === true);
@@ -628,6 +649,16 @@ export function DocumentShell({ boot, config }) {
     'tdoc:key': (message) => {
       if (message.key !== 'Alt' && message.key !== 'Escape') return;
       document.dispatchEvent(new KeyboardEvent('keydown', { key: message.key, bubbles: true, cancelable: true }));
+    },
+    // A change only an editor keeps for everyone (a sheet's column width or
+    // wrap, made in Read or Comment mode): the doc goes into Edit mode, the
+    // change lands there, and Save / Discard are the editor's own. Nothing
+    // is written without that Save, so a doc's own script asking is harmless.
+    'tdoc:requestMode': (message) => {
+      const current = editorRef.current;
+      if (message.mode !== 'edit' || !config.canEdit || !current || current.mode === 'edit') return;
+      current.changeMode('edit');
+      showToast('Edit mode: Save to keep this for everyone, or Discard');
     },
     'tdoc:editState': (message) => editorRef.current?.frameHandlers.editState(message),
     'tdoc:editBaseline': (message) => editorRef.current?.frameHandlers.editBaseline(message),
@@ -2269,6 +2300,7 @@ export function DocumentShell({ boot, config }) {
             onDelete={() => setDialog({ type: 'delete' })}
             onHistory={historyEnabled ? () => changeHistory(true) : null}
             mode={{ modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
+            onAllowEmbeds={embedsHeld ? () => setDialog({ type: 'allow-embeds' }) : null}
           />
         )}
         onThemeChange={(nextTheme) => {
@@ -2407,12 +2439,12 @@ export function DocumentShell({ boot, config }) {
         aria-label="Document content"
         onMouseLeave={() => setHoveredAnchorId(null)}
         sandbox="allow-scripts"
-        src={boot.frameSrc}
+        src={frameSrc}
       />
 
-      <DocumentFooter visible={bridge.layout.footerVisible} />
+      <DocumentFooter visible={bridge.layout.footerVisible && !bridge.layout.fullBleed} />
 
-      {!narrow && commentFilterControl && !comparing && !historyOpen && !sidePanelOpen ? (
+      {!narrow && commentFilterControl && !comparing && !historyOpen && !sidePanelOpen && !bridge.layout.fullBleed ? (
         <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.max(8, Math.min(pinLeft - 4, window.innerWidth - 336)) }}>
           <CommentListControls filter={commentFilterControl}
             unreadCount={unreadAgentReplies}
@@ -2624,6 +2656,13 @@ export function DocumentShell({ boot, config }) {
           onCopied={() => showToast('Link copied')}
         />
       )}
+      <AllowSheetEmbedsDialog
+        open={dialog?.type === 'allow-embeds'}
+        slug={config.slug}
+        sheets={dialog?.type === 'allow-embeds' ? sheetEmbed.sheets() : []}
+        onOpenChange={(open) => !open && setDialog(null)}
+        onAllowed={embedsAllowed}
+      />
       <DeleteDocumentDialog
         open={dialog?.type === 'delete'}
         config={config}

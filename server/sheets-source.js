@@ -37,4 +37,4 @@ function sheetsViewerVersion(source = sheetsViewerSource()) {
   return crypto.createHash('sha256').update(source).digest('hex').slice(0, 12);
 }
 
-module.exports = { sheetsViewerSource, sheetsViewerVersion };
+module.exports = { sheetsViewerSource, sheetsViewerVersion, moduleObject };

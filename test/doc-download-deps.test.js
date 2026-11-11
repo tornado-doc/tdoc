@@ -78,6 +78,16 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(JSON.stringify(S.workbookNames([{ name: 'A/B' }, { name: 'a b' }, { name: 'x'.repeat(40) }])) === JSON.stringify(['A B', 'a b 2', 'x'.repeat(31)]), 'names');
   });
 
+  await t('Excel: a cell with line breaks keeps them; a saved column width goes along', async () => {
+    const XLSX = require(path.join(ROOT, 'node_modules', 'xlsx', 'dist', 'xlsx.mini.min.js'));
+    const M = await import(path.join(ROOT, 'shared', 'sheet-markup.mjs'));
+    const doc = parseHtml(`<body>${M.tableHtml({ name: 'N', columns: [{ name: 'Note', type: 'text', width: 240, wrap: true }, { name: 'B', type: 'text' }], rows: [{ id: 'r1', cells: ['one\ntwo', 'x'] }] })}</body>`);
+    const book = XLSX.read(S.xlsxBytes(XLSX, S.sheetsFromDocument(doc)), { type: 'array', cellStyles: true });
+    const ws = book.Sheets.N;
+    assert(ws.A2.v === 'one\ntwo', JSON.stringify(ws.A2));
+    assert(ws['!cols'] && ws['!cols'][0] && Math.abs((ws['!cols'][0].wpx || 0) - 240) < 8, JSON.stringify(ws['!cols']));
+  });
+
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

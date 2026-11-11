@@ -25,6 +25,7 @@ const OFFLINE = [
   'feedback-team-agents.test.js', // the widget's @ lists team agents (answer only) only through tdoc's own-origin token door
   'version-diff.test.js', // bounded block matching and Unicode edits
   'sheets.test.js',            // sheets: view query (search/filter/sort/URL), CSV parsing + type inference, markup round trip
+  'sheet-embed.test.js',      // a sheet embedded in a page by reference: the reference resolves only to /d/<slug>, data is text with the view applied, the SHEET's access for the reader (owner/link/sign-in/private/team/guest/anonymous), no title on refusal, linear on hostile markup
   'sheets-size.test.js',       // sheets: 8 MB sheet cap on every write path (not for prose or a token sheet), history row-count summary, sheet anchors never lost to the aid reconcile
   'version-history.test.js', // history rows: same writer within 30 min grouped, paged, what changed cached, access, Restore
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
@@ -224,6 +225,7 @@ const BROWSER = [
   'agent-view-ui.test.js', // doc text for agents: no visible space without JS, removed once the app starts
   'layout-preflight.test.js', // development-only Raft geometry audit
   'table-layout.test.js', // provider table protection
+  'table-fit-ui.test.js', // standard tables fit the reader: page width beside the column, wrap, held first column, phone cards; author-laid-out tables, print and the stored HTML untouched; data-tdoc-wide
   'table-scroll-ui.test.js', // wide tables draw a scrollbar and scroll sideways in their own box (bar, wheel, swipe), page still scrolls over them, desktop + phone
   'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior
   'custom-design-theme.test.js', // custom palettes opt out of house styles and theme inversion
@@ -235,7 +237,10 @@ const BROWSER = [
   'doc-download-ui.test.js', // ⋯ → Download & copy: PDF / Word / Markdown for prose, CSV (this tab) / Excel for sheets, each a file of its type; desktop + phone; flag off unchanged
   'slide-controls-ui.test.js', // Edit-mode slide bar: Add slide (Title / Bullets / Big number), Duplicate, Move up/down, Delete + Undo, image by http(s) link; whole slides only, ids follow their slides, nothing of the bar saved; desktop hover + phone tap
   'create-menu-ui.test.js', // My docs New: type tiles (Doc · Sheet · Slides) then methods pushed in place, New folder in the menu, Blank deck edits + saves slide text, agent lines per type, keyboard, drop import; desktop + phone, sheets flag on/off
+  'sheet-embed-ui.test.js', // a sheet embedded in a page: live view (saved view, comment count, Open), no-access state with nothing of the sheet, keyless frames and requests get nothing, flag off is the link, desktop + phone
   'sheets-ui.test.js', // data-tdoc-sheet: grid, search/filter/sort/tags, view in #hash, cell comments, Edit + Save, CSV/XLSX import, CLI, 10k rows, phone
+  'sheets-basics-ui.test.js', // sheet modes (Read edits nothing, a Comment click comments on a cell, Edit), column/row resize (drag, double-click fit, touch, frozen column) through the editor's Save, a reader's own layout, Wrap/Clip + align, line breaks (Alt/Ctrl+Enter, multi-line paste, <br>), fill down, ⌘-arrow edges, 10k rows wrapped; desktop + phone
+  'doc-types-top-bar-ui.test.js', // doc, sheet and deck: the same top bar, ⋯ menu (Read / Comment / Edit) and editor bar; a sheet full screen or on its own page keeps them; desktop + phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers

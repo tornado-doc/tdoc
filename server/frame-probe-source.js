@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { sheetsViewerVersion } = require('./sheets-source');
+const { sheetEmbedLoaderSource } = require('./sheet-embed-source');
 
 // The injected frame script is markdown input rules + the probe, one nonce.
 // Local serve, the worker bundle, and test harnesses all have to agree.
@@ -25,6 +26,9 @@ module.exports = function frameProbeSource() {
     // The sheets loader goes first after the shared modules: it marks a sheet
     // page pending before the probe's first layout (see sheets-loader.js).
     + fs.readFileSync(path.join(__dirname, 'sheets-loader.js'), 'utf8').replace('__TDOC_SHEETS_VERSION__', sheetsViewerVersion())
+    + '\n'
+    // Sheet embeds: fetches the embed viewer only when the page has one.
+    + sheetEmbedLoaderSource()
     + '\n'
     + fs.readFileSync(path.join(__dirname, 'table-layout.js'), 'utf8')
     + '\n'

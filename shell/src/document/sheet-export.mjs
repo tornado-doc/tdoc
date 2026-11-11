@@ -15,7 +15,7 @@ export function sheetsFromDocument(doc) {
     const sheet = readSheetTable(table);
     return {
       name: sheet.name || `Sheet ${i + 1}`,
-      columns: sheet.columns.map((c) => ({ name: c.name, type: c.type })),
+      columns: sheet.columns.map((c) => ({ name: c.name, type: c.type, width: c.width || 0 })),
       rows: sheet.rows.map((r) => r.cells),
     };
   });
@@ -73,7 +73,12 @@ export function workbookNames(sheets) {
 export function xlsxBytes(XLSX, sheets) {
   const book = XLSX.utils.book_new();
   const names = workbookNames(sheets);
-  sheets.forEach((sheet, i) => XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(sheetRows(sheet)), names[i]));
+  sheets.forEach((sheet, i) => {
+    const ws = XLSX.utils.aoa_to_sheet(sheetRows(sheet));
+    // A column's saved width goes with it (Excel's own unit, from px).
+    if (sheet.columns.some((c) => c.width)) ws['!cols'] = sheet.columns.map((c) => (c.width ? { wpx: c.width } : {}));
+    XLSX.utils.book_append_sheet(book, ws, names[i]);
+  });
   return new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'xlsx', compression: true }));
 }
 

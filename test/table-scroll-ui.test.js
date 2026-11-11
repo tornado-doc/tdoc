@@ -10,6 +10,9 @@
 // none); dragging that bar, a horizontal wheel and a touch swipe all scroll the
 // table; a vertical wheel / swipe over the table still scrolls the document;
 // a drag inside a cell still selects text for a comment.
+// The fixture's table carries data-tdoc-table="fixed" (the author's opt-out
+// from fitting to the page, server/table-layout.js), so it keeps its natural
+// width and scrolls: the case this suite is about.
 // Run with: node test/table-scroll-ui.test.js
 const assert = require('assert/strict');
 const fs = require('fs');

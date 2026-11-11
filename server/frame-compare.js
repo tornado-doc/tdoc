@@ -38,7 +38,9 @@
   }
   function collect() {
     var root = document.querySelector('[data-tdoc-content],article,main,.wrap') || document.body;
-    var selector = 'h1,h2,h3,h4,h5,h6,p,li,pre,table,svg,img,iframe,video,canvas,blockquote,figcaption';
+    // An embedded sheet is one block: its reference (data-src, data-tab,
+    // data-view, data-rows) is what a version changes, never the sheet's rows.
+    var selector = 'h1,h2,h3,h4,h5,h6,p,li,pre,table,svg,img,iframe,video,canvas,blockquote,figcaption,[data-tdoc-embed]';
     elements = [];
     function visit(el) {
       if (el.matches('[data-tdoc-provider],script,style,nav,noscript')) return;

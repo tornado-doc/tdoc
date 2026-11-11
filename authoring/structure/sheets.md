@@ -9,6 +9,60 @@ and first column. Without the viewer (an export, a feed reader) the same
 markup is a readable table. You edit a sheet the way you edit any doc: change
 the HTML and publish a new version.
 
+## Sheet or table
+
+A small reference table in a prose doc is a plain `<table>`: five suppliers
+and their status, a plan of eight steps, three options compared. The reader
+takes it in at a glance, and a spreadsheet's tabs and search box add nothing.
+
+- **Plain `<table>`**: up to about 20 rows and 5 columns of short cells,
+  inside a report, plan or note.
+- **`data-tdoc-sheet` in the doc**: data the reader will search, filter or
+  sort (usually more than about 20 rows), and a wider table (more than 5
+  columns) or one with long cell text, where search and sort help.
+- **A sheet doc of its own**: the deliverable itself is a list of records (a
+  CRM, an inventory, a tracker). Publish it as its own doc and link to it from
+  the prose doc in one line.
+
+Columns are not something to avoid. In a prose doc the reader fits a plain
+table, and a sheet of 20 rows or fewer, to the page: columns share the width
+and text wraps, a table the reading column cramps takes the page width beside
+it, and on a phone more than three columns read as one card per row. A sheet
+of 20 rows or fewer shows a small search icon instead of a toolbar; full
+screen still gives the whole grid. `data-tdoc-table="fixed"` on the table
+keeps your own layout, and `data-tdoc-wide` asks for the page width.
+
+Publish warns about a sheet of 20 rows or fewer, 5 columns or fewer and short
+cells in a prose doc: "Small table in a doc: use a plain <table>; keep sheets
+for data people filter or sort, and for wide tables or long cell text."
+
+Before, a status update with three columns of five suppliers as a sheet:
+
+```html
+<p>EGI and Potato are the two suppliers we are pricing first.</p>
+<div class="tdoc-table-scroll">
+<table data-tdoc-sheet data-name="Suppliers">
+  <thead><tr><th data-key="c1">Supplier</th><th data-key="c2" data-type="tags">Status</th><th data-key="c3">Next action</th></tr></thead>
+  <tbody><tr data-row="r1"><td>EGI</td><td><span data-tag>Active</span></td><td>Confirm SKU prices and MOQ</td></tr> …</tbody>
+</table>
+</div>
+```
+
+After, a plain table, with the 21-item inventory as its own sheet doc:
+
+```html
+<p>EGI and Potato are the two suppliers we are pricing first.</p>
+<div class="tdoc-table-scroll">
+<table>
+  <thead><tr><th>Supplier</th><th>Status</th><th>Next action</th></tr></thead>
+  <tbody><tr><td>EGI</td><td>Active</td><td>Confirm SKU prices and MOQ</td></tr> …</tbody>
+</table>
+</div>
+<p>EGI's stock list: <a href="https://tdoc.dev/d/egi-inventory">EGI inventory (21 items)</a>.</p>
+```
+
+The rest of this guide is the sheet itself.
+
 ## The markup
 
 One `<table data-tdoc-sheet>` per tab. `data-name` is the tab's name. The
@@ -79,3 +133,60 @@ split the data into several docs or summarise it.
 one tab per worksheet) writes this markup with column types inferred. To
 change a published sheet, edit its HTML: add `<tr>` rows with new ids, change
 a `<td>`, or change a `<th data-type>` and rewrite that column's cells.
+
+## Embedding a sheet in a page
+
+A standalone sheet can be shown inside any other tdoc page **by reference**:
+the page holds a link, the sheet stays the one place the data lives. Readers
+of the page see a compact live view of the sheet's latest version (its title,
+the header and first rows, the open comment count, and Open), so editing the
+sheet updates every page that embeds it.
+
+```html
+<figure data-tdoc-embed="sheet" data-src="/d/q3-pipeline" data-tab="Deals" data-rows="10">
+  <a href="/d/q3-pipeline">Q3 pipeline</a>
+</figure>
+```
+
+| Attribute | Value |
+|---|---|
+| `data-src` | the sheet's address: `/d/<slug>` (a bare slug or a full link to this tdoc also works). Never another site. |
+| `data-tab` | the tab's `data-name`; without it, the first tab |
+| `data-view` | optional: a saved filter, sort or search, the value after `#sheet=` in the sheet's address once a reader has set one up |
+| `data-rows` | rows shown, 1-50 (default 10) |
+| `data-columns` | optional: which columns, by header name or `data-key`, comma separated (at most 12) |
+
+- Always keep the `<a>` inside the figure, with the sheet's name as its text:
+  it is what an export, a feed reader or an old version shows instead.
+- Use the slug of the sheet you published (its address is
+  `https://tdoc.dev/d/<slug>`). Publish the sheet first, then the page.
+- An embed shows only if **both** every account that has written the page
+  (each version's publisher or editor) and the reader can read the sheet.
+  Otherwise the reader sees "You don't have access to this sheet" and
+  nothing of it, not even its title. Share the sheet with the same people as
+  the page, and embed only sheets you can read yourself.
+- Only the page's latest version shows the live view; an old version shows
+  the link. A page with a version that names no writer (saved before
+  writers were recorded, Nov 2026) shows the link; its owner can turn the
+  embeds on with ⋯ › "Allow sheet embeds on this page", which vouches for
+  those versions as the owner's own (it lists those versions' writers and
+  the embedded sheets first). A duplicate keeps every writer of the page it
+  was copied from; a copy of a page with unnamed versions shows links and
+  cannot be allowed (publish the content as a new page instead).
+- Comments on the data go on the sheet; the embed shows their count and
+  links there.
+- Markdown and Word downloads of the page show the embed as its link. The
+  page's version history shows a change to the reference, never the sheet's
+  rows.
+
+### Embed, or a table in the page?
+
+- **Plain `<table>`**: a small, settled table that is part of this page's
+  argument (a comparison, a handful of figures). It changes when the page does.
+- **A sheet table in the page** (`<table data-tdoc-sheet>` among the prose):
+  records only this page uses that readers will search, filter or sort.
+- **A standalone sheet, embedded**: the data outlives the page or is used by
+  several pages (a tracker, a pipeline, an inventory), is kept up to date by
+  someone other than the page's author, has comments of its own, or is too big
+  to read inline. Make it its own sheet doc, embed it where it is discussed,
+  and point `data-view` at the rows the page is about.

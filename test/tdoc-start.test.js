@@ -118,7 +118,9 @@ t('self-hosting remains an explicit alternate in the recipe and the tutorial', (
 });
 
 t('product dialogs cannot become author comment targets', () => {
-  assert(/<iframe[\s\S]*src=\{boot\.frameSrc\}/.test(documentShell), 'isolated author frame missing');
+  // The frame's address is boot.frameSrc with the page's sheet-embed key in
+  // its fragment (shell/src/document/sheet-embed.js).
+  assert(/<iframe[\s\S]*src=\{frameSrc\}/.test(documentShell) && /embedFrameSrc\(boot\.frameSrc\)/.test(documentShell), 'isolated author frame missing');
   assert(probe.includes("type: 'tdoc:selection'"), 'selection protocol missing from frame probe');
   assert(!dialog.includes('tdoc:selection'), 'provider dialog participates in author selection protocol');
 });

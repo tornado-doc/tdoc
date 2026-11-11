@@ -10,6 +10,9 @@ export function useFrameBridge(handlers) {
     articleRight: window.innerWidth - 44,
     docHeight: 1e7,
     footerVisible: false,
+    // The frame's content spans its whole width (a sheet in full screen):
+    // pins keep the narrow gutter it leaves; nothing else floats there.
+    fullBleed: false,
   });
 
   handlersRef.current = handlers;
@@ -35,6 +38,7 @@ export function useFrameBridge(handlers) {
           scrollY: message.scrollY || 0,
           articleRight: message.articleRight || window.innerWidth - 44,
           docHeight: message.docHeight || 1e7,
+          fullBleed: message.fullBleed === true,
         }));
       } else if (message.type === 'tdoc:scroll') {
         setLayout((current) => ({
@@ -46,8 +50,10 @@ export function useFrameBridge(handlers) {
         }));
       }
 
+      // The event too: a handler that answers over a transferred port
+      // (sheet embeds) needs event.ports.
       const handler = handlersRef.current?.[message.type];
-      handler?.(message);
+      handler?.(message, event);
     };
 
     window.addEventListener('message', receive);
