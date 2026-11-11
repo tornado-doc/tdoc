@@ -13,6 +13,7 @@ import { ConnectorsBody } from './connectors-page.jsx';
 import { DevicesBody } from './tokens-page.jsx';
 import { ConnectAiAppsSection } from './connect-ai-apps.jsx';
 import { SignInMethodsCard } from './docs-hub/sign-in-methods.jsx';
+import { ProfileSettingsCard } from './docs-hub/display-name.jsx';
 import { DeleteAccountCard } from './docs-hub/delete-account.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
@@ -507,17 +508,12 @@ function FlatList({ docs, label, viewer, empty, onToggleStar, layout }) {
   );
 }
 
-function AccountSettingsPane({ identity, profile }) {
+function AccountSettingsPane({ identity, profile, onNameSaved }) {
   const name = identity?.name || identity?.email || identity?.login || 'Your account';
   return (
     <section className="tm-settings" aria-label="Personal workspace settings">
       <div className="tm-settings-title"><h2>Workspace settings</h2><p>Settings for your personal workspace.</p></div>
-      <section className="tm-settings-card">
-        <div className="tm-settings-head"><div><h2>Profile</h2><p>{name}</p></div></div>
-        <a className="ui-btn ui-btn-secondary ui-btn-m" href={profile?.handle ? `/@${encodeURIComponent(profile.handle)}` : '/me#claim-profile'}>
-          {profile?.handle ? 'Open public profile' : 'Claim public profile'}
-        </a>
-      </section>
+      <ProfileSettingsCard name={name} profile={profile} onNameSaved={onNameSaved} />
       <SignInMethodsCard />
       <ConnectAiAppsSection className="tm-settings-card" />
       <section className="tm-settings-card" id="agents">
@@ -610,6 +606,8 @@ function ClaimHandleDialog({ suggested, current, onClose }) {
 export function DocsHub({ boot }) {
   const capabilities = { folders: true, delete: true, star: true, create: true, ...(boot.capabilities || {}) };
   const viewer = boot.identity?.login || '';
+  // The account menu follows a name saved in Settings without a reload.
+  const [identity, setIdentity] = useState(() => boot.identity || null);
   const hub = useDocsHub({
     boot,
     // /me is session-gated by the server; a 401 mid-visit means the session
@@ -1042,7 +1040,7 @@ export function DocsHub({ boot }) {
   return (
     <div className="tdoc-app docs-hub">
       <TopBar
-        identity={boot.identity}
+        identity={identity}
         profile={boot.profile || null}
         onClaimProfile={boot.profile ? () => setModal({ type: 'claim-handle' }) : null}
         onboardingTest={boot.debug ? { record: boot.onboarding, surface: 'hub', onState: () => location.reload() } : null}
@@ -1271,7 +1269,7 @@ export function DocsHub({ boot }) {
             onFailed={teamFailed}
           />
         ) : null}
-        {view === 'settings' ? <AccountSettingsPane identity={boot.identity} profile={boot.profile} /> : null}
+        {view === 'settings' ? <AccountSettingsPane identity={identity} profile={boot.profile} onNameSaved={(saved) => setIdentity((prev) => (prev ? { ...prev, name: saved.name } : prev))} /> : null}
         </>
         )}
       </main>

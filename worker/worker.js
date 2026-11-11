@@ -624,8 +624,16 @@ async function getSession(env, req) {
       session.linked_account_ids = group.ids.filter((id) => id !== group.canonical);
       session.linked_actor_keys = group.actor_keys;
     } catch {}
+    // The name this person chose (Settings -> Profile) wins over whatever the
+    // sign-in provider stamped on the session -- read fresh, not memoized, so
+    // their own pages show a change at once. Read beside the team list.
+    const [chosen, teamIds] = await Promise.all([
+      displayNameForGroup(env, group).catch(() => ''),
+      loadAccountTeamIds(env, session.account_id),
+    ]);
+    if (chosen) { session.provider_name = session.name || ''; session.name = chosen; }
+    session.team_ids = teamIds;
   }
-  if (session.account_id) session.team_ids = await loadAccountTeamIds(env, session.account_id);
   if (session.account_id) session.team_admin_ids = await loadAdminTeamIds(env, session.account_id, session.team_ids);
   // Signed in with an identity a deleted account had (stamped at sign-in):
   // that account's comments and invites are not this session's.
@@ -663,7 +671,10 @@ async function sessionFromHostedBearer(env, req) {
     };
   }
   const group = await accountGroup(env, actor.account_id);
-  const allTeamIds = await loadAccountTeamIds(env, group.canonical);
+  const [allTeamIds, chosenName] = await Promise.all([
+    loadAccountTeamIds(env, group.canonical),
+    displayNameForGroup(env, group).catch(() => ''),
+  ]);
   // A workspace-scoped token sees only the teams it was given, and My docs
   // only if that was ticked too (see tokenScopeAllows).
   const teamIds = actor.scope ? allTeamIds.filter((id) => actor.scope.teams.includes(id)) : allTeamIds;
@@ -671,6 +682,7 @@ async function sessionFromHostedBearer(env, req) {
     id: null,
     login: actor.github_login || '',
     email: actor.email || '',
+    ...(chosenName ? { name: chosenName, provider_name: '' } : {}),
     account_id: group.canonical,
     linked_account_ids: group.ids.filter((id) => id !== group.canonical),
     linked_actor_keys: group.actor_keys,
@@ -5662,11 +5674,16 @@ async function mergeVerifiedAccountState(env, group) {
     for (const slug of normalizeProfilePins(profile)) if (!pins.includes(slug)) pins.push(slug);
   }
   const fallbackProfile = profiles.find(Boolean) || {};
+  // The chosen name lives on the canonical profile only (displayNameForGroup
+  // reads nothing else): carry a member's over when the canonical has none.
+  const named = canonicalProfile.display_name ? canonicalProfile : (profiles.find((p) => p && p.display_name) || {});
   await putAccountProfile(env, group.canonical, {
     ...fallbackProfile,
     ...canonicalProfile,
     bio: canonicalProfile.bio || fallbackProfile.bio || '',
     pins,
+    display_name: named.display_name || undefined,
+    display_name_at: named.display_name_at || undefined,
   });
 
   const teamIds = new Set();
@@ -7064,6 +7081,13 @@ function teamMemberFromSession(session, role) {
   };
 }
 
+// The roster as the members see it: each member's chosen name, else the
+// name they joined with.
+async function namedTeamDetail(env, team, accountId, origin) {
+  const detail = teamDetail(team, accountId, origin);
+  return { ...detail, members: await withMemberDisplayNames(env, detail.members) };
+}
+
 function normalizeTeamInvites(list) {
   if (!Array.isArray(list)) return null;
   const out = [];
@@ -7274,15 +7298,24 @@ async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
 // also gives the first rows back quickly while the rest continue loading.
 const TEAM_COMMENT_DOC_PAGE = 12;
 
-function teamCommentAuthor(author) {
+// `agentVerdict`: the reply carries an agent's status, so its author is an
+// agent whatever its login says. The fields display names need (imported,
+// account and GitHub ids) ride along; redactCommentEmails resolves and
+// drops the ids on the way out.
+function teamCommentAuthor(author, { agentVerdict = false } = {}) {
   const a = author && typeof author === 'object' ? author : {};
   const login = typeof a.login === 'string' ? a.login : '';
   const email = login.startsWith('email:') ? normalizeEmail(login.slice(6)) : null;
+  const kind = a.kind === 'agent' || agentVerdict ? 'agent'
+    : (typeof a.kind === 'string' && a.kind && a.kind !== 'human' ? a.kind : 'human');
   return {
     key: normalizeActorKey(login) || login,
     name: String(a.name || (email ? email.split('@')[0] : login) || 'Someone').slice(0, 100),
     avatar_url: typeof a.avatar_url === 'string' ? a.avatar_url : '',
-    kind: a.kind === 'agent' ? 'agent' : 'human',
+    kind,
+    ...(a.imported ? { imported: true } : {}),
+    ...(typeof a.account_id === 'string' && a.account_id ? { account_id: a.account_id } : {}),
+    ...(typeof a.github_id === 'string' && a.github_id ? { github_id: a.github_id } : {}),
   };
 }
 
@@ -7364,7 +7397,7 @@ function teamCommentRows(slug, meta, list) {
         version: Math.max(1, Number(reply.created_in || reply.version || thread.created_in || thread.version) || 1),
         text: String(reply.text || '').slice(0, 2000),
         created: reply.created || '',
-        author: teamCommentAuthor(reply.author),
+        author: teamCommentAuthor(reply.author, { agentVerdict: reply.agent_status != null }),
       });
     }
   }
@@ -7691,7 +7724,7 @@ async function teamBackupJob(env, job) {
         return;
       }
       const commentPath = `docs/${job.slug}/comments.json`;
-      const commentObject = await writeJson(commentPath, await readComments(env, job.slug));
+      const commentObject = await writeJson(commentPath, withoutPersonAccountIds(await readComments(env, job.slug)));
       manifest = {
         ...manifest, exported_at: new Date().toISOString(),
         objects: [...manifest.objects.filter((object) => object && object.path !== commentPath), commentObject],
@@ -7707,7 +7740,7 @@ async function teamBackupJob(env, job) {
       if (!job.cursor) {
         objects.push(...await Promise.all([
           writeJson(`docs/${job.slug}/meta.json`, backupMetaExport(meta)),
-          writeJson(`docs/${job.slug}/comments.json`, await readComments(env, job.slug)),
+          writeJson(`docs/${job.slug}/comments.json`, withoutPersonAccountIds(await readComments(env, job.slug))),
         ]));
       }
       const page = await env.DOCS.list({ prefix: `docs/${job.slug}/`, cursor: job.cursor, limit: TEAM_BACKUP_OBJECT_PAGE });
@@ -8386,7 +8419,7 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
       ...publicRow(row),
       ...(isFeedbackSpace(row.meta) ? { kind: 'feedback', origin: row.meta.feedback.origin } : {}),
       team: team.id,
-      author: author ? author.name : ownerDisplay(row),
+      author: author ? (authorNames.get(author.account_id) || author.name) : ownerDisplay(row),
       former_member: !author,
       can_manage: isDocOwnerSession(env, session, row.meta),
       can_file: canFileTeamDoc(session, team, row.meta),
@@ -8420,6 +8453,13 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
   // tab. Listed here without counts — the catalog must not read comments per
   // row — and counted by /api/me/feedback when the tab is opened.
   const feedback = await feedbackSpacesFor(env, session, catalog.filter((row) => isFeedbackSpace(row.meta)), publicRow, false);
+  // A team doc's byline: its author's chosen name, else the roster's.
+  const authorIds = [...new Set(teamDocs.map((row) => {
+    const m = teamMember(teamById.get(row.meta.workspace_id), row.meta.hosted && row.meta.hosted.account_id);
+    return m && m.account_id;
+  }).filter(Boolean))].slice(0, DISPLAY_NAME_RESOLVE_MAX);
+  const authorNames = new Map((await Promise.all(authorIds.map(async (id) => [id, await accountDisplayName(env, id)])))
+    .filter(([, n]) => n));
 
   return {
     docs: mine.map((row) => ({ ...ownRow(row), folder: folderState.docs[row.slug] || '' })),
@@ -12430,6 +12470,360 @@ function suggestHandleFromEmail(email) {
   return normalizeGithubLogin(cleaned);
 }
 
+// ---- Display name (Settings -> Profile -> Name) -------------------------
+// The name a person chose for themselves, stored on their canonical
+// account's profile (`account-profile:<id>.display_name`). Sign-in never
+// writes it: every provider door stamps its own name on the session, and
+// getSession lays the chosen one over it, so signing in again with GitHub or
+// Clerk cannot undo the choice. Comment records, inbox rows and team rosters
+// keep the name they were written with as a snapshot; readers resolve the
+// current one at read time -- by the account id stamped on records written
+// since, and for older ones only while the account still holds the identity
+// the record names -- and fall back to the snapshot.
+const DISPLAY_NAME_MAX = 60;
+// Controls, every format character (bidi, zero-width, tags, BOM, soft
+// hyphen...), separators, and the blank-looking fillers and variation
+// selectors that are letters or marks to Unicode but draw nothing.
+const DISPLAY_NAME_STRIP_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164\uffa0\ufe00-\ufe0f\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
+// Folded with suggestNameSkeleton when compared, as names are.
+const DISPLAY_NAME_RUNTIMES = ['claude', 'claude code', 'codex', 'cursor', 'gemini', 'grok', 'chatgpt', 'copilot'];
+// Words after a runtime's name that make it read as the agent itself
+// (skeleton form: l -> i).
+const DISPLAY_NAME_AGENTISH = new Set(['ai', 'bot', 'agent', 'code', 'assistant', 'gpt', 'agents', 'bots']);
+const DISPLAY_NAME_RESERVED = ['agent', 'deleted user', 'anonymous', 'someone', 'tdoc', 'system', 'admin'];
+// Separators tdoc itself puts between an agent and its owner ("Claude ·
+// Julie"), their look-alikes, and the dashes, bars and slashes that read the
+// same way.
+const DISPLAY_NAME_SEPARATOR_RE = /[\u00b7\u2022\u2219\u22c5\u30fb\uff65\u2027\u0387\u2013\u2014\u2015\u2212|\/\u2044\u2215\uff5c\uff0f]/u;
+// Cyrillic and Greek letters that draw like Latin ones, folded before the
+// reserved-name comparison (a small table: the ones that spell tdoc, agent
+// and runtime names).
+const DISPLAY_NAME_CONFUSABLES = new Map([
+  [0x0430, 'a'], [0x0435, 'e'], [0x043e, 'o'], [0x0440, 'p'], [0x0441, 'c'], [0x0443, 'y'], [0x0445, 'x'],
+  [0x043a, 'k'], [0x043c, 'm'], [0x0442, 't'], [0x043d, 'h'], [0x0432, 'b'], [0x0456, 'i'], [0x0458, 'j'],
+  [0x0455, 's'], [0x0501, 'd'], [0x04cf, 'l'], [0x0433, 'r'], [0x0491, 'r'], [0x0457, 'i'], [0x0475, 'v'],
+  [0x0410, 'a'], [0x0415, 'e'], [0x041e, 'o'], [0x0420, 'p'], [0x0421, 'c'], [0x0425, 'x'], [0x041a, 'k'],
+  [0x041c, 'm'], [0x0422, 't'], [0x041d, 'h'], [0x0412, 'b'], [0x0406, 'i'], [0x0408, 'j'], [0x0405, 's'],
+  [0x03b1, 'a'], [0x03bf, 'o'], [0x03c1, 'p'], [0x03bd, 'v'], [0x03c4, 't'], [0x03b9, 'i'], [0x03ba, 'k'],
+  [0x03c7, 'x'], [0x03b5, 'e'], [0x03c5, 'u'], [0x0391, 'a'], [0x039f, 'o'], [0x03a1, 'p'], [0x03a4, 't'],
+  [0x0399, 'i'], [0x039a, 'k'], [0x03a7, 'x'], [0x0395, 'e'], [0x039d, 'n'], [0x039c, 'm'], [0x0392, 'b'],
+  [0x0396, 'z'], [0x0397, 'h'], [0x03a5, 'y'],
+  // Latin small capitals: Latin script, so the mixed-script rule misses them.
+  [0x1d00, 'a'], [0x1d04, 'c'], [0x1d05, 'd'], [0x1d07, 'e'], [0x1d0a, 'j'], [0x1d0b, 'k'], [0x1d0c, 'l'],
+  [0x1d0d, 'm'], [0x1d0f, 'o'], [0x1d18, 'p'], [0x1d1b, 't'], [0x1d1c, 'u'], [0x1d20, 'v'], [0x1d21, 'w'],
+  [0x1d22, 'z'], [0x0299, 'b'], [0x0262, 'g'], [0x029c, 'h'], [0x026a, 'i'], [0x0274, 'n'], [0x0280, 'r'],
+  [0x028f, 'y'],
+]);
+function foldConfusables(s) {
+  return [...s].map((ch) => DISPLAY_NAME_CONFUSABLES.get(ch.codePointAt(0)) || ch).join('');
+}
+const DISPLAY_NAME_TLDS = 'com|net|org|io|dev|ai|app|co|me|xyz|info|biz|gg|so|ly|to|us|uk|cn|de|ru|site|online|link|page|sh|tv|cc|ws|top|club';
+const DISPLAY_NAME_DOMAIN_RE = new RegExp(`(^|[^\\p{L}\\p{N}])[\\p{L}\\p{N}-]+\\.(?:${DISPLAY_NAME_TLDS})(?=$|[^\\p{L}\\p{N}])`, 'iu');
+
+// Reads as tdoc, tdoc AI, a team agent, an agent runtime, a placeholder
+// tdoc prints for nobody, or one of the given team agents' names --
+// compared as suggestNameSkeleton reads agent names (case, spacing and
+// l/1/I/0 look-alikes folded).
+function displayNameReserved(folded, teamAgentNames = []) {
+  if (DISPLAY_NAME_SEPARATOR_RE.test(folded)) return true;
+  const v = suggestNameSkeleton(foldConfusables(folded.toLowerCase()).replace(/[^\p{L}\p{N}]+/gu, ' '));
+  const tight = v.replace(/ /g, '');
+  if (DISPLAY_NAME_RESERVED.some((r) => suggestNameSkeleton(r) === v)) return true;
+  // A runtime's name alone, followed by an agent-ish word ("Claude AI",
+  // "Codex bot", "Claude Code"), or followed by punctuation ("Claude: Julie",
+  // "Grok!"). A person called Claude Dupont keeps their name.
+  const punct = foldConfusables(folded.toLowerCase()).replace(/[l1|]/g, 'i').replace(/0/g, 'o').replace(/\s+/g, ' ').trim();
+  for (const r of DISPLAY_NAME_RUNTIMES) {
+    const k = suggestNameSkeleton(r);
+    if (v === k) return true;
+    if (v.startsWith(`${k} `) && DISPLAY_NAME_AGENTISH.has(v.slice(k.length + 1).split(' ')[0])) return true;
+    if (punct.startsWith(k) && /^\s*[^\p{L}\p{N}\s]/u.test(punct.slice(k.length))) return true;
+  }
+  if (tight === 'tdoc' || tight.startsWith('tdocai') || tight.startsWith('tdocagent') || v.startsWith('tdoc ')) return true;
+  if (tight.startsWith('teamagent')) return true;
+  return teamAgentNames.some((n) => n && (n === v || n.replace(/ /g, '') === tight));
+}
+
+function normalizeDisplayName(raw, { teamAgentNames = [] } = {}) {
+  if (typeof raw !== 'string') return { error: 'invalid_name', message: 'Enter a name.' };
+  if (raw.length > DISPLAY_NAME_MAX * 8) return { error: 'name_too_long', message: `Use ${DISPLAY_NAME_MAX} characters or fewer.` };
+  let name = raw;
+  try { name = name.normalize('NFC'); } catch {}
+  name = name.replace(DISPLAY_NAME_STRIP_RE, '').replace(/\s+/g, ' ').trim();
+  if (!name) return { error: 'invalid_name', message: 'Enter a name.' };
+  if ([...name].length > DISPLAY_NAME_MAX) return { error: 'name_too_long', message: `Use ${DISPLAY_NAME_MAX} characters or fewer.` };
+  if (!/[\p{L}\p{N}]/u.test(name)) return { error: 'invalid_name', message: 'Use letters or numbers.' };
+  // Stacked combining marks (zalgo) draw over the lines around the name.
+  if (/\p{M}{4,}/u.test(name)) return { error: 'invalid_name', message: 'Too many accents on one letter.' };
+  // Latin mixed with Cyrillic or Greek inside one word is how look-alikes
+  // of reserved names are spelled ("Сlaude"); a name may still give itself
+  // in two alphabets ("Alexei (Алексей)").
+  if (name.split(' ').some((w) => /\p{Script=Latin}/u.test(w) && /[\p{Script=Cyrillic}\p{Script=Greek}]/u.test(w))) {
+    return { error: 'invalid_name', message: 'Use one alphabet within a word.' };
+  }
+  // Every check below reads the compatibility form, so a fullwidth or
+  // small-form < > @ or dot is the character it looks like; ideographic
+  // and halfwidth full stops read as dots too.
+  let folded = name;
+  try { folded = name.normalize('NFKC'); } catch {}
+  folded = folded.replace(/[\u3002\uff0e\uff61]/g, '.');
+  // Rendering escapes everywhere; markup in a name is still refused so it
+  // never reaches an email client, a notification or an agent prompt as
+  // something that looks like markup.
+  if (/[<>]/.test(folded)) return { error: 'invalid_name', message: 'Names can’t contain < or >.' };
+  // An address as a name would print where tdoc deliberately shows no
+  // address (email-keyed commenters show their local part only); a link
+  // would turn every comment into an advert.
+  if (/@/.test(folded)) return { error: 'invalid_name', message: 'Use a name, not an email address.' };
+  // Anything shaped like a host: a link, www., a known ending, any
+  // lowercase ending that closes the name or starts a path ("evil.fr",
+  // "x.shop/"), or a dotted IP address. "Dr.Smith" is a name.
+  if (/:\/\/|(^|[^\p{L}\p{N}])www\./iu.test(folded) || DISPLAY_NAME_DOMAIN_RE.test(folded)
+      || /\p{L}\.[a-z]{2,}(?:$|\/)/u.test(folded) || /\d+\.\d+\.\d+/.test(folded)) {
+    return { error: 'invalid_name', message: 'Use a name, not a web address.' };
+  }
+  if (displayNameReserved(folded, teamAgentNames)) {
+    return { error: 'reserved_name', message: 'That name is reserved for tdoc and agents. Pick another.' };
+  }
+  return { name };
+}
+
+function storedDisplayName(rec) {
+  if (!rec || typeof rec.display_name !== 'string') return '';
+  const n = normalizeDisplayName(rec.display_name);
+  return n.name || '';
+}
+
+// Per-isolate memo, short so another person's change shows up within about
+// half a minute (KV's own edge cache can add up to a minute more). The
+// saving isolate clears its entries.
+const DISPLAY_NAME_CACHE = new WeakMap(); // env.META -> Map(key -> { v, t })
+const DISPLAY_NAME_CACHE_MS = 30 * 1000;
+const DISPLAY_NAME_CACHE_MAX = 2000;
+function displayNameMemo(env, key, load) {
+  let cache = DISPLAY_NAME_CACHE.get(env.META);
+  if (!cache) { cache = new Map(); DISPLAY_NAME_CACHE.set(env.META, cache); }
+  const now = Date.now();
+  const hit = cache.get(key);
+  if (hit && now - hit.t < DISPLAY_NAME_CACHE_MS) return hit.v;
+  const v = Promise.resolve().then(load).catch(() => '');
+  if (cache.size >= DISPLAY_NAME_CACHE_MAX) cache.clear();
+  cache.set(key, { v, t: now });
+  return v;
+}
+function forgetDisplayNames(env) { if (env && env.META) DISPLAY_NAME_CACHE.delete(env.META); }
+
+// The chosen name of an account group: one read, the canonical account's.
+// A merge carries a member's name onto the canonical profile, and a save
+// clears it on the members, so nothing else is consulted.
+async function displayNameForGroup(env, group) {
+  if (!group || !group.canonical) return '';
+  return storedDisplayName(await accountProfile(env, group.canonical));
+}
+
+async function accountDisplayName(env, accountId) {
+  if (typeof accountId !== 'string' || !accountId || !env || !env.META) return '';
+  return displayNameMemo(env, `a:${accountId}`, async () => {
+    const group = await accountGroup(env, accountId);
+    if (group.deleted_at || group.unavailable) return '';
+    return displayNameForGroup(env, group);
+  });
+}
+
+// The account that holds this actor key NOW, or null. A record written
+// before account ids were stamped names only a handle or an address, and
+// the hosted-account:<login> pointer never moves: a login its owner gave up
+// and somebody else registered still points at the first account. So a
+// handle counts only while the account's linked GitHub identity still
+// carries it. An address counts through the email index, which is the
+// sign-in door itself: whoever signs in with that mailbox reaches that
+// account.
+async function actorKeyCurrentAccount(env, k, githubId = null) {
+  if (k.startsWith('email:')) return null;
+  const rec = await lookupHostedAccount(env, k);
+  if (!rec || !rec.account_id) return null;
+  const group = await accountGroup(env, rec.account_id);
+  if (group.deleted_at || group.unavailable) return null;
+  const links = await Promise.all(group.ids.slice(0, 8).map((id) => accountGithubLink(env, id).catch(() => null)));
+  // A record that names the GitHub id it was written with must match it too.
+  return links.some((l) => l && normalizeGithubLogin(l.handle) === k && (!githubId || String(l.sub) === githubId)) ? group.canonical : null;
+}
+
+async function actorChosenName(env, key, githubId = null) {
+  const k = normalizeActorKey(key);
+  if (!k || !env || !env.META) return '';
+  return displayNameMemo(env, githubId ? `g:${githubId}:${k}` : `k:${k}`, async () => {
+    const accountId = await actorKeyCurrentAccount(env, k, githubId);
+    return accountId ? accountDisplayName(env, accountId) : '';
+  });
+}
+
+// Logins that only ever name agents and tdoc itself.
+const DISPLAY_NAME_AGENT_LOGINS = new Set(['tdoc', 'claude', 'claude-code', 'codex', 'cursor', 'gemini', 'grok', 'chatgpt', 'copilot', 'openai', 'tdoc-agent', 'tdoc-ai', 'mcp-app']);
+
+// The lookup for a { login|key, name, account_id? | github_id? } person
+// object, or null. Only authors the worker stamped from a session resolve:
+// agents, the system note, deleted users, aliases and anything a publisher
+// uploaded keep what they carry. An unstamped record (written before
+// stamping) resolves by GitHub handle only -- never by address, which an
+// upload could have forged to learn whose account an address is.
+function personNameRef(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v) || typeof v.name !== 'string') return null;
+  if (v.imported) return null;
+  if (v.kind && v.kind !== 'human') return null;
+  if (v.handle || v.team_agent || v.agent_status != null) return null;
+  const raw = typeof v.login === 'string' ? v.login : (typeof v.key === 'string' ? v.key : '');
+  if (!raw || DISPLAY_NAME_AGENT_LOGINS.has(raw.toLowerCase())) return null;
+  const k = normalizeActorKey(raw);
+  if (!k) return null;
+  if (typeof v.account_id === 'string' && v.account_id) return `a:${v.account_id}`;
+  if (k.startsWith('email:')) return null;
+  if (typeof v.github_id === 'string' && /^[0-9]{1,20}$/.test(v.github_id)) return `g:${v.github_id}:${k}`;
+  return `k:${k}`;
+}
+
+// The person as records store them: the actor key, the name at the time,
+// and the account, so a later read finds the person, not whoever holds the
+// handle by then. The account id never leaves the worker (see
+// withActorDisplayNames and the backup copy).
+function personRef(session) {
+  return {
+    login: actorKey(session),
+    avatar_url: (session && session.avatar_url) || '',
+    name: actorDisplayName(session),
+    ...(session && typeof session.account_id === 'string' && session.account_id
+      ? { account_id: session.account_id }
+      // No account yet (a spectator's first comment): the GitHub id the
+      // provider attested, so a later read can tell this person from
+      // whoever holds the handle by then.
+      : (sessionGithubId(session) ? { github_id: sessionGithubId(session) } : {})),
+  };
+}
+
+// Every author-shaped object in an uploaded comment: flagged imported, and
+// stripped of anything that would let a read resolve it to an account.
+function markImportedAuthors(value, depth = 0, field = '') {
+  if (value == null || typeof value !== 'object' || depth > 12) return;
+  if (Array.isArray(value)) { for (const x of value) markImportedAuthors(x, depth + 1, field); return; }
+  if (field === 'author' || field === 'actor' || isPersonShape(value)) {
+    delete value.account_id;
+    delete value.github_id;
+    value.imported = true;
+  }
+  for (const [k, x] of Object.entries(value)) if (k !== 'anchor' && x && typeof x === 'object') markImportedAuthors(x, depth + 1, k);
+}
+
+function isPersonShape(v) {
+  return (typeof v.login === 'string' || typeof v.key === 'string') && typeof v.name === 'string';
+}
+
+// Records that carry a person's account id, without it.
+function withoutPersonAccountIds(value, depth = 0) {
+  if (value == null || typeof value !== 'object' || depth > 12) return value;
+  if (Array.isArray(value)) return value.map((x) => withoutPersonAccountIds(x, depth + 1));
+  const out = {};
+  const person = isPersonShape(value);
+  for (const [field, x] of Object.entries(value)) {
+    if (person && (field === 'account_id' || field === 'github_id')) continue;
+    out[field] = field === 'anchor' ? x : withoutPersonAccountIds(x, depth + 1);
+  }
+  return out;
+}
+
+const DISPLAY_NAME_RESOLVE_MAX = 60;
+// Handle-keyed lookups cost several reads each: fewer per payload.
+const DISPLAY_NAME_RESOLVE_KEYED_MAX = 30;
+// Replace the `name` of every person object in a payload (comments, replies,
+// events, inbox actors, rosters) with that person's chosen name, if any, and
+// drop the account and GitHub ids records carry. The author of a reply that
+// carries an agent verdict is an agent, whatever its login says. `only`
+// narrows which objects may be renamed (the @ list).
+async function withActorDisplayNames(env, value, { only = null } = {}) {
+  if (value == null || typeof value !== 'object') return value;
+  const refs = new Set();
+  let stamped = false;
+  const eligible = (v, agentParent) => !agentParent && (!only || only(v));
+  const collect = (v, depth, agentParent) => {
+    if (v == null || typeof v !== 'object' || depth > 12) return;
+    if (Array.isArray(v)) { for (const x of v) collect(x, depth + 1, false); return; }
+    if (isPersonShape(v) && ('account_id' in v || 'github_id' in v)) stamped = true;
+    const ref = personNameRef(v);
+    if (ref && eligible(v, agentParent)) refs.add(ref);
+    const agentHere = v.agent_status != null;
+    for (const [field, x] of Object.entries(v)) {
+      if (field !== 'anchor' && x && typeof x === 'object') collect(x, depth + 1, agentHere && field === 'author');
+    }
+  };
+  collect(value, 0, false);
+  const names = new Map();
+  if (refs.size && env && env.META) {
+    const all = [...refs];
+    const picked = [
+      ...all.filter((r) => r.startsWith('a:')).slice(0, DISPLAY_NAME_RESOLVE_MAX),
+      ...all.filter((r) => !r.startsWith('a:')).slice(0, DISPLAY_NAME_RESOLVE_KEYED_MAX),
+    ];
+    await Promise.all(picked.map(async (ref) => {
+      let n = '';
+      if (ref.startsWith('a:')) n = await accountDisplayName(env, ref.slice(2));
+      else if (ref.startsWith('g:')) {
+        const at = ref.indexOf(':', 2);
+        n = await actorChosenName(env, ref.slice(at + 1), ref.slice(2, at));
+      } else n = await actorChosenName(env, ref.slice(2));
+      if (n) names.set(ref, n);
+    }));
+  }
+  if (!names.size && !stamped) return value;
+  const walk = (v, depth, agentParent) => {
+    if (v == null || typeof v !== 'object' || depth > 12) return v;
+    if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1, false));
+    const person = isPersonShape(v);
+    const agentHere = v.agent_status != null;
+    const out = {};
+    for (const [field, x] of Object.entries(v)) {
+      if (person && (field === 'account_id' || field === 'github_id')) continue;
+      out[field] = field === 'anchor' ? x : walk(x, depth + 1, agentHere && field === 'author');
+    }
+    const ref = personNameRef(v);
+    if (ref && names.has(ref) && eligible(v, agentParent)) out.name = names.get(ref);
+    return out;
+  };
+  return walk(value, 0, false);
+}
+
+// Team rosters carry account ids: resolve by account, not by key.
+async function withMemberDisplayNames(env, members) {
+  if (!Array.isArray(members) || !members.length) return members;
+  const names = await Promise.all(members.slice(0, 200).map((m) => (m && m.account_id ? accountDisplayName(env, m.account_id) : '')));
+  return members.map((m, i) => (names[i] ? { ...m, name: names[i] } : m));
+}
+
+// What Settings shows: the name in use, the one chosen (if any), and the
+// sign-in provider's, which an empty save goes back to.
+function displayNameFields(session) {
+  const chosen = session && typeof session.provider_name === 'string' ? String(session.name || '') : '';
+  const provider = chosen
+    ? (session.provider_name || actorDisplayName({ ...session, name: '' }))
+    : actorDisplayName(session);
+  return { name: actorDisplayName(session), display_name: chosen, provider_name: provider };
+}
+
+const DISPLAY_NAME_RATE = 20; // saves per account per hour
+
+// Written on the canonical account and cleared on every other member (each
+// through putAccountProfile, the one profile writer), so a later merge never
+// brings back a name the person removed.
+async function setAccountDisplayName(env, group, name) {
+  const at = new Date().toISOString();
+  const members = group.ids.filter((id) => id !== group.canonical).slice(0, 8);
+  await putAccountProfile(env, group.canonical, name
+    ? { display_name: name, display_name_at: at }
+    : { display_name: undefined, display_name_at: at });
+  await Promise.all(members.map(async (id) => {
+    const prev = await accountProfile(env, id);
+    if (prev && prev.display_name) await putAccountProfile(env, id, { display_name: undefined });
+  }));
+}
+
 async function accountProfile(env, accountId) {
   if (!accountId || !env || !env.META) return null;
   try {
@@ -13791,6 +14185,12 @@ function collectEmails(value, out, key = '') {
 }
 
 async function redactCommentEmails(value, privacy) {
+  // Every comment-shaped payload that leaves the worker (the doc page, the
+  // feedback widget and space, team review, inbox, exports, agent reads)
+  // passes through here, so this is also where each person's name becomes
+  // the one they chose -- before addresses are aliased, while the actor key
+  // still names them. Existing comments keep their snapshot as the fallback.
+  value = await withActorDisplayNames(privacy && privacy.env, value);
   const present = [...collectEmails(value, new Set())];
   // A deleted account's address is nobody's to see any more, not even the
   // owner who invited it or a former teammate (the person's own session is
@@ -13968,13 +14368,13 @@ async function profileBootForSession(env, session) {
   if (!accountId) {
     const login = sessionLogin(session);
     const suggested = login || suggestHandleFromEmail(session && session.email) || null;
-    return { handle: null, suggested, pins: [] };
+    return { handle: null, suggested, pins: [], ...displayNameFields(session) };
   }
   const rec = await accountProfile(env, accountId);
   const claimed = normalizeGithubLogin(rec && rec.handle);
   const login = sessionLogin(session);
   const suggested = claimed || login || suggestHandleFromEmail(session && session.email) || null;
-  return { handle: claimed, suggested, pins: await accountProfilePins(env, accountId) };
+  return { handle: claimed, suggested, pins: await accountProfilePins(env, accountId), ...displayNameFields(session) };
 }
 
 // Claim / publish mint an account; bare sign-in does not (spectators stay
@@ -15239,9 +15639,10 @@ function commentParticipants(list) {
     if (!c) continue;
     push(c.author);
     for (const e of (Array.isArray(c.events) ? c.events : [])) {
-      if (e && e.kind === 'reply_added' && e.reply) push(e.reply.author);
+      if (e && e.kind === 'reply_added' && e.reply && e.reply.agent_status == null) push(e.reply.author);
     }
-    for (const r of (Array.isArray(c.replies) ? c.replies : [])) push(r && r.author);
+    // A reply carrying an agent's verdict was written by an agent.
+    for (const r of (Array.isArray(c.replies) ? c.replies : [])) if (r && r.agent_status == null) push(r.author);
   }
   return [...byLogin.values()];
 }
@@ -15286,7 +15687,9 @@ async function loadContacts(env, actor) {
 // One write per post that named or answered someone; nothing for a plain note.
 async function recordContacts(env, actor, people, at) {
   const key = contactsKey(actor);
-  const fresh = (people || []).filter((p) => p && p.login && p.login !== actor && !isNonHumanAuthor(p));
+  // Someone a publisher's upload names is not a contact: the login and name
+  // are whatever the upload said.
+  const fresh = (people || []).filter((p) => p && p.login && p.login !== actor && !isNonHumanAuthor(p) && !p.imported);
   if (!key || !fresh.length) return;
   const prev = await loadContacts(env, actor);
   // Answering the people already at the front of the list again, within a
@@ -15319,6 +15722,8 @@ async function mentionDirectory(env, s, meta, access, list) {
   for (const c of (Array.isArray(list) ? list : [])) {
     const authors = [c && c.author, ...((c && c.events) || []).map((e) => e && e.kind === 'reply_added' && e.reply && e.reply.author), ...((c && c.replies) || []).map((r) => r && r.author)];
     for (const a of authors) if (isNonHumanAuthor(a)) agents.add(normalizeActorKey(a.login));
+    const replies = [...((c && c.replies) || []), ...((c && c.events) || []).map((e) => e && e.kind === 'reply_added' && e.reply)];
+    for (const r of replies) if (r && r.agent_status != null && r.author) agents.add(normalizeActorKey(r.author.login));
   }
   const add = (entry, tag, at) => {
     const login = normalizeActorKey(entry && entry.login);
@@ -15326,10 +15731,35 @@ async function mentionDirectory(env, s, meta, access, list) {
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '', tags: [], at: '', order: order++ };
     if (!prev.name && entry.name) prev.name = entry.name;
     if (!prev.avatar_url && entry.avatar_url) prev.avatar_url = entry.avatar_url;
+    // The account a record was stamped with, for the chosen name; dropped
+    // before the list leaves the worker (withActorDisplayNames).
+    const acct = entry.account_id || (stamped.get(login) || {}).account_id;
+    if (!prev.account_id && typeof acct === 'string' && acct) prev.account_id = acct;
+    // No account to go by: a GitHub id the record was written with, or the
+    // mark that this doc knows the login only from an upload.
+    const seen = stamped.get(login) || {};
+    if (!prev.account_id && !prev.github_id && seen.github_id) prev.github_id = seen.github_id;
+    if (!prev.account_id && seen.imported) prev.imported = true;
     if (!prev.tags.includes(tag)) prev.tags.push(tag);
     if (at && String(at) > String(prev.at || '')) prev.at = at;
     byLogin.set(login, prev);
   };
+  // What the doc's own records say about each login: the account or GitHub
+  // id the worker stamped, and whether an upload named it (then it is never
+  // resolved by handle).
+  const stamped = new Map();
+  for (const c of (Array.isArray(list) ? list : [])) {
+    const authors = [c && c.author, ...((c && c.events) || []).map((e) => e && e.kind === 'reply_added' && e.reply && e.reply.author), ...((c && c.replies) || []).map((r) => r && r.author)];
+    for (const a of authors) {
+      const k = a && !isNonHumanAuthor(a) && normalizeActorKey(a.login);
+      if (!k) continue;
+      const rec = stamped.get(k) || {};
+      if (a.imported) rec.imported = true;
+      else if (typeof a.account_id === 'string' && a.account_id) rec.account_id = a.account_id;
+      else if (typeof a.github_id === 'string' && a.github_id && !rec.github_id) rec.github_id = a.github_id;
+      stamped.set(k, rec);
+    }
+  }
   const insider = isAllowlisted(access, s, env, meta);
   add({ login: ownerActorKey(meta, env) }, 'doc');
   for (const p of commentParticipants(list)) add(p, 'doc');
@@ -15338,7 +15768,7 @@ async function mentionDirectory(env, s, meta, access, list) {
   const teams = await Promise.all([...teamIds].slice(0, 5).map((id) => loadTeam(env, id).catch(() => null)));
   for (const team of teams) {
     if (!team || !teamMember(team, s.account_id)) continue;
-    for (const m of team.members || []) add({ login: m.key, name: m.name, avatar_url: memberAvatar(m.key) }, 'teammate');
+    for (const m of team.members || []) add({ login: m.key, name: m.name, avatar_url: memberAvatar(m.key), account_id: m.account_id }, 'teammate');
   }
   const [contacts, inbox] = await Promise.all([loadContacts(env, me), loadInbox(env, me).then((r) => r.inbox.items || []).catch(() => [])]);
   for (const c of contacts) add(c, 'recent', c.at);
@@ -15581,6 +16011,10 @@ function applyCommentOp(list, op) {
         for (const lc of op.localComments) {
           if (!lc || !lc.id || have.has(lc.id)) continue;
           ensureEventLog(lc);
+          // Words a publisher uploaded, not ones the worker took from a
+          // session: whoever they name, they keep the name they carry and
+          // never borrow an account's chosen one (personNameRef).
+          markImportedAuthors(lc);
           list.push(lc);
           have.add(lc.id);
           merged++;
@@ -24810,7 +25244,56 @@ const tdocHandlers = {
         });
       }
       const { handle, suggested } = await profileBootForSession(env, s);
-      return json({ ok: true, profile: { handle, suggested } }, {
+      return json({ ok: true, profile: { handle, suggested, ...displayNameFields(s) } }, {
+        headers: { 'Cache-Control': 'private, no-store' },
+      });
+    }
+
+    // Settings -> Profile -> Name: the name shown on this person's comments,
+    // replies, team rosters, notifications and the account menu, in place of
+    // the one their sign-in provider sent. An empty name goes back to the
+    // provider's. Hosted only; a signed-in browser session from this origin,
+    // never a feedback-widget token (that door is scoped to one doc).
+    if (p === '/api/me/name' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_only' }, { status: 404 });
+      }
+      const s = await getSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin) || s.feedback) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const acct = await ensureSessionHostedAccount(env, s);
+      const accountId = acct && acct.account_id;
+      if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
+      const group = await accountGroup(env, accountId);
+      if (group.deleted_at || group.unavailable) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (await rateLimited(env, `display-name:${group.canonical}`, DISPLAY_NAME_RATE, 3600)) {
+        return json({ error: 'rate_limited', message: 'Too many name changes. Try again in an hour.' }, { status: 429, headers: { 'Retry-After': '3600' } });
+      }
+      let body = null;
+      try { body = await req.json(); } catch {}
+      // Only an explicit "" or null clears: a body that did not parse, or
+      // that names no `name`, changes nothing.
+      if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.prototype.hasOwnProperty.call(body, 'name')) {
+        return json({ error: 'invalid_request', message: 'Send { "name": "..." }.' }, { status: 400 });
+      }
+      const raw = body.name;
+      let chosen = '';
+      if (!(raw === null || raw === '')) {
+        // Not one of the agents of a team this person is in, either.
+        const teams = await Promise.all((s.team_ids || []).slice(0, 20).map((id) => loadTeam(env, id).catch(() => null)));
+        const teamAgentNames = teams.flatMap((team) => (team ? teamAgents(team).map((a) => suggestNameSkeleton(a.name)) : [])).filter(Boolean);
+        const n = normalizeDisplayName(raw, { teamAgentNames });
+        if (n.error) return json({ error: n.error, message: n.message }, { status: 400 });
+        chosen = n.name;
+      }
+      await setAccountDisplayName(env, group, chosen);
+      forgetDisplayNames(env);
+      const { provider_name } = displayNameFields(s);
+      return json({ ok: true, name: chosen || provider_name, display_name: chosen, provider_name }, {
         headers: { 'Cache-Control': 'private, no-store' },
       });
     }
@@ -27566,7 +28049,7 @@ const tdocHandlers = {
         });
       } catch {}
       if (s.bearer) return json({ ok: true, team: teamSummary(team, s.account_id), emailed });
-      return json({ ok: true, team: teamDetail(team, s.account_id, url.origin), emailed });
+      return json({ ok: true, team: await namedTeamDetail(env, team, s.account_id, url.origin), emailed });
     }
 
     if (p === '/api/team' && (method === 'GET' || method === 'PATCH')) {
@@ -27583,7 +28066,7 @@ const tdocHandlers = {
       const handled = await claimTeamHandle(env, team);
       if (method === 'GET') {
         if (handled) await saveTeam(env, team);
-        return json({ ok: true, team: teamDetail(team, s.account_id, url.origin) });
+        return json({ ok: true, team: await namedTeamDetail(env, team, s.account_id, url.origin) });
       }
       if (teamRole(team, s.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
       let added = [];
@@ -27607,7 +28090,7 @@ const tdocHandlers = {
           added, inviterName: actorDisplayName(s), inviterId: actorKey(s), team, origin: url.origin,
         });
       } catch {}
-      return json({ ok: true, team: teamDetail(team, s.account_id, url.origin), emailed });
+      return json({ ok: true, team: await namedTeamDetail(env, team, s.account_id, url.origin), emailed });
     }
 
     if (p === '/api/team/guests' && (method === 'GET' || method === 'POST')) {
@@ -27682,7 +28165,7 @@ const tdocHandlers = {
           await writeInboxEvent(env, admin.key, {
             kind: 'team_join_request', slug, team_id: team.id, title: team.name,
             target_id: requester, requester, at: new Date().toISOString(),
-            actor: { login: requester, name: actorDisplayName(gate.session), avatar_url: gate.session.avatar_url || '' },
+            actor: { ...personRef(gate.session), login: requester },
           }, { ctx, origin: url.origin });
         }
         await env.META.put(key, '1', { expirationTtl: 24 * 60 * 60 });
@@ -28178,7 +28661,7 @@ const tdocHandlers = {
         await syncTeamSeats(env, team);
         if (self) return json({ ok: true, left: true });
       }
-      return json({ ok: true, team: teamDetail(team, s.account_id, url.origin) });
+      return json({ ok: true, team: await namedTeamDetail(env, team, s.account_id, url.origin) });
     }
 
     if (p === '/api/team/join' && method === 'POST') {
@@ -28754,7 +29237,13 @@ const tdocHandlers = {
       // An address this person is not entitled to is not offered at all: a
       // tag inserts the address into the comment text.
       const privacy = await emailPrivacyFor(env, s, slug, meta);
-      const users = (await mentionDirectory(env, s, meta, access, list)).filter((u) => {
+      // A chosen name is filled in only for people in this doc or team, or
+      // an entry the worker stamped with an account (an inbox actor): an
+      // owner typing logins into the invite list, or a recent contact that
+      // came from someone's upload, must not learn whose account each is.
+      const known = (u) => (Array.isArray(u.tags) && (u.tags.includes('doc') || u.tags.includes('teammate')))
+        || (typeof u.account_id === 'string' && u.account_id) || (typeof u.github_id === 'string' && u.github_id);
+      const users = (await withActorDisplayNames(env, await mentionDirectory(env, s, meta, access, list), { only: known })).filter((u) => {
         const m = String(u.login || '').match(EMAIL_KEY_RE);
         return !m || privacy.reveal.has(m[1].toLowerCase());
       });
@@ -28789,7 +29278,7 @@ const tdocHandlers = {
       // login carries the actor key (a handle, or email:<addr>); name is what
       // readers see, and for an email identity that is the local part only —
       // the address itself never renders in a thread.
-      const author = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
+      const author = personRef(s);
       const created = new Date().toISOString();
       const V = coerceBodyVersion(version);
       const ownerLogin = ownerActorKey(meta, env);
@@ -29091,7 +29580,7 @@ const tdocHandlers = {
         await deliverInbox(env, target && target.login, {
           kind: 'reaction', slug, version: V, comment_id,
           thread_id: thread && thread.root && thread.root.id, target_id: comment_id,
-          actor: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
+          actor: personRef(s),
           title: (meta && meta.title) || slug, emoji,
         }, { ctx, origin: url.origin });
       }
@@ -30984,7 +31473,7 @@ const tdocHandlers = {
             target_id: asker,
             requester: asker,
             at: new Date().toISOString(),
-            actor: { login: asker, name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
+            actor: { ...personRef(session), login: asker },
         }, { ctx, origin: url.origin });
       }
       await env.META.put(dedupeKey, '1', { expirationTtl: 7 * 24 * 60 * 60 });
@@ -31046,7 +31535,7 @@ const tdocHandlers = {
           slug,
           title,
           actor: approver
-            ? { login: actorKey(approver), name: actorDisplayName(approver), avatar_url: approver.avatar_url || '' }
+            ? personRef(approver)
             : null,
         }, { ctx, origin: url.origin });
       }
