@@ -47,6 +47,9 @@ function SheetFormatUI(api) {
     // The toolbar: one slim row of icons, Edit mode only.
     '.ts-fbar{display:flex;align-items:center;gap:2px;height:36px;margin:0 0 8px;padding:0 4px;border:1px solid var(--ts-line);border-radius:8px;background:var(--ts-head);overflow:hidden;white-space:nowrap}',
     '.ts-fbar[hidden]{display:none!important}',
+    // In a prose doc the row floats above the sheet while a cell is
+    // selected, so it appears without moving the grid under the pointer.
+    '.ts-fbar.fx-float{position:absolute;left:0;right:0;bottom:100%;z-index:6;margin:0 0 6px;box-shadow:0 4px 14px rgba(0,0,0,.1);background:#fff}',
     '.ts-fbar .ts-icon{width:30px;height:28px;position:relative;-webkit-tap-highlight-color:transparent}',
     '.ts-fbar .ts-icon svg{width:18px;height:18px}',
     '.ts-fbar .ts-icon[aria-pressed="true"]{background:var(--ts-accent-tint);color:var(--ts-accent)}',
@@ -128,6 +131,11 @@ function SheetFormatUI(api) {
       tab.mlist.push(v);
       for (var r = m.r; r < m.r + m.rs; r++) for (var c = m.c; c < m.c + m.cs; c++) tab.mview.set(r * K + c, v);
     });
+    // By top row, with the furthest bottom so far: firstRow is a binary search.
+    tab.mlist.sort(function (a, b) { return a.i0 - b.i0; });
+    tab.mend = new Int32Array(tab.mlist.length);
+    var far = -1;
+    tab.mlist.forEach(function (m, k) { far = Math.max(far, m.i0 + m.rs); tab.mend[k] = far; });
   }
   function covered(tab, r, c) { return !!(tab.fcovered && tab.fcovered.has(r * K + c)); }
   function fmtOf(tab, r, c) { return (tab.fmt && tab.fmt.get(r * K + c)) || null; }
@@ -190,11 +198,14 @@ function SheetFormatUI(api) {
     return out;
   }
   // The first row to draw: back to the top of a merge the window starts in.
+  // The first merge (by top row) whose rows reach past `first` is the one
+  // that starts highest among those covering it.
   function firstRow(tab, first) {
-    if (!tab.mlist) return first;
-    var f = first;
-    for (var k = 0; k < tab.mlist.length; k++) { var m = tab.mlist[k]; if (m.i0 < f && m.i0 + m.rs > first) f = m.i0; }
-    return f;
+    var list = tab.mlist;
+    if (!list || !list.length) return first;
+    var lo = 0, hi = list.length;
+    while (lo < hi) { var mid = (lo + hi) >> 1; if (tab.mend[mid] > first) hi = mid; else lo = mid + 1; }
+    return lo < list.length && list[lo].i0 < first ? list[lo].i0 : first;
   }
 
   // ---- selection over merges -----------------------------------------------------
@@ -452,6 +463,7 @@ function SheetFormatUI(api) {
     bar.appendChild(moreBtn);
     root.insertBefore(bar, before);
     if (window.ResizeObserver) new ResizeObserver(function () { fit(); }).observe(bar);
+    document.addEventListener('focusin', function () { sync(); });
     wireGrid();
   }
   function moreMenu() {
@@ -484,10 +496,19 @@ function SheetFormatUI(api) {
     var seen = !groupEls[0].hidden;
     sepEls.forEach(function (sp, k) { var g = groupEls[k + 1]; sp.hidden = !(seen && !g.hidden); if (!g.hidden) seen = true; });
   }
-  // The toolbar follows the mode and the active cell.
+  // The toolbar follows the mode and the active cell. A doc that is only its
+  // sheet (or full screen) always shows it in Edit mode; a sheet inside a
+  // prose doc, only while one of its cells is selected (focus in the sheet
+  // or in one of its menus).
+  function inUse() {
+    if (!api.embedded()) return true;
+    var a = document.activeElement;
+    return !!api.sel().touched && !!a && (api.ui.root.contains(a) || !!(a.closest && a.closest('.ts-pop')));
+  }
   function sync() {
     if (!bar) return;
-    var show = api.canEdit() && !!api.cur();
+    var show = api.canEdit() && !!api.cur() && inUse();
+    bar.classList.toggle('fx-float', api.embedded());
     if (bar.hidden === show) { bar.hidden = !show; if (show) fit(); }
     if (!show) return;
     var f = activeFmt() || {};

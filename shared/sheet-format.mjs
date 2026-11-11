@@ -315,6 +315,27 @@ export function cleanSpan(value) {
   const n = Number(value);
   return Number.isInteger(n) && n > 1 ? Math.min(n, MAX_SPAN) : 1;
 }
+// Merges [{ r, c, rs, cs }] with any that overlaps one before it (in row,
+// then column order) left out, at most `max` of them: linear in merges ×
+// columns (a column's covered-until row), never per covered cell. For a
+// writer (import, export) whatever the source said.
+export const MAX_MERGES = 5000;
+export function nonOverlapping(merges, max = MAX_MERGES) {
+  const list = (merges || []).filter((m) => m && m.rs >= 1 && m.cs >= 1 && m.cs <= KEY && (m.rs > 1 || m.cs > 1))
+    .slice().sort((a, b) => a.r - b.r || a.c - b.c);
+  const until = new Map();
+  const out = [];
+  for (const m of list) {
+    if (out.length >= max) break;
+    let free = true;
+    for (let c = m.c; c < m.c + m.cs; c++) if ((until.get(c) ?? -1) >= m.r) { free = false; break; }
+    if (!free) continue;
+    for (let c = m.c; c < m.c + m.cs; c++) until.set(c, m.r + m.rs - 1);
+    out.push(m);
+  }
+  return out;
+}
+
 // Body rows of a sheet table, in order.
 function bodyRows(table) {
   const out = [];
@@ -340,9 +361,11 @@ export function expandMerges(table, columns) {
       if (carry[c] > 0) { carry[c]--; plan.push({ tr, at: c }); continue; }
       const td = tr.cells[k++];
       if (!td) continue;
-      const cs = Math.min(cleanSpan(td.getAttribute('colspan')), columns - c);
-      const rs = Math.min(cleanSpan(td.getAttribute('rowspan')), trs.length - r);
+      let cs = Math.min(cleanSpan(td.getAttribute('colspan')), columns - c);
+      let rs = Math.min(cleanSpan(td.getAttribute('rowspan')), trs.length - r);
       if (td.hasAttribute('colspan') || td.hasAttribute('rowspan')) { td.removeAttribute('colspan'); td.removeAttribute('rowspan'); }
+      // A merge over a slot another merge covers is no merge (readSheetTable's rule).
+      for (let j = 1; j < cs; j++) if (carry[c + j] > 0) { cs = 1; rs = 1; break; }
       if (cs > 1 || rs > 1) {
         merges.push({ r, c, rs, cs });
         for (let j = 0; j < cs; j++) carry[c + j] = rs - 1;

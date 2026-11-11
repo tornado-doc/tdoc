@@ -346,8 +346,10 @@ export function readSheetTable(table, normalize) {
         tds.push(td);
         cells.push(readCell(td, columns[c].type));
         if (!td) continue;
-        const cs = Math.min(spanOf(td.getAttribute('colspan')), columns.length - c);
-        const rs = Math.min(spanOf(td.getAttribute('rowspan')), trs.length - r);
+        let cs = Math.min(spanOf(td.getAttribute('colspan')), columns.length - c);
+        let rs = Math.min(spanOf(td.getAttribute('rowspan')), trs.length - r);
+        // A merge reaching over a slot another merge covers is no merge.
+        for (let j = 1; j < cs; j++) if (carry[c + j] > 0) { cs = 1; rs = 1; break; }
         if (cs > 1 || rs > 1) {
           merges.push({ r, c, rs, cs });
           for (let j = 0; j < cs; j++) carry[c + j] = rs - 1;

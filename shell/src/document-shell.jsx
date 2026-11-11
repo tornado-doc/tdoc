@@ -2384,6 +2384,7 @@ export function DocumentShell({ boot, config }) {
 
       {editor.mode === 'edit' ? (
         <EditorToolbar
+          proseTools={!docShape.sheetDoc}
           dirty={editor.dirty}
           checking={editor.checking}
           saving={editor.saving}

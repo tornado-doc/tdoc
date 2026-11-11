@@ -144,6 +144,31 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(JSON.stringify(back.merges) === JSON.stringify([{ r: 0, c: 1, rs: 2, cs: 1 }]), JSON.stringify(back.merges));
   });
 
+  await t('Excel import: crafted merges (huge, overlapping, 100,000 of them) are clipped, capped and kept apart, in bounded time; export writes no overlap', async () => {
+    const XLSX = require(path.join(ROOT, 'node_modules', 'xlsx', 'dist', 'xlsx.mini.min.js'));
+    const I = await import(path.join(ROOT, 'shared', 'sheet-import.mjs'));
+    const M = await import(path.join(ROOT, 'shared', 'sheet-markup.mjs'));
+    const F = await import(path.join(ROOT, 'shared', 'sheet-format.mjs'));
+    const rows = [['A', 'B', 'C']].concat(Array.from({ length: 300 }, (_, k) => [`a${k}`, `b${k}`, `c${k}`]));
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!merges'] = [{ s: { r: 1, c: 0 }, e: { r: 1e9, c: 1e6 } }, { s: { r: 2, c: 1 }, e: { r: 4, c: 2 } }]
+      .concat(Array.from({ length: 100000 }, (_, k) => ({ s: { r: 1 + (k % 300), c: k % 3 }, e: { r: 1 + (k % 300) + (k % 5), c: 2 } })));
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'S');
+    const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+    const t0 = Date.now();
+    const out = await I.importSheetFile({ name: 's.xlsx', bytes }, { loadXlsx: async () => XLSX });
+    const ms = Date.now() - t0;
+    assert(ms < 8000, `import took ${ms}ms`);
+    const back = M.readSheetTable(parseHtml(out.html).querySelector('table'));
+    assert(back.merges.length >= 1 && back.merges.length <= F.MAX_MERGES, `${back.merges.length} merges`);
+    assert(JSON.stringify(back.merges[0]) === JSON.stringify({ r: 0, c: 0, rs: 300, cs: 3 }), `the huge one clipped to the sheet: ${JSON.stringify(back.merges[0])}`);
+    assert(back.rows.length === 300, `rows ${back.rows.length}`);
+    // Export: overlapping merges in a sheet model are never written as such.
+    const book = XLSX.read(S.xlsxBytes(XLSX, [{ name: 'O', columns: [{ name: 'a' }, { name: 'b' }, { name: 'c' }], rows: [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9']], formats: null,
+      merges: [{ r: 0, c: 0, rs: 2, cs: 2 }, { r: 1, c: 1, rs: 2, cs: 2 }, { r: 2, c: 0, rs: 1, cs: 1 }, { r: 0, c: 2, rs: 99, cs: 1 }] }]), { type: 'array' });
+    assert(JSON.stringify(book.Sheets.O['!merges']) === JSON.stringify([{ s: { c: 0, r: 1 }, e: { c: 1, r: 2 } }]), JSON.stringify(book.Sheets.O['!merges']));
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

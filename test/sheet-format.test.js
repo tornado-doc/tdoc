@@ -167,6 +167,59 @@ async function t(name, fn) {
     assert.deepEqual(map.get(1), { i: true });
   });
 
+  await t('a merge over a slot another merge covers is no merge, read and laid flat alike', () => {
+    // r1 B spans two rows; r2's first cell claims three columns, over B2.
+    const html = '<tr data-row="r1"><td>a</td><td rowspan="2">B</td><td>c</td></tr><tr data-row="r2"><td colspan="3">x</td><td>z</td></tr>';
+    const s = M.readSheetTable(table(html));
+    assert.deepEqual(s.merges, [{ r: 0, c: 1, rs: 2, cs: 1 }]);
+    assert.deepEqual(s.rows[1].cells, ['x', '', 'z']);
+    const tb = table(html);
+    F.withMerges(tb, () => M.headerCells(tb), () => {});
+    const back = M.readSheetTable(tb);
+    assert.deepEqual(back.merges, s.merges);
+    assert.deepEqual(back.rows.map((r) => r.cells), s.rows.map((r) => r.cells));
+  });
+
+  await t('nonOverlapping: overlaps dropped, capped, linear on crafted lists', () => {
+    assert.deepEqual(F.nonOverlapping([{ r: 0, c: 0, rs: 3, cs: 2 }, { r: 2, c: 1, rs: 2, cs: 2 }, { r: 3, c: 0, rs: 1, cs: 2 }]), [{ r: 0, c: 0, rs: 3, cs: 2 }, { r: 3, c: 0, rs: 1, cs: 2 }]);
+    const many = Array.from({ length: 200000 }, (_, k) => ({ r: k % 1000, c: k % 7, rs: 1 + (k % 900), cs: 1 + (k % 200) }));
+    const t0 = Date.now();
+    const out = F.nonOverlapping(many);
+    assert.ok(Date.now() - t0 < 1500, `took ${Date.now() - t0}ms`);
+    assert.ok(out.length <= F.MAX_MERGES);
+    const grid = new Set();
+    for (const m of out) for (let r = m.r; r < m.r + m.rs; r++) for (let c = m.c; c < m.c + m.cs; c++) { assert.ok(!grid.has(r * 256 + c)); grid.add(r * 256 + c); }
+  });
+
+  await t('Excel styles reader: crafted parts read in bounded time, styled cells past the row limit ignored', async () => {
+    const X = await import('../shared/sheet-xlsx-style.mjs');
+    const enc = (x) => ({ content: new TextEncoder().encode(x) });
+    const wb = (styles, sheet) => ({ files: {
+      'xl/workbook.xml': enc('<workbook><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+      'xl/_rels/workbook.xml.rels': enc('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'),
+      'xl/styles.xml': enc(styles),
+      'xl/worksheets/sheet1.xml': enc(sheet),
+    } });
+    const okStyles = '<styleSheet><fonts><font><sz val="12"/></font><font><b/></font></fonts><fills><fill/></fills><borders><border/></borders><cellXfs><xf fontId="0"/><xf fontId="1"/></cellXfs></styleSheet>';
+    const cells = Array.from({ length: 2000 }, (_, k) => `<row r="${k + 1}"><c r="A${k + 1}" s="1"><v>1</v></c></row>`).join('');
+    const got = X.readXlsxStyles(null, wb(okStyles, `<worksheet><sheetData>${cells}</sheetData></worksheet>`), { maxRows: 50 }).get('S');
+    assert.equal(got.size, 50);
+    assert.deepEqual(got.get('A50'), { b: true });
+    // Unclosed and nested-looking tags that would make a lazy regex rescan.
+    const evil = [
+      `<styleSheet><fonts>${'<font><b/>'.repeat(300000)}</fonts><cellXfs><xf fontId="0"/></cellXfs></styleSheet>`,
+      `<styleSheet><fonts>${'<font '.repeat(300000)}</fonts></styleSheet>`,
+      `<styleSheet><cellXfs>${'<xf fontId="1">'.repeat(200000)}</cellXfs><fonts><font><b/></font></fonts></styleSheet>`,
+    ];
+    for (const st of evil) {
+      const t0 = Date.now();
+      X.readXlsxStyles(null, wb(st, `<worksheet>${'<c r="A1" s="0">'.repeat(100000)}</worksheet>`), { maxRows: 100 });
+      assert.ok(Date.now() - t0 < 2000, `crafted styles took ${Date.now() - t0}ms`);
+    }
+    // A styles part over the cap is not read.
+    assert.equal(X.readXlsxStyles(null, wb(' '.repeat(X.MAX_PART + 1), cells)).size, 0);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

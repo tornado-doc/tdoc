@@ -529,6 +529,7 @@
     ui: ui, h: h, provider: provider, cur: cur, sel: function () { return sel; }, canEdit: canEdit,
     isEditing: function () { return !!editor; }, openPop: openPop, closePop: closePop, menuItems: menuItems,
     toast: toast, record: record, afterChange: afterChange, ensureCell: ensureCell, rowH: rowH,
+    embedded: function () { return !expand.sheetOnly && !expand.on; },
   });
 
   function mount() {

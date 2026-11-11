@@ -4,7 +4,7 @@
 // doc holds, not what a search or filter shows right now. No DOM globals: an
 // offline test runs this on a small DOM.
 import { SHEET_SELECTOR, readSheetTable } from '../../../shared/sheet-markup.mjs';
-import { KEY, readFormats, excelFormat, isNumeric, isDateLike, toNumber, toDateParts } from '../../../shared/sheet-format.mjs';
+import { KEY, readFormats, excelFormat, isNumeric, isDateLike, toNumber, toDateParts, nonOverlapping } from '../../../shared/sheet-format.mjs';
 import { styleXlsx, colName } from '../../../shared/sheet-xlsx-style.mjs';
 
 export const CSV_MIME = 'text/csv';
@@ -119,7 +119,9 @@ export function xlsxBytes(XLSX, sheets) {
       if (!ws[ref]) ws[ref] = { t: 's', v: '' };
       cells.set(ref, f);
     });
-    if (sheet.merges && sheet.merges.length) ws['!merges'] = sheet.merges.map((m) => ({ s: { r: m.r + 1, c: m.c }, e: { r: m.r + m.rs, c: m.c + m.cs - 1 } }));
+    // Never two merges over one cell (Excel calls such a file corrupt).
+    const merges = nonOverlapping((sheet.merges || []).filter((m) => m.r + m.rs <= sheet.rows.length && m.c + m.cs <= sheet.columns.length));
+    if (merges.length) ws['!merges'] = merges.map((m) => ({ s: { r: m.r + 1, c: m.c }, e: { r: m.r + m.rs, c: m.c + m.cs - 1 } }));
     styled.push({ cells });
     XLSX.utils.book_append_sheet(book, ws, names[i]);
   });

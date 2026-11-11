@@ -32,6 +32,47 @@ function colIndex(letters) {
   return n - 1;
 }
 
+// Parts read at most this large, and lists at most this long: a crafted
+// workbook costs bounded time (Excel itself caps cell formats at 64,000).
+export const MAX_PART = 8 * 1024 * 1024;
+export const MAX_ITEMS = 65000;
+
+// The inner text of the first <tag …>…</tag> (or '' ), by plain search.
+function block(xml, tag) {
+  let i = 0;
+  for (;;) {
+    i = xml.indexOf(`<${tag}`, i);
+    if (i === -1) return '';
+    const ch = xml.charAt(i + tag.length + 1);
+    if (ch === '>' || ch === ' ' || ch === '/' || ch === '\n' || ch === '\t' || ch === '\r') break;
+    i += tag.length + 1;
+  }
+  const gt = xml.indexOf('>', i);
+  if (gt === -1 || xml.charAt(gt - 1) === '/') return '';
+  const end = xml.indexOf(`</${tag}>`, gt);
+  return end === -1 ? '' : xml.slice(gt + 1, end);
+}
+// Each <tag …/> or <tag …>…</tag> in `inner`, in one forward pass (no
+// backtracking regex), at most MAX_ITEMS.
+function items(inner, tag) {
+  const out = [];
+  let i = 0;
+  while (out.length < MAX_ITEMS) {
+    i = inner.indexOf(`<${tag}`, i);
+    if (i === -1) break;
+    const ch = inner.charAt(i + tag.length + 1);
+    if (!(ch === '>' || ch === ' ' || ch === '/' || ch === '\n' || ch === '\t' || ch === '\r')) { i += tag.length + 1; continue; }
+    const gt = inner.indexOf('>', i);
+    if (gt === -1) break;
+    if (inner.charAt(gt - 1) === '/') { out.push(inner.slice(i, gt + 1)); i = gt + 1; continue; }
+    const end = inner.indexOf(`</${tag}>`, gt);
+    if (end === -1) break;
+    out.push(inner.slice(i, end + tag.length + 3));
+    i = end + tag.length + 3;
+  }
+  return out;
+}
+
 function entry(cfb, path) {
   for (let i = 0; i < cfb.FullPaths.length; i++) if (cfb.FullPaths[i].replace(/^Root Entry\//, '').replace(/^\//, '') === path) return cfb.FileIndex[i];
   return null;
@@ -54,12 +95,10 @@ export function styleXlsx(XLSX, bytes, sheets) {
   const stylesEntry = entry(cfb, 'xl/styles.xml');
   if (!stylesEntry) return bytes;
   let styles = dec(stylesEntry.content);
-  const block = (tag) => { const m = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`).exec(styles); return m ? m[1] : ''; };
-  const items = (inner, tag) => inner.match(new RegExp(`<${tag}\\b[^>]*?(?:/>|>[\\s\\S]*?</${tag}>)`, 'g')) || [];
-  const fonts = items(block('fonts'), 'font');
-  const fills = items(block('fills'), 'fill');
-  const borders = items(block('borders'), 'border');
-  const xfs = items(block('cellXfs'), 'xf');
+  const fonts = items(block(styles, 'fonts'), 'font');
+  const fills = items(block(styles, 'fills'), 'fill');
+  const borders = items(block(styles, 'borders'), 'border');
+  const xfs = items(block(styles, 'cellXfs'), 'xf');
   const fontAt = new Map(), fillAt = new Map(), borderAt = new Map(), xfAt = new Map();
   const font = (f) => {
     const key = `${f.b ? 'b' : ''}${f.i ? 'i' : ''}${f.s ? 's' : ''}:${f.color || ''}`;
@@ -116,7 +155,9 @@ export function styleXlsx(XLSX, bytes, sheets) {
     se.content = enc(xml);
   });
   const put = (tag, list) => {
-    styles = styles.replace(new RegExp(`<${tag}[^>]*>[\\s\\S]*?</${tag}>`), `<${tag} count="${list.length}">${list.join('')}</${tag}>`);
+    const i = styles.indexOf(`<${tag}`), end = styles.indexOf(`</${tag}>`, i);
+    if (i === -1 || end === -1) return;
+    styles = `${styles.slice(0, i)}<${tag} count="${list.length}">${list.join('')}</${tag}>${styles.slice(end + tag.length + 3)}`;
   };
   put('fonts', fonts); put('fills', fills); put('borders', borders); put('cellXfs', xfs);
   stylesEntry.content = enc(styles);
@@ -163,10 +204,10 @@ function attrsOf(tag) {
 }
 // The theme's colours in Excel's index order (lt1, dk1, lt2, dk2, accents…).
 function themeColors(xml) {
-  const scheme = /<a:clrScheme[^>]*>([\s\S]*?)<\/a:clrScheme>/.exec(xml || '');
+  const scheme = block(xml || '', 'a:clrScheme');
   if (!scheme) return [];
   const list = [];
-  scheme[1].replace(/<a:(\w+)>\s*<a:(?:srgbClr val|sysClr[^>]*lastClr)="([0-9A-Fa-f]{6})"/g, (m, name, hex) => { list.push(hex); return m; });
+  scheme.replace(/<a:(\w+)>\s*<a:(?:srgbClr val|sysClr[^>]*lastClr)="([0-9A-Fa-f]{6})"/g, (m, name, hex) => { list.push(hex); return m; });
   if (list.length >= 4) { const [dk1, lt1, dk2, lt2] = list; list[0] = lt1; list[1] = dk1; list[2] = lt2; list[3] = dk2; }
   return list;
 }
@@ -181,33 +222,33 @@ function colorOf(tag, theme) {
 // From a workbook read with { bookFiles: true }: Map(sheet name → Map('A1' →
 // format)), only cells with a style worth keeping. Empty when the workbook
 // cannot be read this way.
-export function readXlsxStyles(XLSX, wb) {
+export function readXlsxStyles(XLSX, wb, { maxRows = Infinity } = {}) {
   const out = new Map();
-  const file = (path) => {
+  // A part over MAX_PART is not read (styles.xml of a real workbook is
+  // kilobytes); a worksheet's own XML is read only up to its row limit.
+  const file = (path, cap = MAX_PART) => {
     const f = wb.files && (wb.files[path] || wb.files[`/${path}`]);
-    if (!f || !f.content) return null;
+    if (!f || !f.content || f.content.length > cap) return null;
     return dec(f.content instanceof Uint8Array ? f.content : new Uint8Array(f.content));
   };
   try {
     const book = file('xl/workbook.xml'), rels = file('xl/_rels/workbook.xml.rels'), styles = file('xl/styles.xml');
     if (!book || !rels || !styles) return out;
     const theme = themeColors(file('xl/theme/theme1.xml'));
-    const block = (tag) => { const m = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`).exec(styles); return m ? m[1] : ''; };
-    const items = (inner, tag) => inner.match(new RegExp(`<${tag}\\b[^>]*?(?:/>|>[\\s\\S]*?</${tag}>)`, 'g')) || [];
-    const fonts = items(block('fonts'), 'font').map((x) => {
+    const fonts = items(block(styles, 'fonts'), 'font').map((x) => {
       const on = (t) => new RegExp(`<${t}(?:\\s+val="(?:1|true)")?\\s*/>`).test(x);
       const rgb = colorOf((/<color\b[^>]*\/>/.exec(x) || [])[0], theme);
       return { b: on('b'), i: on('i'), s: on('strike'), color: nearestColor(rgb, 'color') };
     });
-    const fills = items(block('fills'), 'fill').map((x) => {
+    const fills = items(block(styles, 'fills'), 'fill').map((x) => {
       if (!/patternType="solid"/.test(x)) return '';
       return nearestColor(colorOf((/<fgColor\b[^>]*\/>/.exec(x) || [])[0], theme), 'fill');
     });
-    const borders = items(block('borders'), 'border').map((x) => {
+    const borders = items(block(styles, 'borders'), 'border').map((x) => {
       const has = (side) => new RegExp(`<${side}\\s+style="(?!none)[^"]+"`).test(x);
       return EDGES.filter((e) => has({ t: 'top', r: 'right', b: 'bottom', l: 'left' }[e])).join(' ');
     });
-    const xfs = items(block('cellXfs'), 'xf').map((x) => {
+    const xfs = items(block(styles, 'cellXfs'), 'xf').map((x) => {
       const a = attrsOf(x.slice(0, x.indexOf('>') + 1));
       const al = attrsOf((/<alignment\b[^>]*>/.exec(x) || [''])[0]);
       const fo = fonts[Number(a.fontId) || 0] || {};
@@ -226,10 +267,19 @@ export function readXlsxStyles(XLSX, wb) {
     book.replace(/<sheet\b[^>]*>/g, (tag) => {
       const a = attrsOf(tag);
       const target = targets[a['r:id']];
-      const xml = target && file(`xl/${target}`);
+      // The worksheet part SheetJS already read (its size is the import's
+      // own limit); scanned once, cell tags only, up to the row limit.
+      const xml = target && file(`xl/${target}`, Infinity);
       if (!xml) return tag;
       const cells = new Map();
-      xml.replace(/<c r="([A-Z]+\d+)"[^>]*?\ss="(\d+)"/g, (m, ref, s) => { const f = xfs[Number(s)]; if (f) cells.set(ref, f); return m; });
+      const re = /<c r="([A-Z]{1,3})(\d{1,7})"([^>]*)>/g;
+      let m;
+      while ((m = re.exec(xml))) {
+        if (Number(m[2]) > maxRows) break;
+        const sm = /\ss="(\d{1,5})"/.exec(m[3]);
+        const f = sm && xfs[Number(sm[1])];
+        if (f) cells.set(m[1] + m[2], f);
+      }
       if (cells.size) out.set(a.name.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'"), cells);
       return tag;
     });

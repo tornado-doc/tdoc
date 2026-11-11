@@ -9,7 +9,7 @@
 
 import { inferType } from './sheet-query.mjs';
 import { sheetDocumentHtml, parseDelimited, detectDelimiter } from './sheet-markup.mjs';
-import { fromExcelFormat, isNumeric, formatAttrString, mergeFormat } from './sheet-format.mjs';
+import { fromExcelFormat, isNumeric, formatAttrString, mergeFormat, nonOverlapping, MAX_MERGES } from './sheet-format.mjs';
 import { readXlsxStyles, colName } from './sheet-xlsx-style.mjs';
 
 export { parseDelimited, detectDelimiter };
@@ -140,7 +140,7 @@ export function sheetsFromWorkbook(XLSX, wb, { warnings = [] } = {}) {
   const sheets = [];
   // Cell styles (bold, colours, fills, borders, alignment): read from the
   // workbook's own XML, as SheetJS keeps only fills (shared/sheet-xlsx-style.mjs).
-  const styles = wb.files ? readXlsxStyles(XLSX, wb) : new Map();
+  const styles = wb.files ? readXlsxStyles(XLSX, wb, { maxRows: LIMITS.rows + 2 }) : new Map();
   for (const name of names) {
     const ws = wb.Sheets[name];
     if (!ws || !ws['!ref']) continue;
@@ -151,14 +151,23 @@ export function sheetsFromWorkbook(XLSX, wb, { warnings = [] } = {}) {
     const numFormats = numberFormats(XLSX, ws, range);
     // Blank rows are left out, as before, except inside a merged range; each
     // row kept remembers its row in the worksheet, for styles and merges.
-    const merges = (ws['!merges'] || []).filter((m) => m.e.r > m.s.r || m.e.c > m.s.c);
-    const inMerge = new Set();
-    merges.forEach((m) => { for (let r = m.s.r; r <= m.e.r; r++) inMerge.add(r); });
+    // Each merge is clipped to the worksheet's range before anything else
+    // walks it, and at most MAX_MERGES of them are read.
+    const merges = clipMerges(ws['!merges'], range);
+    // Rows inside a merge, as sorted, joined intervals (never row by row).
+    const spans = [];
+    merges.slice().sort((a, b) => a.s.r - b.s.r).forEach((m) => {
+      const last = spans[spans.length - 1];
+      if (last && m.s.r <= last[1] + 1) last[1] = Math.max(last[1], m.e.r); else spans.push([m.s.r, m.e.r]);
+    });
     const all = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true });
     const grid = [], at = [];
+    let sp = 0;
     all.forEach((row, k) => {
       const r = range.s.r + k;
-      if (!inMerge.has(r) && (!Array.isArray(row) || row.every((v) => String(v == null ? '' : v) === ''))) return;
+      while (sp < spans.length && spans[sp][1] < r) sp++;
+      const inMerge = sp < spans.length && spans[sp][0] <= r;
+      if (!inMerge && (!Array.isArray(row) || row.every((v) => String(v == null ? '' : v) === ''))) return;
       grid.push(row); at.push(r);
     });
     const sheet = sheetFromGrid(name, grid, { warnings });
@@ -167,6 +176,24 @@ export function sheetsFromWorkbook(XLSX, wb, { warnings = [] } = {}) {
     sheets.push(sheet);
   }
   return sheets;
+}
+
+// A worksheet's merges, each clipped to its range (the rows SheetJS read),
+// spanning more than one cell, at most MAX_MERGES: the only form any later
+// step walks.
+function clipMerges(list, range) {
+  const out = [];
+  if (!Array.isArray(list)) return out;
+  for (const m of list) {
+    if (out.length >= MAX_MERGES) break;
+    if (!m || !m.s || !m.e) continue;
+    const s = { r: Math.max(range.s.r, m.s.r | 0), c: Math.max(range.s.c, m.s.c | 0) };
+    const e = { r: Math.min(range.e.r, m.e.r | 0), c: Math.min(range.e.c, m.e.c | 0) };
+    if (s.r !== (m.s.r | 0) || s.c !== (m.s.c | 0)) continue; // its top-left cell is outside
+    if (e.r < s.r || e.c < s.c || (e.r === s.r && e.c === s.c)) continue;
+    out.push({ s, e });
+  }
+  return out;
 }
 
 // Number formats tdoc shows (shared/sheet-format.mjs): such a cell keeps its
@@ -209,21 +236,18 @@ function addFormats(sheet, at, c0, styled, nums, merges) {
     });
   }
   if (merges.length) {
-    const rowOf = new Map();
-    bodyAt.forEach((r, i) => rowOf.set(r, i));
-    sheet.merges = [];
-    const taken = new Set();
-    merges.forEach((m) => {
-      const r = rowOf.get(m.s.r), c = m.s.c - c0;
-      if (r == null || c < 0 || c >= width) return;
-      let r1 = r;
-      for (let x = m.s.r; x <= m.e.r; x++) if (rowOf.has(x)) r1 = rowOf.get(x);
-      const c1 = Math.min(width - 1, m.e.c - c0);
-      if (r1 === r && c1 === c) return;
-      for (let y = r; y <= r1; y++) for (let x = c; x <= c1; x++) if (taken.has(y * 256 + x)) return;
-      for (let y = r; y <= r1; y++) for (let x = c; x <= c1; x++) taken.add(y * 256 + x);
-      sheet.merges.push({ r, c, rs: r1 - r + 1, cs: c1 - c + 1 });
-    });
+    // Rows kept in order: the body row of a worksheet row by binary search.
+    const firstAtOrAfter = (r) => { let lo = 0, hi = bodyAt.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (bodyAt[mid] < r) lo = mid + 1; else hi = mid; } return lo; };
+    const list = [];
+    for (const m of merges) {
+      const r = firstAtOrAfter(m.s.r);
+      if (r >= bodyAt.length || bodyAt[r] !== m.s.r) continue; // its top row is the header or was not kept
+      const r1 = firstAtOrAfter(m.e.r + 1) - 1;
+      const c = m.s.c - c0, c1 = Math.min(width - 1, m.e.c - c0);
+      if (c < 0 || c >= width || (r1 === r && c1 === c)) continue;
+      list.push({ r, c, rs: r1 - r + 1, cs: c1 - c + 1 });
+    }
+    sheet.merges = nonOverlapping(list);
   }
 }
 

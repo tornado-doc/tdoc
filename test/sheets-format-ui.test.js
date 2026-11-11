@@ -83,7 +83,7 @@ async function shot(page, name) {
   };
   writeDoc('fmt-read', formatted());
   writeDoc('fmt-phone', formatted());
-  for (const slug of ['fmt-edit', 'fmt-merge']) writeDoc(slug, M.sheetDocumentHtml({ title: 'Budget 2026', sheets: [{ name: 'Budget', columns, rows: plainRows(24) }] }));
+  for (const slug of ['fmt-edit', 'fmt-merge', 'fmt-one']) writeDoc(slug, M.sheetDocumentHtml({ title: 'Budget 2026', sheets: [{ name: 'Budget', columns, rows: plainRows(24) }] }));
   // A small formatted sheet in a prose doc: the flat view (and phone cards).
   const small = plainRows(6);
   small[0].attrs = [F.formatAttrString({ b: true, fill: 'yellow' }), '', F.formatAttrString({ num: 'currency:USD:0' })];
@@ -289,6 +289,42 @@ async function shot(page, name) {
       assert(/data-num="currency:USD:1"/.test(html) && /data-num="date:medium"/.test(html) && /data-align="center"/.test(html), 'saved: number formats, align');
       assert(!/style="[^"]/.test(html.split("<table")[1].split("</table>")[0]), "no inline style in the sheet");
       assert(!/fx-|ts-fbar/.test(html), 'no viewer classes or toolbar saved');
+    });
+
+    await test('one formatting row: a sheet-only doc in Edit shows no prose formatting buttons; the editor bar keeps Undo, Redo, Save', async () => {
+      const frame = await open('fmt-one');
+      await editMode(frame);
+      const bar = await page.evaluate(() => {
+        const t = document.querySelector('.tdoc-editor-toolbar');
+        const has = (name) => !!t.querySelector(`button[aria-label="${name}"]`);
+        return { prose: ['Bold', 'Italic', 'Heading 1', 'Heading 2', 'Heading 3', 'Bullet list', 'Numbered list', 'Quote', 'Inline code', 'Add link', 'Insert diagram'].filter(has), undo: has('Undo'), redo: has('Redo'), save: has('Save'), discard: has('Discard draft') };
+      });
+      assert(!bar.prose.length, `no prose tools on a sheet doc: ${bar.prose.join(', ')}`);
+      assert(bar.undo && bar.redo && bar.save && bar.discard, `the editor bar keeps its commit tools: ${JSON.stringify(bar)}`);
+      assert(await frame.evaluate(() => !!document.querySelector('.ts-fbar:not([hidden]):not(.fx-float)')), 'the sheet row is shown, in place');
+      await shot(page, 'after-edit-sheet-only-one-row-desktop');
+    });
+
+    await test('a sheet in a prose doc: the prose row stays; the sheet row floats in only while a cell is selected', async () => {
+      const frame = await open('fmt-flat', { wait: '.ts-flat table' });
+      await chooseMode(page, 'Edit');
+      await frameMode(frame, 'edit');
+      await frameLoc().locator('.ts-row').first().waitFor();
+      assert(await page.locator('.tdoc-editor-toolbar button[aria-label="Heading 1"]').count() === 1, 'prose tools stay in a prose doc');
+      const shown = () => frame.evaluate(() => !!document.querySelector('.ts-fbar:not([hidden])'));
+      assert(!(await shown()), 'no sheet row before a cell is selected');
+      const top0 = await frame.evaluate(() => document.querySelector('.ts-grid').getBoundingClientRect().top);
+      await frameLoc().locator(cellSel(1, 0)).click();
+      await frame.waitForFunction(() => !!document.querySelector('.ts-fbar.fx-float:not([hidden])'));
+      const top1 = await frame.evaluate(() => document.querySelector('.ts-grid').getBoundingClientRect().top);
+      assert(Math.abs(top1 - top0) < 1, `the grid does not move: ${top0} → ${top1}`);
+      await shot(page, 'after-edit-embedded-cell-selected-desktop');
+      await tool('Bold').click();
+      await frame.waitForFunction(() => document.querySelector('tr[data-row="r2"] td').getAttribute('data-fmt') === 'b');
+      // Into the prose: the sheet row goes.
+      await frameLoc().locator('p', { hasText: 'One.' }).click();
+      await frame.waitForFunction(() => !document.querySelector('.ts-fbar:not([hidden])'));
+      await page.getByRole('button', { name: /Discard/ }).click().catch(() => {});
     });
 
     await test('merge all / horizontally / vertically, unmerge; Save writes colspan and rowspan', async () => {
