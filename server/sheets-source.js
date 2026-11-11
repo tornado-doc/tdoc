@@ -1,10 +1,11 @@
 'use strict';
 // The sheets viewer as served at /sheets-viewer.js: the shared pure modules
 // (shared/sheet-query.mjs, shared/sheet-markup.mjs, shared/doc-type.mjs -- the
-// sheet-only rule My docs labels by -- shared/sheet-format.mjs and
-// shared/sheet-outline.mjs) each wrapped as a plain object (their `export`s
-// become its properties), then the format UI (server/sheets-format-ui.js),
-// the structure UI (server/sheets-structure.js) and the in-frame viewer
+// sheet-only rule My docs labels by -- shared/sheet-format.mjs,
+// shared/sheet-outline.mjs and shared/sheet-rules.mjs) each wrapped as a
+// plain object (their `export`s become its properties), then the format UI
+// (server/sheets-format-ui.js), the structure UI (server/sheets-structure.js),
+// the rules panels (server/sheets-rules-ui.js) and the in-frame viewer
 // (server/sheets-viewer.js), all in one function scope. The probe
 // carries only server/sheets-loader.js, which fetches this file when a doc
 // actually holds a sheet, so docs without one pay nothing for it.
@@ -33,6 +34,8 @@ function sheetsViewerSource() {
     + fs.readFileSync(path.join(__dirname, 'sheets-format-ui.js'), 'utf8')
     + moduleObject('SheetOutline', 'shared/sheet-outline.mjs')
     + fs.readFileSync(path.join(__dirname, 'sheets-structure.js'), 'utf8')
+    + moduleObject('SheetRules', 'shared/sheet-rules.mjs')
+    + fs.readFileSync(path.join(__dirname, 'sheets-rules-ui.js'), 'utf8')
     + fs.readFileSync(path.join(__dirname, 'sheets-viewer.js'), 'utf8')
     + '\n})();\n';
 }

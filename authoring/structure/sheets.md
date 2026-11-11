@@ -114,6 +114,22 @@ header row is the last row of `<thead>`; each `<th>` declares its column type.
 - Plain text in cells: no nested tables, no markup except `<a>` in a `url`
   column and `<span data-tag>` in a `tags` column. Formatting is attributes
   on the `<td>` (below), never `style` or `<b>`.
+- **Conditional formatting and dropdowns.** Rules live on the `<table>` as
+  JSON, never as CSS. `data-format-rules` fills cells by value (the first
+  rule that matches wins); `data-validation` gives a column a dropdown of
+  values, shown as chips (a value outside the list is marked while editing).
+  Columns are named by `data-key`; a fill is a palette name, drawn as its
+  soft tint. A rule's fill wins over the cell's own `data-fill`.
+
+  ```html
+  <table data-tdoc-sheet data-name="Tasks"
+    data-format-rules='[{"cols":["c2"],"when":"gt","value":"10","fill":"red"},
+                        {"cols":["c4"],"when":"textContains","value":"blocked","fill":"orange"}]'
+    data-validation='[{"cols":["c4"],"kind":"list","values":["open","done","blocked"]}]'>
+  ```
+
+  `when` is `gt`, `lt`, `eq` (a number, or a date in a date column),
+  `textContains` or `empty`. Anything else is ignored.
 - Write prose around the sheet as usual: a heading, a line on what the sheet
   is and where it came from. Filters, sort and search are the reader's view
   and are never written into the doc.

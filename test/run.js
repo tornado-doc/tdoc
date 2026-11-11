@@ -25,6 +25,7 @@ const OFFLINE = [
   'feedback-team-agents.test.js', // the widget's @ lists team agents (answer only) only through tdoc's own-origin token door
   'version-diff.test.js', // bounded block matching and Unicode edits
   'sheets.test.js',            // sheets: view query (search/filter/sort/URL), CSV parsing + type inference, markup round trip
+  'sheet-rules.test.js',       // sheets: find & replace, rule JSON parsing (hostile input dropped), conditional formats, dropdowns, fill series, 10k rows in budget
   'sheet-embed.test.js',      // a sheet embedded in a page by reference: the reference resolves only to /d/<slug>, data is text with the view applied, the SHEET's access for the reader (owner/link/sign-in/private/team/guest/anonymous), no title on refusal, linear on hostile markup
   'sheets-outline.test.js',    // sheets structure: groups (nested, 3 levels), collapsed default vs a reader's view, hidden rows, freeze, moves, query re-key, markup round trip, 10k rows
   'sheets-size.test.js',       // sheets: 8 MB sheet cap on every write path (not for prose or a token sheet), history row-count summary, sheet anchors never lost to the aid reconcile
@@ -244,6 +245,7 @@ const BROWSER = [
   'sheets-structure-ui.test.js', // group/collapse/expand rows + columns, hide/unhide, drag + Alt-arrow reorder, freeze (menu, grip, reader's own), tab rename/reorder/duplicate/colour/delete+undo, comments keep cells, flat view + phone cards summary rows, 10k rows grouped; desktop + phone
   'sheets-basics-ui.test.js', // sheet modes (Read edits nothing, a Comment click comments on a cell, Edit), column/row resize (drag, double-click fit, touch, frozen column) through the editor's Save, a reader's own layout, Wrap/Clip + align, line breaks (Alt/Ctrl+Enter, multi-line paste, <br>), fill down, ⌘-arrow edges, 10k rows wrapped; desktop + phone
   'sheets-format-ui.test.js', // cell formatting: Read draws formats/number formats/merges (grid, flat, phone) with no toolbar; Edit's one-row toolbar (bold, italic, colours, fills, number formats, align, clear, merge/unmerge) through Undo and Save; hostile attributes inert; 10k rows in budget
+  'sheets-rules-ui.test.js', // sheets: Find and replace (⌘⇧H, match case, entire cell, every tab, one Undo), conditional formatting + dropdowns side panel (JSON on the table, Save), dropdown chips and marks, the fill handle (number/date series, Ctrl copies, under a sort), Read stays clean, phone bottom sheets, 10k rows with rules
   'doc-types-top-bar-ui.test.js', // doc, sheet and deck: the same top bar, ⋯ menu (Read / Comment / Edit) and editor bar; a sheet full screen or on its own page keeps them; desktop + phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization

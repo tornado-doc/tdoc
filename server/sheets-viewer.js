@@ -414,6 +414,8 @@
     });
     readLayout(tab);
     S.read(tab); // [structure]
+    // [sheet-rules] the table's conditional formats and validation, evaluated once per read
+    if (rulesExt) rulesExt.readTab(tab);
     return tab;
   }
   // ---- layout: widths, heights, wrap, alignment ------------------------------
@@ -579,6 +581,7 @@
     ui.prev = iconButton(ICON.up, 'Previous match', function () { stepMatch(-1); });
     ui.next = iconButton(ICON.down, 'Next match', function () { stepMatch(1); });
     search.appendChild(ui.search); search.appendChild(ui.hits); search.appendChild(ui.prev); search.appendChild(ui.next);
+    if (rulesExt) rulesExt.mountSearch(search); // [sheet-rules] Find and replace
     ui.bar.appendChild(search);
     ui.chips = h('div', 'ts-chips'); ui.bar.appendChild(ui.chips);
     ui.searchBox = search;
@@ -720,6 +723,7 @@
     ui.back.hidden = !expand.alone;
     ui.xtitle.textContent = expand.alone ? docTitle() + ' · ' + tab.name : docTitle();
     if (expand.on) linkHrefs();
+    if (rulesExt) rulesExt.bar(); // [sheet-rules]
     ui.note.hidden = !(m2 === 'edit');
     ui.note.textContent = canEdit() ? 'Type or double-click to edit · Alt+Enter for a new line · paste a range from Excel or Sheets' : m2 === 'edit' ? 'Editing sheets in the browser is not available yet' : '';
   }
@@ -850,6 +854,7 @@
     if (tab.anyWrap && measureRows(tab, first, last)) return true;
     placePill();
     placeOffscreen();
+    if (rulesExt) rulesExt.painted(); // [sheet-rules] the fill handle
     return true;
   }
   // View rows first..last as markup, with the columns cols[0]..cols[1] (and
@@ -941,8 +946,13 @@
       if (fx && fx.text != null) text = fx.text; // [format] the value in its number format
       inner = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + mark(text, needle) + '</a>' : '<span class="ts-t">' + mark(text, needle) + '</span>';
     }
+    // [sheet-rules] a conditional format, a dropdown chip, a mark on a value outside its list
+    var rx = rulesExt && rulesExt.cell(tab, r, c, needle, inner), xs = '';
+    if (rx) { if (rx.cls) cls += rx.cls; if (rx.inner != null) inner = rx.inner; if (rx.style) xs = ';' + rx.style; }
+    // A conditional format's fill wins over the cell's own fill ([format]), as in Google Sheets.
+    if (xs) cls = cls.replace(/ fx-fill| fx-f-[a-z]+/g, '');
     var w = fx ? fx.w : tab.widths[c];
-    return '<div class="' + cls + '" role="gridcell" data-c="' + c + '" style="width:' + w + 'px' + S.frozenLeft(tab, c) + (fx ? fx.style : '') + '"' + (isActive ? ' aria-selected="true"' : '') + ' title="' + esc(col.text[r].slice(0, 300)) + '">' + inner + '</div>';
+    return '<div class="' + cls + '" role="gridcell" data-c="' + c + '" style="width:' + w + 'px' + S.frozenLeft(tab, c) + (fx ? fx.style : '') + xs + '"' + (isActive ? ' aria-selected="true"' : '') + ' title="' + esc(col.text[r].slice(0, 300)) + '">' + inner + '</div>';
   }
   // ---- flat view: a small sheet in a prose doc, read as a table --------------------
   function renderFlat() {
@@ -961,8 +971,11 @@
       else { var href = type === 'url' ? M.safeHref(col.text[r]) : ''; inner = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + mark(col.text[r], needle) + '</a>' : mark(fx.text != null ? fx.text : col.text[r], needle); }
       var cls = (type === 'number' ? ' is-num' : type === 'date' || type === 'checkbox' ? ' is-short' : '') + (needle && col.lower[r].indexOf(needle) !== -1 ? ' is-hit' : '') + (td && commented.has(td) ? ' has-comment' : '') +
         // The grid's line breaks and column alignment read the same here.
-        (type !== 'tags' && type !== 'checkbox' && col.text[r].indexOf('\n') !== -1 ? ' is-ml' : '') + (tab.align && tab.align[c] ? ' al-' + tab.align[c] : '') + fx.cls;
-      return { cls: cls, inner: inner, span: fx.span };
+        (type !== 'tags' && type !== 'checkbox' && col.text[r].indexOf('\n') !== -1 ? ' is-ml' : '') + (tab.align && tab.align[c] ? ' al-' + tab.align[c] : '');
+      // [sheet-rules] conditional formats read the same here, and win over the cell's own fill
+      var fst = rulesExt && rulesExt.flatStyle(tab, r, c);
+      cls += fst ? fx.cls.replace(/ fx-fill| fx-f-[a-z]+/g, '') : fx.cls;
+      return { cls: cls, inner: inner, span: fx.span, style: fst ? ' style="' + fst + '"' : '' };
     };
     if (!n && !S.flatSummary(tab, 0, cards, vis.length)) html = '<p class="ts-flat-empty">' + (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.') + '</p>';
     else if (cards) {
@@ -971,12 +984,12 @@
         if (i === n) break;
         r = tab.order[i];
         var t0 = cell(r, vis[0]);
-        html += '<div class="ts-card" role="listitem"><p class="ts-card-t' + t0.cls + '" data-i="' + i + '" data-c="' + vis[0] + '">' + S.flatToggle(tab, i) + (t0.inner || '&nbsp;') + '</p>';
+        html += '<div class="ts-card" role="listitem"><p class="ts-card-t' + t0.cls + '" data-i="' + i + '" data-c="' + vis[0] + '"' + (t0.style || '') + '>' + S.flatToggle(tab, i) + (t0.inner || '&nbsp;') + '</p>';
         for (v = 1; v < vis.length; v++) {
           c = vis[v];
           var x = cell(r, c);
           if (x.skip || !x.inner) continue;
-          html += '<p class="ts-card-l' + x.cls + '" data-i="' + i + '" data-c="' + c + '"><span class="ts-card-k">' + esc(cols[c].name) + ':</span> ' + x.inner + '</p>';
+          html += '<p class="ts-card-l' + x.cls + '" data-i="' + i + '" data-c="' + c + '"' + x.style + '><span class="ts-card-k">' + esc(cols[c].name) + ':</span> ' + x.inner + '</p>';
         }
         html += '</div>';
       }
@@ -994,7 +1007,7 @@
         if (i === n) break;
         r = tab.order[i];
         html += '<tr>';
-        for (v = 0; v < vis.length; v++) { c = vis[v]; var y = cell(r, c); if (y.skip) continue; html += '<td class="' + y.cls.trim() + '"' + y.span + ' data-i="' + i + '" data-c="' + c + '">' + (v ? '' : S.flatToggle(tab, i)) + y.inner + '</td>'; }
+        for (v = 0; v < vis.length; v++) { c = vis[v]; var y = cell(r, c); if (y.skip) continue; html += '<td class="' + y.cls.trim() + '"' + y.span + ' data-i="' + i + '" data-c="' + c + '"' + y.style + '>' + (v ? '' : S.flatToggle(tab, i)) + y.inner + '</td>'; }
         html += '</tr>';
       }
       html += '</tbody></table>';
@@ -1189,6 +1202,7 @@
       }
     }
     placePill();
+    if (rulesExt) rulesExt.painted(); // [sheet-rules] the fill handle
   }
   function select(i, c, extend) {
     var tab = cur(), n = tab.order.length, cols = tab.widths.length;
@@ -1557,6 +1571,7 @@
       items.push({ label: nc > 1 ? 'Insert ' + nc + ' columns left' : 'Insert column left', onSelect: function () { insertColumn(nc > 1 ? ca : c, nc); } });
       items.push({ label: nc > 1 ? 'Insert ' + nc + ' columns right' : 'Insert column right', onSelect: function () { insertColumn((nc > 1 ? cb : c) + 1, nc); } });
       items.push({ label: 'Delete column', danger: true, disabled: tab.data.columns.length < 2, onSelect: function () { deleteColumn(c); } });
+      if (rulesExt) items = items.concat(rulesExt.menuItems(c)); // [sheet-rules]
     }
     items = items.concat(S.columnItems(tab, c)); // [structure] hide, freeze
     openMenu(anchor, items, col.name + ' column');
@@ -1571,7 +1586,7 @@
       { label: n > 1 ? 'Insert ' + n + ' rows above' : 'Insert row above', onSelect: function () { insertRows(cur().order[ra], n, true); } },
       { label: n > 1 ? 'Insert ' + n + ' rows below' : 'Insert row below', onSelect: function () { insertRows(cur().order[rb], n, false); } },
       { label: n > 1 ? 'Delete ' + n + ' rows' : 'Delete row', danger: true, onSelect: function () { deleteRows(ra, rb); } },
-    ].concat(S.rowItems(cur(), ra, rb)), 'Row menu'); // [structure] hide, group, freeze
+    ].concat(S.rowItems(cur(), ra, rb)).concat(rulesExt ? rulesExt.menuItems(sel.c) : []), 'Row menu'); // [structure] hide, group, freeze; [sheet-rules]
   }
   // [structure] move left / right, and a delete the toast can undo:
   // server/sheets-structure.js
@@ -1710,7 +1725,11 @@
     if (op.tab) op.tab.measured = new Map();
     if (redo) op.redo(); else op.undo();
     to.push(op);
+    // [sheet-rules] a Replace all over every tab touched several
+    if (op.tabs) op.tabs.forEach(function (t) { if (t !== op.tab && book.tabs.indexOf(t) >= 0) readTab(t.table, t); });
     afterChange(op.tab);
+    // The tab on screen was among them (another than the op's own): draw it.
+    if (op.tabs && op.tab !== cur() && op.tabs.indexOf(cur()) >= 0) { runTab(cur()); renderBar(); layout(); renderHead(); renderBody(true); }
   }
   function afterChange(tab, keepSel) {
     var t = book.tabs.indexOf(tab);
@@ -1739,9 +1758,16 @@
   }
   // [{ r, c, value }] → one undoable change.
   function setCells(tab, list, keepRow) {
+    var op = writeCells(tab, list);
+    if (!op) return; // [format] only covered slots: nothing written
+    record(op);
+    afterChange(tab, keepRow);
+  }
+  // The cells written; the undo step returned, not yet recorded.
+  function writeCells(tab, list) {
     var before = [], after = [];
     list = list.filter(function (ch) { return !FX.covered(tab, ch.r, ch.c); }); // [format] a merge's covered slots hold nothing
-    if (!list.length) return;
+    if (!list.length) return null;
     list.forEach(function (ch) {
       var row = tab.data.rows[ch.r];
       tab.measured.delete(row.tr);
@@ -1754,8 +1780,7 @@
     var op = { tab: tab,
       undo: function () { before.slice().reverse().forEach(function (b) { b.td.innerHTML = b.html; while (b.tr.cells.length > b.cells) b.tr.removeChild(b.tr.lastElementChild); }); },
       redo: function () { after.forEach(function (a, k) { var b = before[k]; while (b.tr.cells.length < b.cells || !b.td.isConnected && b.tr.cells.length <= Array.prototype.indexOf.call(b.tr.cells, b.td)) b.tr.appendChild(document.createElement('td')); if (!b.td.isConnected) b.tr.appendChild(b.td); a.td.innerHTML = a.html; }); } };
-    record(op);
-    afterChange(tab, keepRow);
+    return op;
   }
   // Structural changes (rows, columns, types, tabs, pastes) snapshot the
   // table; the undo puts the snapshot back.
@@ -1779,6 +1804,8 @@
     ensureVisible(i, c);
     var cell = cellAt(i, c);
     if (!cell) return;
+    // [sheet-rules] a dropdown cell opens its list
+    if (rulesExt && rulesExt.startEdit(tab, r, c, cell, initial)) return;
     if (type === 'checkbox') { setCells(tab, [{ r: r, c: c, value: tab.index.cols[c].num[r] === 1 ? '' : Q.CHECK_MARK }], r); return; }
     if (type === 'tags') { openTagPicker(tab, r, c, cell, initial); return; }
     // A text box that holds line breaks: Alt/Option+Enter or Ctrl+Enter puts
@@ -2201,6 +2228,8 @@
     var sk = S.onKey(e); // [structure] Alt+Shift+→/← group / ungroup rows
     if (sk === 'skip') return;
     if (sk) { e.preventDefault(); e.stopPropagation(); return; }
+    // [sheet-rules] Find and replace (⌘⇧H, Ctrl+H)
+    if (rulesExt && rulesExt.key(e)) { e.preventDefault(); e.stopPropagation(); return; }
     var tab = cur(), k = e.key, mod = e.metaKey || e.ctrlKey;
     var page = Math.max(1, rowAtY(tab, ui.grid.scrollTop + ui.grid.clientHeight - HEAD_H) - rowAtY(tab, ui.grid.scrollTop) - 1);
     var last = tab.order.length - 1, lastC = tab.widths.length - 1;
@@ -2316,7 +2345,7 @@
       if (editor) commitEdit();
       if (ticking) return;
       ticking = true;
-      requestAnimationFrame(function () { ticking = false; renderBody(); placeOffscreen(); });
+      requestAnimationFrame(function () { ticking = false; renderBody(); placeOffscreen(); if (rulesExt) rulesExt.painted(); });
       clearTimeout(scrollSettle); scrollSettle = setTimeout(relayout, 200);
     }, { passive: true });
     ui.foot.addEventListener('click', function (e) {
@@ -2429,6 +2458,8 @@
       }
       var wasActive = sel.r === at.i && sel.c === at.c && sel.r === sel.r2 && sel.c === sel.c2;
       select(at.i, at.c, e.shiftKey);
+      // [sheet-rules] a dropdown chip opens its list
+      if (canEdit() && !e.shiftKey && rulesExt && rulesExt.press(e, at)) { e.preventDefault(); return; }
       cellPress = e.shiftKey ? null : { i: at.i, c: at.c };
       ui.grid.focus({ preventScroll: true });
       if (e.pointerType === 'mouse') drag = { i: at.i, c: at.c };
@@ -2709,6 +2740,18 @@
     // [structure] the active tab's outline, hidden and frozen state, as shown.
     structure: function () { return book ? S.describe(cur()) : null; },
   };
+  // [sheet-rules] find & replace, conditional formatting, data validation and
+  // the fill handle (server/sheets-rules-ui.js, shared/sheet-rules.mjs).
+  var rulesExt = typeof SheetRulesUI !== 'undefined' ? SheetRulesUI.install({
+    Q: Q, M: M, R: SheetRules, h: h, provider: provider, esc: esc, mark: mark, ICON: ICON, fmt: fmt, HEAD_H: HEAD_H, NARROW: NARROW,
+    book: function () { return book; }, cur: cur, ui: ui, sel: function () { return sel; }, canEdit: canEdit, mode: mode,
+    select: select, setCells: setCells, writeCells: writeCells, record: record, afterChange: afterChange, readTab: readTab,
+    renderAll: renderAll, renderHead: renderHead, renderBody: renderBody, saveView: saveView,
+    openPop: openPop, closePop: closePop, pop: function () { return pop; }, openMenu: openMenu, toast: toast, iconButton: iconButton, tagStyle: tagStyle,
+    ensureKeys: function (tab) { ensureKeys(headRow(tab)); },
+    refLabel: refLabel, colKey: colKey, rowTop: rowTop, rowH: rowH, numW: numW, cellFromEvent: cellFromEvent,
+    S: S, FX: FX, // [structure] hidden rows and columns, groups, freeze; [format] merges
+  }) : null;
   // Mounted: the tables are hidden by the viewer's own style now, so the
   // frame's 200-row hold (#tdoc-sheets-pending) is no longer needed.
   if (mount()) { window.__tdocSheets.mounted = true; relayout(); }
