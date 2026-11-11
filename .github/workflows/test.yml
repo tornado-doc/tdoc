@@ -136,6 +136,10 @@ jobs:
       - run: npm run build:sw
       - name: Preview renderer in workerd
         run: npm run test:workerd
+      # Download output read back with marked and SheetJS; the offline job has no
+      # node_modules, so these checks run here after npm ci.
+      - name: Download output through real parsers
+        run: node test/doc-download-deps.test.js
       - name: Committed runtime matches shell/src
         run: |
           git add -N server/runtime

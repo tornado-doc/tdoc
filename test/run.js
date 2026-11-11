@@ -290,7 +290,10 @@ const EXTENDED_BROWSER = [
 ];
 
 const INTEGRATION = ['onboarding.test.js', 'publish.test.js'];
-const RUNTIME = ['preview-workerd.test.js']; // needs npm ci; real workerd WASM and font modules
+const RUNTIME = [
+  'preview-workerd.test.js', // needs npm ci; real workerd WASM and font modules
+  'doc-download-deps.test.js', // needs npm ci; download output read back with marked and SheetJS (CI: shell runtime job)
+];
 const runAll = process.argv.includes('--all');
 const runBrowser = process.argv.includes('--browser');
 const allFiles = runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
