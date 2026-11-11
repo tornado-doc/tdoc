@@ -30,6 +30,11 @@ export const LIMITS = Object.freeze({
   textChars: 32767,
   rows: 1048576,
   cols: 16384,
+  // Range references in the whole workbook's dependency graph (a formula
+  // over the limit is #BUSY!), and how many columns a range may span before
+  // it is kept as one interval instead of one entry per column.
+  rangeRefs: 1000000,
+  narrowCols: 8,
 });
 
 // ---- errors ------------------------------------------------------------------
@@ -307,6 +312,19 @@ export function functionNames(formula) {
   try { toks = tokenize(String(formula).replace(/^=/, '')); } catch { return null; }
   return toks.filter((t) => t.k === 'func').map((t) => t.v);
 }
+// The tab names a formula refers to (as written), or null when it does not
+// parse.
+export function referencedSheets(formula) {
+  let toks;
+  try { toks = tokenize(String(formula).replace(/^=/, '')); } catch { return null; }
+  return toks.filter((t) => t.k === 'ref' && t.ref.sheet != null).map((t) => t.ref.sheet);
+}
+// A sheet name no workbook tab can have: Excel's external and path
+// references ([1]Sheet, 'C:\dir\[book.xlsx]Sheet') use these.
+export function isExternalSheetName(name) {
+  return /[[\]\\/:?*]/.test(String(name));
+}
+
 // The functions a formula names that this engine does not have.
 export function unsupportedFunctions(formula) {
   const names = functionNames(formula);
@@ -590,8 +608,16 @@ function compare(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-// * any run, ? one character, ~ escapes the next. Linear-time matching
-// (no regex built from what the sheet holds).
+// The work meter of the recalculation running now: text work (wildcards,
+// comparisons) is charged by its length, so a long string costs what it
+// costs and the budget holds. A no-op outside a recalculation.
+let charge = () => {};
+// Criteria and lookup patterns are at most this long, as in Excel.
+const MAX_PATTERN = 255;
+
+// * any run, ? one character, ~ escapes the next. Matching in
+// O(pattern × text) steps at worst, each charged (no regex built from what
+// the sheet holds).
 function wildcardMatch(pattern, text) {
   const p = [], lit = [];
   for (let i = 0; i < pattern.length; i++) {
@@ -600,8 +626,10 @@ function wildcardMatch(pattern, text) {
     else { p.push(ch === '*' || ch === '?' ? ch : ch.toLowerCase()); lit.push(ch !== '*' && ch !== '?'); }
   }
   const t = text.toLowerCase();
-  let pi = 0, ti = 0, star = -1, mark = 0;
+  charge(1 + (t.length >> 4));
+  let pi = 0, ti = 0, star = -1, mark = 0, steps = 0;
   while (ti < t.length) {
+    if (++steps === 256) { charge(256); steps = 0; }
     if (pi < p.length && (lit[pi] ? p[pi] === t[ti] : p[pi] === '?')) { pi++; ti++; }
     else if (pi < p.length && !lit[pi] && p[pi] === '*') { star = pi++; mark = ti; }
     else if (star !== -1) { pi = star + 1; ti = ++mark; }
@@ -630,7 +658,7 @@ function criterion(c) {
   if (num !== null) {
     return (v) => {
       let x = typeof v === 'number' ? v : null;
-      if (x === null && typeof v === 'string' && (op === '=' || op === '<>')) x = textToNumber(v);
+      if (x === null && typeof v === 'string' && (op === '=' || op === '<>')) { charge(1 + (v.length >> 4)); x = textToNumber(v); }
       if (op === '<>') return x === null || x !== num;
       if (x === null) return false;
       return op === '=' ? x === num : op === '<' ? x < num : op === '>' ? x > num : op === '<=' ? x <= num : x >= num;
@@ -644,11 +672,12 @@ function criterion(c) {
   if (op === '=' || op === '<>') {
     const wild = hasWild(rest);
     const low = rest.toLowerCase();
-    const eq = (v) => typeof v === 'string' && (wild ? wildcardMatch(rest, v) : v.toLowerCase() === low);
+    const eq = (v) => typeof v === 'string' && (wild ? wildcardMatch(rest, v) : (charge(1 + (v.length >> 4)), v.toLowerCase() === low));
     return op === '=' ? eq : (v) => !eq(v);
   }
   return (v) => {
     if (typeof v !== 'string') return false;
+    charge(1 + (v.length >> 4));
     const d = compare(v, rest);
     return op === '<' ? d < 0 : op === '>' ? d > 0 : op === '<=' ? d <= 0 : d >= 0;
   };
@@ -686,7 +715,7 @@ function splitSections(f) {
   return out;
 }
 function formatDatePattern(serial, f) {
-  if (!Number.isFinite(serial)) return E['#VALUE!'];
+  if (!Number.isFinite(serial) || serial < 0 || serial >= 2958466) return E['#VALUE!'];
   const p = ymd(serial);
   const secs = Math.round((serial - Math.floor(serial)) * 86400);
   let H = Math.floor(secs / 3600) % 24, Mi = Math.floor(secs / 60) % 60, S = secs % 60;
@@ -752,10 +781,11 @@ function formatNumberPattern(v, f, signShown) {
   if (exp) {
     let e = a === 0 ? 0 : Math.floor(Math.log10(a));
     a = a / Math.pow(10, e);
-    if (Number(a.toFixed(decPat.length)) >= 10) { a /= 10; e += 1; }
+    if (Number(a.toFixed(Math.min(decPat.length, 30))) >= 10) { a /= 10; e += 1; }
     expText = 'E' + (e < 0 ? '-' : exp[1] === '+' ? '+' : '') + String(Math.abs(e)).padStart(exp[2].length, '0');
   }
-  const decs = decPat.length;
+  const decs = Math.min(decPat.length, 30);
+  if (a >= 1e21) return formatNumber(neg ? -a : a);
   const fixed = roundHalfAway(a, decs).toFixed(decs);
   let [intPart, decPart = ''] = fixed.split('.');
   const minInt = (ip.replace(/,/g, '').match(/0/g) || []).length;
@@ -906,6 +936,7 @@ function ifsMatch(cx, pairs) {
     dims = d;
     const c = cx.sc(cn);
     if (isErr(c)) return c;
+    if (typeof c === 'string' && c.length > MAX_PATTERN) return E['#VALUE!'];
     list.push({ a, test: criterion(c) });
   }
   return { dims, test: (i, j) => list.every((x) => x.test(areaGet(cx, x.a, i, j))) };
@@ -1026,6 +1057,7 @@ def('ABS', 1, 1, (args, cx) => { const x = argNum(cx, args[0], 0); return isErr(
 
 // Lookup.
 function exactEq(a, b, wild) {
+  if (typeof a === 'string' && typeof b === 'string') charge(1 + (a.length >> 4));
   if (typeof a === 'string' && typeof b === 'string') return wild && hasWild(b) ? wildcardMatch(b, a) : a.toLowerCase() === b.toLowerCase();
   if (a === null || a === undefined) return b === '' ;
   return typeof a === typeof b && a === b;
@@ -1034,6 +1066,7 @@ function exactEq(a, b, wild) {
 // mode 0: exact (wild: * ? ~); 1: largest ≤ key in ascending data;
 // -1: smallest ≥ key in descending data. -1 when there is none.
 function findIn(cx, n, get, key, mode, wild, reverse) {
+  if (typeof key === 'string' && key.length > MAX_PATTERN && wild && hasWild(key)) return -1;
   if (mode === 0) {
     for (let k = 0; k < n; k++) { cx.tick(); const i = reverse ? n - 1 - k : k; if (exactEq(get(i), key, wild)) return i; }
     return -1;
@@ -1043,6 +1076,7 @@ function findIn(cx, n, get, key, mode, wild, reverse) {
     cx.tick();
     const v = get(i);
     if (v === null || typeRank(v) !== typeRank(key)) continue;
+    if (typeof v === 'string') charge(1 + (v.length >> 4));
     const d = compare(v, key);
     if (mode === 1) { if (d <= 0) best = i; else break; }
     else { if (d >= 0) best = i; else break; }
@@ -1231,7 +1265,7 @@ function datePart(args, cx, part) {
   if (isErr(v)) return v;
   const n = typeof v === 'string' ? textToNumber(v) : toNum(v);
   if (n === null || isErr(n)) return E['#VALUE!'];
-  if (n < 0) return E['#NUM!'];
+  if (n < 0 || n >= 2958466) return E['#NUM!'];
   const p = ymd(n);
   return p[part];
 }
@@ -1419,6 +1453,7 @@ export class Workbook {
   }
   _link(f) {
     f.prec = [];
+    f.links = [];
     if (!f.ast) return;
     const refs = [];
     (function collect(n) {
@@ -1428,50 +1463,80 @@ export class Workbook {
       else if (n.t === 'bin') { collect(n.a); collect(n.b); }
       else if (n.t === 'neg' || n.t === 'pct') collect(n.a);
     })(f.ast);
+    // The same range written many times is one dependency.
+    const seen = new Set();
     for (const ref of refs) {
       const p = this._resolve(f, ref);
       if (!p) continue;
-      f.prec.push(p);
+      const id = p.s.name + '\u0000' + p.r1 + ',' + p.c1 + ',' + p.r2 + ',' + p.c2;
+      if (seen.has(id)) continue;
+      seen.add(id);
       const s = p.s;
       if (p.single) {
+        f.prec.push(p);
         const k = keyOf(p.r1, p.c1);
-        let list = s.points.get(k);
-        if (!list) s.points.set(k, list = []);
-        list.push(f);
+        let set = s.points.get(k);
+        if (!set) s.points.set(k, set = new Set());
+        set.add(f);
+        f.links.push({ point: k, s });
+        continue;
+      }
+      if (++this.rangeRefs > this.limits.rangeRefs) { this.rangeRefs--; this._unlink(f); f.err = E['#BUSY!']; return; }
+      f.prec.push(p);
+      const c2 = Math.min(p.c2, s.cols - 1);
+      if (c2 - p.c1 + 1 <= this.limits.narrowCols) {
+        for (let c = p.c1; c <= c2; c++) { const e = { r1: p.r1, r2: p.r2, f, dead: false }; s.areas[c].push(e); s.live++; f.links.push({ entry: e, s }); }
       } else {
-        const c2 = Math.min(p.c2, s.cols - 1);
-        for (let c = p.c1; c <= c2; c++) s.areas[c].push({ r1: p.r1, r2: p.r2, f });
+        const e = { r1: p.r1, r2: p.r2, c1: p.c1, c2, f, dead: false };
+        s.wide.push(e);
+        s.live++;
+        f.links.push({ entry: e, s });
       }
     }
-    const types = (sheet, c) => sheet && sheet.types && sheet.types[c];
-    f.kind = kindOf(f.ast, (ref) => {
-      if (ref.kind !== 'cell') return null;
-      const s = ref.sheet != null ? this.sheet(ref.sheet) : f.sheet;
-      if (types(s, ref.a.c) === 'date') return 'date';
-      const g = s && s.fx.get(keyOf(ref.a.r, ref.a.c));
-      return g && g !== f ? g.kind : null;
-    });
+    this._relinkKind(f);
   }
+  // Undo _link: point sets lose the formula; range entries are marked dead
+  // (no search), and a sheet's lists are compacted once half of them are.
   _unlink(f) {
-    for (const p of f.prec) {
-      const s = p.s;
-      if (p.single) {
-        const k = keyOf(p.r1, p.c1), list = s.points.get(k);
-        if (list) { const i = list.indexOf(f); if (i >= 0) list.splice(i, 1); if (!list.length) s.points.delete(k); }
-      } else {
-        const c2 = Math.min(p.c2, s.cols - 1);
-        for (let c = p.c1; c <= c2; c++) { const a = s.areas[c]; for (let i = a.length - 1; i >= 0; i--) if (a[i].f === f) { a.splice(i, 1); break; } }
+    for (const l of f.links || []) {
+      if (l.point !== undefined) {
+        const set = l.s.points.get(l.point);
+        if (set) { set.delete(f); if (!set.size) l.s.points.delete(l.point); }
+      } else if (!l.entry.dead) {
+        l.entry.dead = true;
+        this.rangeRefs--;
+        if (++l.s.dead > 1024 && l.s.dead * 2 > l.s.live) this._compact(l.s);
       }
     }
+    f.links = [];
     f.prec = [];
+  }
+  _compact(s) {
+    for (let c = 0; c < s.areas.length; c++) s.areas[c] = s.areas[c].filter((e) => !e.dead);
+    s.wide = s.wide.filter((e) => !e.dead);
+    s.live = s.wide.length + s.areas.reduce((n, a) => n + a.length, 0);
+    s.dead = 0;
+  }
+  // The formulas that read cell (r, c) of sheet s.
+  _readers(s, r, c, k, out) {
+    const pts = s.points.get(k);
+    if (pts) for (const g of pts) out(g);
+    const areas = s.areas[c];
+    if (areas) for (let i = 0; i < areas.length; i++) { const a = areas[i]; if (!a.dead && r >= a.r1 && r <= a.r2) out(a.f); }
+    const wide = s.wide;
+    for (let i = 0; i < wide.length; i++) { const a = wide[i]; if (!a.dead && r >= a.r1 && r <= a.r2 && c >= a.c1 && c <= a.c2) out(a.f); }
   }
 
   _rebuild() {
     let count = 0;
+    this.rangeRefs = 0;
     for (const s of this.sheets) {
       s.fx = new Map();
       s.points = new Map();
       s.areas = Array.from({ length: s.cols }, () => []);
+      s.wide = [];
+      s.dead = 0;
+      s.live = 0;
       s.fcols = Array.from({ length: s.cols }, () => []);
     }
     const all = [];
@@ -1509,23 +1574,15 @@ export class Workbook {
   _recompute(sheet, changedKeys) {
     const dirty = new Set();
     const queue = [];
-    const visit = (s, k) => {
-      const r = Math.floor(k / ROWK), c = k % ROWK;
-      const f = s.fx.get(k);
-      if (f && !dirty.has(f)) { dirty.add(f); queue.push(f); }
-      const pts = s.points.get(k);
-      if (pts) for (const g of pts) if (!dirty.has(g)) { dirty.add(g); queue.push(g); }
-      const areas = s.areas[c];
-      if (areas) for (let i = 0; i < areas.length; i++) { const a = areas[i]; if (r >= a.r1 && r <= a.r2 && !dirty.has(a.f)) { dirty.add(a.f); queue.push(a.f); } }
-    };
-    for (const k of changedKeys) visit(sheet, k);
+    const add = (g) => { if (!dirty.has(g)) { dirty.add(g); queue.push(g); } };
+    for (const k of changedKeys) {
+      const f = sheet.fx.get(k);
+      if (f) add(f);
+      this._readers(sheet, Math.floor(k / ROWK), k % ROWK, k, add);
+    }
     for (let q = 0; q < queue.length; q++) {
       const f = queue[q];
-      const k = keyOf(f.r, f.c);
-      const pts = f.sheet.points.get(k);
-      if (pts) for (const g of pts) if (!dirty.has(g)) { dirty.add(g); queue.push(g); }
-      const areas = f.sheet.areas[f.c];
-      if (areas) for (let i = 0; i < areas.length; i++) { const a = areas[i]; if (f.r >= a.r1 && f.r <= a.r2 && !dirty.has(a.f)) { dirty.add(a.f); queue.push(a.f); } }
+      this._readers(f.sheet, f.r, f.c, keyOf(f.r, f.c), add);
     }
     this.stats.full = false;
     this._evaluate(queue);
@@ -1540,10 +1597,15 @@ export class Workbook {
     const self = this;
     let busy = false;
     for (const f of list) { f.state = 0; f.cyc = false; f.frame = -1; f.sheet.vals[f.r][f.c] = PENDING; }
+    // The clock is read every 4096 units of work, whatever size the steps.
+    let nextCheck = 4096;
     const tick = (n) => {
       work += n || 1;
-      if (work > maxWork || ((work & 4095) === 0 && Date.now() > deadline)) throw new Budget();
+      if (work > maxWork) throw new Budget();
+      if (work >= nextCheck) { nextCheck = work + 4096; if (Date.now() > deadline) throw new Budget(); }
     };
+    const prevCharge = charge;
+    charge = tick;
     const cell = (s, r, c) => {
       if (r < 0 || c < 0 || r >= s.rows || c >= s.cols) return null;
       const v = s.vals[r][c];
@@ -1583,6 +1645,7 @@ export class Workbook {
         const c2 = Math.min(p.c2, s.cols - 1), r2 = Math.min(p.r2, s.rows - 1);
         for (let c = p.c1; c <= c2; c++) {
           const rows = s.fcols[c];
+          tick();
           if (!rows || !rows.length) continue;
           let lo = lowerBound(rows, p.r1);
           for (; lo < rows.length && rows[lo] <= r2; lo++) {
@@ -1603,8 +1666,8 @@ export class Workbook {
       if (f.err) return f.err;
       if (f.cyc) return E['#CYCLE!'];
       cx.host = f;
-      let v = evalNode(f.ast, cx);
-      v = scalar(v, cx);
+      let v;
+      try { v = scalar(evalNode(f.ast, cx), cx); } catch (e) { if (e instanceof Budget) throw e; v = E['#ERROR!']; }
       if (v === undefined) v = null;
       if (typeof v === 'number' && !Number.isFinite(v)) v = E['#NUM!'];
       if (typeof v === 'string' && v.length > this.limits.textChars) v = E['#VALUE!'];
@@ -1636,9 +1699,12 @@ export class Workbook {
         }
       }
     } catch (e) {
-      if (!(e instanceof Budget)) throw e;
       busy = true;
-      for (const f of list) if (f.state !== 2) finish(f, E['#BUSY!']);
+      // Over budget (or, never expected, anything else): what is left is
+      // #BUSY!, and the engine stays usable.
+      for (const f of list) if (f.state !== 2) finish(f, e instanceof Budget ? E['#BUSY!'] : E['#ERROR!']);
+    } finally {
+      charge = prevCharge;
     }
     this.stats.busy = busy;
     this.stats.ms = Date.now() - t0;
@@ -1757,7 +1823,10 @@ function evalNode(node, cx) {
       if (!fn) return E['#NAME?'];
       if (node.args.length < fn.min || node.args.length > fn.max) return E['#N/A'];
       cx.tick();
-      const v = fn.fn(node.args, cx);
+      // A function that throws (a bug, an edge it did not foresee) is
+      // #ERROR! in its cell, never an exception out of the engine.
+      let v;
+      try { v = fn.fn(node.args, cx); } catch (e) { if (e instanceof Budget) throw e; return E['#ERROR!']; }
       return v === undefined ? null : v;
     }
     default: return E['#ERROR!'];

@@ -4,7 +4,7 @@
 // doc holds, not what a search or filter shows right now. No DOM globals: an
 // offline test runs this on a small DOM.
 import { SHEET_SELECTOR, readSheetTable } from '../../../shared/sheet-markup.mjs';
-import { toExcel, unsupportedFunctions, isFormula } from '../../../shared/sheet-formula.mjs';
+import { toExcel, unsupportedFunctions, isFormula, referencedSheets } from '../../../shared/sheet-formula.mjs';
 
 export const CSV_MIME = 'text/csv';
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -95,13 +95,16 @@ export function xlsxBytes(XLSX, sheets) {
 // Formulas go into the workbook as formulas (Excel's row 1 is the header,
 // so every row moves down one), beside the value they last showed. Only
 // formulas the engine itself computes: anything else stays a value, so an
-// export never carries a function the sheet could not run (no WEBSERVICE,
-// no external links).
+// export never carries a function the sheet could not run (no WEBSERVICE)
+// nor a reference outside the workbook.
 export function addFormulas(XLSX, ws, sheet, renamed) {
   for (const { r, c, f } of sheet.formulas || []) {
     if (!isFormula(f)) continue;
     const missing = unsupportedFunctions(f);
     if (!missing || missing.length) continue;
+    // Only references to tabs of this workbook.
+    const used = referencedSheets(f) || [];
+    if (used.some((n) => !renamed.has(String(n).toLowerCase()))) continue;
     const addr = XLSX.utils.encode_cell({ r: r + 1, c });
     const cell = ws[addr] || (ws[addr] = { t: 's', v: '' });
     cell.f = toExcel(f, { names: renamed });

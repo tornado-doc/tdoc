@@ -9,7 +9,7 @@
 
 import { inferType } from './sheet-query.mjs';
 import { sheetDocumentHtml, parseDelimited, detectDelimiter } from './sheet-markup.mjs';
-import { fromExcel, unsupportedFunctions, LIMITS as FORMULA_LIMITS } from './sheet-formula.mjs';
+import { fromExcel, unsupportedFunctions, referencedSheets, isExternalSheetName, LIMITS as FORMULA_LIMITS } from './sheet-formula.mjs';
 
 export { parseDelimited, detectDelimiter };
 
@@ -165,7 +165,7 @@ export function sheetsFromWorkbook(XLSX, wb, { warnings = [] } = {}) {
   }
   if (fxStats.dropped) {
     const list = Array.from(fxStats.names).slice(0, 5).join(', ');
-    warnings.push(`${fxStats.dropped} formula${fxStats.dropped === 1 ? '' : 's'} use${fxStats.dropped === 1 ? 's' : ''} functions tdoc does not compute yet (${list}): ${fxStats.dropped === 1 ? 'its value was' : 'their values were'} kept as text.`);
+    warnings.push(`${fxStats.dropped} formula${fxStats.dropped === 1 ? '' : 's'} use${fxStats.dropped === 1 ? 's' : ''} what tdoc does not compute yet (${list}): ${fxStats.dropped === 1 ? 'its value was' : 'their values were'} kept as text.`);
   }
   return sheets;
 }
@@ -186,6 +186,10 @@ function formulaGrid(ws, range, { name, starts, sheetNames, stats }) {
     if (cell.f.length > FORMULA_LIMITS.formulaChars) { stats.dropped++; return; }
     const missing = unsupportedFunctions(cell.f);
     if (!missing || missing.length) { stats.dropped++; (missing || ['?']).forEach((n) => stats.names.add(n)); return; }
+    // Only references to this workbook's own sheets: an external or path
+    // reference keeps its value.
+    const sheetsUsed = referencedSheets(cell.f) || [];
+    if (sheetsUsed.some((n) => isExternalSheetName(n) || !sheetNames.has(String(n).toLowerCase()))) { stats.dropped++; stats.names.add('a reference outside this workbook'); return; }
     (out[g] = out[g] || [])[k] = fromExcel(cell.f, { names: sheetNames, rowOffset, colOffset });
     stats.kept++;
     any = true;

@@ -72,6 +72,12 @@ async function shot(page, name) {
     ] },
   ] });
   for (const slug of ['read', 'edit', 'shift', 'fill', 'rename', 'phone']) writeDoc(slug, budget());
+  // Two tabs whose names differ only by case, and a formula naming one.
+  writeDoc('dupes', M.sheetDocumentHtml({ title: 'Dupes', sheets: [
+    { name: 'Data', columns: [{ name: 'A', type: 'number' }], rows: [{ id: 'r1', cells: ['1'] }] },
+    { name: 'data', columns: [{ name: 'A', type: 'number' }, { name: 'B', type: 'number' }], rows: [{ id: 'r1', cells: ['2', '5'], formulas: [null, '=A1*10'] }] },
+    { name: 'Use', columns: [{ name: 'X', type: 'number' }], rows: [{ id: 'r1', cells: [''], formulas: ['=data!A1+100'] }] },
+  ] }));
   // Hostile: 3,000 formulas that each read 20,000 long cells many ways.
   writeDoc('hostile', M.sheetDocumentHtml({ title: 'Heavy', sheets: [{ name: 'H', columns: [{ name: 'Text', type: 'text' }, { name: 'F', type: 'text' }], rows: Array.from({ length: 20000 }, (_, k) => ({ id: `r${k + 1}`, cells: ['x'.repeat(300), ''], formulas: [null, k < 3000 ? '=CONCAT(A:A)&COUNTIF(A:A,"*x*x*x*x*x*y")&SUM(A:A)' : null] })) }] }));
   // 10,000 formulas.
@@ -187,6 +193,7 @@ async function shot(page, name) {
       assert(/<td data-formula="=SUM\(D1:D3\)">74\.5<\/td>/.test(html), 'saved: SUM with its value');
       assert(/<td data-formula="=D4\*2">149<\/td>/.test(html), 'saved: the typed formula');
       assert(/<td data-formula="=Items!D4">74\.5<\/td>/.test(html), 'saved: the other tab');
+      assert(/<td data-formula="=TEXT\(TODAY\(\),&quot;yyyy&quot;\)"><\/td>/.test(html), 'TODAY() is not rewritten by an unrelated edit');
     });
 
     await test('insert / delete rows and columns shift references; undo puts them back', async () => {
@@ -250,6 +257,15 @@ async function shot(page, name) {
       await frame.waitForFunction(() => document.querySelectorAll('table[data-tdoc-sheet]')[1].querySelector('tr[data-row="r1"]').cells[1].getAttribute('data-formula') === "='Q3 items'!D4");
       assert(await shown(frame, 1, 0, 1) === '65.5', 'still computes');
       await page.getByRole('button', { name: /Discard/ }).click().catch(() => {});
+    });
+
+    await test('tab names equal but for case: the second is shown as "data (2)"; each tab keeps its own cells', async () => {
+      const frame = await open('dupes');
+      const names = await frame.evaluate(() => window.__tdocSheets.tabs().map((t) => t.name));
+      assert(JSON.stringify(names) === JSON.stringify(['Data', 'data (2)', 'Use']), JSON.stringify(names));
+      assert(await shown(frame, 2, 0, 0) === '101', `the first "data": ${await shown(frame, 2, 0, 0)}`);
+      assert(await shown(frame, 1, 0, 1) === '20', `its own formula: ${await shown(frame, 1, 0, 1)}`);
+      assert(await shown(frame, 0, 0, 0) === '1', 'not overwritten');
     });
 
     await test('a hostile sheet opens and stays usable: what is over budget shows #BUSY!', async () => {

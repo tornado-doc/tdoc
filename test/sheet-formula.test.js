@@ -296,6 +296,79 @@ async function t(name, fn) {
     assert.equal(wb3.display('S', 49999, 0), '50000');
   });
 
+  await t('hostile: long text and patterns are charged by length; criteria over 255 characters are #VALUE!', () => {
+    const text = ('ab'.repeat(15000)).slice(0, 30000);
+    const longPattern = '*' + 'a*'.repeat(7500) + 'z';
+    const worst = '*' + 'a*'.repeat(126) + 'z'; // 254 characters
+    const grid = Array.from({ length: 40 }, () => [text, null]);
+    for (let k = 0; k < 20; k++) grid[k][1] = '=COUNTIF(A:A,"' + worst + '")+COUNTIF(A:A,"' + worst + 'q")';
+    grid[20][1] = '=COUNTIF(A:A,C1)';
+    grid[0][2] = longPattern;
+    const t0 = Date.now();
+    const wb = book(sheet('S', grid));
+    const ms = Date.now() - t0;
+    assert.ok(ms < 1500, `stopped in ${ms} ms`);
+    assert.ok(wb.stats.busy || wb.display('S', 19, 1) === '0', 'over budget, or done');
+    assert.equal(wb.display('S', 20, 1), '#VALUE!');
+    assert.equal(wb.display('S', 0, 1), wb.stats.busy ? wb.display('S', 0, 1) : '0');
+    // A 15 KB criterion against 30 KB cells, twenty times: refused at once.
+    const g2 = Array.from({ length: 20 }, (_, r) => [text, '=COUNTIF(A:A,C1)', r ? null : '*' + 'a'.repeat(15000) + '*']);
+    const t1 = Date.now();
+    const wb2 = book(sheet('S', g2));
+    assert.ok(Date.now() - t1 < 1200);
+    assert.equal(wb2.display('S', 0, 1), '#VALUE!');
+  });
+
+  await t('hostile: the dependency graph stays small (100 formulas × 8 KB of whole-row ranges)', () => {
+    const refs = (from) => Array.from({ length: 200 }, (_, k) => `${((from + k) % 800) + 1}:${((from + k) % 800) + 9}`).join(',');
+    let f = '=SUM(' + refs(0) + ')';
+    for (let k = 1; f.length < 7000; k++) f += '+SUM(' + refs(k * 200).slice(0, 8100 - f.length - 7).replace(/,[^,]*$/, '') + ')';
+    assert.ok(f.length <= 8192);
+    const grid = Array.from({ length: 1000 }, (_, r) => Array.from({ length: 200 }, (_, c) => (c === 0 && r >= 900 ? f : r + c)));
+    const before = process.memoryUsage().heapUsed;
+    const t0 = Date.now();
+    const wb = book(sheet('S', grid));
+    const ms = Date.now() - t0;
+    const grew = process.memoryUsage().heapUsed - before;
+    assert.ok(ms < 500, `loaded in ${ms} ms`);
+    assert.ok(grew < 300 * 1024 * 1024, `heap grew ${Math.round(grew / 1048576)} MB`);
+    assert.ok(!wb.display('S', 900, 0).startsWith('#'), wb.display('S', 900, 0));
+    console.log(`    (100 × 8 KB of row ranges: ${ms} ms, +${Math.round(grew / 1048576)} MB)`);
+    // Range references past the workbook limit are #BUSY!, not memory.
+    const wb2 = F.createWorkbook({ limits: { rangeRefs: 500 } });
+    wb2.load([sheet('S', grid)]);
+    assert.equal(wb2.display('S', 999, 0), '#BUSY!');
+  });
+
+  await t('fuzz: random formulas never throw out of the engine', () => {
+    let seed = 12345;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    const pick = (a) => a[rnd(a.length)];
+    const names = F.FUNCTION_NAMES.concat(['NOPE']);
+    const atoms = ['1', '-3.5', '0', '1e308', '"x"', '""', 'TRUE', 'A1', 'B2:C9', 'A:A', '2:3', '$A$1', 'Other!A1', '#N/A', '"*a?~"', '"yyyy-mm-dd dddd"', '"0.' + '0'.repeat(150) + '"', '"#,##0.00E+000"', '-1e300', '99999999', '"2026-02-30"', '"<>"', '">=5"'];
+    const gen = (d) => {
+      const k = rnd(d > 4 ? 1 : 4);
+      if (k === 0) return pick(atoms);
+      if (k === 1) return gen(d + 1) + pick(['+', '-', '*', '/', '^', '&', '=', '<>', '<', '>=']) + gen(d + 1);
+      if (k === 2) return pick(['-', '(']) + gen(d + 1) + (rnd(2) ? ')' : '');
+      const n = rnd(5);
+      return pick(names) + '(' + Array.from({ length: n }, () => (rnd(8) ? gen(d + 1) : '')).join(pick([',', ';'])) + ')';
+    };
+    const grid = Array.from({ length: 30 }, (_, r) => Array.from({ length: 6 }, (_, c) => (c < 3 ? pick([r, 'txt' + r, '', true, -r * 1e10]) : '=' + gen(0))));
+    for (let round = 0; round < 40; round++) {
+      for (let r = 0; r < 30; r++) for (let c = 3; c < 6; c++) grid[r][c] = '=' + gen(0);
+      const wb = F.createWorkbook({ now: () => NOW });
+      wb.load([sheet('S', grid), sheet('Other', [[1, 'a'], ['b', 2]])]);
+      for (let r = 0; r < 30; r++) for (let c = 3; c < 6; c++) assert.equal(typeof wb.display('S', r, c), 'string');
+      grid[rnd(30)][rnd(3)] = pick([1, 'x', null, 1e300]);
+      wb.update(sheet('S', grid));
+    }
+    // The ones that used to throw.
+    for (const f of ['=TEXT(1e12,"dddd")', '=TEXT(-1,"mmmm")', '=TEXT(1,"0.' + '0'.repeat(150) + '")', '=TEXT(1e25,"0.00")', '=TEXT(5,"0.' + '0'.repeat(120) + 'E+00")', '=YEAR(1e15)', '=DATEDIF(0,1e15,"MD")']) {
+      assert.equal(typeof ev(f), 'string', f);
+    }
+  });
+
   await t('speed: 10,000 formulas compute in well under 200 ms, an edit faster still', () => {
     const N = 10000;
     const grid = Array.from({ length: N }, (_, r) => [
@@ -332,8 +405,10 @@ async function t(name, fn) {
     const ws = XLSX.utils.aoa_to_sheet([['Item', 'Qty', 'Price', 'Total'], ['Paper', 3, 4.5, 13.5], ['Pens', 10, 1.2, 12], [], ['Sum', null, null, 25.5]]);
     ws.D2.f = 'B2*C2'; ws.D3.f = 'B3*C3'; ws.D5.f = 'SUM(D1:D3)';
     ws.B5 = { t: 'n', v: 9, f: 'SUMPRODUCT(B2:B3,C2:C3)' };
-    const other = XLSX.utils.aoa_to_sheet([['Ref'], [0]]);
+    const other = XLSX.utils.aoa_to_sheet([['Ref', 'Ext', 'Gone'], [0, 7, 8]]);
     other.A2.f = "'Line items'!D5*2";
+    other.B2.f = "'C:\\files\\[book.xlsx]Sheet1'!A1";
+    other.C2.f = 'Nowhere!A1+1';
     XLSX.utils.book_append_sheet(wb, ws, 'Line items');
     XLSX.utils.book_append_sheet(wb, other, 'Other');
     const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
@@ -345,6 +420,8 @@ async function t(name, fn) {
     assert.equal(items.rows[3].formulas[1], null, 'SUMPRODUCT is not computed here: the value stays');
     assert.equal(items.rows[3].cells[1], '9');
     assert.equal(out.sheets[1].rows[0].formulas[0], "='Line items'!D4*2");
+    assert.deepEqual(out.sheets[1].rows[0].formulas.slice(1), [null, null], 'external and unknown sheets keep values');
+    assert.deepEqual(out.sheets[1].rows[0].cells.slice(1), ['7', '8']);
     assert.ok(out.warnings.some((w) => /SUMPRODUCT/.test(w)), out.warnings.join(' | '));
     assert.match(out.html, /<td data-formula="=B1\*C1">13\.5<\/td>/);
     // Export: the doc's formulas back into a workbook, rows moved down.
@@ -358,6 +435,10 @@ async function t(name, fn) {
     assert.equal(s1.D2.v, 13.5);
     assert.equal(s2.A2.f, "'Line items'!D5*2");
     assert.equal(s1.B5.f, undefined, 'no formula the sheet does not compute');
+    // A formula naming a tab the workbook does not have stays a value.
+    const lone = [{ name: 'A', columns: [{ name: 'x', type: 'number' }], rows: [['1']], formulas: [{ r: 0, c: 0, f: '=Missing!A1' }] }];
+    const b2 = XLSX.read(X.xlsxBytes(XLSX, lone), { type: 'array' });
+    assert.equal(b2.Sheets.A.A2.f, undefined);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
