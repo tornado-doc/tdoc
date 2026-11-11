@@ -58,7 +58,8 @@ export function FeedbackSpace({ boot }) {
   const canManage = Boolean(boot.ownerManage || boot.teamManage?.canManage);
   const currentTeam = boot.workspaceId || boot.teamManage?.team?.id || null;
 
-  const notify = useNotifyTargets(slug, Boolean(isOwner));
+  const notifyViewer = (identity && (identity.account_id || identity.login)) || '';
+  const notify = useNotifyTargets(slug, Boolean(isOwner), notifyViewer);
   const canSendToAgent = Boolean(isOwner && notify.ready && notify.available && notify.reason !== 'no_agent_bound'
     && (notify.default || (notify.candidates || []).length || notify.fallback));
   // Anyone else who joined: their OWN agents, which answer in the thread
@@ -266,7 +267,7 @@ export function FeedbackSpace({ boot }) {
                     if (sent.ask) myAgent.addAsk(sent.ask);
                     setNotice(sent.message);
                   }
-                })();
+                })().catch((err) => setNotice((err && err.message) || 'Posted; could not refresh the list'));
                 return true;
               },
               onReact: (id, emoji) => act(() => toggleReaction({ slug, version, comment_id: id, emoji })),
@@ -313,7 +314,7 @@ export function FeedbackSpace({ boot }) {
         />
       ) : null}
       {notifyIds ? (
-        <NotifyHandoffPanel slug={slug} open commentIds={notifyIds} onClose={() => setNotifyIds(null)} onSent={() => refresh()} onTargetsChanged={notify.refresh} />
+        <NotifyHandoffPanel slug={slug} open commentIds={notifyIds} onClose={() => setNotifyIds(null)} onSent={() => refresh()} onTargetsChanged={notify.refresh} viewer={notifyViewer} />
       ) : null}
     </div>
     </AgentMentionContext.Provider>

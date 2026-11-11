@@ -68,7 +68,8 @@ export function useComments({ slug, version, onChange, onUnauthorized, demo = fa
       const result = await operation();
       if (show) {
         applyLocal((list) => show(list, result));
-        refresh().catch(() => {});
+        // Signed out meanwhile: the same sign-in fallback as a refused write.
+        refresh().catch((error) => { if (error && error.status === 401 && onUnauthorized) onUnauthorized(); });
       } else {
         await refresh();
       }

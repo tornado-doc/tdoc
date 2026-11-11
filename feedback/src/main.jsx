@@ -26,7 +26,7 @@ import { composerAgents } from '../../shell/src/document/ai-answerer.js';
 import { composerDefault } from '../../shell/src/document/agent-choices.js';
 import { askOwnAgent, threadAskPick, useMyAgent } from '../../shell/src/document/my-agent.js';
 import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
-import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, clearNotifyTargetsCache, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
 import {
   createComment, getThreadSeen, listComments, listMentionableUsers, postNotifyHandoff,
   removeComment, resendNotifyHandoff, setApiTransport, setCommentResolved,
@@ -482,6 +482,8 @@ ${uiCss}
     try { return JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch (_) { return null; }
   };
   const writeSession = (session) => {
+    // Signed out or another session: no agent list cached for the last one.
+    if (!session || session.token !== (readSession() || {}).token) clearNotifyTargetsCache();
     try {
       if (session) localStorage.setItem(storageKey, JSON.stringify(session));
       else localStorage.removeItem(storageKey);
@@ -1007,7 +1009,15 @@ ${uiCss}
             const surface = await loadSurface(session);
             return { ...surface, ...(sent ? { handoff: sent } : {}) };
           } catch (error) {
-            return sent ? { ok: false, handoffOnly: sent } : null;
+            // Signed out or moved space meanwhile: the same notice (and
+            // Connect / Reconnect) a failed action gets. Anything else
+            // leaves the posted comment shown; the feed's refresh catches up.
+            const refused = [401, 403, 409].includes(error && error.status);
+            if (!refused) return sent ? { ok: false, handoffOnly: sent } : null;
+            return {
+              ok: false, status: error.status, reconnect: error.status === 409,
+              error: String(error && error.message || error), ...(sent ? { handoffOnly: sent } : {}),
+            };
           }
         })();
         return { ok: true, posted, followUp, handingOff: Boolean(handOff), ...(postedDraft ? { postedDraft: true } : {}) };
@@ -1239,8 +1249,10 @@ ${uiCss}
         setSurface((prev) => (prev ? { ...prev, allComments: withPostedComment(prev.allComments, made, parentId) } : prev));
         if (result.postedDraft) { setSelected(null); setAreaSel(null); setPicking(false); if (!result.handingOff) say('Comment posted'); }
         result.followUp.then((next) => {
-          if (next && next.ok) apply(next);
-          else if (next && next.handoffOnly) say(next.handoffOnly.message, !next.handoffOnly.ok);
+          if (!next) return;
+          if (next.ok) { apply(next); return; }
+          if (next.handoffOnly) say(next.handoffOnly.message, !next.handoffOnly.ok);
+          if (next.status) setNotice({ status: next.status, reconnect: Boolean(next.reconnect), error: next.error });
         });
         return true;
       }
@@ -1425,7 +1437,10 @@ ${uiCss}
     });
     const unreadComments = area.unread;
     const teamMember = Boolean(surface?.teamMember);
-    const agent = useNotifyTargets(slug, Boolean((owner || teamMember) && slug && session?.notify));
+    // The token is this person's session here: a new one (reconnect, another
+    // account) is another viewer to the agent-list cache.
+    const notifyViewer = session?.token || '';
+    const agent = useNotifyTargets(slug, Boolean((owner || teamMember) && slug && session?.notify), notifyViewer);
     const canSendToAgent = Boolean(agent.ready && agent.available && agent.reason !== 'no_agent_bound'
       && (agent.default || agent.candidates.length || agent.fallback));
     // Send to agent in the dock, as on the doc page. The owner always has it:
@@ -2009,6 +2024,7 @@ ${uiCss}
             onSent={() => load()}
             onTargetsChanged={agent.refresh}
             hostNotify={Boolean(session?.notify)}
+            viewer={notifyViewer}
           />
         ) : null}
       </AgentButtonsContext.Provider>

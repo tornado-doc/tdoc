@@ -102,6 +102,54 @@ async function seedDoc(env, slug, owner = 'alice') {
     assert(carol && carol.items.some((row) => row.kind === 'mention'), 'the mentioned person was not notified');
   });
 
+  await t('five posts at once naming the same person leave five inbox rows (one lane per inbox)', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const slug = 'critical-path-race';
+    await seedDoc(env, slug);
+    const meta = JSON.parse(env.META.map.get(`meta:${slug}`));
+    meta.access = { mode: 'public', allowed_users: ['bob', 'carol'] };
+    await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+    // A KV read that takes a moment, as Workers KV's does: without a lane,
+    // every delivery reads the inbox before any of them writes it.
+    const get = env.META.get.bind(env.META);
+    env.META.get = async (k) => {
+      const value = await get(k);
+      if (String(k).startsWith('inbox:')) await new Promise((r) => setTimeout(r, 20));
+      return value;
+    };
+    const cookie = await putSession(env, 'bob');
+    const ctxs = [];
+    const answers = await Promise.all([0, 1, 2, 3, 4].map((i) => {
+      const ctx = makeCtx();
+      ctxs.push(ctx);
+      return worker.fetch(req('/api/comments', {
+        method: 'POST', cookie, body: { slug, version: 1, text: `Thread ${i}: @carol please check.`, anchor: { text: `spot ${i}` } },
+      }), env, ctx);
+    }));
+    assert(answers.every((r) => r.status === 200), `posts: ${answers.map((r) => r.status)}`);
+    await Promise.all(ctxs.flatMap((c) => c.pending));
+    const carol = JSON.parse(env.META.map.get('inbox:carol') || 'null');
+    const rows = (carol && carol.items || []).filter((row) => row.kind === 'mention');
+    assert(rows.length === 5, `expected 5 mention rows, got ${rows.length}`);
+    const alice = JSON.parse(env.META.map.get('inbox:alice') || 'null');
+    // The owner's rows for one doc fold into one, counted.
+    const owner = alice && alice.items.find((row) => row.kind === 'comment');
+    assert(owner && owner.count === 5, `owner row count: ${JSON.stringify(alice)}`);
+  });
+
+  await t('a duplicate post answers with the thread as a fresh post would, not the stored record', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const slug = 'critical-path-dup';
+    await seedDoc(env, slug);
+    // A record stored before the event log (the check matches on its text).
+    await env.META.put(`comments:${slug}`, JSON.stringify([{ id: 'c_legacy', author: { login: 'bob', name: 'bob' }, text: 'Twice.', created: new Date().toISOString(), anchor: null, replies: [], version: 1 }]));
+    const cookie = await putSession(env, 'bob');
+    const again = await (await worker.fetch(req('/api/comments', { method: 'POST', cookie, body: { slug, version: 1, text: 'Twice.', anchor: null } }), env, {})).json();
+    assert(again.duplicate_of === 'c_legacy' && again.id === 'c_legacy', `not marked a duplicate: ${JSON.stringify(again)}`);
+    assert(again.text === 'Twice.' && again.status === 'open' && Array.isArray(again.replies), `not a snapshot: ${JSON.stringify(again)}`);
+    assert(!('events' in again), 'the stored event log leaked into the answer');
+  });
+
   await t('without a request context the follow-up work is awaited, as before', async () => {
     const env = makeEnv(mod.CommentsStore);
     const slug = 'critical-path-no-ctx';
