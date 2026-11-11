@@ -119,10 +119,10 @@ async function shot(page, name, opts = {}) {
     await waitForServer(port);
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
-    // The editing and import surfaces are behind the `sheets` flag; reading is not.
+    // Editing and import are on for everyone (the `sheets` flag defaults on):
+    // no flag is pinned here.
     await context.addInitScript(() => {
       try { localStorage.setItem('tdoc-save-notice-dismissed', '1'); } catch {}
-      if (window === window.top) window.__TDOC_FLAGS__ = Object.assign({}, window.__TDOC_FLAGS__, { sheets: true });
     });
     const page = await context.newPage();
     const errors = [];
@@ -591,7 +591,6 @@ async function shot(page, name, opts = {}) {
       assert(JSON.parse(fs.readFileSync(path.join(root, slug, 'meta.json'), 'utf8')).title === 'Untitled sheet');
       // Phone: the same menu, the same sheet.
       const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
-      await phone.addInitScript(() => { if (window === window.top) window.__TDOC_FLAGS__ = { sheets: true }; });
       const p2 = await phone.newPage();
       await p2.goto(`${base}/`);
       await p2.getByRole('button', { name: 'Create a doc' }).tap();

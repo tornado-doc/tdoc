@@ -63,6 +63,15 @@ const assert = require('assert/strict');
     assert.ok(hub.includes("isFeatureOn('fullTextSearch')"), 'docs-hub.jsx gates the text results');
   });
 
+  t('sheets import and editing are on for everyone, read by the hub and the sheet view', () => {
+    assert.equal(FLAGS.sheets.default, true);
+    assert.equal(isFeatureOn('sheets', null), true, 'dev mode off: on');
+    assert.ok(!devOnlyFlags().some((flag) => flag.name === 'sheets'), 'not listed as dev-only');
+    const fs = require('fs');
+    assert.ok(fs.readFileSync(require.resolve('../shell/src/docs-hub.jsx'), 'utf8').includes("isFeatureOn('sheets')"), 'docs-hub.jsx reads the flag');
+    assert.ok(fs.readFileSync(require.resolve('../shell/src/document/sheet-view.js'), 'utf8').includes("isFeatureOn('sheets')"), 'sheet-view.js reads the flag');
+  });
+
   if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
   console.log('\nall passed');
 })().catch((error) => { console.error(error); process.exit(1); });
