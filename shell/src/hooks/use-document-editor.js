@@ -55,10 +55,14 @@ export function useDocumentEditor({
   // need. `tdoc:ready` re-sends whatever mode is current, so the frame picks
   // this up even though it is set before the iframe has loaded.
   const [mode, setMode] = useState(() => {
-    const wantsEdit = new URLSearchParams(location.search).get('edit') === '1';
+    const params = new URLSearchParams(location.search);
+    const wantsEdit = params.get('edit') === '1';
     if (wantsEdit && config.canEdit) return 'edit';
+    // A sheet on its own page (?sheet=<n>) is for reading and commenting:
+    // its full-screen view has no Save, so it never opens in Edit mode.
+    const sheetAlone = params.has('sheet');
     const stored = getStoredMode(config);
-    if (stored === 'edit' && config.canEdit) return 'edit';
+    if (stored === 'edit' && config.canEdit && !sheetAlone) return 'edit';
     if (stored === 'comment' && (config.canComment || config.signInToComment)) return 'comment';
     if (stored === 'read') return 'read';
     return (config.canComment || config.signInToComment) ? 'comment' : 'read';
