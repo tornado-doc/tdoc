@@ -25,6 +25,7 @@ const OFFLINE = [
   'feedback-team-agents.test.js', // the widget's @ lists team agents (answer only) only through tdoc's own-origin token door
   'version-diff.test.js', // bounded block matching and Unicode edits
   'sheets.test.js',            // sheets: view query (search/filter/sort/URL), CSV parsing + type inference, markup round trip
+  'sheets-outline.test.js',    // sheets structure: groups (nested, 3 levels), collapsed default vs a reader's view, hidden rows, freeze, moves, query re-key, markup round trip, 10k rows
   'sheets-size.test.js',       // sheets: 8 MB sheet cap on every write path (not for prose or a token sheet), history row-count summary, sheet anchors never lost to the aid reconcile
   'version-history.test.js', // history rows: same writer within 30 min grouped, paged, what changed cached, access, Restore
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
@@ -237,6 +238,7 @@ const BROWSER = [
   'slide-controls-ui.test.js', // Edit-mode slide bar: Add slide (Title / Bullets / Big number), Duplicate, Move up/down, Delete + Undo, image by http(s) link; whole slides only, ids follow their slides, nothing of the bar saved; desktop hover + phone tap
   'create-menu-ui.test.js', // My docs New: type tiles (Doc · Sheet · Slides) then methods pushed in place, New folder in the menu, Blank deck edits + saves slide text, agent lines per type, keyboard, drop import; desktop + phone, sheets flag on/off
   'sheets-ui.test.js', // data-tdoc-sheet: grid, search/filter/sort/tags, view in #hash, cell comments, Edit + Save, CSV/XLSX import, CLI, 10k rows, phone
+  'sheets-structure-ui.test.js', // group/collapse/expand rows + columns, hide/unhide, drag + Alt-arrow reorder, freeze (menu, grip, reader's own), tab rename/reorder/duplicate/colour/delete+undo, comments keep cells, flat view + phone cards summary rows, 10k rows grouped; desktop + phone
   'sheets-basics-ui.test.js', // sheet modes (Read edits nothing, a Comment click comments on a cell, Edit), column/row resize (drag, double-click fit, touch, frozen column) through the editor's Save, a reader's own layout, Wrap/Clip + align, line breaks (Alt/Ctrl+Enter, multi-line paste, <br>), fill down, ⌘-arrow edges, 10k rows wrapped; desktop + phone
   'doc-types-top-bar-ui.test.js', // doc, sheet and deck: the same top bar, ⋯ menu (Read / Comment / Edit) and editor bar; a sheet full screen or on its own page keeps them; desktop + phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing

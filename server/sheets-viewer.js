@@ -27,6 +27,10 @@
 // own, and a range pasted from Excel or Google Sheets fills the grid. Every
 // change goes through the editor's own draft and Save (a new version).
 //
+// Structure (row groups, hidden rows and columns, freeze, reordering tabs)
+// is server/sheets-structure.js, reached through the hooks marked
+// [structure] below; its markup and pure logic are shared/sheet-outline.mjs.
+//
 // Served at /sheets-viewer.js and loaded by server/sheets-loader.js only when
 // the doc has a sheet. SheetQuery, SheetMarkup and DocType are
 // shared/sheet-query.mjs, shared/sheet-markup.mjs and shared/doc-type.mjs,
@@ -42,7 +46,8 @@
   // A sheet of COMPACT_ROWS rows or fewer in a prose doc is a small table
   // (server/block-lint.js warns about it): compact, at most EMBED_ROWS tall.
   var COMPACT_ROWS = 20, EMBED_ROWS = 15;
-  function numW() { return NARROW && NARROW.matches ? 36 : 48; }
+  // [structure] the row-number column grows by the row outline's gutter.
+  function numW() { return (NARROW && NARROW.matches ? 36 : 48) + (S ? S.gutterW() : 0); }
   var hooks = window.__tdocElementHooks = window.__tdocElementHooks || {};
 
   function post(msg) { msg.source = 'tdoc-frame'; try { window.parent.postMessage(msg, '*'); } catch (e) {} }
@@ -407,6 +412,7 @@
       }
     });
     readLayout(tab);
+    S.read(tab); // [structure]
     return tab;
   }
   // ---- layout: widths, heights, wrap, alignment ------------------------------
@@ -491,13 +497,17 @@
   }
   function runTab(tab) {
     tab.order = Q.runQuery(tab.index, tab.query);
+    // [structure] hidden rows out (tab.sorder), then collapsed groups (tab.order).
+    S.run(tab);
     tab.pos = new Int32Array(tab.index.size).fill(-1);
     for (var i = 0; i < tab.order.length; i++) tab.pos[tab.order[i]] = i;
-    tab.matches = Q.searchMatches(tab.index, tab.order, tab.query.search);
+    // Search finds a match in a collapsed group too; stepping to it opens it.
+    tab.matches = Q.searchMatches(tab.index, tab.sorder, tab.query.search);
+    S.spans(tab);
     if (tab.matchAt >= tab.matches.hits.length) tab.matchAt = -1;
     tab.colLeft = [];
     var x = numW();
-    for (var c = 0; c < tab.widths.length; c++) { tab.colLeft.push(x); x += tab.widths[c]; }
+    for (var c = 0; c < tab.widths.length; c++) { tab.colLeft.push(x); x += S.colW(tab, c); }
     tab.totalW = x;
     buildTops(tab);
   }
@@ -506,7 +516,7 @@
   function reflow(tab) {
     tab.colLeft = [];
     var x = numW();
-    for (var c = 0; c < tab.widths.length; c++) { tab.colLeft.push(x); x += tab.widths[c]; }
+    for (var c = 0; c < tab.widths.length; c++) { tab.colLeft.push(x); x += S.colW(tab, c); }
     tab.totalW = x;
     if (tab.anyWrap) tab.measured = new Map();
     buildTops(tab);
@@ -521,6 +531,19 @@
   var sel = { r: 0, c: 0, r2: 0, c2: 0 };
   var config = { editing: false, canEditDoc: false, received: false };
   var undoStack = [], redoStack = [];
+
+  // [structure] groups, hidden rows and columns, freeze and tab operations
+  // live in server/sheets-structure.js; it reaches the viewer only through
+  // this object.
+  var S = SheetStructure({
+    Q: Q, HEAD_H: HEAD_H,
+    get book() { return book; }, get sel() { return sel; },
+    get config() { return config; }, get undoStack() { return undoStack; },
+    ui: ui, h: h, provider: provider, esc: esc, mode: mode, canEdit: canEdit, cur: cur, numW: numW,
+    openMenu: openMenu, toast: toast, post: post, record: record, undo: undo, afterChange: afterChange, runTab: runTab,
+    renderAll: renderAll, renderBar: renderBar, layout: layout, renderHead: renderHead, renderBody: renderBody, rowsHtml: rowsHtml,
+    relayout: relayout, changed: changed, saveView: saveView, flatView: flatView, rowTop: rowTop, rowH: rowH, deleteTab: deleteTab,
+  });
 
   function mount() {
     var tables = Array.prototype.slice.call(document.querySelectorAll(SEL)).filter(function (t) { return !t.closest('[data-tdoc-provider]'); });
@@ -574,9 +597,12 @@
     ui.head = h('div', 'ts-head'); ui.head.setAttribute('role', 'row');
     ui.body = h('div', 'ts-body');
     ui.rows = h('div', 'ts-rows'); ui.rows.setAttribute('role', 'rowgroup');
+    // [structure] the outline gutter (over the row numbers) and the frozen rows.
+    ui.outline = h('div', 'ts-outline'); ui.body.appendChild(ui.outline);
+    ui.frozen = h('div', 'ts-frozen'); ui.frozen.setAttribute('role', 'rowgroup');
     ui.body.appendChild(ui.rows);
     ui.foot = h('div', 'ts-foot'); ui.foot.setAttribute('role', 'row'); ui.foot.setAttribute('aria-label', 'Summary'); ui.foot.hidden = true;
-    ui.grid.appendChild(ui.head); ui.grid.appendChild(ui.body); ui.grid.appendChild(ui.foot);
+    ui.grid.appendChild(ui.head); ui.grid.appendChild(ui.frozen); ui.grid.appendChild(ui.body); ui.grid.appendChild(ui.foot);
     ui.flat = h('div', 'ts-flat');
     ui.flat.addEventListener('click', flatClick);
     ui.addRow = h('button', 'ts-add-row'); ui.addRow.type = 'button'; ui.addRow.innerHTML = ICON.plus + '<span>Add row</span>';
@@ -630,6 +656,7 @@
         b.addEventListener('dblclick', function (e) { e.stopPropagation(); renameTab(i, b); });
         b.addEventListener('contextmenu', function (e) { e.preventDefault(); tabMenu(i, b); });
       }
+      S.decorateTab(b, tab, i, editing); // [structure] in Edit: drag to reorder, a tap on the open tab for its menu
       ui.tabs.appendChild(b);
     });
     if (editing) {
@@ -668,7 +695,8 @@
       clear.addEventListener('click', function (e) { e.stopPropagation(); setQuery({ search: tab.query.search, filters: {}, sort: [], totals: Object.assign({}, tab.query.totals) }); });
       ui.chips.appendChild(clear);
     }
-    var total = tab.index.size, shown = tab.order.length;
+    // [structure] collapsed groups are not a filter; hidden rows are not counted.
+    var total = S.unhiddenCount(tab), shown = tab.sorder.length;
     ui.count.textContent = shown === total ? fmt(total) + (total === 1 ? ' row' : ' rows') : fmt(shown) + ' of ' + fmt(total) + ' rows';
     var m2 = mode();
     ui.comment.hidden = m2 !== 'comment';
@@ -720,13 +748,14 @@
   }
   function renderHead() {
     var tab = cur(), W = numW();
-    var html = '<div class="ts-corner" style="width:' + W + 'px"></div>';
+    var html = '<div class="ts-corner" style="width:' + W + 'px">' + S.cornerHtml(tab) + '</div>'; // [structure]
     var a = Math.min(sel.c, sel.c2), b = Math.max(sel.c, sel.c2);
     tab.data.columns.forEach(function (col, c) {
+      if (!S.colShown(tab, c)) return; // [structure] a hidden column
       var s = -1, dir = null;
       tab.query.sort.forEach(function (k, i) { if (k.col === c) { s = i; dir = k.dir; } });
       var filtered = tab.query.filters[c] != null;
-      html += '<div class="ts-h' + (c === 0 ? ' is-first' : '') + (c >= a && c <= b ? ' is-sel' : '') + '" role="columnheader" data-c="' + c + '" style="width:' + tab.widths[c] + 'px' + (c === 0 ? ';left:' + W + 'px' : '') + '"' +
+      html += '<div class="ts-h' + S.frozenCls(tab, c) + (c >= a && c <= b ? ' is-sel' : '') + '" role="columnheader" data-c="' + c + '" style="width:' + tab.widths[c] + 'px' + S.frozenLeft(tab, c) + '"' +
         (dir ? ' aria-sort="' + (dir === 'asc' ? 'ascending' : 'descending') + '"' : '') + '>' +
         '<button type="button" class="ts-hname" data-act="sort" title="Sort by ' + esc(col.name) + ' (shift-click to add)"><span class="ts-glyph" aria-label="' + TYPE_LABEL[tab.index.cols[c].type] + '">' + TYPE_GLYPH[tab.index.cols[c].type] + '</span><b>' + esc(col.name) + '</b>' +
         (dir ? '<span class="ts-sorted">' + (dir === 'asc' ? ICON.up : ICON.down) + (tab.query.sort.length > 1 ? (s + 1) : '') + '</span>' : '') + '</button>' +
@@ -736,13 +765,14 @@
     });
     if (canEdit()) html += '<div class="ts-h-add"><button type="button" class="ts-icon" data-act="addcol" aria-label="Add a column" title="Add a column">' + ICON.plus + '</button></div>';
     ui.head.innerHTML = html;
+    S.afterHead(tab); // [structure] hidden-column markers
     renderFoot();
   }
   // ---- summary row -----------------------------------------------------------------
   function hasTotals(tab) { return Object.keys(tab.query.totals || {}).some(function (k) { return Number(k) < tab.data.columns.length; }); }
   function footH() { var tab = cur(); return tab && hasTotals(tab) ? ROW_H : 0; }
   function totalText(tab, c, fn) {
-    var v = Q.columnTotal(tab.index, tab.order, c, fn);
+    var v = Q.columnTotal(tab.index, tab.sorder || tab.order, c, fn); // [structure] collapsed rows still count
     if (v == null) return '–';
     if (fn === 'avg') return Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
     return fmt(v);
@@ -754,11 +784,12 @@
     if (!any) { ui.foot.textContent = ''; return; }
     var html = '<div class="ts-fcorner" style="width:' + W + 'px" title="Summary of the rows shown">Σ</div>';
     tab.data.columns.forEach(function (col, c) {
+      if (!S.colShown(tab, c)) return; // [structure]
       var fn = tab.query.totals[c];
       var label = fn ? Q.TOTAL_LABEL[fn] : 'Summary';
-      html += '<button type="button" class="ts-fc' + (c === 0 ? ' is-first' : '') + (fn ? '' : ' is-none') + '" data-c="' + c + '" role="gridcell"' +
+      html += '<button type="button" class="ts-fc' + S.frozenCls(tab, c) + (fn ? '' : ' is-none') + '" data-c="' + c + '" role="gridcell"' +
         ' aria-label="' + esc(col.name) + ' summary' + (fn ? ': ' + label + ' ' + esc(totalText(tab, c, fn)) : '') + '"' +
-        ' style="width:' + tab.widths[c] + 'px' + (c === 0 ? ';left:' + W + 'px' : '') + '">' +
+        ' style="width:' + tab.widths[c] + 'px' + S.frozenLeft(tab, c) + '">' +
         '<small>' + esc(label) + '</small>' + (fn ? '<b>' + esc(totalText(tab, c, fn)) + '</b>' : '') + '</button>';
     });
     ui.foot.innerHTML = html;
@@ -776,7 +807,7 @@
   function visibleCols(tab) {
     var left = ui.grid.scrollLeft, right = left + ui.grid.clientWidth;
     var c0 = 0, c1 = tab.widths.length - 1;
-    for (var c = 0; c < tab.widths.length; c++) { if (tab.colLeft[c] + tab.widths[c] >= left + numW()) { c0 = c; break; } }
+    for (var c = 0; c < tab.widths.length; c++) { if (tab.colLeft[c] + tab.widths[c] >= left + numW() + S.frozenW(tab)) { c0 = c; break; } }
     for (var d = c0; d < tab.widths.length; d++) { if (tab.colLeft[d] > right) { c1 = d; break; } }
     return [Math.max(0, c0 - 1), Math.min(tab.widths.length - 1, c1 + 1)];
   }
@@ -786,7 +817,8 @@
     var n = tab.order.length;
     if (!n) {
       ui.rows.style.top = '0px';
-      ui.rows.innerHTML = '<div class="ts-empty" style="width:' + ui.grid.clientWidth + 'px">' + (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.') + '</div>';
+      ui.rows.innerHTML = '<div class="ts-empty" style="width:' + ui.grid.clientWidth + 'px">' + (S.emptyText(tab) || (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.')) + '</div>';
+      S.afterBody(tab, 0, -1, [0, -1]); // [structure]
       rendered.key = 'empty';
       return true;
     }
@@ -797,30 +829,39 @@
     var key = first + ':' + last + ':' + cols[0] + ':' + cols[1] + ':' + (tab.tops ? tab.tops[n] : 0);
     if (!force && key === rendered.key) return false;
     rendered.key = key;
+    var html = rowsHtml(tab, first, last, cols);
+    ui.rows.style.top = rowTop(tab, first) + 'px';
+    ui.rows.innerHTML = html;
+    S.afterBody(tab, first, last, cols); // [structure] outline gutter, markers, frozen rows
+    if (tab.anyWrap && measureRows(tab, first, last)) return true;
+    placePill();
+    placeOffscreen();
+    return true;
+  }
+  // View rows first..last as markup, with the columns cols[0]..cols[1] (and
+  // the frozen ones before them, a spacer standing for those between).
+  function rowsHtml(tab, first, last, cols) {
     var W = numW(), needle = tab.query.search.trim().toLowerCase();
     var ra = Math.min(sel.r, sel.r2), rb = Math.max(sel.r, sel.r2), ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2);
     var hit = tab.matchAt >= 0 ? tab.matches.hits[tab.matchAt] : null;
     var html = '';
-    var list = [];
-    if (cols[0] > 0) list.push(0);
-    for (var c = cols[0]; c <= cols[1]; c++) list.push(c);
+    // [structure] the frozen columns, then the scrolled range; hidden ones skipped.
+    var fc = S.frozenCount(tab), from = Math.max(cols[0], fc), list = [];
+    for (var f = 0; f < fc; f++) if (S.colShown(tab, f)) list.push(f);
+    var gap = from > fc ? tab.colLeft[from] - tab.colLeft[fc] : 0, gapAt = list.length;
+    for (var c = from; c <= cols[1]; c++) if (S.colShown(tab, c)) list.push(c);
     for (var i = first; i <= last; i++) {
       var r = tab.order[i];
       var rowSel = i >= ra && i <= rb;
       html += '<div class="ts-row" role="row" data-i="' + i + '" style="width:' + tab.totalW + 'px' + (tab.tops ? ';height:' + rowH(tab, i) + 'px' : '') + '"><div class="ts-n' + (rowSel ? ' is-sel' : '') + '" role="rowheader" style="width:' + W + 'px">' + (r + 1) + '<span class="ts-rresize" data-act="rresize" aria-hidden="true"></span></div>';
       for (var k = 0; k < list.length; k++) {
         var cc = list[k];
-        if (k === 1 && list[0] === 0 && cols[0] > 1) html += '<div style="flex:none;width:' + (tab.colLeft[cols[0]] - tab.colLeft[1]) + 'px"></div>';
+        if (k === gapAt && gap > 0) html += '<div style="flex:none;width:' + gap + 'px"></div>';
         html += cellHtml(tab, r, cc, i, rowSel && cc >= ca && cc <= cb, i === sel.r && cc === sel.c, needle, hit && hit.row === r && hit.col === cc);
       }
       html += '</div>';
     }
-    ui.rows.style.top = rowTop(tab, first) + 'px';
-    ui.rows.innerHTML = html;
-    if (tab.anyWrap && measureRows(tab, first, last)) return true;
-    placePill();
-    placeOffscreen();
-    return true;
+    return html;
   }
   // Wrapped rows drawn: their real heights replace the estimates. true when
   // one changed (the body is drawn again with the new tops).
@@ -855,7 +896,7 @@
   }
   function cellHtml(tab, r, c, i, isSel, isActive, needle, isHitOn) {
     var col = tab.index.cols[c], type = col.type, inner = '', cls = 'ts-c';
-    if (c === 0) cls += ' is-first';
+    cls += S.frozenCls(tab, c); // [structure] frozen columns
     if (type === 'number' && !tab.align[c]) cls += ' is-num';
     else if (type === 'number') cls += ' is-num-t';
     if (tab.align[c]) cls += ' al-' + tab.align[c];
@@ -881,13 +922,16 @@
       inner = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + mark(text, needle) + '</a>' : '<span class="ts-t">' + mark(text, needle) + '</span>';
     }
     var w = tab.widths[c];
-    return '<div class="' + cls + '" role="gridcell" data-c="' + c + '" style="width:' + w + 'px' + (c === 0 ? ';left:' + numW() + 'px' : '') + '"' + (isActive ? ' aria-selected="true"' : '') + ' title="' + esc(col.text[r].slice(0, 300)) + '">' + inner + '</div>';
+    return '<div class="' + cls + '" role="gridcell" data-c="' + c + '" style="width:' + w + 'px' + S.frozenLeft(tab, c) + '"' + (isActive ? ' aria-selected="true"' : '') + ' title="' + esc(col.text[r].slice(0, 300)) + '">' + inner + '</div>';
   }
   // ---- flat view: a small sheet in a prose doc, read as a table --------------------
   function renderFlat() {
     var tab = cur(), n = tab.order.length, cols = tab.data.columns, needle = tab.query.search.trim().toLowerCase();
-    var cards = ui.root.clientWidth <= 480 && cols.length > 3;
-    var html = '', i, r, c;
+    // [structure] hidden columns are left out; a collapsed group is one summary row.
+    var vis = [];
+    for (c = 0; c < cols.length; c++) if (S.colShown(tab, c)) vis.push(c);
+    var cards = ui.root.clientWidth <= 480 && vis.length > 3;
+    var html = '', i, r, c, v;
     var cell = function (r, c) {
       var col = tab.index.cols[c], type = col.type, td = tab.data.rows[r].tds[c], inner = '';
       if (type === 'tags') { for (var t = 0; t < col.tags[r].length; t++) inner += '<span class="ts-tag" style="' + tagStyle(col.tags[r][t], tab.palettes[c]) + '">' + mark(col.tags[r][t], needle) + '</span>'; }
@@ -898,13 +942,16 @@
         (type !== 'tags' && type !== 'checkbox' && col.text[r].indexOf('\n') !== -1 ? ' is-ml' : '') + (tab.align && tab.align[c] ? ' al-' + tab.align[c] : '');
       return { cls: cls, inner: inner };
     };
-    if (!n) html = '<p class="ts-flat-empty">' + (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.') + '</p>';
+    if (!n && !S.flatSummary(tab, 0, cards, vis.length)) html = '<p class="ts-flat-empty">' + (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.') + '</p>';
     else if (cards) {
-      for (i = 0; i < n; i++) {
+      for (i = 0; i <= n; i++) {
+        html += S.flatSummary(tab, i, true, vis.length);
+        if (i === n) break;
         r = tab.order[i];
-        var t0 = cell(r, 0);
-        html += '<div class="ts-card" role="listitem"><p class="ts-card-t' + t0.cls + '" data-i="' + i + '" data-c="0">' + (t0.inner || '&nbsp;') + '</p>';
-        for (c = 1; c < cols.length; c++) {
+        var t0 = cell(r, vis[0]);
+        html += '<div class="ts-card" role="listitem"><p class="ts-card-t' + t0.cls + '" data-i="' + i + '" data-c="' + vis[0] + '">' + S.flatToggle(tab, i) + (t0.inner || '&nbsp;') + '</p>';
+        for (v = 1; v < vis.length; v++) {
+          c = vis[v];
           var x = cell(r, c);
           if (!x.inner) continue;
           html += '<p class="ts-card-l' + x.cls + '" data-i="' + i + '" data-c="' + c + '"><span class="ts-card-k">' + esc(cols[c].name) + ':</span> ' + x.inner + '</p>';
@@ -914,15 +961,18 @@
       html = '<div role="list" aria-label="' + esc(tab.name) + '">' + html + '</div>';
     } else {
       html = '<table><thead><tr>';
-      for (c = 0; c < cols.length; c++) {
+      for (v = 0; v < vis.length; v++) {
+        c = vis[v];
         var s = tab.query.sort.filter(function (k) { return k.col === c; })[0];
         html += '<th data-c="' + c + '"' + (s ? ' aria-sort="' + (s.dir === 'desc' ? 'descending' : 'ascending') + '"' : '') + '><button type="button" data-sort="' + c + '" title="Sort by ' + esc(cols[c].name) + '">' + esc(cols[c].name) + (s ? ' <span class="ts-sorted">' + (s.dir === 'desc' ? ICON.down : ICON.up) + '</span>' : '') + '</button></th>';
       }
       html += '</tr></thead><tbody>';
-      for (i = 0; i < n; i++) {
+      for (i = 0; i <= n; i++) {
+        html += S.flatSummary(tab, i, false, vis.length);
+        if (i === n) break;
         r = tab.order[i];
         html += '<tr>';
-        for (c = 0; c < cols.length; c++) { var y = cell(r, c); html += '<td class="' + y.cls.trim() + '" data-i="' + i + '" data-c="' + c + '">' + y.inner + '</td>'; }
+        for (v = 0; v < vis.length; v++) { c = vis[v]; var y = cell(r, c); html += '<td class="' + y.cls.trim() + '" data-i="' + i + '" data-c="' + c + '">' + (v ? '' : S.flatToggle(tab, i)) + y.inner + '</td>'; }
         html += '</tr>';
       }
       html += '</tbody></table>';
@@ -942,6 +992,7 @@
   // A header sorts; in Comment mode a cell takes a comment; a commented cell
   // opens its thread.
   function flatClick(e) {
+    if (S.flatClick(e)) return; // [structure] a group's summary row or toggle
     var b = e.target.closest('[data-sort]');
     if (b) { e.stopPropagation(); setQuery(Q.toggleSort(cur().query, Number(b.getAttribute('data-sort')), e.shiftKey)); return; }
     var el = e.target.closest('[data-i]');
@@ -1021,6 +1072,8 @@
         Object.keys(t.local.h).forEach(function (id) { if (n < 2000 && t.local.h[id]) { h[id] = t.local.h[id]; n++; } });
         widths[t.name] = { w: t.local.w, h: h, wrap: t.local.wrap, align: t.local.align };
       });
+      // [structure] anyone's expanded / collapsed groups and a reader's freeze.
+      book.tabs.forEach(function (t) { var o = S.viewState(t); if (o) (widths[t.name] = widths[t.name] || {}).o = o; });
       post({ type: 'tdoc:sheetView', hash: Q.encodeView(viewObject()), widths: widths });
     }, 250);
   }
@@ -1047,7 +1100,8 @@
         each(w.wrap, function (k, v) { if (typeof v === 'boolean') loc.wrap[k] = v; });
         each(w.align, function (k, v) { if (M.cleanAlign(v)) loc.align[k] = M.cleanAlign(v); });
       }
-      if (w) { t.local = loc; t.resized = true; readLayout(t); }
+      if (w && !(w.o && Object.keys(w).length === 1)) { t.local = loc; t.resized = true; readLayout(t); }
+      if (w && w.o) S.applyViewState(t, w.o); // [structure]
     });
     var at = book.tabs.findIndex(function (t) { return t.name === view.active; });
     if (at >= 0) book.active = at;
@@ -1061,19 +1115,25 @@
     if (!m.hits.length) return;
     tab.matchAt = tab.matchAt < 0 ? (d > 0 ? 0 : m.hits.length - 1) : (tab.matchAt + d + m.hits.length) % m.hits.length;
     var hit = m.hits[tab.matchAt];
-    sel.r = sel.r2 = hit.at; sel.c = sel.c2 = hit.col;
-    renderBar(); renderHead(); renderBody(true);
-    ensureVisible(hit.at, hit.col);
+    // [structure] a match in a collapsed group opens it first.
+    S.expandTo(tab, hit.row, hit.col);
+    var at = tab.pos[hit.row];
+    if (at < 0) return;
+    sel.r = sel.r2 = at; sel.c = sel.c2 = hit.col;
+    renderBar(); layout(); renderHead(); renderBody(true);
+    ensureVisible(at, hit.col);
   }
 
   // ---- selection & scrolling -------------------------------------------------------
   function ensureVisible(i, c) {
     var tab = cur(), g = ui.grid;
     var top = rowTop(tab, i), hgt = rowH(tab, i), viewH = g.clientHeight - HEAD_H - footH();
-    if (top < g.scrollTop) g.scrollTop = top;
-    else if (top + hgt > g.scrollTop + viewH) g.scrollTop = Math.min(top, top + hgt - viewH);
-    if (c > 0) {
-      var left = tab.colLeft[c] - tab.colLeft[0] - tab.widths[0], right = tab.colLeft[c] + tab.widths[c];
+    // [structure] frozen rows cover the top of the view, frozen columns its left.
+    var fh = i < S.frozenRows(tab) ? 0 : S.frozenH(tab);
+    if (top < g.scrollTop + fh) g.scrollTop = top - fh;
+    else if (top + hgt > g.scrollTop + viewH) g.scrollTop = Math.min(top - fh, top + hgt - viewH);
+    if (c >= S.frozenCount(tab)) {
+      var left = tab.colLeft[c] - numW() - S.frozenW(tab), right = tab.colLeft[c] + tab.widths[c];
       if (left < g.scrollLeft) g.scrollLeft = left;
       else if (right > g.scrollLeft + g.clientWidth) g.scrollLeft = right - g.clientWidth;
     }
@@ -1086,7 +1146,7 @@
     var tab = cur();
     if (!tab.order.length) return;
     var ra = Math.min(sel.r, sel.r2), rb = Math.max(sel.r, sel.r2), ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2);
-    var rows = ui.rows.children;
+    var rows = Array.prototype.slice.call(ui.rows.children).concat(Array.prototype.slice.call(ui.frozen.children)); // [structure]
     for (var k = 0; k < rows.length; k++) {
       var row = rows[k], i = Number(row.getAttribute('data-i'));
       if (!row.classList.contains('ts-row')) continue;
@@ -1106,12 +1166,16 @@
     var tab = cur(), n = tab.order.length, cols = tab.widths.length;
     if (!n || !cols) return;
     i = Math.max(0, Math.min(n - 1, i)); c = Math.max(0, Math.min(cols - 1, c));
+    c = S.shownCol(tab, c, extend ? sel.c2 : sel.c); // [structure] never onto a hidden column
     if (extend) { sel.r2 = i; sel.c2 = c; } else { sel.r = sel.r2 = i; sel.c = sel.c2 = c; }
     sel.touched = true;
     renderHead();
     if (extend) ensureVisible(i, c); else ensureVisible(sel.r, sel.c);
   }
-  function cellAt(i, c) { return ui.rows.querySelector('.ts-row[data-i="' + i + '"] .ts-c[data-c="' + c + '"]'); }
+  function cellAt(i, c) {
+    var q = '.ts-row[data-i="' + i + '"] .ts-c[data-c="' + c + '"]';
+    return (i < S.frozenRows(cur()) && ui.frozen.querySelector(q)) || ui.rows.querySelector(q); // [structure] frozen rows on top
+  }
   function srcCell(tab, i, c) {
     var r = tab.order[i];
     return r == null ? null : tab.data.rows[r].tds[c];
@@ -1187,7 +1251,8 @@
   // -1 above the grid's visible rows, 1 below, 0 in view.
   function rowPlace(i) {
     var tab = cur(), top = rowTop(tab, i), view = ui.grid.clientHeight - HEAD_H - footH();
-    if (top + rowH(tab, i) <= ui.grid.scrollTop + 2) return -1;
+    if (i < S.frozenRows(tab)) return 0; // [structure] a frozen row is always in view
+    if (top + rowH(tab, i) <= ui.grid.scrollTop + S.frozenH(tab) + 2) return -1;
     if (top >= ui.grid.scrollTop + view - 2) return 1;
     return 0;
   }
@@ -1237,8 +1302,9 @@
     if (!at) return false;
     if (at.t !== book.active) { book.active = at.t; renderAll(); }
     if (at.r == null) { ui.root.scrollIntoView({ block: 'nearest' }); return true; }
+    S.expandTo(cur(), at.r, at.c); // [structure] its collapsed group opens (the reader's view)
     var i = cur().pos[at.r];
-    if (i < 0) { toast('That cell is hidden by the search or a filter on this sheet.'); return false; }
+    if (i < 0) { toast(S.hiddenRow(cur(), at.r) ? 'That cell is in a hidden row.' : 'That cell is hidden by the search or a filter on this sheet.'); return false; }
     ui.root.scrollIntoView({ block: 'nearest' });
     select(i, at.c || 0, false);
     return true;
@@ -1288,7 +1354,7 @@
     show(ui.offAbove, above, 'above');
     show(ui.offBelow, below, 'below');
     ui.offHidden.hidden = !hidden;
-    ui.offHidden.textContent = hidden ? hidden + (hidden === 1 ? ' comment is' : ' comments are') + ' on rows the search or filters hide' : '';
+    ui.offHidden.textContent = hidden ? hidden + (hidden === 1 ? ' comment is' : ' comments are') + ' on rows this view hides (a search, a filter, a collapsed group or hidden rows)' : '';
     var g = ui.grid.offsetTop;
     ui.offAbove.style.top = (g + HEAD_H + 6) + 'px';
     ui.offBelow.style.top = (g + ui.grid.offsetHeight - 36) + 'px';
@@ -1450,10 +1516,13 @@
       items.push({ header: 'Type' });
       Q.TYPES.forEach(function (t) { items.push({ label: TYPE_LABEL[t], checked: t === type, onSelect: function () { if (t !== type) setColumnType(c, t); } }); });
       items.push('sep');
-      items.push({ label: 'Insert column left', onSelect: function () { insertColumn(c); } });
-      items.push({ label: 'Insert column right', onSelect: function () { insertColumn(c + 1); } });
+      // [structure] as many columns as are selected (one when this column is not).
+      var ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2), nc = c >= ca && c <= cb ? cb - ca + 1 : 1;
+      items.push({ label: nc > 1 ? 'Insert ' + nc + ' columns left' : 'Insert column left', onSelect: function () { insertColumn(nc > 1 ? ca : c, nc); } });
+      items.push({ label: nc > 1 ? 'Insert ' + nc + ' columns right' : 'Insert column right', onSelect: function () { insertColumn((nc > 1 ? cb : c) + 1, nc); } });
       items.push({ label: 'Delete column', danger: true, disabled: tab.data.columns.length < 2, onSelect: function () { deleteColumn(c); } });
     }
+    items = items.concat(S.columnItems(tab, c)); // [structure] hide, freeze
     openMenu(anchor, items, col.name + ' column');
   }
   function rowMenu(i, anchor) {
@@ -1462,19 +1531,21 @@
     if (i < ra || i > rb) { ra = rb = i; select(i, sel.c, false); }
     var n = rb - ra + 1;
     openMenu(anchor, [
-      { label: 'Insert row above', onSelect: function () { insertRows(cur().order[ra], 1, true); } },
-      { label: 'Insert row below', onSelect: function () { insertRows(cur().order[rb], 1, false); } },
+      // [structure] as many rows as are selected
+      { label: n > 1 ? 'Insert ' + n + ' rows above' : 'Insert row above', onSelect: function () { insertRows(cur().order[ra], n, true); } },
+      { label: n > 1 ? 'Insert ' + n + ' rows below' : 'Insert row below', onSelect: function () { insertRows(cur().order[rb], n, false); } },
       { label: n > 1 ? 'Delete ' + n + ' rows' : 'Delete row', danger: true, onSelect: function () { deleteRows(ra, rb); } },
-    ], 'Row menu');
+    ].concat(S.rowItems(cur(), ra, rb)), 'Row menu'); // [structure] hide, group, freeze
   }
+  // [structure] move left / right, and a delete the toast can undo:
+  // server/sheets-structure.js
   function tabMenu(i, anchor) {
     openMenu(anchor, [
       { label: 'Rename…', onSelect: function () { renameTab(i, anchor); } },
-      { label: 'Delete tab', danger: true, disabled: book.tabs.length < 2, onSelect: function () {
-        // The sandbox has no confirm(): a second menu asks.
-        openMenu(anchor, [{ header: 'Delete "' + book.tabs[i].name + '" and its ' + fmt(book.tabs[i].index.size) + ' rows?' }, { label: 'Delete tab', danger: true, onSelect: function () { deleteTab(i); } }, { label: 'Cancel', onSelect: function () {} }], 'Confirm delete');
-      } },
-    ], 'Tab menu');
+    ].concat(S.tabItems(i, anchor), [
+      'sep',
+      { label: 'Delete tab', danger: true, disabled: book.tabs.length < 2, onSelect: function () { S.deleteTabWithUndo(i); } },
+    ]), 'Tab menu');
   }
 
   // ---- layout changes -------------------------------------------------------------------
@@ -1616,7 +1687,7 @@
       sel.r = Math.min(sel.r, Math.max(0, tab.order.length - 1)); sel.r2 = Math.min(sel.r2, Math.max(0, tab.order.length - 1));
       sel.c = Math.min(sel.c, tab.widths.length - 1); sel.c2 = Math.min(sel.c2, tab.widths.length - 1);
       renderTabs(); renderBar(); layout(); renderHead(); renderBody(true);
-    }
+    } else renderTabs(); // [structure] a tab's undo (order, colour, a copy) shows in the strip
     changed();
     relayout();
   }
@@ -1870,24 +1941,27 @@
       th.setAttribute('data-key', M.nextColumnKey(keys));
     });
   }
-  function insertColumn(at) {
-    var tab = cur(), name = 'Column ' + (tab.data.columns.length + 1);
+  function insertColumn(at, count) {
+    var tab = cur(), n = Math.max(1, Math.min(MAX_COLUMNS - tab.data.columns.length, count || 1));
+    if (n < 1 || tab.data.columns.length >= MAX_COLUMNS) { toast('A sheet has at most ' + MAX_COLUMNS + ' columns.'); return; }
     snapshotOp(tab, function () {
       var hr = headRow(tab);
       ensureKeys(hr);
-      var th = newHeader(hr, name);
-      hr.insertBefore(th, hr.cells[at] || null);
+      for (var k = 0; k < n; k++) {
+        var th = newHeader(hr, 'Column ' + (tab.data.columns.length + k + 1));
+        hr.insertBefore(th, hr.cells[at + k] || null);
+      }
       tab.data.rows.forEach(function (row) {
         var tr = row.tr;
         while (tr.cells.length < at) tr.appendChild(document.createElement('td'));
-        tr.insertBefore(document.createElement('td'), tr.cells[at] || null);
+        for (var j = 0; j < n; j++) tr.insertBefore(document.createElement('td'), tr.cells[at] || null);
       });
     });
-    tab.widths.splice(at, 0, 140);
-    tab.query = Q.shiftQueryColumns(tab.query, at, 1);
+    for (var w = 0; w < n; w++) tab.widths.splice(at, 0, 140);
+    tab.query = Q.shiftQueryColumns(tab.query, at, n);
     afterChange(tab);
     select(sel.r, at, false);
-    renameColumn(at);
+    if (n === 1) renameColumn(at);
   }
   function deleteColumn(c) {
     var tab = cur();
@@ -1985,7 +2059,7 @@
     node.remove();
     book.tabs.splice(i, 1);
     book.active = Math.max(0, Math.min(book.active, book.tabs.length - 1));
-    record({ tab: book.tabs[0], undo: function () { parent.insertBefore(node, nextSib); book.tabs.splice(i, 0, tab); book.active = i; }, redo: function () { node.remove(); book.tabs.splice(book.tabs.indexOf(tab), 1); book.active = Math.max(0, Math.min(book.active, book.tabs.length - 1)); } });
+    record({ tab: tab, undo: function () { parent.insertBefore(node, nextSib); book.tabs.splice(i, 0, tab); book.active = i; }, redo: function () { node.remove(); book.tabs.splice(book.tabs.indexOf(tab), 1); book.active = Math.max(0, Math.min(book.active, book.tabs.length - 1)); } });
     sel = { r: 0, c: 0, r2: 0, c2: 0 };
     renderAll(); changed(); relayout(); saveView();
   }
@@ -2077,6 +2151,9 @@
   }
   function onKey(e) {
     if (!book || editor || (pop && pop.el.contains(e.target))) return;
+    var sk = S.onKey(e); // [structure] Alt+Shift+→/← group / ungroup rows
+    if (sk === 'skip') return;
+    if (sk) { e.preventDefault(); e.stopPropagation(); return; }
     var tab = cur(), k = e.key, mod = e.metaKey || e.ctrlKey;
     var page = Math.max(1, rowAtY(tab, ui.grid.scrollTop + ui.grid.clientHeight - HEAD_H) - rowAtY(tab, ui.grid.scrollTop) - 1);
     var last = tab.order.length - 1, lastC = tab.widths.length - 1;
@@ -2160,7 +2237,7 @@
       var under = document.elementFromPoint(e.clientX, e.clientY);
       cell = under && under.closest && under.closest('.ts-c,.ts-n');
     }
-    if (!cell || !ui.rows.contains(cell)) return null;
+    if (!cell || !(ui.rows.contains(cell) || ui.frozen.contains(cell))) return null; // [structure]
     var row = cell.parentElement;
     var i = Number(row.getAttribute('data-i'));
     var c = cell.classList.contains('ts-n') ? -1 : Number(cell.getAttribute('data-c'));
@@ -2168,6 +2245,7 @@
   }
   var drag = null, cellPress = null, rowPress = -1;
   function wire() {
+    S.wire(); // [structure] group toggles, unhide markers, the corner's view menu
     ui.grid.addEventListener('keydown', onKey);
     ['input', 'beforeinput', 'keyup'].forEach(function (t) { ui.root.addEventListener(t, function (e) { e.stopPropagation(); }); });
     ui.root.addEventListener('keydown', escapeClose);
@@ -2527,6 +2605,7 @@
       // After this message's other listeners: the editor (frame-probe.js)
       // turns Edit mode on, and takes its baseline, in its own.
       var pending = pendingLayout; pendingLayout = null;
+      S.onMode(d.mode); // [structure] a structure change that asked for Edit mode
       if (pending) setTimeout(function () {
         if (d.mode === 'edit' && mode() === 'edit' && book && book.tabs.indexOf(pending.tab) >= 0) applyLayout(pending.tab, pending.change);
         else relayoutTab(pending.tab);
@@ -2573,6 +2652,8 @@
     active: function () { return book ? book.active : -1; },
     selection: function () { return Object.assign({}, sel); },
     expanded: function () { return { on: expand.on, alone: expand.alone, sheetOnly: expand.sheetOnly, embed: expand.embed, fit: expand.fit, flat: !!book && flatView() }; },
+    // [structure] the active tab's outline, hidden and frozen state, as shown.
+    structure: function () { return book ? S.describe(cur()) : null; },
   };
   // Mounted: the tables are hidden by the viewer's own style now, so the
   // frame's 200-row hold (#tdoc-sheets-pending) is no longer needed.
