@@ -2,7 +2,7 @@
 // Doc-level "send to agent" panel. Uses /api/notify/* (Raft is the first
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Terminal, Webhook } from 'lucide-react';
 import { AskIcon } from '../ui/ask-icon.jsx';
 import { ClaudeMark, OpenAIMark, RaftMark } from '../agent-marks.jsx';
@@ -449,16 +449,25 @@ function ConnectAgentView({ onClose, onConnected, isConnected }) {
   );
 }
 
+// The last list each doc answered with, shared by every user of the hook on
+// the page: the surface asks once for its @agent button, and the Send to
+// agent dialog opens on that answer instead of asking again and sitting on
+// "Finding your agents…" with Send disabled while the server walks the Raft
+// directory (Julie, 2026-11-11: about 0.5 s warm, 5 s cold). Each open still
+// refreshes it, behind the list already shown.
+const notifyTargetsCache = new Map();
+const NO_TARGETS = Object.freeze({
+  ready: false,
+  available: false,
+  default: null,
+  candidates: [],
+  fallback: null,
+  reason: null,
+  raftServers: [],
+});
+
 export function useNotifyTargets(slug, enabled) {
-  const [state, setState] = useState({
-    ready: false,
-    available: false,
-    default: null,
-    candidates: [],
-    fallback: null,
-    reason: null,
-    raftServers: [],
-  });
+  const [state, setState] = useState(() => (enabled && slug && notifyTargetsCache.get(slug)) || NO_TARGETS);
 
   const refresh = useCallback(async () => {
     // Not asked yet (a closed dialog) is not "unavailable": that state used
@@ -468,10 +477,11 @@ export function useNotifyTargets(slug, enabled) {
       setState((s) => ({ ...s, ready: false, available: false, reason: null }));
       return;
     }
-    setState((s) => ({ ...s, ready: false }));
+    const known = notifyTargetsCache.get(slug);
+    setState((s) => known || { ...s, ready: false });
     try {
       const body = await listNotifyTargets(slug);
-      setState({
+      const next = {
         ready: true,
         available: true,
         default: body.default || null,
@@ -479,18 +489,15 @@ export function useNotifyTargets(slug, enabled) {
         fallback: body.fallback || null,
         reason: body.reason || null,
         raftServers: Array.isArray(body.raft_servers) ? body.raft_servers : [],
-      });
+      };
+      notifyTargetsCache.set(slug, next);
+      setState(next);
     } catch (err) {
+      // A list already shown stays: a failed refresh behind it says nothing
+      // new about who can be reached.
+      if (known) return;
       // 404 = worker stub not shipped yet; hide the panel rather than alarm.
-      setState({
-        ready: true,
-        available: err.status !== 404,
-        default: null,
-        candidates: [],
-        fallback: null,
-        reason: null,
-        raftServers: [],
-      });
+      setState({ ...NO_TARGETS, ready: true, available: err.status !== 404 });
     }
   }, [slug, enabled]);
 
@@ -614,6 +621,7 @@ export function NotifyHandoffPanel({
 }) {
   const targets = useNotifyTargets(slug, open && hostNotify);
   const [selected, setSelected] = useState(null);
+  const picked = useRef(false);
   const [instruction, setInstruction] = useState(() => defaultInstruction(commentIds));
   const [resending, setResending] = useState(false);
   const [status, setStatus] = useState('');
@@ -637,8 +645,11 @@ export function NotifyHandoffPanel({
     const all = orderedAgentChoices(targets);
     const skip = (t) => avoid && avoid.agent_name && t.provider === (avoid.provider || t.provider)
       && String(t.agent_name || '').toLowerCase() === String(avoid.agent_name).toLowerCase();
+    // The list may refresh behind an open dialog: a pick already made stays.
+    if (picked.current) return;
     setSelected(avoid ? all.find((t) => !skip(t)) || null : targets.default || null);
   }, [open, targets.default, targets.candidates, avoid]);
+  useEffect(() => { if (!open) picked.current = false; }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -771,7 +782,7 @@ export function NotifyHandoffPanel({
                 value={selectedKey}
                 onChange={(key) => {
                   const next = choices.find((t) => targetKey(t) === key);
-                  if (next) setSelected(next);
+                  if (next) { picked.current = true; setSelected(next); }
                 }}
                 options={choices.map((t) => recipientOption(t, targets.default, choices))}
               />

@@ -13828,8 +13828,9 @@ async function redactCommentEmails(value, privacy) {
   return walk(value, '', false);
 }
 
-async function commentPrivacyJson(env, session, slug, body, init) {
-  const meta = slug ? await loadDocMeta(env, slug).catch(() => null) : null;
+async function commentPrivacyJson(env, session, slug, body, init, knownMeta = undefined) {
+  // A caller that has just read (or written) the doc's record passes it.
+  const meta = knownMeta !== undefined ? knownMeta : slug ? await loadDocMeta(env, slug).catch(() => null) : null;
   return json(await redactCommentEmails(body, await emailPrivacyFor(env, session, slug, meta)), init);
 }
 
@@ -18160,7 +18161,7 @@ async function handoffThreadIdsFor(env, slug, session) {
   return handoffThreadIds(list, keys);
 }
 
-async function mutateComments(env, slug, op) {
+async function mutateComments(env, slug, op, { ctx = null, meta: knownMeta = null } = {}) {
   let result;
   if (env.COMMENTS) {
     const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
@@ -18184,15 +18185,32 @@ async function mutateComments(env, slug, op) {
     result = clean;
   }
   if (result && result.status === 200) {
-    const meta = await loadDocMeta(env, slug);
     // Comment text is searchable, a wipe included: queue the doc for
-    // reindexing in its owner's store. Bounded; never fails the comment.
-    if (meta) await searchStoreOp(env, searchScopeOf(meta), { kind: 'comments', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
-    if (meta && validTeamId(meta.workspace_id)) {
-      await enqueueTeamBackup(env, { kind: 'comments', team: meta.workspace_id, slug });
-    }
+    // reindexing in its owner's store, and a team doc for its backup.
+    // Neither is the comment: with a request context they run after the
+    // response (afterResponse); bounded either way, never failing the write.
+    await afterResponse(ctx, (async () => {
+      const meta = knownMeta || await loadDocMeta(env, slug);
+      if (meta) await searchStoreOp(env, searchScopeOf(meta), { kind: 'comments', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
+      if (meta && validTeamId(meta.workspace_id)) {
+        await enqueueTeamBackup(env, { kind: 'comments', team: meta.workspace_id, slug });
+      }
+    })(), 'comment index/backup');
   }
   return result;
+}
+
+// Work a response does not wait for: what follows a saved comment (search
+// indexing, team backup, inbox rows, contacts, onboarding stamps). Under a
+// request context it runs past the response (ctx.waitUntil); without one (a
+// direct call, a test) it is awaited, so its effects are there on return.
+// Its failure is logged and never reaches the caller.
+async function afterResponse(ctx, promise, label = 'background') {
+  const guarded = Promise.resolve(promise).catch((error) => {
+    console.error(`[${label}] failed:`, error && error.message ? error.message : error);
+  });
+  if (ctx && typeof ctx.waitUntil === 'function') { ctx.waitUntil(guarded); return; }
+  await guarded;
 }
 
 // Read the comment list for `slug` from the DO (the source of truth). Returns
@@ -28762,7 +28780,11 @@ const tdocHandlers = {
       if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       if (anchorTooLarge(anchor)) return json({ error: 'anchor_too_large', limit: ANCHOR_MAX_BYTES }, { status: 413 });
       if (invalidProductAnchorUrl(anchor)) return json({ error: 'invalid_product_url' }, { status: 400 });
-      const meta = await loadDocMeta(env, slug);
+      // The doc's record and its comments are independent reads: one wait.
+      // The comments are needed only past the gate below, never returned
+      // before it.
+      const [meta, priorList] = await Promise.all([loadDocMeta(env, slug), readComments(env, slug)]);
+      let metaNow = meta;
       const access = accessFromMeta(meta || {});
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
@@ -28776,7 +28798,6 @@ const tdocHandlers = {
       // Resolve @mentions BEFORE the write: the delivered list is stamped onto
       // the event, so a chip on the card is exactly the set that was notified.
       // Named logins come from the text, never from the request body.
-      const priorList = await readComments(env, slug);
       const isDocOwner = isDocOwnerSession(env, s, meta);
       const outcome = classifyMentions(
         mentionCandidates(commentText).filter((login) => login !== actorKey(s)),
@@ -28814,82 +28835,89 @@ const tdocHandlers = {
         });
         if (patched.error) return json(patched, { status: 400 });
         await putDocMetaJson(env, slug, JSON.stringify(patched.meta));
+        metaNow = patched.meta;
       }
       // The same words twice within seconds is one comment: answer with the
       // one already there instead of writing a twin.
       const dup = duplicateComment(priorList, { author, text: commentText, anchor, parent_id, at: created });
-      if (dup) return commentPrivacyJson(env, s, slug, { ...dup, duplicate_of: dup.id, mention_outcome: outcome });
+      if (dup) return commentPrivacyJson(env, s, slug, { ...dup, duplicate_of: dup.id, mention_outcome: outcome }, undefined, metaNow);
       // Serialized through the per-slug DO (mutation logic lives once in
       // applyCommentOp). create + reply are both id-stamped here so the
       // response is deterministic regardless of where the write runs.
       const op = parent_id
         ? { kind: 'reply', slug, parent_id, reply_id: `r_${Date.now()}_${rand(4)}`, author, text: commentText, mentions, version: V, at: created }
         : { kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author, text: commentText, mentions, anchor: anchor || null, version: V, at: created };
-      const res = await mutateComments(env, slug, op);
-      if (res.status === 200) {
-        const title = (meta && meta.title) || slug;
-        const commentId = parent_id ? op.reply_id : op.id;
-        const threadId = parent_id ? (res.body && res.body.thread_id) : op.id;
-        // Whom this person tagged or answered: the next "@" offers them early.
-        try {
-          const parentA = parent_id ? recordAuthor(priorList, parent_id) : null;
-          await recordContacts(env, actorKey(s), [
-            ...mentions.map((login) => ({ login })),
-            ...(parentA && parentA.login ? [parentA] : []),
-          ], created);
-        } catch {}
-        if (mentions.length) {
-          await deliverInbox(env, null, {
-            kind: 'mention', slug, version: V, comment_id: commentId,
-            thread_id: threadId, target_id: commentId, mentions,
-            actor: author, preview: commentText, title, at: created,
-          }, { ctx, origin: url.origin });
-        }
-        if (!parent_id) {
-          const owner = positionalRecipient(ownerLogin, mentions);
-          if (owner) {
-            await deliverInbox(env, owner, {
-              kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
+      const res = await mutateComments(env, slug, op, { ctx, meta: metaNow });
+      // Everything below the write is about the comment, not the comment
+      // itself: whom it is delivered to (inbox rows, which then push and
+      // email), whom the writer talks to, their onboarding. None of it
+      // changes the answer, so the person is not kept waiting on it: it runs
+      // after the response (afterResponse). Every step still runs, in the
+      // same order, and none can fail the post.
+      if (res.status === 200) await afterResponse(ctx, (async () => {
+          const title = (meta && meta.title) || slug;
+          const commentId = parent_id ? op.reply_id : op.id;
+          const threadId = parent_id ? (res.body && res.body.thread_id) : op.id;
+          // Whom this person tagged or answered: the next "@" offers them early.
+          try {
+            const parentA = parent_id ? recordAuthor(priorList, parent_id) : null;
+            await recordContacts(env, actorKey(s), [
+              ...mentions.map((login) => ({ login })),
+              ...(parentA && parentA.login ? [parentA] : []),
+            ], created);
+          } catch {}
+          if (mentions.length) {
+            await deliverInbox(env, null, {
+              kind: 'mention', slug, version: V, comment_id: commentId,
+              thread_id: threadId, target_id: commentId, mentions,
               actor: author, preview: commentText, title, at: created,
             }, { ctx, origin: url.origin });
           }
-        } else {
-          const parentA = recordAuthor(priorList, parent_id);
-          const parentLogin = positionalRecipient(parentA && parentA.login, mentions);
-          if (parentLogin) {
-            await deliverInbox(env, parentLogin, {
-              kind: 'reply', slug, version: V, comment_id: op.reply_id,
-              thread_id: res.body && res.body.thread_id, target_id: parent_id,
-              actor: author, preview: commentText, title, at: created,
-            }, { ctx, origin: url.origin });
+          if (!parent_id) {
+            const owner = positionalRecipient(ownerLogin, mentions);
+            if (owner) {
+              await deliverInbox(env, owner, {
+                kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
+                actor: author, preview: commentText, title, at: created,
+              }, { ctx, origin: url.origin });
+            }
+          } else {
+            const parentA = recordAuthor(priorList, parent_id);
+            const parentLogin = positionalRecipient(parentA && parentA.login, mentions);
+            if (parentLogin) {
+              await deliverInbox(env, parentLogin, {
+                kind: 'reply', slug, version: V, comment_id: op.reply_id,
+                thread_id: res.body && res.body.thread_id, target_id: parent_id,
+                actor: author, preview: commentText, title, at: created,
+              }, { ctx, origin: url.origin });
+            }
           }
+        // The owner's own first comment, and the first person they tagged, are
+        // steps on their journey. Never fail the post for a stamp.
+        if (isDocOwner) {
+          try {
+            const accountId = await sessionAccountId(env, s);
+            // Only a comment on the journey's own doc moves the journey; a
+            // comment on any other doc of theirs says nothing about it.
+            const journey = await loadOnboarding(env, accountId);
+            // A reply counts. The seeded comment is a question -- "which claim
+            // would you defend least?" -- and its Reply button is the most
+            // obvious thing on the page, so the gesture the checklist asks for
+            // is very often a reply and not a new thread. Excluding replies left
+            // the doc's own corner row ticking while My docs stayed at 2 of 4
+            // and row 4 stayed locked, with no way to reach it.
+            if (!journey.first_doc || journey.first_doc === slug) await stampOnboardingFor(env, accountId, 'commented');
+            if (mentions.length) await stampOnboardingFor(env, accountId, 'tagged');
+          } catch {}
         }
-      }
-      // The owner's own first comment, and the first person they tagged, are
-      // steps on their journey. Never fail the post for a stamp.
-      if (res.status === 200 && isDocOwner) {
-        try {
-          const accountId = await sessionAccountId(env, s);
-          // Only a comment on the journey's own doc moves the journey; a
-          // comment on any other doc of theirs says nothing about it.
-          const journey = await loadOnboarding(env, accountId);
-          // A reply counts. The seeded comment is a question -- "which claim
-          // would you defend least?" -- and its Reply button is the most
-          // obvious thing on the page, so the gesture the checklist asks for
-          // is very often a reply and not a new thread. Excluding replies left
-          // the doc's own corner row ticking while My docs stayed at 2 of 4
-          // and row 4 stayed locked, with no way to reach it.
-          if (!journey.first_doc || journey.first_doc === slug) await stampOnboardingFor(env, accountId, 'commented');
-          if (mentions.length) await stampOnboardingFor(env, accountId, 'tagged');
-        } catch {}
-      }
+      })(), 'comment delivery');
       // The composer needs to know what became of each name: an invite is
       // worth telling the owner about (they still have to send the link), and
       // a blocked name would otherwise fail silently.
       const body_out = res.status === 200 && res.body && typeof res.body === 'object'
         ? { ...res.body, mention_outcome: outcome }
         : res.body;
-      return commentPrivacyJson(env, s, slug, body_out, { status: res.status });
+      return commentPrivacyJson(env, s, slug, body_out, { status: res.status }, metaNow);
     }
 
     // Re-anchor a comment, or edit its text. Appends an `anchor_changed` /

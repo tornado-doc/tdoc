@@ -9,6 +9,7 @@ import {
   updateCommentText,
 } from '../document/api.js';
 import { anchorFromSelection } from '../document/model.js';
+import { withPostedComment } from '../comments/core/posted-comment.js';
 
 function demoId() {
   return `demo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -58,16 +59,25 @@ export function useComments({ slug, version, onChange, onUnauthorized, demo = fa
 
   // Returns the server's response for the mutation itself — the caller needs
   // it for POST /api/comments, which reports what became of each @mention.
-  const mutate = useCallback(async (operation) => {
+  // `show(list, result)`, when given, puts the result on screen at once and
+  // the re-read runs behind it: a new comment or reply shows from the POST's
+  // own answer (comments/core/posted-comment.js), and a re-read that is slow
+  // or fails does not hold "Posting…" on a post the server already took.
+  const mutate = useCallback(async (operation, { show = null } = {}) => {
     try {
       const result = await operation();
-      await refresh();
+      if (show) {
+        applyLocal((list) => show(list, result));
+        refresh().catch(() => {});
+      } else {
+        await refresh();
+      }
       return result;
     } catch (error) {
       if (error.status === 401 && onUnauthorized) return onUnauthorized();
       throw error;
     }
-  }, [onUnauthorized, refresh]);
+  }, [applyLocal, onUnauthorized, refresh]);
 
   const addComment = useCallback(async (selection, text) => {
     if (demo) {
@@ -85,11 +95,11 @@ export function useComments({ slug, version, onChange, onUnauthorized, demo = fa
       return comment;
     }
     return mutate(() => createComment({
-        slug,
-        version,
-        text: text.trim(),
-        anchor: selection ? anchorFromSelection(selection) : null,
-      }));
+      slug,
+      version,
+      text: text.trim(),
+      anchor: selection ? anchorFromSelection(selection) : null,
+    }), { show: (list, made) => withPostedComment(list, made) });
   }, [applyLocal, demo, identity, mutate, slug, version]);
 
   const addReply = useCallback(async (parentId, text) => {
@@ -113,7 +123,8 @@ export function useComments({ slug, version, onChange, onUnauthorized, demo = fa
       }));
       return reply;
     }
-    return mutate(() => createComment({ slug, version, text: text.trim(), parent_id: parentId }));
+    return mutate(() => createComment({ slug, version, text: text.trim(), parent_id: parentId }),
+      { show: (list, made) => withPostedComment(list, made, parentId) });
   }, [applyLocal, demo, identity, mutate, slug, version]);
 
   const edit = useCallback(async (id, text) => {
