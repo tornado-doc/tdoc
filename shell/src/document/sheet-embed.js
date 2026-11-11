@@ -10,8 +10,8 @@ import { EMBED_MAX_PER_PAGE, embedQuery, readEmbedRef } from '../../../shared/sh
 //   frame → shell { type:'tdoc:sheetEmbed', key, id, src, tab, view, rows, columns } + [port]
 //   shell → port  { ok:true, data } | { ok:false, error, signedIn }
 //
-// The key: the frame is opened at <frameSrc>#tdoc-embed=<EMBED_KEY>, random
-// per page load. Only the document the shell opened knows it; a page the
+// The key: the frame is opened at <frameSrc>#tdoc-embed=<key>, random per
+// frame load. Only the document the shell opened knows it; a page the
 // frame is navigated to does not (a fragment is never sent on), so a request
 // without it is a request from somebody else, and gets nothing.
 
@@ -20,34 +20,40 @@ function randomKey() {
   crypto.getRandomValues(bytes);
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
-export const EMBED_KEY = randomKey();
 
-// The frame's address with the key. `reload`: a new address (the editor's
-// Discard reloads the frame; the same address with a fragment would only
-// scroll it).
+// One key per frame load: the frame's first address gets one, and every
+// reload (the editor's Discard) a new one, so a key never outlives the
+// document it was given to. `reload` also changes the address itself (the
+// same address with another fragment would only scroll the frame).
+let currentKey = '';
 let loads = 0;
+let requestsThisLoad = 0;
+export function currentEmbedKey() { return currentKey; }
 export function embedFrameSrc(src, reload = false) {
   const base = String(src || '').replace(/#.*$/, '');
   if (!base) return base;
+  if (!currentKey || reload) { currentKey = randomKey(); requestsThisLoad = 0; }
   const url = reload ? `${base}${base.includes('?') ? '&' : '?'}tdoc_load=${++loads}` : base;
-  return `${url}#tdoc-embed=${EMBED_KEY}`;
+  return `${url}#tdoc-embed=${currentKey}`;
 }
 
 const ANSWER_CACHE_MS = 30_000;
-// Requests one frame load may make: an embed per figure (EMBED_MAX_PER_PAGE),
-// and a reload (Discard, a restored draft) asks again.
-const MAX_REQUESTS = EMBED_MAX_PER_PAGE * 5;
+// Requests one frame load may make: an embed per figure, and a few retries.
+const MAX_REQUESTS = EMBED_MAX_PER_PAGE * 2;
 
 function str(value, max) {
   return typeof value === 'string' ? value.slice(0, max) : '';
 }
 
-export function createSheetEmbedHandler({ enabled, fetchImpl = (...args) => fetch(...args) } = {}) {
+// `page`: this page's slug, from the shell's own config (never from the
+// frame). The server embeds a sheet only if the reader can read this page
+// and the sheet, and this page's author can read the sheet.
+export function createSheetEmbedHandler({ enabled, page, fetchImpl = (...args) => fetch(...args) } = {}) {
   const answers = new Map();
-  let requests = 0;
 
   async function load(ref) {
-    const query = embedQuery(ref);
+    const slug = typeof page === 'function' ? page() : page;
+    const query = `page=${encodeURIComponent(String(slug || ''))}&${embedQuery(ref)}`;
     const cached = answers.get(query);
     if (cached && Date.now() - cached.at < ANSWER_CACHE_MS) return cached.answer;
     const answer = (async () => {
@@ -73,9 +79,9 @@ export function createSheetEmbedHandler({ enabled, fetchImpl = (...args) => fetc
     if (!port) return;
     const reply = (value) => { try { port.postMessage(value); port.close(); } catch {} };
     // Not the frame this shell opened: no answer at all.
-    if (!message || message.key !== EMBED_KEY) { try { port.close(); } catch {} return; }
+    if (!message || !currentKey || message.key !== currentKey) { try { port.close(); } catch {} return; }
     if (!(typeof enabled === 'function' ? enabled() : enabled)) return reply({ ok: false, error: 'disabled' });
-    if (++requests > MAX_REQUESTS) return reply({ ok: false, error: 'rate_limited' });
+    if (++requestsThisLoad > MAX_REQUESTS) return reply({ ok: false, error: 'rate_limited' });
     const attrs = {
       'data-tdoc-embed': 'sheet',
       'data-src': str(message.src, 600),

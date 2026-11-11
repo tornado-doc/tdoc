@@ -311,7 +311,20 @@
   // sides in one coordinate space is what makes the comparison mean anything.
   function placeInView(range, text) { return TS.placeInView(range, text, docView()); }
 
+  // An embedded sheet (sheet-embed-viewer.js) is not the page's text: a
+  // selection that starts or ends in one is not a quote, and one that spans
+  // one keeps only the page's own words around it.
+  function inEmbedHost(node) {
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    return !!(el && el.closest && el.closest('[data-tdoc-embed-host]'));
+  }
   function postTextSelection(range, text) {
+    if (inEmbedHost(range.startContainer) || inEmbedHost(range.endContainer)) return;
+    var hosts = document.querySelectorAll('[data-tdoc-embed-host]');
+    for (var hi = 0; hi < hosts.length; hi++) {
+      if (range.intersectsNode(hosts[hi])) { text = String(range.toString() || '').trim(); break; }
+    }
+    if (!text) return;
     var placed = placeInView(range, text);
     var ctx = placed ? { before: placed.before, after: placed.after } : context(range, 60);
     // Keep the selected passage visible while the shell composer has focus.

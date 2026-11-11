@@ -124,8 +124,9 @@ const root = path.join(__dirname, '..');
   await seed('s-link', { visibility: 'unlisted' });
   await seed('s-gated', { visibility: 'unlisted', signin_required: true });
   await seed('s-private', { visibility: 'private', allowed_users: ['ivan'] });
-  await seed('s-team', { visibility: 'private', team: true, allowed_users: ['gina'] }, { workspace_id: 'team_one' });
-  await seed('s-team-other', { visibility: 'private', team: true }, { workspace_id: 'team_one' });
+  const TEAM = 't_00000000000000aa';
+  await seed('s-team', { visibility: 'private', team: true, allowed_users: ['gina'] }, { workspace_id: TEAM });
+  await seed('s-team-other', { visibility: 'private', team: true }, { workspace_id: TEAM });
   await seed('s-trashed', { visibility: 'public' }, { trashed_at: created, trashed_by: 'olivia' });
   await seed('s-prose', { visibility: 'public' }, {}, '<!doctype html><html><body><h1>Prose</h1><p>no sheet</p></body></html>');
 
@@ -133,11 +134,31 @@ const root = path.join(__dirname, '..');
   const invited = await putSession(env, 'ivan');
   const guest = await putSession(env, 'gina');
   const memberSid = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await env.META.put(`session:${memberSid}`, JSON.stringify({ login: 'mona', name: 'mona', avatar_url: '', created, team_ids: ['team_one'] }));
+  await env.META.put(`session:${memberSid}`, JSON.stringify({ login: 'mona', name: 'mona', avatar_url: '', created, team_ids: [TEAM] }));
   const member = `tdoc_sid=${memberSid}`;
 
+  // The pages that embed: who published each one's latest version matters.
+  const mallory = await issue(worker, env, 'mallory');
+  const tess = await issue(worker, env, 'tess');
+  await env.META.put(`account-teams:${tess.account_id}`, JSON.stringify([TEAM]));
+  async function seedPage(slug, by, access, extra = {}) {
+    await env.META.put(`meta:${slug}`, JSON.stringify({
+      title: slug, slug, created, versions: [{ n: 1, created, by: by.account_id }],
+      hosted: { account_id: by.account_id, github_login: by.login },
+      access: { history_visibility: 'owner', commenting: 'signed_in', allowed_users: [], ...access },
+      ...extra,
+    }));
+    await env.DOCS.put(`docs/${slug}/v1/index.html`, '<!doctype html><html><body><h1>Page</h1><figure data-tdoc-embed="sheet" data-src="/d/s-private"><a href="/d/s-private">x</a></figure></body></html>');
+  }
+  await seedPage('page-owner', owner, { visibility: 'public' });
+  await seedPage('page-mallory', mallory, { visibility: 'public' });
+  await seedPage('page-team', tess, { visibility: 'public' }, { workspace_id: TEAM });
+  await seedPage('page-team-private', tess, { visibility: 'private', team: true }, { workspace_id: TEAM });
+  await seedPage('page-private', owner, { visibility: 'private' });
+
   const embed = async (slug, o = {}, q = '') => {
-    const r = await worker.fetch(req(`/api/embed/sheet?slug=${slug}&tab=Deals&rows=3${q}`, { headers: { 'Sec-Fetch-Site': 'same-origin', ...(o.headers || {}) }, ...o }), env, {});
+    const page = o.page === undefined ? 'page-owner' : o.page;
+    const r = await worker.fetch(req(`/api/embed/sheet?${page ? `page=${page}&` : ''}slug=${slug}&tab=Deals&rows=3${q}`, { headers: { 'Sec-Fetch-Site': 'same-origin', ...(o.headers || {}) }, ...o }), env, {});
     const text = r.status === 304 ? '' : await r.text();
     let body = null;
     try { body = JSON.parse(text); } catch {}
@@ -179,12 +200,37 @@ const root = path.join(__dirname, '..');
   });
 
   await t('team: members read; a guest reads only the sheet shared with them', async () => {
-    readable(await embed('s-team', { cookie: member }), 'member');
-    readable(await embed('s-team-other', { cookie: member }), 'member other');
-    readable(await embed('s-team', { cookie: guest }), 'guest invited');
-    refused(await embed('s-team-other', { cookie: guest }), 'guest not invited');
-    refused(await embed('s-team', { cookie: stranger }), 'stranger team');
-    refused(await embed('s-team'), 'anonymous team');
+    const page = 'page-team';
+    readable(await embed('s-team', { cookie: member, page }), 'member');
+    readable(await embed('s-team-other', { cookie: member, page }), 'member other');
+    readable(await embed('s-team', { cookie: guest, page }), 'guest invited');
+    refused(await embed('s-team-other', { cookie: guest, page }), 'guest not invited');
+    refused(await embed('s-team', { cookie: stranger, page }), 'stranger team');
+    refused(await embed('s-team', { page }), 'anonymous team');
+  });
+
+  await t('the page\'s author must be able to read the sheet too (no confused deputy)', async () => {
+    // ivan may read s-private; mallory, who published the page, may not.
+    const deputy = await embed('s-private', { cookie: invited, page: 'page-mallory' });
+    refused(deputy, 'author without access');
+    const priv = await embed('s-private', { cookie: stranger });
+    assert(deputy.text === priv.text.replace('"signed_in":true', '"signed_in":true'), `${deputy.text} / ${priv.text}`);
+    // The same reader, on a page whose author can read the sheet.
+    readable(await embed('s-private', { cookie: invited, page: 'page-owner' }), 'author with access');
+    // A public sheet: anybody's page may show it.
+    readable(await embed('s-public', { page: 'page-mallory' }), 'public sheet, any author');
+  });
+
+  await t('a team page published by a member who can read the team sheet works', async () => {
+    readable(await embed('s-team-other', { cookie: member, page: 'page-team-private' }), 'team page, team sheet');
+    refused(await embed('s-team-other', { cookie: stranger, page: 'page-team-private' }), 'reader who cannot read the page');
+  });
+
+  await t('the reader must be able to read the page, and the shell must name it', async () => {
+    refused(await embed('s-public', { page: 'page-private' }), 'anonymous, private page');
+    readable(await embed('s-public', { cookie: owner.cookie, page: 'page-private' }), 'owner, own private page');
+    assert((await embed('s-public', { page: '' })).status === 400, 'no page');
+    assert((await embed('s-public', { page: '..%2Fx' })).status === 400, 'bad page');
   });
 
   await t('a missing, trashed or private sheet is the same answer', async () => {
@@ -223,10 +269,10 @@ const root = path.join(__dirname, '..');
     assert(cross.status === 403 && cross.body.error === 'cross_site', 'cross-site refused');
     const prose = await embed('s-prose');
     assert(prose.status === 422 && prose.body.error === 'not_a_sheet', `${prose.status}`);
-    const tab = await worker.fetch(req('/api/embed/sheet?slug=s-public&tab=Nope', { headers: { 'Sec-Fetch-Site': 'same-origin' } }), env, {});
+    const tab = await worker.fetch(req('/api/embed/sheet?page=page-owner&slug=s-public&tab=Nope', { headers: { 'Sec-Fetch-Site': 'same-origin' } }), env, {});
     const tb = await tab.json();
     assert(tab.status === 404 && tb.error === 'no_tab' && tb.tabs.join() === 'Deals,Contacts', JSON.stringify(tb));
-    const tabPrivate = await worker.fetch(req('/api/embed/sheet?slug=s-private&tab=Nope', { cookie: stranger, headers: { 'Sec-Fetch-Site': 'same-origin' } }), env, {});
+    const tabPrivate = await worker.fetch(req('/api/embed/sheet?page=page-owner&slug=s-private&tab=Nope', { cookie: stranger, headers: { 'Sec-Fetch-Site': 'same-origin' } }), env, {});
     assert(tabPrivate.status === 403 && !/Deals/.test(await tabPrivate.text()), 'tab names only for readers');
   });
 

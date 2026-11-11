@@ -560,7 +560,7 @@ export function DocumentShell({ boot, config }) {
   const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity) });
   // Sheets embedded in the page (flag sheetEmbeds): the frame asks, this
   // fetches as the reader and answers on the request's own port.
-  const sheetEmbed = useMemo(() => createSheetEmbedHandler({ enabled: () => isFeatureOn('sheetEmbeds') }), []);
+  const sheetEmbed = useMemo(() => createSheetEmbedHandler({ enabled: () => isFeatureOn('sheetEmbeds'), page: config.slug }), [config.slug]);
   const bridge = useFrameBridge({
     ...sheetHandlers,
     'tdoc:sheetEmbed': sheetEmbed,

@@ -106,9 +106,11 @@ sheet updates every page that embeds it.
   it is what an export, a feed reader or an old version shows instead.
 - Use the slug of the sheet you published (its address is
   `https://tdoc.dev/d/<slug>`). Publish the sheet first, then the page.
-- Access is the sheet's. A reader who can read the page but not the sheet
+- An embed shows only if **both** the page's author (whoever published its
+  latest version) and the reader can read the sheet. Otherwise the reader
   sees "You don't have access to this sheet" and nothing of it, not even its
-  title. Share the sheet with the same people as the page.
+  title. Share the sheet with the same people as the page, and embed only
+  sheets you can read yourself.
 - Comments on the data go on the sheet; the embed shows their count and
   links there.
 - Markdown and Word downloads of the page show the embed as its link. The

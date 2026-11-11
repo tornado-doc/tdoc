@@ -38,6 +38,7 @@ function sheetEmbedSource() {
     + 'globalThis.TdocSheetEmbed = {\n'
     + '  refFromQuery: SheetEmbedRef.embedRefFromQuery,\n'
     + '  sheetHref: SheetEmbedRef.embedSheetHref,\n'
+    + '  normalizeView: function (v) { return v ? SheetQuery.encodeView(SheetQuery.decodeView(v)) : \'\'; },\n'
     + '  maxRows: SheetEmbedRef.EMBED_MAX_ROWS,\n'
     + '  maxColumns: SheetEmbedRef.EMBED_MAX_COLUMNS,\n'
     + '  payload: function (html, ref) { return SheetEmbedData.embedPayload(html, ref, SheetQuery, { maxRows: SheetEmbedRef.EMBED_MAX_ROWS, maxColumns: SheetEmbedRef.EMBED_MAX_COLUMNS }); },\n'

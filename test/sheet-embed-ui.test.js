@@ -97,7 +97,7 @@ ${figure('/d/finance-forecast', ' data-rows="5"', 'Finance forecast')}
       await context.addInitScript(openShadows);
       await context.addInitScript((on) => { window.__TDOC_FLAGS__ = Object.assign(window.__TDOC_FLAGS__ || {}, { sheetEmbeds: on }); }, flag);
       // The forecast belongs to somebody else: this reader may not read it.
-      await context.route('**/api/embed/sheet?slug=finance-forecast*', (route) => route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'no_access', signed_in: false }) }));
+      await context.route('**/api/embed/sheet?*slug=finance-forecast*', (route) => route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'no_access', signed_in: false }) }));
       return context;
     }
     const frameOf = (page) => page.frames().find((f) => f.url().includes('/frame'));
@@ -137,6 +137,21 @@ ${figure('/d/finance-forecast', ' data-rows="5"', 'Finance forecast')}
       assert(/First 3 of 4 rows/.test(e.foot) && /filtered from 7/.test(e.foot) && /Sorted/.test(e.foot), e.foot);
       assert(e.actions.some((a) => a === '2 comments'), e.actions.join());
       assert(!e.fallbackShown, 'the fallback link hides once the view is live');
+      // Nothing the page's CSS can see depends on the sheet: the host's size
+      // comes from data-rows alone, in every state, and no state is an attribute.
+      const boxes = await frame.evaluate(() => Array.from(document.querySelectorAll('[data-tdoc-embed-host]')).map((h) => ({ h: h.getBoundingClientRect().height, attrs: h.getAttributeNames().sort().join() })));
+      const expect = (rows) => 2 + 44 + 33 + rows * 34 + 32;
+      assert(boxes[0].h === expect(3) && boxes[1].h === expect(5), JSON.stringify(boxes));
+      assert(boxes.every((b) => b.attrs === 'contenteditable,data-tdoc-embed-host,data-tdoc-provider'), JSON.stringify(boxes));
+      const hostile = await frame.evaluate(() => {
+        const st = document.createElement('style');
+        st.textContent = '[data-tdoc-embed-host]{display:none!important;height:1px!important;contain:none!important;font-family:Evil!important}';
+        document.head.appendChild(st);
+        const r = document.querySelector('[data-tdoc-embed-host]').getBoundingClientRect().height;
+        st.remove();
+        return r;
+      });
+      assert(hostile === expect(3), `author CSS changed the card: ${hostile}`);
       const overflow = await frame.evaluate(() => document.documentElement.scrollWidth - innerWidth);
       assert(overflow <= 1, `page scrolls sideways: ${overflow}`);
       await frame.evaluate(() => document.querySelector('[data-tdoc-embed-host]').scrollIntoView({ block: 'start' }));

@@ -74,15 +74,31 @@
   };
   function icon(name) { var s = h('span', 'se-icon'); s.innerHTML = ICON[name]; return s; }
 
-  // The card's own styles, inside the shadow root. `all:initial` on the host
-  // keeps inherited author typography (and an author @font-face) out.
+  // The card's own styles, inside the shadow root. The card is drawn inside
+  // the author's document, so nothing about it that author CSS can observe
+  // may depend on the sheet: the host's size is fixed from data-rows alone
+  // (the same in every state: loading, live, no access, error), it is size-
+  // and paint-contained and clips, `!important` in the shadow context beats
+  // anything the page says about the host, no state is ever an attribute in
+  // the page, and the type is generic families only (no author @font-face,
+  // so no unicode-range probes). Values are text; nothing loads.
+  var TOP_H = 44, HEAD_H = 33, ROW_H = 34, FOOT_H = 32;
+  function rowsOf(value) {
+    var n = Math.floor(Number(String(value == null ? '' : value).trim()));
+    return Number.isFinite(n) && n >= 1 ? Math.min(R.EMBED_MAX_ROWS, n) : R.EMBED_DEFAULT_ROWS;
+  }
+  function hostCss(embed) {
+    var height = 2 + TOP_H + HEAD_H + embed.rowsShown * ROW_H + FOOT_H;
+    return ':host{all:initial!important;display:block!important;box-sizing:border-box!important;contain:strict!important;overflow:hidden!important;'
+      + 'width:auto!important;height:' + height + 'px!important;min-height:0!important;max-height:none!important;margin:0 0 8px!important;padding:0!important;'
+      + 'visibility:visible!important;opacity:1!important;transform:none!important;filter:none!important}\n';
+  }
   var CSS = [
-    ':host{all:initial;display:block;contain:content}',
     '.se{--se-accent:#1652f0;--se-ink:#17171a;--se-muted:#666670;--se-line:#e6e6ea;--se-head:#f7f7f8;',
-    'box-sizing:border-box;margin:0;border:1px solid var(--se-line);border-radius:10px;background:#fff;color:var(--se-ink);',
-    'font:13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;text-align:left;overflow:hidden}',
+    'box-sizing:border-box;height:100%;display:flex;flex-direction:column;margin:0;border:1px solid var(--se-line);border-radius:10px;background:#fff;color:var(--se-ink);',
+    'font:13px/1.45 system-ui,sans-serif;text-align:left;overflow:hidden;-webkit-user-select:none;user-select:none}',
     '.se *{box-sizing:border-box}',
-    '.se-top{display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 10px 8px 12px;border-bottom:1px solid var(--se-line)}',
+    '.se-top{flex:none;display:flex;align-items:center;gap:10px;height:' + TOP_H + 'px;padding:0 10px 0 12px;border-bottom:1px solid var(--se-line);overflow:hidden}',
     '.se-title{flex:1;min-width:0;display:flex;align-items:center;gap:8px;color:inherit;text-decoration:none;font-weight:600;font-size:14px}',
     '.se-title b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
     '.se-title span.se-tab{flex:none;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--se-muted);font-weight:500}',
@@ -95,37 +111,38 @@
     '.se-act .se-icon svg{width:14px;height:14px}',
     '.se-comments{border-color:transparent;color:var(--se-muted)}',
     '.se-comments:hover{color:var(--se-ink)}',
-    '.se-scroll{overflow:auto;max-height:520px;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}',
+    '.se-scroll{flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}',
     'table{border-collapse:separate;border-spacing:0;width:100%;font-variant-numeric:tabular-nums}',
-    'th,td{padding:6px 10px;border-bottom:1px solid var(--se-line);text-align:left;vertical-align:top;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}',
-    'th{position:sticky;top:0;z-index:1;background:var(--se-head);font-weight:600;color:#3a3a42}',
+    'th,td{box-sizing:border-box;padding:0 10px;line-height:20px;border-bottom:1px solid var(--se-line);text-align:left;vertical-align:middle;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}',
+    'td{height:' + ROW_H + 'px}',
+    'th{height:' + HEAD_H + 'px;position:sticky;top:0;z-index:1;background:var(--se-head);font-weight:600;color:#3a3a42}',
     'tr:last-child td{border-bottom:0}',
     'td.se-num,th.se-num{text-align:right}',
-    'td.se-wrap{white-space:normal;min-width:160px}',
     'td a{color:var(--se-accent);text-decoration:none}',
     'td a:hover{text-decoration:underline}',
-    '.se-tag{display:inline-block;margin:0 4px 2px 0;padding:0 8px;border-radius:999px;font-size:12px;line-height:20px;white-space:nowrap}',
-    '.se-foot{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;padding:7px 12px;border-top:1px solid var(--se-line);background:var(--se-head);color:var(--se-muted);font-size:12px}',
+    '.se-tag{display:inline-block;vertical-align:middle;margin:0 4px 0 0;padding:0 8px;border-radius:999px;font-size:12px;line-height:20px;white-space:nowrap}',
+    '.se-foot{flex:none;display:flex;flex-wrap:nowrap;gap:12px;align-items:center;height:' + FOOT_H + 'px;padding:0 12px;border-top:1px solid var(--se-line);background:var(--se-head);color:var(--se-muted);font-size:12px;white-space:nowrap;overflow:hidden}',
+    '.se-foot span{overflow:hidden;text-overflow:ellipsis}',
     '.se-foot a{color:var(--se-accent);text-decoration:none;margin-left:auto;font-weight:500}',
     '.se-foot a:hover{text-decoration:underline}',
-    '.se-msg{display:flex;align-items:center;gap:10px;padding:14px 12px;color:var(--se-muted)}',
+    '.se-msg{flex:1;min-height:0;display:flex;align-items:center;gap:10px;padding:0 12px;color:var(--se-muted);overflow:hidden}',
     '.se-msg p{margin:0;flex:1;min-width:0}',
     '.se-msg strong{color:var(--se-ink);font-weight:600}',
-    '.se-skel{padding:10px 12px}',
+    '.se-skel{flex:1;min-height:0;padding:10px 12px;overflow:hidden}',
     '.se-skel i{display:block;height:12px;margin:9px 0;border-radius:4px;background:linear-gradient(90deg,#f0f0f3,#f7f7f9,#f0f0f3);background-size:200% 100%;animation:se-shine 1.2s linear infinite}',
     '.se-skel i:nth-child(2){width:86%}.se-skel i:nth-child(3){width:72%}',
     '@keyframes se-shine{to{background-position:-200% 0}}',
     '@media (prefers-reduced-motion:reduce){.se-skel i{animation:none}}',
     '.se-short{display:none}',
-    '@media (max-width:640px){.se-top{padding:6px 8px 6px 10px;gap:4px}.se-act{padding:0 8px}.se-act .se-label{display:none}.se-comments .se-short{display:inline}.se-title span.se-tab{display:none}th,td{padding:6px 8px;max-width:220px}}',
+    '@media (max-width:640px){.se-top{padding:6px 8px 6px 10px;gap:4px}.se-act{padding:0 8px}.se-act .se-label{display:none}.se-comments .se-short{display:inline}.se-title span.se-tab{display:none}th,td{padding:0 8px;max-width:220px}.se-foot .se-extra{display:none}}',
   ].join('\n');
 
-  // Hide the figure's own children (the fallback link) while the view is
-  // drawn; a figcaption stays. A provider style, so the editor drops it.
+  // Hide the figure's own children (the fallback link) while the card is
+  // there; a figcaption stays. A provider style, so the editor drops it.
   var pageStyle = document.createElement('style');
   pageStyle.setAttribute('data-tdoc-provider', '');
-  pageStyle.textContent = '[data-tdoc-embed="sheet"]:has(>[data-tdoc-embed-host][data-state]:not([data-state="fallback"]))>:not([data-tdoc-embed-host]):not(figcaption){display:none!important}'
-    + '[data-tdoc-embed-host]{display:block;margin:0 0 .5rem}';
+  // From the moment the card is mounted, whatever comes back.
+  pageStyle.textContent = '[data-tdoc-embed="sheet"]:has(>[data-tdoc-embed-host])>:not([data-tdoc-embed-host]):not(figcaption){display:none!important}';
   (document.head || document.documentElement).appendChild(pageStyle);
 
   // Every link the viewer draws, and where it goes. Clicks are taken at the
@@ -160,16 +177,14 @@
   window.addEventListener('click', onClick, true);
   window.addEventListener('auxclick', onClick, true);
 
-  function setState(embed, state) {
-    embed.state = state;
-    embed.host.setAttribute('data-state', state);
-  }
+  // State lives here only: never an attribute the page's CSS could select.
+  function setState(embed, state) { embed.state = state; }
 
   function frame(embed) {
     var root = embed.root;
     while (root.firstChild) root.removeChild(root.firstChild);
     var st = document.createElement('style');
-    st.textContent = CSS;
+    st.textContent = hostCss(embed) + CSS;
     root.appendChild(st);
     var card = h('div', 'se');
     card.setAttribute('role', 'group');
@@ -231,7 +246,7 @@
     var card = frame(embed);
     var title = String(d.title || embed.slug);
     embed.title = title;
-    embed.rows = Array.isArray(d.rows) ? d.rows.length : 0;
+    embed.rows = Array.isArray(d.rows) ? Math.min(d.rows.length, embed.rowsShown) : 0;
     card.setAttribute('aria-label', 'Sheet: ' + title);
     var top = topRow(card, embed, title, d.tabs > 1 ? d.tab : '', href);
     var count = Math.max(0, Math.floor(Number(d.comments) || 0));
@@ -262,7 +277,7 @@
     thead.appendChild(hr);
     table.appendChild(thead);
     var tbody = h('tbody');
-    (Array.isArray(d.rows) ? d.rows.slice(0, R.EMBED_MAX_ROWS) : []).forEach(function (row) {
+    (Array.isArray(d.rows) ? d.rows.slice(0, embed.rowsShown) : []).forEach(function (row) {
       var tr = h('tr');
       cols.forEach(function (col, i) {
         var v = row && Array.isArray(row.cells) ? row.cells[i] : '';
@@ -281,7 +296,6 @@
           td.appendChild(a);
         } else {
           var text = String(v == null ? '' : v);
-          if (text.length > 60) td.className = 'se-wrap';
           td.textContent = text;
         }
         tr.appendChild(td);
@@ -298,8 +312,8 @@
       : shown < matching ? 'First ' + fmt(shown) + ' of ' + fmt(matching) + ' rows' : fmt(matching) + (matching === 1 ? ' row' : ' rows');
     if (d.filtered && matching) line += ' (filtered from ' + fmt(total) + ')';
     foot.appendChild(h('span', '', line));
-    if (d.sorted) foot.appendChild(h('span', '', 'Sorted'));
-    if (d.hidden_columns > 0) foot.appendChild(h('span', '', fmt(d.hidden_columns) + (d.hidden_columns === 1 ? ' more column' : ' more columns')));
+    if (d.sorted) foot.appendChild(h('span', 'se-extra', 'Sorted'));
+    if (d.hidden_columns > 0) foot.appendChild(h('span', 'se-extra', fmt(d.hidden_columns) + (d.hidden_columns === 1 ? ' more column' : ' more columns')));
     var all = link('', href);
     all.textContent = 'View the whole sheet';
     foot.appendChild(all);
@@ -329,11 +343,12 @@
     }
   }
 
-  // Back to the figure as written: its link.
+  // Back to the figure as written: its link. Only for an answer that says
+  // nothing about the sheet (embeds are off for this reader, no channel).
   function fallback(embed) {
     clearTimeout(embed.timer);
     setState(embed, 'fallback');
-    while (embed.root.firstChild) embed.root.removeChild(embed.root.firstChild);
+    if (embed.host.parentNode) embed.host.parentNode.removeChild(embed.host);
   }
 
   function request(embed) {
@@ -380,7 +395,7 @@
         id: 'e' + i, fig: fig, host: host, root: host.attachShadow({ mode: 'closed' }),
         slug: slug, src: attr('data-src'), tab: attr('data-tab'), view: attr('data-view'),
         rowsWanted: attr('data-rows'), columns: attr('data-columns'),
-        state: 'loading', rows: 0, title: '', timer: null,
+        state: 'loading', rows: 0, rowsShown: rowsOf(attr('data-rows')), title: '', timer: null,
       };
       embeds.push(embed);
       setState(embed, 'loading');

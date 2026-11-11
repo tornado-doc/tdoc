@@ -20586,9 +20586,10 @@ function blockLintOf(html) {
 // only the rows and columns the embed shows. Never HTML: nothing the sheet's
 // author wrote runs in the page that embeds it.
 //
-// Access is the SHEET's, for the person asking: the same gate as reading the
-// sheet itself (enforceDocAccess: cookie session, bearer, owner token). The
-// page that embeds it grants nothing. Every refusal -- no such doc, in
+// Access: the person asking must be able to read the page (`page`, sent by
+// the shell from its own config, never by the frame) and the SHEET, and the
+// publisher of the page's latest version must be able to read the sheet too
+// (see handleSheetEmbed). The page grants nothing. Every refusal -- no such doc, in
 // Trash, private, not signed in, a feedback token for another doc -- is the
 // same answer with no title, so an embed cannot be used to learn whether a
 // private doc exists or what it is called.
@@ -20600,11 +20601,13 @@ function blockLintOf(html) {
 // may revalidate its own copy, and no shared cache keeps it.
 //
 // Cost: a miss reads the whole sheet (up to 8 MB) and scans it once
-// (linear, shared/sheet-embed-data.mjs). Misses are limited per isolate and,
-// for a large sheet, per person through KV.
+// (linear, shared/sheet-embed-data.mjs). Misses are limited per isolate and
+// per person through KV (a large sheet tighter); the comment count is kept
+// a minute.
 /* __TDOC_SHEET_EMBED__ */
 const SHEET_EMBED_BIG_BYTES = 512 * 1024;
 const SHEET_EMBED_BIG_PER_MIN = 30;
+const SHEET_EMBED_MISSES_PER_ACTOR = 120;
 const SHEET_EMBED_MISSES_PER_MIN = 240;
 const SHEET_EMBED_ISOLATE = { window: 0, count: 0 };
 function sheetEmbedJson(body, status, extra = {}) {
@@ -20628,6 +20631,71 @@ function sheetEmbedOpenThreads(list) {
   }
   return n;
 }
+// Who published the page's latest version, as an identity the access rules
+// can read: the account that uploaded it (an agent, the CLI), the person who
+// saved it in the browser, a team agent (its team), else the page's owner.
+// For ACL checks only; never a session anything is attributed to. null when
+// nobody can be named: then nothing is embedded.
+async function sheetEmbedAuthorSession(env, pageMeta) {
+  const versions = Array.isArray(pageMeta && pageMeta.versions) ? pageMeta.versions : [];
+  const latest = latestVersionNumber(pageMeta);
+  const v = versions.find((x) => x && Number(x.n) === latest) || null;
+  const w = v ? versionWriter(pageMeta, v) : null;
+  if (w && w.kind === 'team_agent') {
+    return pageMeta.workspace_id
+      ? { id: null, login: '', email: '', linked_account_ids: [], linked_actor_keys: [], team_ids: [pageMeta.workspace_id], team_admin_ids: [] }
+      : null;
+  }
+  let accountId = w && w.kind === 'agent' ? w.account_id : null;
+  let login = w && w.kind === 'person' && !w.legacy ? String(w.login || '') : '';
+  if (!accountId && login) {
+    try { accountId = await sessionAccountId(env, { login }); } catch { accountId = null; }
+  }
+  if (!accountId && !login) {
+    accountId = (pageMeta.hosted && pageMeta.hosted.account_id) || null;
+    if (!accountId) login = hostedGithubLogin(pageMeta) || '';
+  }
+  if (!accountId) {
+    return login ? { id: null, login, email: login.startsWith('email:') ? login.slice(6) : '', linked_account_ids: [], linked_actor_keys: [], team_ids: [], team_admin_ids: [] } : null;
+  }
+  const group = await accountGroup(env, accountId);
+  if (!group || group.unavailable || group.deleted_at || !group.canonical) return null;
+  const keys = Array.isArray(group.actor_keys) ? group.actor_keys : [];
+  const teamIds = await loadAccountTeamIds(env, group.canonical);
+  const email = (keys.find((k) => k.startsWith('email:')) || '').slice(6);
+  const name = login || (pageMeta.hosted && pageMeta.hosted.account_id === accountId && pageMeta.hosted.github_login) || keys.find((k) => !k.includes(':')) || '';
+  return {
+    id: null,
+    login: name.startsWith('email:') ? '' : name,
+    email,
+    account_id: group.canonical,
+    linked_account_ids: group.ids.filter((id) => id !== group.canonical),
+    linked_actor_keys: keys,
+    team_ids: teamIds,
+    team_admin_ids: await loadAdminTeamIds(env, group.canonical, teamIds),
+    reborn: await loadReborn(env, [...keys, name].filter(Boolean)),
+  };
+}
+// The sheet's open thread count, kept a minute in the edge cache: a page
+// with embeds does not cost a Durable Object read per view. Read only after
+// the gate.
+async function sheetEmbedCommentCount(env, origin, slug, ctx) {
+  const cache = edgeCache();
+  const key = `${origin}/__sheet-embed-comments/${encodeURIComponent(slug)}`;
+  if (cache) {
+    try {
+      const hit = await cache.match(key);
+      if (hit) return Number(await hit.text()) || 0;
+    } catch {}
+  }
+  let n = 0;
+  try { n = sheetEmbedOpenThreads(await readComments(env, slug)); } catch { return 0; }
+  if (cache) {
+    const put = cache.put(key, new Response(String(n), { headers: { 'Cache-Control': 'public, max-age=60' } })).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put); else await put;
+  }
+  return n;
+}
 async function handleSheetEmbed(env, req, url, ctx) {
   const engine = globalThis.TdocSheetEmbed;
   if (!engine) return sheetEmbedJson({ error: 'unavailable' }, 503);
@@ -20637,14 +20705,31 @@ async function handleSheetEmbed(env, req, url, ctx) {
   const site = String(req.headers.get('sec-fetch-site') || '').toLowerCase();
   if (site && site !== 'same-origin' && site !== 'none') return sheetEmbedJson({ error: 'cross_site' }, 403);
   const ref = engine.refFromQuery(url.searchParams);
-  if (!ref) return sheetEmbedJson({ error: 'invalid_reference' }, 400);
+  const page = String(url.searchParams.get('page') || '');
+  if (!ref || !isValidSlug(page)) return sheetEmbedJson({ error: 'invalid_reference' }, 400);
+  // The view as the viewer would write it: equivalent spellings are one
+  // cache entry, and nothing unbounded reaches the key.
+  ref.view = engine.normalizeView(ref.view);
   const denied = (session) => sheetEmbedJson({ error: 'no_access', signed_in: Boolean(sessionPrincipal(session)) }, 403);
+  // Both must hold, or nothing is embedded (the same refusal either way):
+  //  1. the reader may read the PAGE that embeds the sheet, and the SHEET;
+  //  2. whoever published the page's latest version may read the sheet.
+  // (2) is what stops a confused deputy: the card is drawn inside the
+  // author's document, so an author must never get a sheet drawn there that
+  // they could not read themselves -- whatever their CSS could observe of
+  // it, it observes only what they could already see.
+  const pageGate = await enforceDocAccess(env, req, page, null);
+  if (!pageGate.ok) return denied(await getSession(env, req));
   const gate = await enforceDocAccess(env, req, ref.slug, null);
   if (!gate.ok) return denied(await getSession(env, req));
-  if (feedbackScopeDenied(gate.session, ref.slug)) return denied(gate.session);
+  if (feedbackScopeDenied(gate.session, ref.slug) || feedbackScopeDenied(pageGate.session, page)) return denied(gate.session);
   const meta = gate.meta;
   const latest = latestVersionNumber(meta);
-  if (!meta || !latest) return denied(gate.session);
+  if (!meta || !latest || !pageGate.meta) return denied(gate.session);
+  if (page !== ref.slug) {
+    const author = await sheetEmbedAuthorSession(env, pageGate.meta);
+    if (!author || !canReadDoc(accessFromMeta(meta), author, env, meta)) return denied(gate.session);
+  }
   const docKey = `docs/${ref.slug}/v${latest}/index.html`;
   const params = `${ref.tab}\n${ref.tabIndex}\n${ref.view}\n${ref.rows}\n${ref.columns}`;
   const frameKey = frameCacheKey(url.origin, ref.slug, latest, meta, await frameBakeGeneration());
@@ -20665,10 +20750,10 @@ async function handleSheetEmbed(env, req, url, ctx) {
     if (!head) return denied(gate.session);
     const size = Number(head.size) || 0;
     if (size > SHEET_MAX_DOC_BYTES * 2) return sheetEmbedJson({ error: 'too_large' }, 413);
-    if (size > SHEET_EMBED_BIG_BYTES) {
-      const who = actorKey(gate.session) || `ip:${clientIp(req)}`;
-      if (await rateLimited(env, `sheet-embed:${who}`, SHEET_EMBED_BIG_PER_MIN, 60)) return sheetEmbedJson({ error: 'rate_limited' }, 429, { 'Retry-After': '60' });
-    }
+    // Every miss is limited per person (or address); a big sheet tighter.
+    const who = actorKey(gate.session) || `ip:${clientIp(req)}`;
+    if (await rateLimited(env, `sheet-embed:${who}`, SHEET_EMBED_MISSES_PER_ACTOR, 60)) return sheetEmbedJson({ error: 'rate_limited' }, 429, { 'Retry-After': '60' });
+    if (size > SHEET_EMBED_BIG_BYTES && await rateLimited(env, `sheet-embed-big:${who}`, SHEET_EMBED_BIG_PER_MIN, 60)) return sheetEmbedJson({ error: 'rate_limited' }, 429, { 'Retry-After': '60' });
     const obj = await env.DOCS.get(docKey);
     if (!obj) return denied(gate.session);
     let out;
@@ -20684,8 +20769,7 @@ async function handleSheetEmbed(env, req, url, ctx) {
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put); else await put;
     }
   }
-  let comments = 0;
-  try { comments = sheetEmbedOpenThreads(await readComments(env, ref.slug)); } catch {}
+  const comments = await sheetEmbedCommentCount(env, url.origin, ref.slug, ctx);
   const title = (typeof meta.title === 'string' && meta.title.trim().slice(0, 200)) || ref.slug;
   const body = {
     ok: true,
@@ -20697,7 +20781,7 @@ async function handleSheetEmbed(env, req, url, ctx) {
     ...data,
   };
   const entry = (Array.isArray(meta.versions) ? meta.versions : []).find((v) => Number(v.n) === latest);
-  const etag = `W/"${(await sha256Hex(`${ref.slug}\n${latest}\n${entry && entry.sha || ''}\n${params}\n${comments}\n${title}`)).slice(0, 24)}"`;
+  const etag = `W/"${(await sha256Hex(`${page}\n${ref.slug}\n${latest}\n${entry && entry.sha || ''}\n${params}\n${comments}\n${title}`)).slice(0, 24)}"`;
   if ((req.headers.get('if-none-match') || '') === etag) {
     return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': 'private, no-cache', 'Vary': 'Cookie, Authorization' } });
   }
@@ -24066,7 +24150,7 @@ function mcpWritingGuide(style, kind) {
     // A deck is slides, not a reading page: its own rules follow below.
     // A live sheet from another doc (the sheets kind says more).
     ...(kind === 'slides' || kind === 'sheets' ? [] : [
-      '- Live sheet from a sheet doc: <figure data-tdoc-embed="sheet" data-src="/d/<slug>" data-rows="10"><a href="/d/<slug>">Name</a></figure> (latest rows, the sheet\'s access; get_writing_guide kind "sheets").',
+      '- Live sheet from a sheet doc: <figure data-tdoc-embed="sheet" data-src="/d/<slug>" data-rows="10"><a href="/d/<slug>">Name</a></figure> (latest rows; shows only if you and the reader can read the sheet).',
     ]),
     ...(kind === 'slides' ? [] : [
       '- Stat tiles: <div class="tdoc-tiles"><div class="tdoc-tile"><p class="tdoc-tile-num">11%</p><p>what it counts</p></div>…</div>',
