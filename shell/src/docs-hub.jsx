@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Folder, FolderPlus, LayoutGrid, List, Search, UsersRound, X } from 'lucide-react';
+import { Check, ChevronRight, Folder, LayoutGrid, List, Search, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppButton } from './ui/button.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
-import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
+import { AgentRecipe, CreateMenu, agentRecipeFor } from './create-from-scratch.jsx';
+import { createBlankDeck } from './blank-deck.js';
 import { SheetDropHint, SheetFilePicker, SheetImportDialog, createBlankSheet, isSheetFileName, sheetErrorText, useSheetFileDrop } from './sheet-import.jsx';
 import { DocList, DocRow, FolderRow, day, shareMenuItem } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
@@ -683,7 +684,7 @@ export function DocsHub({ boot }) {
   // Behind the fullTextSearch flag (dev mode only until approved): off, the
   // hook never asks and the section never shows.
   const [fullTextSearch] = useState(() => isFeatureOn('fullTextSearch'));
-  // Sheets (flagged): a spreadsheet chosen from Create a doc, or dropped on
+  // Sheets (flagged): a spreadsheet chosen from New › Sheet, or dropped on
   // My docs, imports as a sheet doc in the workspace being looked at.
   const [sheetsOn] = useState(() => isFeatureOn('sheets'));
   const sheetPicker = useRef(null);
@@ -697,6 +698,18 @@ export function DocsHub({ boot }) {
     } catch (error) {
       if (error.body?.error === 'quota_docs') return { quota: error.body };
       hub.notify(sheetErrorText(error), true);
+      return false;
+    }
+  }, [hub.notify]);
+  // Blank deck: the same leave-on-success, quota-bump contract as New sheet.
+  const newDeck = useCallback(async (teamId) => {
+    try {
+      const made = await createBlankDeck(teamId);
+      location.href = made.url;
+      return true;
+    } catch (error) {
+      if (error.body?.error === 'quota_docs') return { quota: error.body };
+      hub.notify(error.message || 'Could not create the deck', true);
       return false;
     }
   }, [hub.notify]);
@@ -822,7 +835,7 @@ export function DocsHub({ boot }) {
 
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
-  const openAgentRecipe = () => setModal({ type: 'create-agent' });
+  const openAgentRecipe = (kind = 'doc') => setModal({ type: 'create-agent', kind });
 
   const toggleProfilePin = async (doc, { confirmed = false } = {}) => {
     if (!doc || !doc.slug || !boot.profile || !doc.mine) return;
@@ -1071,7 +1084,11 @@ export function DocsHub({ boot }) {
                   onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
                   onImport={sheetsOn ? () => sheetPicker.current?.click() : null}
                   onNewSheet={sheetsOn ? newSheet : null}
-                  trigger={<button className="mk-btn" type="button">Create a doc</button>}
+                  onNewDeck={newDeck}
+                  onNewFolder={team
+                    ? () => setModal({ type: 'new-team-folder' })
+                    : capabilities.folders ? () => setModal({ type: 'new-folder' }) : null}
+                  trigger={<button className="mk-btn" type="button">New</button>}
                 />
               ) : null}
             </div>
@@ -1121,11 +1138,7 @@ export function DocsHub({ boot }) {
             ) : (
               <>
                 <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p>
-                <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort}>
-                  <button type="button" className="new-folder-btn" onClick={() => setModal({ type: 'new-team-folder' })}>
-                    <FolderPlus size={15} /> New folder
-                  </button>
-                </DocsToolbar>
+                <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort} />
                 {!teamSearching && teamPath.length ? (
                   <nav className="crumbs" aria-label="Folder path">
                     <button className="crumb-root" type="button" onClick={() => setTeamFolder('')}>{team.name}</button>
@@ -1172,13 +1185,7 @@ export function DocsHub({ boot }) {
         {onboardingChecklistShown({ view, docCount: hub.docs.length }) ? <OnboardingChecklist record={boot.onboarding} docs={hub.docs} /> : null}
         {view === 'docs' ? (
           <section className="pane" id="pane-mine">
-            <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort}>
-              {capabilities.folders ? (
-                <button type="button" className="new-folder-btn" onClick={() => setModal({ type: 'new-folder' })}>
-                  <FolderPlus size={15} /> New folder
-                </button>
-              ) : null}
-            </DocsToolbar>
+            <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort} />
 
             {!hub.query.trim() && hub.path.length ? (
               <nav className="crumbs" aria-label="Folder path">
@@ -1341,11 +1348,11 @@ export function DocsHub({ boot }) {
       ) : null}
       {modal?.type === 'create-agent' ? (
         <HubDialog
-          title="Build it with your agent"
+          title={agentRecipeFor(modal.kind).title}
           onClose={closeModal}
           actions={<AppButton onClick={closeModal}>Close</AppButton>}
         >
-          <AgentRecipe />
+          <AgentRecipe kind={modal.kind} />
         </HubDialog>
       ) : null}
       {sheetsOn ? <SheetFilePicker ref={sheetPicker} onFile={(file) => setModal({ type: 'import-sheet', file, start: true })} /> : null}

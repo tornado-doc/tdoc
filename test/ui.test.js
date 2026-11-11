@@ -176,14 +176,15 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
 
   await t('Docs Hub Create a doc is a menu, and the agent answer composes its line', async () => {
     await page.click('.mk-btn');
-    // A modal to choose between two things is a room built for a sentence, so
-    // the fork is a menu. Only the answer that needs a subject typed into it
-    // gets a dialog.
-    await page.waitForSelector('.ui-menu-item.mk-item:has-text("Build it with your agent")');
-    await page.click('.ui-menu-item.mk-item:has-text("Build it with your agent")');
+    // A modal to choose between three things is a room built for a sentence,
+    // so the fork is a menu: the type, then the method. Only the answer that
+    // needs a subject typed into it gets a dialog.
+    await page.click('.ui-menu-item.mk-tile[data-kind="doc"]');
+    await page.waitForSelector('.ui-menu-item.mk-item:has-text("Write it with your agent")');
+    await page.click('.ui-menu-item.mk-item:has-text("Write it with your agent")');
     await page.waitForSelector('.ui-dialog-popup .mk-agent');
     const title = await page.textContent('.ui-dialog-title');
-    if (title !== 'Build it with your agent') throw new Error(`unexpected dialog title: ${title}`);
+    if (title !== 'Write it with your agent') throw new Error(`unexpected dialog title: ${title}`);
     // Copy is refused until the line is a line and not a placeholder.
     if (!await page.isDisabled('.mk-line button')) throw new Error('Copy offered an unfinished line');
     await page.fill('.mk-subject input', 'what our on-call rotation costs');
