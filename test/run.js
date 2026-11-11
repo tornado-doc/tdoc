@@ -233,6 +233,7 @@ const BROWSER = [
   'landing-hero-rotate-ui.test.js', // homepage hero: four demos rotate every 5 s with a filling tab bar, hover/focus pause, tab click restarts there (even the checked tab), reduced motion stands still, phone swipe, a CTA per demo to a real route, no layout shift
   'landing-sheets-ui.test.js', // the homepage's live sample sheet: viewer fetched only for it; search, tag filter, sort, comment composer on a cell, desktop + phone, nothing written
   'doc-download-ui.test.js', // ⋯ → Download & copy: PDF / Word / Markdown for prose, CSV (this tab) / Excel for sheets, each a file of its type; desktop + phone; flag off unchanged
+  'slide-controls-ui.test.js', // Edit-mode slide bar: Add slide (Title / Bullets / Big number), Duplicate, Move up/down, Delete + Undo, image by http(s) link; whole slides only, ids follow their slides, nothing of the bar saved; desktop hover + phone tap
   'create-menu-ui.test.js', // My docs New: type tiles (Doc · Sheet · Slides) then methods pushed in place, New folder in the menu, Blank deck edits + saves slide text, agent lines per type, keyboard, drop import; desktop + phone, sheets flag on/off
   'sheets-ui.test.js', // data-tdoc-sheet: grid, search/filter/sort/tags, view in #hash, cell comments, Edit + Save, CSV/XLSX import, CLI, 10k rows, phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing

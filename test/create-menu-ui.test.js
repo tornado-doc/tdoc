@@ -362,7 +362,7 @@ async function startServer(worker, env) {
         const html = await env.DOCS.get(`docs/${slug}/v2/index.html`).then((o) => o.text());
         assert.match(html, /<h1>Launch plan<\/h1>/, 'the cover heading was edited');
         assert.match(html, /<li>Fourth point<\/li>/, 'a bullet was added');
-        assert.equal((html.match(/data-tdoc-slide/g) || []).length, 3, 'still three slides');
+        assert.equal((html.match(/data-tdoc-slide="/g) || []).length, 3, 'still three slides');
         assert.ok(!/contenteditable|data-tdoc-editor|data-tdoc-slides=/.test(html), 'no editor or viewer state saved');
         assert.equal(JSON.parse(await env.META.get(`meta:${slug}`)).title, 'Launch plan', 'titled from the cover');
         if (SHOTS && sheets) {

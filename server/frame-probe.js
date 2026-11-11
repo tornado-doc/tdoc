@@ -85,6 +85,10 @@
     });
   }
   var interactionMode = 'read';
+  // The mode is this script's to set, never the document's: a page saved or
+  // published with data-tdoc-interaction-mode="edit" on <html> must not open
+  // in Edit mode's chrome (the slide bar, edit-only styles) for its readers.
+  document.documentElement.removeAttribute('data-tdoc-interaction-mode');
   // Site pages (home, pricing, start, templates, privacy) load the frame with
   // ?tdoc_site=1. They read as an ordinary website: a normal cursor, no
   // document chrome on visuals, and no comment on a bare click. Selecting text
@@ -1476,6 +1480,27 @@
     setDirty(true, true);
     reportDraft();
   });
+  // The slide controls (slides-edit.js) add, copy, move and delete whole
+  // slides; the same path again. A slide they add may carry an image slot,
+  // which is atomic like any image: marked here exactly as enableEditing
+  // marks the page, so the save cleans it the same way.
+  document.addEventListener('tdoc:slides-edit', function (event) {
+    if (interactionMode !== 'edit') return;
+    var added = event.detail && event.detail.added;
+    if (added && added.querySelectorAll) {
+      var nodes = Array.prototype.slice.call(added.querySelectorAll(ATOMIC));
+      if (added.matches && added.matches(ATOMIC)) nodes.unshift(added);
+      nodes.forEach(function (node) {
+        node.setAttribute('data-tdoc-editor-atomic', '');
+        if (!node.hasAttribute('data-tdoc-editor-original-editable')) {
+          node.setAttribute('data-tdoc-editor-original-editable', node.hasAttribute('contenteditable') ? node.getAttribute('contenteditable') : '__missing__');
+        }
+        node.setAttribute('contenteditable', 'false');
+      });
+    }
+    setDirty(true, true);
+    reportDraft();
+  });
   function markdownCtx() {
     return { root: findEditRoot(), atomicSelector: ATOMIC + ',[data-tdoc-editor-atomic]' };
   }
@@ -1640,6 +1665,7 @@
     clone.removeAttribute('data-tdoc-slides');
     clone.removeAttribute('data-tdoc-presenting');
     clone.removeAttribute('data-tdoc-visual-open');
+    clone.removeAttribute('data-tdoc-interaction-mode');
     return '<!doctype html>\n' + clone.outerHTML;
   }
 

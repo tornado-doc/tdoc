@@ -245,17 +245,27 @@ t('nothing on a document opens a second onboarding (#371)', () => {
     'the blank answers honour canCreate, and the agent answers survive canCreate=false');
 });
 
-t('the starter deck is three slides the viewer and the title reader both understand', async () => {
+t('the starter deck is three slides the viewer and the title reader both understand', () => {
   // Blank deck (New › Slides) writes this through the same create + first
-  // save as a blank sheet; create-menu-ui.test.js edits and saves it.
-  const deck = read('shared/slides-markup.mjs');
-  assert(deck.includes('export function blankDeckHtml('), 'blankDeckHtml missing');
-  assert((deck.match(/<section class="slide[^"]*" data-tdoc-slide/g) || []).length === 3, 'three data-tdoc-slide sections');
-  assert(deck.includes('container-type: inline-size') && deck.includes('aspect-ratio: 16/9') && deck.includes('@container (max-width: 640px)'),
+  // save as a blank sheet; create-menu-ui.test.js edits and saves it, and
+  // slide-controls-ui.test.js adds, moves and deletes its slides.
+  // The module as the doc frame runs it (frame-probe-source.js bundles it).
+  const kit = new Function(`${require('../server/frame-probe-source.js').slideKitBundle()}\nreturn TdocSlideKit;`)();
+  const html = kit.blankDeckHtml();
+  const ids = [...html.matchAll(/<section class="tds-slide[^"]*" data-tdoc-slide="(s-[a-z0-9]{6})"/g)].map((m) => m[1]);
+  assert(ids.length === 3 && new Set(ids).size === 3, `three slides, each with its own id: ${ids}`);
+  assert(html.includes('<style data-tdoc-slide-kit>') && kit.KIT_CSS.includes('container-type:inline-size')
+    && kit.KIT_CSS.includes('aspect-ratio:16/9') && kit.KIT_CSS.includes('@container (max-width: 640px)'),
     'the slides.md frame: 16:9 cards sized from the card, released on a phone');
-  assert(!/position:\s*absolute/.test(deck.replace('.inner { position: absolute;', '')), 'nothing but .inner is absolutely placed');
-  assert(titleFromDocument(deck.replace('${title}', 'Untitled deck').replace('${title}', 'Untitled deck')) === 'Untitled deck',
-    'the cover heading is the first h1, so the deck is titled from it');
+  assert(!/position:absolute/.test(kit.KIT_CSS.replace('.tds-inner{position:absolute;', '')), 'nothing but the inner frame is absolutely placed');
+  assert(titleFromDocument(html) === 'Untitled deck', 'the cover heading is the first h1, so the deck is titled from it');
+  assert(!kit.blankDeckHtml('<b>x</b>').includes('<b>x</b>'), 'a title is escaped');
+  for (const layout of kit.SLIDE_LAYOUTS) {
+    const slide = kit.slideHtml(layout.id, { id: 's-test01' });
+    assert((slide.match(/data-tdoc-slide=/g) || []).length === 1 && slide.includes('data-tdoc-slide="s-test01"'), `${layout.id}: one slide, the id given`);
+  }
+  assert(kit.slideHtml('number').includes('<figure class="tds-figure" data-tdoc-slide-image data-tdoc-edit-atomic></figure>'),
+    'Big number carries an empty, atomic image slot');
   const blankDeck = read('shell/src/blank-deck.js');
   assert(blankDeck.includes('createDocument(') && blankDeck.includes('saveDocumentVersion(') && blankDeck.includes("searchParams.set('edit', '1')"),
     'created, saved as v1, and opened in Edit mode');
