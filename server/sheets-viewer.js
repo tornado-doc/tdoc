@@ -407,6 +407,8 @@
       }
     });
     readLayout(tab);
+    // [sheet-rules] the table's conditional formats and validation, evaluated once per read
+    if (rulesExt) rulesExt.readTab(tab);
     return tab;
   }
   // ---- layout: widths, heights, wrap, alignment ------------------------------
@@ -544,6 +546,7 @@
     ui.prev = iconButton(ICON.up, 'Previous match', function () { stepMatch(-1); });
     ui.next = iconButton(ICON.down, 'Next match', function () { stepMatch(1); });
     search.appendChild(ui.search); search.appendChild(ui.hits); search.appendChild(ui.prev); search.appendChild(ui.next);
+    if (rulesExt) rulesExt.mountSearch(search); // [sheet-rules] Find and replace
     ui.bar.appendChild(search);
     ui.chips = h('div', 'ts-chips'); ui.bar.appendChild(ui.chips);
     ui.searchBox = search;
@@ -679,6 +682,7 @@
     ui.back.hidden = !expand.alone;
     ui.xtitle.textContent = expand.alone ? docTitle() + ' · ' + tab.name : docTitle();
     if (expand.on) linkHrefs();
+    if (rulesExt) rulesExt.bar(); // [sheet-rules]
     ui.note.hidden = !(m2 === 'edit');
     ui.note.textContent = canEdit() ? 'Type or double-click to edit · Alt+Enter for a new line · paste a range from Excel or Sheets' : m2 === 'edit' ? 'Editing sheets in the browser is not available yet' : '';
   }
@@ -820,6 +824,7 @@
     if (tab.anyWrap && measureRows(tab, first, last)) return true;
     placePill();
     placeOffscreen();
+    if (rulesExt) rulesExt.painted(); // [sheet-rules] the fill handle
     return true;
   }
   // Wrapped rows drawn: their real heights replace the estimates. true when
@@ -880,8 +885,11 @@
       var href = type === 'url' ? M.safeHref(text) : '';
       inner = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + mark(text, needle) + '</a>' : '<span class="ts-t">' + mark(text, needle) + '</span>';
     }
+    // [sheet-rules] a conditional format, a dropdown chip, a mark on a value outside its list
+    var rx = rulesExt && rulesExt.cell(tab, r, c, needle, inner), xs = '';
+    if (rx) { if (rx.cls) cls += rx.cls; if (rx.inner != null) inner = rx.inner; if (rx.style) xs = ';' + rx.style; }
     var w = tab.widths[c];
-    return '<div class="' + cls + '" role="gridcell" data-c="' + c + '" style="width:' + w + 'px' + (c === 0 ? ';left:' + numW() + 'px' : '') + '"' + (isActive ? ' aria-selected="true"' : '') + ' title="' + esc(col.text[r].slice(0, 300)) + '">' + inner + '</div>';
+    return '<div class="' + cls + '" role="gridcell" data-c="' + c + '" style="width:' + w + 'px' + (c === 0 ? ';left:' + numW() + 'px' : '') + xs + '"' + (isActive ? ' aria-selected="true"' : '') + ' title="' + esc(col.text[r].slice(0, 300)) + '">' + inner + '</div>';
   }
   // ---- flat view: a small sheet in a prose doc, read as a table --------------------
   function renderFlat() {
@@ -896,7 +904,9 @@
       var cls = (type === 'number' ? ' is-num' : type === 'date' || type === 'checkbox' ? ' is-short' : '') + (needle && col.lower[r].indexOf(needle) !== -1 ? ' is-hit' : '') + (td && commented.has(td) ? ' has-comment' : '') +
         // The grid's line breaks and column alignment read the same here.
         (type !== 'tags' && type !== 'checkbox' && col.text[r].indexOf('\n') !== -1 ? ' is-ml' : '') + (tab.align && tab.align[c] ? ' al-' + tab.align[c] : '');
-      return { cls: cls, inner: inner };
+      // [sheet-rules] conditional formats read the same here
+      var fst = rulesExt && rulesExt.flatStyle(tab, r, c);
+      return { cls: cls, inner: inner, style: fst ? ' style="' + fst + '"' : '' };
     };
     if (!n) html = '<p class="ts-flat-empty">' + (tab.index.size ? 'No rows match.' : 'This sheet has no rows yet.') + '</p>';
     else if (cards) {
@@ -922,7 +932,7 @@
       for (i = 0; i < n; i++) {
         r = tab.order[i];
         html += '<tr>';
-        for (c = 0; c < cols.length; c++) { var y = cell(r, c); html += '<td class="' + y.cls.trim() + '" data-i="' + i + '" data-c="' + c + '">' + y.inner + '</td>'; }
+        for (c = 0; c < cols.length; c++) { var y = cell(r, c); html += '<td class="' + y.cls.trim() + '" data-i="' + i + '" data-c="' + c + '"' + y.style + '>' + y.inner + '</td>'; }
         html += '</tr>';
       }
       html += '</tbody></table>';
@@ -1101,6 +1111,7 @@
       }
     }
     placePill();
+    if (rulesExt) rulesExt.painted(); // [sheet-rules] the fill handle
   }
   function select(i, c, extend) {
     var tab = cur(), n = tab.order.length, cols = tab.widths.length;
@@ -1453,6 +1464,7 @@
       items.push({ label: 'Insert column left', onSelect: function () { insertColumn(c); } });
       items.push({ label: 'Insert column right', onSelect: function () { insertColumn(c + 1); } });
       items.push({ label: 'Delete column', danger: true, disabled: tab.data.columns.length < 2, onSelect: function () { deleteColumn(c); } });
+      if (rulesExt) items = items.concat(rulesExt.menuItems(c)); // [sheet-rules]
     }
     openMenu(anchor, items, col.name + ' column');
   }
@@ -1465,7 +1477,7 @@
       { label: 'Insert row above', onSelect: function () { insertRows(cur().order[ra], 1, true); } },
       { label: 'Insert row below', onSelect: function () { insertRows(cur().order[rb], 1, false); } },
       { label: n > 1 ? 'Delete ' + n + ' rows' : 'Delete row', danger: true, onSelect: function () { deleteRows(ra, rb); } },
-    ], 'Row menu');
+    ].concat(rulesExt ? rulesExt.menuItems(sel.c) : []), 'Row menu'); // [sheet-rules]
   }
   function tabMenu(i, anchor) {
     openMenu(anchor, [
@@ -1603,6 +1615,8 @@
     if (op.tab) op.tab.measured = new Map();
     if (redo) op.redo(); else op.undo();
     to.push(op);
+    // [sheet-rules] a Replace all over every tab touched several
+    if (op.tabs) op.tabs.forEach(function (t) { if (t !== op.tab && book.tabs.indexOf(t) >= 0) readTab(t.table, t); });
     afterChange(op.tab);
   }
   function afterChange(tab, keepSel) {
@@ -1632,6 +1646,11 @@
   }
   // [{ r, c, value }] → one undoable change.
   function setCells(tab, list, keepRow) {
+    record(writeCells(tab, list));
+    afterChange(tab, keepRow);
+  }
+  // The cells written; the undo step returned, not yet recorded.
+  function writeCells(tab, list) {
     var before = [], after = [];
     list.forEach(function (ch) {
       var row = tab.data.rows[ch.r];
@@ -1645,8 +1664,7 @@
     var op = { tab: tab,
       undo: function () { before.slice().reverse().forEach(function (b) { b.td.innerHTML = b.html; while (b.tr.cells.length > b.cells) b.tr.removeChild(b.tr.lastElementChild); }); },
       redo: function () { after.forEach(function (a, k) { var b = before[k]; while (b.tr.cells.length < b.cells || !b.td.isConnected && b.tr.cells.length <= Array.prototype.indexOf.call(b.tr.cells, b.td)) b.tr.appendChild(document.createElement('td')); if (!b.td.isConnected) b.tr.appendChild(b.td); a.td.innerHTML = a.html; }); } };
-    record(op);
-    afterChange(tab, keepRow);
+    return op;
   }
   // Structural changes (rows, columns, types, tabs, pastes) snapshot the
   // table; the undo puts the snapshot back.
@@ -1670,6 +1688,8 @@
     ensureVisible(i, c);
     var cell = cellAt(i, c);
     if (!cell) return;
+    // [sheet-rules] a dropdown cell opens its list
+    if (rulesExt && rulesExt.startEdit(tab, r, c, cell, initial)) return;
     if (type === 'checkbox') { setCells(tab, [{ r: r, c: c, value: tab.index.cols[c].num[r] === 1 ? '' : Q.CHECK_MARK }], r); return; }
     if (type === 'tags') { openTagPicker(tab, r, c, cell, initial); return; }
     // A text box that holds line breaks: Alt/Option+Enter or Ctrl+Enter puts
@@ -2077,6 +2097,8 @@
   }
   function onKey(e) {
     if (!book || editor || (pop && pop.el.contains(e.target))) return;
+    // [sheet-rules] Find and replace (⌘⇧H, Ctrl+H)
+    if (rulesExt && rulesExt.key(e)) { e.preventDefault(); e.stopPropagation(); return; }
     var tab = cur(), k = e.key, mod = e.metaKey || e.ctrlKey;
     var page = Math.max(1, rowAtY(tab, ui.grid.scrollTop + ui.grid.clientHeight - HEAD_H) - rowAtY(tab, ui.grid.scrollTop) - 1);
     var last = tab.order.length - 1, lastC = tab.widths.length - 1;
@@ -2188,7 +2210,7 @@
       if (editor) commitEdit();
       if (ticking) return;
       ticking = true;
-      requestAnimationFrame(function () { ticking = false; renderBody(); placeOffscreen(); });
+      requestAnimationFrame(function () { ticking = false; renderBody(); placeOffscreen(); if (rulesExt) rulesExt.painted(); });
       clearTimeout(scrollSettle); scrollSettle = setTimeout(relayout, 200);
     }, { passive: true });
     ui.foot.addEventListener('click', function (e) {
@@ -2301,6 +2323,8 @@
       }
       var wasActive = sel.r === at.i && sel.c === at.c && sel.r === sel.r2 && sel.c === sel.c2;
       select(at.i, at.c, e.shiftKey);
+      // [sheet-rules] a dropdown chip opens its list
+      if (canEdit() && !e.shiftKey && rulesExt && rulesExt.press(e, at)) { e.preventDefault(); return; }
       cellPress = e.shiftKey ? null : { i: at.i, c: at.c };
       ui.grid.focus({ preventScroll: true });
       if (e.pointerType === 'mouse') drag = { i: at.i, c: at.c };
@@ -2574,6 +2598,16 @@
     selection: function () { return Object.assign({}, sel); },
     expanded: function () { return { on: expand.on, alone: expand.alone, sheetOnly: expand.sheetOnly, embed: expand.embed, fit: expand.fit, flat: !!book && flatView() }; },
   };
+  // [sheet-rules] find & replace, conditional formatting, data validation and
+  // the fill handle (server/sheets-rules-ui.js, shared/sheet-rules.mjs).
+  var rulesExt = typeof SheetRulesUI !== 'undefined' ? SheetRulesUI.install({
+    Q: Q, M: M, R: SheetRules, h: h, provider: provider, esc: esc, mark: mark, ICON: ICON, fmt: fmt, HEAD_H: HEAD_H, NARROW: NARROW,
+    book: function () { return book; }, cur: cur, ui: ui, sel: function () { return sel; }, canEdit: canEdit, mode: mode,
+    select: select, setCells: setCells, writeCells: writeCells, record: record, afterChange: afterChange, readTab: readTab,
+    renderAll: renderAll, renderHead: renderHead, renderBody: renderBody, saveView: saveView,
+    openPop: openPop, closePop: closePop, pop: function () { return pop; }, openMenu: openMenu, toast: toast, iconButton: iconButton, tagStyle: tagStyle,
+    refLabel: refLabel, colKey: colKey, rowTop: rowTop, rowH: rowH, numW: numW, cellFromEvent: cellFromEvent,
+  }) : null;
   // Mounted: the tables are hidden by the viewer's own style now, so the
   // frame's 200-row hold (#tdoc-sheets-pending) is no longer needed.
   if (mount()) { window.__tdocSheets.mounted = true; relayout(); }
