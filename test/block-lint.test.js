@@ -116,8 +116,8 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
 
   await t('a small sheet in a prose doc is told to be a plain table; a big one and a sheet doc are not', () => {
     const r = lint(page(prose + sheetTable('CRM', 5) + sheetTable('Notes', 20, false) + sheetTable('Inventory', 21)));
-    assert(r.small_sheet_count === 2 && r.small_sheets.map((x) => `${x.name}:${x.rows}`).join(',') === 'CRM:5,Notes:20', JSON.stringify(r.small_sheets));
-    assert(r.warning === 'Block check (a warning only; the doc is published): Small table in a doc: use a plain <table>; keep sheets for data people filter or sort ("CRM" 5 rows, "Notes" 20 rows). Guide: tdoc://authoring/structure/sheets.md', r.warning);
+    assert(r.small_sheet_count === 2 && r.small_sheets.map((x) => `${x.name}:${x.rows}x${x.cols}`).join(',') === 'CRM:5x2,Notes:20x2', JSON.stringify(r.small_sheets));
+    assert(r.warning === 'Block check (a warning only; the doc is published): Small table in a doc: use a plain <table>; keep sheets for data people filter or sort, and for wide tables or long cell text ("CRM" 5 rows × 2 columns, "Notes" 20 rows × 2 columns). Guide: tdoc://authoring/structure/sheets.md', r.warning);
     assert(r.loose_text === 0 && r.unknown_class_count === 0, 'nothing else is flagged');
     // A sheet doc: a title, a line on what it is, the sheet (any size).
     const doc = lint(page('<h1>Tasks</h1><p class="sheet-note">Thirty tasks.</p><p>From the Q3 export.</p>' + sheetTable('Tasks', 3) + sheetTable('People', 2)));
@@ -128,12 +128,16 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     assert(lint(page('<h1>T</h1>' + sheetTable('S', 4) + '<table><tr><td>x</td></tr></table>')).small_sheet_count === 1, 'a plain table beside it is a doc');
     assert(lint(page(prose + sheetTable('Big', 400))).warning === null, 'a 400-row sheet in a doc is fine');
     assert(lint(page(prose + '<table><tr><td>a</td></tr></table>')).warning === null, 'a plain table is fine');
+    // Wide (more than five columns) or long cell text: a sheet is fine.
+    const cols = (n, cell = 'x') => `<table data-tdoc-sheet><thead><tr>${'<th>h</th>'.repeat(n)}</tr></thead><tbody>${`<tr>${`<td>${cell}</td>`.repeat(n)}</tr>`.repeat(3)}</tbody></table>`;
+    assert(lint(page(prose + cols(5))).small_sheet_count === 1 && lint(page(prose + cols(6))).warning === null, 'six columns is wide');
+    assert(lint(page(prose + cols(2, 'y'.repeat(81)))).warning === null && lint(page(prose + cols(2, '<b>' + 'y'.repeat(80) + '</b> &amp;'))).small_sheet_count === 1, 'a cell over 80 characters is long text');
   });
 
   await t('the small-sheet line follows the block check, and its list is bounded', () => {
     const r = lint(page(prose + '<div class="tile">11%</div>' + Array.from({ length: 9 }, (_, i) => sheetTable(`T${i}`, 2)).join('')));
     const lines = r.warning.split('\n');
-    assert(/^Block check .*loose text/.test(lines[0]) && /^Fix: /.test(lines[1]) && /^Small table in a doc: .*"T4" 2 rows, …\)\. Guide: /.test(lines[2]), r.warning);
+    assert(/^Block check .*loose text/.test(lines[0]) && /^Fix: /.test(lines[1]) && /^Small table in a doc: .*"T4" 2 rows × 2 columns, …\)\. Guide: /.test(lines[2]), r.warning);
     assert(r.small_sheet_count === 9 && r.small_sheets.length === 5, JSON.stringify(r.small_sheets));
   });
 

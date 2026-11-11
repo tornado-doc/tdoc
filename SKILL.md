@@ -103,13 +103,17 @@ and the 1280px + 390px check before publishing.
 
 ### Sheets
 
-A table in a prose doc is a plain `<table>` in `tdoc-table-scroll`: a small
-reference table read at a glance (a supplier shortlist, a plan, a comparison).
-Make it a sheet only when the reader needs to search, filter or sort it: more
-than about 20 rows, or a list they will filter. When the whole deliverable is a
-list of records (a tracker, an inventory, a budget, a contact list, rows from a
-CSV or Excel file), publish a sheet doc of its own and link to it from the
-prose. Publish warns about a sheet of 20 rows or fewer inside a prose doc.
+A table in a prose doc is a plain `<table>` in `tdoc-table-scroll` when it is
+a small reference table read at a glance: up to about 20 rows and 5 columns of
+short cells. For a wider table (more than 5 columns) or long cell text, a sheet
+in the doc works too; and use a sheet whenever the reader needs to search,
+filter or sort (more than about 20 rows). Columns are not something to avoid:
+the reader fits both plain tables and small sheets to the page (text wraps, a
+wide one takes the page width beside the reading column, a phone shows cards).
+When the whole deliverable is a list of records (a tracker, an inventory, a
+budget, a contact list, rows from a CSV or Excel file), publish a sheet doc of
+its own and link to it from the prose. Publish warns about a sheet of 20 rows
+or fewer, 5 columns or fewer and short cells inside a prose doc.
 
 A sheet: one `<table data-tdoc-sheet data-name="Tab">` per tab, each
 `<th data-type="text|number|date|tags|checkbox|url">`, tag cells as
@@ -1384,8 +1388,12 @@ Every doc must work on mobile out of the box. The baked template carries defensi
 - **Tables**: wrap in `<div class="tdoc-table-scroll">`. Preserve semantic
   `<table>` / `<th>` / `<td>` relationships; mark atomic cells with
   `data-tdoc-cell="value"`. Do not use page clipping or shrinking text to fit.
-  Native tables get the same content-width protection in the provider and CLI
-  preview. An intentional card reflow remains the author's responsibility.
+  The reader fits a plain table to the page on screen (columns share the
+  width, text wraps, a wide table takes the page width beside the column, a
+  phone shows more than three columns as cards); the stored HTML and print
+  keep it as written. `data-tdoc-table="fixed"` keeps your own table layout;
+  `data-tdoc-wide` gives a block the page width inside a narrow custom
+  container. See `$SKILL_DIR/authoring/structure/components.md`, "Table".
 - **Code blocks (`<pre>`)**: `max-width: 100%; overflow-x: auto;`.
 - **Design for constrained and expanded content at phone, tablet and desktop widths.**
   When previewing, inspect the document frame as well as the shell: a fitting

@@ -14,11 +14,13 @@
 // a capped scan says so rather than guessing about the rest.
 //
 // It also counts the rows of each sheet (<table data-tdoc-sheet>) as it jumps
-// over it: in a prose doc, a sheet of 20 rows or fewer is a small reference
-// table the reader takes in at a glance, and reads better as a plain <table>
-// (authoring/structure/sheets.md, "Sheet or table"). A doc that is only its
-// sheets (a title and a line or two around them) is a sheet doc and is left
-// alone. Counting stops at the 21st row, so an 8 MB sheet costs no more.
+// over it: in a prose doc, a sheet of 20 rows or fewer, 5 columns or fewer
+// and short cells is a small reference table the reader takes in at a
+// glance, and reads better as a plain <table> (authoring/structure/sheets.md,
+// "Sheet or table"). A wide sheet or one with long cell text stays a sheet. A
+// doc that is only its sheets (a title and a line or two around them) is a
+// sheet doc and is left alone. Counting stops at the 21st row, so an 8 MB
+// sheet costs no more.
 //
 // Shared by the worker (inlined by bin/tdoc-bundle at __TDOC_BLOCK_LINT__)
 // and Node tests (require).
@@ -33,8 +35,9 @@
   var MAX_DEPTH_SEARCH = 64;
   var MAX_SAMPLES = 5;
   var MAX_CLASSES = 8;
-  // A sheet with at most this many body rows, in a prose doc, is a small table.
-  var SMALL_SHEET_ROWS = 20;
+  // A sheet with at most this many body rows and columns, and no cell longer
+  // than SHORT_CELL characters, in a prose doc, is a small table.
+  var SMALL_SHEET_ROWS = 20, SMALL_SHEET_COLS = 5, SHORT_CELL = 80;
   // Text blocks outside the sheets past which a doc is prose, not a sheet doc
   // (the same rule as the viewer's compact embed, server/sheets-viewer.js).
   var PROSE_BLOCKS = 3;
@@ -140,7 +143,7 @@
   // counted up to `cap`: a <tr> holding a <td> (a header row holds only <th>).
   // The next <td> is looked up once and kept until a row passes it, so each
   // byte of the table is read a bounded number of times.
-  var TR = /<tr(?=[\s>])/ig, TD = /<td(?=[\s>])/ig;
+  var TR = /<tr(?=[\s>])/ig, TD = /<td(?=[\s>])/ig, CELL = /<t[hd](?=[\s>])/ig;
   function sheetRows(html, from, to, cap) {
     var n = 0, td = null, tdAt = -1;
     TR.lastIndex = from;
@@ -158,6 +161,34 @@
       tr = next;
     }
     return n;
+  }
+  // Columns: the cells of the first row (the header).
+  function sheetCols(html, from, to) {
+    TR.lastIndex = from;
+    var tr = TR.exec(html);
+    if (!tr || tr.index >= to) return 0;
+    TR.lastIndex = tr.index + 3;
+    var next = TR.exec(html);
+    var end = next && next.index < to ? next.index : to;
+    var n = 0, m;
+    CELL.lastIndex = tr.index + 3;
+    while ((m = CELL.exec(html)) && m.index < end) n++;
+    return n;
+  }
+  // The longest body cell's text, in characters (called only on a small sheet).
+  function longestCell(html, from, to) {
+    var max = 0, at = from, m;
+    while (true) {
+      TD.lastIndex = at;
+      m = TD.exec(html);
+      if (!m || m.index >= to) return max;
+      var close = html.indexOf('</td', m.index);
+      var next = html.indexOf('<td', m.index + 3);
+      var end = Math.min(close === -1 ? to : close, next === -1 ? to : next, to);
+      var text = html.slice(m.index, end).replace(/^<td[^>]*>/i, '').replace(/<[^>]*>/g, '').replace(/&[#\w]+;/g, ' ').replace(/\s+/g, ' ').trim();
+      if (text.length > max) max = text.length;
+      at = end;
+    }
   }
 
   function hasText(s) {
@@ -251,7 +282,12 @@
       if (SKIP[name]) {
         if (!/\/\s*$/.test(attrs)) {
           var after = skipEnd(html, name, pos);
-          if (sheet) sheets.push({ name: attr(attrs, NAME_ATTR) || 'Sheet ' + (sheets.length + 1), rows: sheetRows(html, pos, after, SMALL_SHEET_ROWS + 1) });
+          if (sheet) {
+            var shape = { name: attr(attrs, NAME_ATTR) || 'Sheet ' + (sheets.length + 1), rows: sheetRows(html, pos, after, SMALL_SHEET_ROWS + 1), cols: 0, small: false };
+            if (shape.rows <= SMALL_SHEET_ROWS) shape.cols = sheetCols(html, pos, after);
+            shape.small = shape.rows <= SMALL_SHEET_ROWS && shape.cols <= SMALL_SHEET_COLS && longestCell(html, pos, after) <= SHORT_CELL;
+            sheets.push(shape);
+          }
           skipped += after - pos; pos = after;
         }
         continue;
@@ -280,7 +316,7 @@
       .map(function (k) { return { name: k, count: classes[k] }; })
       .sort(function (a, b) { return b.count - a.count; });
     var prose = docContent || proseBlocks >= PROSE_BLOCKS;
-    var small = prose ? sheets.filter(function (x) { return x.rows <= SMALL_SHEET_ROWS; }) : [];
+    var small = prose ? sheets.filter(function (x) { return x.small; }).map(function (x) { return { name: x.name, rows: x.rows, cols: x.cols }; }) : [];
     var result = {
       loose_text: loose,
       loose_text_samples: samples,
@@ -298,14 +334,14 @@
 
   var FIX = 'Fix: put text in <p>/<li>/<h2-h4>, use the house blocks (tdoc-tiles, tdoc-cards, aside.note, details, figure, diagram-box), or make a custom component one block with data-tdoc-artifact. Guide: tdoc://authoring/structure/components.md';
 
-  var SMALL = 'Small table in a doc: use a plain <table>; keep sheets for data people filter or sort';
+  var SMALL = 'Small table in a doc: use a plain <table>; keep sheets for data people filter or sort, and for wide tables or long cell text';
   var SMALL_GUIDE = 'Guide: tdoc://authoring/structure/sheets.md';
 
   function format(r) {
     if (!r.loose_text && !r.unknown_class_count && !r.small_sheet_count) return null;
     var head = 'Block check (a warning only; the doc is published): ';
     var small = r.small_sheet_count ? SMALL + ' ('
-      + r.small_sheets.map(function (x) { return '"' + snippet(x.name) + '" ' + x.rows + (x.rows === 1 ? ' row' : ' rows'); }).join(', ')
+      + r.small_sheets.map(function (x) { return '"' + snippet(x.name) + '" ' + x.rows + (x.rows === 1 ? ' row' : ' rows') + ' × ' + x.cols + (x.cols === 1 ? ' column' : ' columns'); }).join(', ')
       + (r.small_sheet_count > r.small_sheets.length ? ', …' : '') + '). ' + SMALL_GUIDE : null;
     if (!r.loose_text && !r.unknown_class_count) return head + small;
     var parts = [];

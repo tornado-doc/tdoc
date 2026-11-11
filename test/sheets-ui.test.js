@@ -97,10 +97,16 @@ ${M.tableHtml({ name: 'Notes', columns: [{ name: 'Note', type: 'text' }], rows: 
   // an 18-step plan and a 21-row inventory, as tabs.
   writeDoc('brief', `<!doctype html><html><head><meta charset="utf-8"><title>Supplier follow up</title></head><body><main><h1>Supplier follow up</h1>
 <p>EGI and Potato are the two suppliers we are pricing first.</p>
-${M.tableHtml({ name: 'Suppliers', columns: [{ name: 'Supplier', type: 'text' }, { name: 'Status', type: 'tags' }], rows: ['EGI', 'Potato', 'Mighty', 'Via', 'Great Buy'].map((n, k) => ({ id: `r${k + 1}`, cells: [n, [k < 2 ? 'Active' : 'Paused']] })) })}
+${M.tableHtml({ name: 'Suppliers', columns: [{ name: 'Supplier', type: 'text' }, { name: 'Status', type: 'tags' }, { name: 'Next action', type: 'text' }, { name: 'Updated', type: 'date' }], rows: ['EGI', 'Potato', 'Mighty', 'Via', 'Great Buy'].map((n, k) => ({ id: `r${k + 1}`, cells: [n, [k < 2 ? 'Active' : 'Paused'], `Confirm per-SKU prices, case pack and minimum order with ${n}, then ask whether they allow listing on the marketplace and how often stock updates.`, `2026-11-${String(10 - k).padStart(2, '0')}`] })) })}
 ${M.tableHtml({ name: 'Plan', columns: [{ name: 'Step', type: 'text' }], rows: Array.from({ length: 18 }, (_, k) => ({ id: `r${k + 1}`, cells: [`Step ${k + 1}`] })) })}
 ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { name: 'Qty', type: 'number' }], rows: Array.from({ length: 21 }, (_, k) => ({ id: `r${k + 1}`, cells: [`Item ${k + 1}`, String(k * 3)] })) })}
 <h2>Next</h2><p>Call EGI on Thursday.</p></main></body></html>`, 'Supplier follow up');
+  // Eight columns, five rows: wider than the reading column.
+  const eight = (attrs = '') => M.tableHtml({ name: 'Services', columns: ['Service', 'Owner', 'Region', 'Latency', 'Errors', 'Window', 'Fallback plan', 'Status'].map((name) => ({ name, type: 'text' })), rows: Array.from({ length: 5 }, (_, k) => ({ id: `r${k + 1}`, cells: [`Service ${k + 1}`, 'Ana Ruiz', 'eu-west-2', '120 ms p95', '0.1%', 'Nov 18-20', 'Route back with DNS weights and keep the old cluster warm for three days.', 'Ready'] })) }).replace('<table data-tdoc-sheet', `<table data-tdoc-sheet${attrs}`);
+  const proseAround = (body, root = '') => `<!doctype html><html${root}><head><meta charset="utf-8"><title>Services</title><style>main{max-width:660px;margin:0 auto}</style></head><body><main><h1>Services</h1><p>Where each service moves.</p>${body}<h2>Next</h2><p>Cut over on Monday.</p></main></body></html>`;
+  writeDoc('wide-sheet', proseAround(eight()), 'Wide sheet');
+  writeDoc('custom-sheet', proseAround(eight(), ' data-tdoc-design="custom"'), 'Custom sheet');
+  writeDoc('fixed-sheet', proseAround(eight(' data-tdoc-table="fixed"')), 'Fixed sheet');
   // Agent-authored markup, no row ids, no thead (a <th> row in the body).
   writeDoc('handwritten', `<!doctype html><html><head><meta charset="utf-8"><title>Hand</title></head><body><main><h1>Inventory</h1>
 <table data-tdoc-sheet data-name="Stock"><tr><th>Item</th><th data-type="number">Qty</th><th data-type="tags">Where</th></tr>
@@ -154,7 +160,7 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
     async function open(slug, hash = '', viewPage = page) {
       if (viewPage.url().startsWith(base)) await viewPage.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('tdoc-sheet-view:')) localStorage.removeItem(k); });
       await viewPage.goto(`${base}/d/${slug}/v/1${hash}`);
-      await viewPage.frameLocator('iframe[aria-label="Document content"]').locator('.tdoc-sheet .ts-row, .tdoc-sheet .ts-empty').first().waitFor({ timeout: 15000 });
+      await viewPage.frameLocator('iframe[aria-label="Document content"]').locator('.tdoc-sheet .ts-row, .tdoc-sheet .ts-empty, .ts-flat td, .ts-flat .ts-card').first().waitFor({ timeout: 15000 });
       return viewPage.frames().find((f) => f.url().includes('/frame'));
     }
     const state = (frame) => frame.evaluate(() => ({ tabs: window.__tdocSheets.tabs(), active: window.__tdocSheets.active(), sel: window.__tdocSheets.selection() }));
@@ -884,11 +890,16 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await phone.close();
     });
 
-    await test('a small sheet in a prose doc is compact: as tall as its rows, one short row of controls, search behind its icon; a big one and a sheet doc are not', async () => {
+    await test('a small sheet in a prose doc reads as a fitted table (cards on a phone): text wraps, one short row of controls; a big one, full screen and a sheet doc keep the grid', async () => {
       const measure = (frame) => frame.evaluate(() => {
-        const r = (sel) => document.querySelector(sel).getBoundingClientRect();
-        const grid = document.querySelector('.ts-grid');
-        return { x: window.__tdocSheets.expanded(), grid: r('.ts-grid').height, scrolls: grid.scrollHeight > grid.clientHeight + 1, wide: grid.scrollWidth > grid.clientWidth, bar: r('.ts-bar').height, search: r('.ts-search').width, input: r('.ts-search input').width, expand: !document.querySelector('.ts-expand').hidden, overflow: document.documentElement.scrollWidth - innerWidth };
+        const r = (sel) => { const el = document.querySelector(sel); return el ? el.getBoundingClientRect() : { width: 0, height: 0 }; };
+        const flat = document.querySelector('.ts-flat'), grid = document.querySelector('.ts-grid');
+        const long = flat.querySelector('td[data-c="2"], .ts-card-l[data-c="2"]');
+        const lines = long ? Math.round(long.getBoundingClientRect().height / parseFloat(getComputedStyle(long).lineHeight || 20)) : 0;
+        return { x: window.__tdocSheets.expanded(), flat: getComputedStyle(flat).display !== 'none', grid: getComputedStyle(grid).display !== 'none', cards: flat.classList.contains('is-cards'),
+          flatScrollsX: flat.scrollWidth > flat.clientWidth + 1, flatScrollsY: flat.scrollHeight > flat.clientHeight + 1, lines, rows: flat.querySelectorAll('tbody tr, .ts-card').length,
+          labels: [...flat.querySelectorAll('.ts-card-k')].slice(0, 3).map((k) => k.textContent), first: (flat.querySelector('tbody td, .ts-card-t') || {}).textContent,
+          bar: r('.ts-bar').height, search: r('.ts-search').width, input: r('.ts-search input').width, sheetW: r('.tdoc-sheet').width, colW: document.querySelector('main').clientWidth, overflow: document.documentElement.scrollWidth - innerWidth };
       });
       for (const [name, vp] of [['desktop', null], ['phone', { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]]) {
         const ctx = vp ? await browser.newContext(vp) : context;
@@ -898,49 +909,77 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
         await f.locator('.tdoc-sheet').scrollIntoViewIfNeeded();
         await p.waitForTimeout(150);
         let m = await measure(frame);
-        assert(m.x.embed && !m.x.sheetOnly, `${name}: a prose doc's sheet is embedded: ${JSON.stringify(m.x)}`);
-        // Five rows: the header, five rows and the border, and no band below them.
-        assert(!m.scrolls && m.grid <= 34 + 5 * 32 + 2 + (m.wide ? 20 : 0) + 1, `${name}: the grid fits its rows: ${JSON.stringify(m)}`);
-        assert(m.bar <= 32 && m.search <= 30 && m.input < 1 && m.expand && m.overflow <= 1, `${name}: one short row, search is an icon, expand is there: ${JSON.stringify(m)}`);
-        await shot(p, `sheet-embed-${name}`);
-        // The icon opens the search; a query keeps it open; cleared, it folds back.
+        assert(m.x.embed && m.x.fit && m.x.flat && m.flat && !m.grid, `${name}: a small sheet in a prose doc is the flat view: ${JSON.stringify(m)}`);
+        assert(m.cards === (name === 'phone'), `${name}: cards only on a phone: ${JSON.stringify(m)}`);
+        assert(!m.flatScrollsX && m.lines >= 2 && m.rows === 5 && m.overflow <= 1, `${name}: fits the width, long text wraps: ${JSON.stringify(m)}`);
+        if (m.cards) assert(m.first === 'EGI' && m.labels[0] === 'Status:' && m.labels[1] === 'Next action:', `card title and labels: ${JSON.stringify(m)}`);
+        assert(m.bar <= 32 && m.search <= 30 && m.input < 1, `${name}: one short row of controls, search an icon: ${JSON.stringify(m)}`);
+        await shot(p, `sheet-flat-${name}`);
+        // Search filters the flat view; the icon opens it.
         await f.locator('.ts-search').click();
-        await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('egi');
-        await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '1 of 5 rows');
-        await frame.evaluate(() => document.activeElement.blur());
-        m = await measure(frame);
-        assert(m.search > 150 && m.input > 60, `${name}: open with a query: ${JSON.stringify(m)}`);
-        await shot(p, `sheet-embed-search-${name}`);
-        await f.locator('.ts-search').click();
+        await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('potato');
+        await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '1 of 5 rows' && document.querySelectorAll('.ts-flat tbody tr, .ts-flat .ts-card').length === 1);
         await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('');
-        await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '5 rows');
+        await frame.waitForFunction(() => document.querySelectorAll('.ts-flat tbody tr, .ts-flat .ts-card').length === 5);
         await frame.evaluate(() => document.activeElement.blur());
-        await frame.waitForFunction(() => document.querySelector('.ts-search').getBoundingClientRect().width <= 30);
-        // A longer small tab stops at fifteen rows and scrolls inside.
+        if (name === 'desktop') {
+          // A header sorts.
+          await f.locator('.ts-flat th button', { hasText: 'Updated' }).click();
+          await frame.waitForFunction(() => document.querySelector('.ts-flat tbody td').textContent === 'Great Buy');
+          await f.locator('.ts-flat th button', { hasText: 'Updated' }).click();
+          await frame.waitForFunction(() => document.querySelector('.ts-flat tbody td').textContent === 'EGI');
+          // A cell of the flat view takes a comment, anchored to its row and column like the grid's.
+          await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
+          await f.locator('.ts-flat td[data-i="1"][data-c="2"]').click();
+          await p.waitForSelector('.tdoc-popup textarea', { timeout: 5000 });
+          await p.fill('.tdoc-popup textarea', 'Who calls Potato?');
+          await p.click('.tdoc-popup .submit');
+          const file = path.join(root, 'brief', 'comments.json');
+          let saved = [];
+          for (let k = 0; k < 50 && !saved.length; k++) { try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {} if (!saved.length) await p.waitForTimeout(100); }
+          assert(saved.length === 1 && saved[0].anchor.sheet && saved[0].anchor.sheet.table === 'Suppliers' && saved[0].anchor.sheet.row === 'r2', JSON.stringify(saved[0] && saved[0].anchor));
+          await frame.waitForFunction(() => document.querySelector('.ts-flat td[data-i="1"][data-c="2"]').classList.contains('has-comment'));
+          await page.keyboard.press('Escape');
+        }
+        // 18 rows: at most 15 shown, the rest scroll inside.
         await f.getByRole('tab', { name: 'Plan' }).click();
         await p.waitForTimeout(100);
         m = await measure(frame);
-        assert(m.scrolls && m.grid <= 34 + 15 * 32 + 18 + 2 + 1 && m.grid >= 34 + 10 * 32 && m.search <= 30, `${name}: 18 rows stop at about 15: ${JSON.stringify(m)}`);
-        // Past 20 rows it is data to filter: the whole toolbar, as in a sheet doc.
+        assert(m.flat && m.flatScrollsY && m.rows === 18, `${name}: 18 rows scroll after 15: ${JSON.stringify(m)}`);
+        // Past 20 rows it is data to filter: the grid and the whole toolbar.
         await f.getByRole('tab', { name: 'Inventory' }).click();
         await p.waitForTimeout(100);
         m = await measure(frame);
-        assert(m.search > 200 && m.input > 100 && !(await frame.evaluate(() => document.querySelector('.tdoc-sheet').classList.contains('is-compact'))), `${name}: 21 rows get the full toolbar: ${JSON.stringify(m)}`);
-        await shot(p, `sheet-embed-21-${name}`);
-        // Full screen is there, with the whole toolbar.
+        assert(m.grid && !m.flat && m.search > 200, `${name}: 21 rows get the grid: ${JSON.stringify(m)}`);
+        // Full screen keeps the grid, for a small tab too.
         await f.getByRole('tab', { name: 'Suppliers' }).click();
         await f.getByRole('button', { name: 'Expand sheet to full screen' }).click();
         await frame.waitForFunction(() => window.__tdocSheets.expanded().on);
         await p.waitForTimeout(150);
         m = await measure(frame);
-        assert(m.grid > 500 && m.search > 150, `${name}: full screen has the whole toolbar: ${JSON.stringify(m)}`);
+        assert(m.grid && !m.flat && m.search > 150, `${name}: full screen is the grid: ${JSON.stringify(m)}`);
         await f.getByRole('button', { name: 'Close full screen (Esc)' }).click();
-        await frame.waitForFunction(() => !window.__tdocSheets.expanded().on);
-        // A sheet doc keeps the full toolbar and the tall grid.
+        await frame.waitForFunction(() => !window.__tdocSheets.expanded().on && window.__tdocSheets.expanded().flat);
+        // A sheet doc is unchanged.
         const sheetFrame = await open('tracker', '', p);
         m = await measure(sheetFrame);
-        assert(!m.x.embed && m.x.sheetOnly && m.search > 200 && m.input > 100 && m.scrolls && m.grid > 34 + 15 * 32 + 20, `${name}: a sheet doc is unchanged: ${JSON.stringify(m)}`);
+        assert(!m.x.embed && m.x.sheetOnly && m.grid && !m.flat && m.search > 200, `${name}: a sheet doc is unchanged: ${JSON.stringify(m)}`);
         if (vp) await ctx.close();
+      }
+    });
+
+    await test('a wide sheet in a prose doc takes the page width beside the column; a custom design and data-tdoc-table="fixed" keep the author\'s layout', async () => {
+      let frame = await open('prose');
+      let w = await frame.evaluate(() => ({ sheet: document.querySelector('.tdoc-sheet').getBoundingClientRect().width, col: document.querySelector('main').clientWidth, wide: document.querySelector('.tdoc-sheet').classList.contains('is-wide') }));
+      assert(w.wide || w.sheet <= w.col + 1, JSON.stringify(w));
+      frame = await open('wide-sheet');
+      w = await frame.evaluate(() => ({ sheet: document.querySelector('.tdoc-sheet').getBoundingClientRect().width, col: document.querySelector('main').clientWidth, vw: innerWidth, flat: window.__tdocSheets.expanded().flat }));
+      assert(w.flat && w.sheet > w.col + 100 && w.sheet <= Math.min(1200, w.vw - 48) + 1, `breaks out of the column: ${JSON.stringify(w)}`);
+      await shot(page, 'sheet-flat-wide-desktop');
+      for (const slug of ['custom-sheet', 'fixed-sheet']) {
+        frame = await open(slug);
+        w = await frame.evaluate(() => ({ x: window.__tdocSheets.expanded(), sheet: document.querySelector('.tdoc-sheet').getBoundingClientRect().width, col: document.querySelector('main').clientWidth, grid: getComputedStyle(document.querySelector('.ts-grid')).display }));
+        assert(!w.x.fit && !w.x.flat && w.grid !== 'none' && w.sheet <= w.col + 1, `${slug}: the grid, in the column: ${JSON.stringify(w)}`);
       }
     });
 

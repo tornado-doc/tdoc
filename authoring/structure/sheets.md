@@ -11,24 +11,32 @@ the HTML and publish a new version.
 
 ## Sheet or table
 
-A table in a prose doc is a plain `<table>` by default. Five suppliers, a plan
-of eight steps, a comparison of three options: the reader takes it in at a
-glance, and a spreadsheet grid around it (tabs, a search box, a frame) only
-pushes the prose apart.
+A small reference table in a prose doc is a plain `<table>`: five suppliers
+and their status, a plan of eight steps, three options compared. The reader
+takes it in at a glance, and a spreadsheet's tabs and search box add nothing.
 
-- **Plain `<table>`**: a reference table inside a report, plan or note. Up to
-  about 20 rows.
+- **Plain `<table>`**: up to about 20 rows and 5 columns of short cells,
+  inside a report, plan or note.
 - **`data-tdoc-sheet` in the doc**: data the reader will search, filter or
-  sort, usually more than about 20 rows (every run of a benchmark under its
-  write-up).
+  sort (usually more than about 20 rows), and a wider table (more than 5
+  columns) or one with long cell text, where search and sort help.
 - **A sheet doc of its own**: the deliverable itself is a list of records (a
   CRM, an inventory, a tracker). Publish it as its own doc and link to it from
   the prose doc in one line.
 
-Publish warns about a sheet of 20 rows or fewer in a prose doc: "Small table
-in a doc: use a plain <table>; keep sheets for data people filter or sort."
+Columns are not something to avoid. In a prose doc the reader fits a plain
+table, and a sheet of 20 rows or fewer, to the page: columns share the width
+and text wraps, a table the reading column cramps takes the page width beside
+it, and on a phone more than three columns read as one card per row. A sheet
+of 20 rows or fewer shows a small search icon instead of a toolbar; full
+screen still gives the whole grid. `data-tdoc-table="fixed"` on the table
+keeps your own layout, and `data-tdoc-wide` asks for the page width.
 
-Before, a status update with its five suppliers as a sheet:
+Publish warns about a sheet of 20 rows or fewer, 5 columns or fewer and short
+cells in a prose doc: "Small table in a doc: use a plain <table>; keep sheets
+for data people filter or sort, and for wide tables or long cell text."
+
+Before, a status update with three columns of five suppliers as a sheet:
 
 ```html
 <p>EGI and Potato are the two suppliers we are pricing first.</p>

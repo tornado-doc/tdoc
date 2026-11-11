@@ -23938,7 +23938,7 @@ function mcpWritingGuide(style, kind) {
     '- Diagram: <div class="diagram-box" data-tdoc-artifact><svg viewBox="0 0 680 260" role="img" aria-label="…">…</svg><p class="cap">What to take from it.</p></div>',
     '- Table: <div class="tdoc-table-scroll"><table>…</table></div>; square corners, hairline row rules, no fills; numbers in <span class="num"> with tabular numerals.',
     // Agents turned every small table into a spreadsheet grid (Julie, 2026-11-10).
-    ...(kind === 'doc' ? ['- A table in a doc stays a plain <table>: a reference table read at a glance. A sheet grid only for data readers will search, filter or sort (more than about 20 rows); when the deliverable is a list of records, publish it as its own sheet doc (get_writing_guide kind "sheets") and link to it.'] : []),
+    ...(kind === 'doc' ? ['- A small reference table (up to 20 rows, 5 columns, short cells) is a plain <table>. Columns and long text are fine: the reader fits tables to the page (text wraps, wide ones use the page width, phones show cards). A sheet (get_writing_guide kind "sheets") for data readers search, filter or sort, or a wide table with long text; a list of records that is the deliverable is its own sheet doc, linked from the prose. data-tdoc-table="fixed" keeps your own table layout.'] : []),
     '- Rules: do not pad or center the content root, no position:fixed, no page footer, no other tdoc-* classes, light mode only (dark is an automatic invert). A custom design (own page-level CSS) only for a landing page or deck the user asked for, never a report.',
     `## Style: ${name}`,
   ];
@@ -23960,7 +23960,7 @@ function mcpWritingGuide(style, kind) {
   if (kind === 'sheets') {
     const md = mcpAuthoringGuides()['structure/sheets.md'];
     const markup = mcpGuideSection(md, 'The markup');
-    parts.push('## Sheets', 'Records people search, filter and sort: one <table data-tdoc-sheet data-name="Tab"> per tab, drawn by the reader as a spreadsheet grid. In a prose doc, a table of 20 rows or fewer stays a plain <table> (publish warns); a list of records that is the whole deliverable is a sheet doc of its own, linked from the prose. Full guide: tdoc://authoring/structure/sheets.md');
+    parts.push('## Sheets', 'Records people search, filter and sort: one <table data-tdoc-sheet data-name="Tab"> per tab, drawn by the reader as a spreadsheet grid. In a prose doc a small table (20 rows, 5 columns, short cells) is a plain <table> (publish warns); a list of records that is the deliverable is its own sheet doc, linked from the prose. Full guide: tdoc://authoring/structure/sheets.md');
     if (markup) parts.push(markup.replace(/^## The markup\n+/, '').replace(/^[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*\n\n/, ''));
     parts.push('Keep every data-row id and th data-key when editing (cell comments hang on them); a new row or column takes the next number. data-palette colours: gray red orange yellow green teal blue purple pink. Several tables are tabs of one grid. A sheet doc may be up to 8 MB (10,000 rows × 20 columns fits).');
   }

@@ -227,14 +227,32 @@ mark a paragraph as a value. Keep paragraph cells normally wrappable. Do not
 assign one first-column percentage to every table: an ID column and a prose
 column have different intrinsic widths.
 
-The provider and CLI preview share a content-based safety floor for native
-tables. Each cell reserves its natural unwrapped width up to a 12em prose
-reading measure; explicit value cells reserve the complete value. Insufficient
-space becomes local scrolling, not one-character columns or reduced type.
-This also covers old documents that have no value annotations. It does not
-replace reviewing all tables in both content widths, and does not run in a
-standalone HTML file opened without the provider. Author card reflows keep
-their own layout; the provider does not guess whether a matrix is a record list.
+**The reader fits a standard table to the page**, so columns and long cell
+text are not something to avoid. A standard table is this block as written
+above (a plain `<table>` in `tdoc-table-scroll`, no class, style or width of
+its own, not inside a figure or a custom component) in a house-style doc. On
+screen its columns share the width (a short value keeps its width, text wraps
+down to about 6em); a table the reading column cramps takes the page width
+beside it, centred, up to 1200px; one that still cannot fit scrolls in its own
+box with the first column held; on a phone (480px or less) a table of more
+than three columns reads as one card per row, the first cell its title and
+each other cell a "Column: value" line. This is reader-side provider CSS: the
+stored HTML is never changed, and print, PDF and Word export keep the table
+as written.
+
+- `data-tdoc-table="fixed"` on a table (or a block around it) keeps the
+  author's layout: no fitting, no page width, no cards.
+- `data-tdoc-wide` on a block (a table's wrapper, a figure, a sheet table)
+  gives it the page width beside the reading column, also in a custom design
+  whose own CSS keeps the content narrow.
+
+Any other table (a custom design or slide deck, a table with its own class,
+style or width, one inside a figure or a custom component) keeps the older
+safety floor: each cell reserves its natural unwrapped width up to a 12em
+prose reading measure, explicit value cells the complete value, and
+insufficient space becomes local scrolling, not one-character columns or
+reduced type. Author card reflows keep their own layout. None of this runs
+in a standalone HTML file opened without the provider.
 
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
 figure. Both are `overflow-x: auto`.
