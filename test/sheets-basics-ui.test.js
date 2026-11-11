@@ -181,7 +181,15 @@ async function shot(page, name) {
       await frame.waitForFunction(() => !document.querySelectorAll('table[data-tdoc-sheet] thead th')[0].hasAttribute('data-width'));
       // Double-click the edge: fit to the longest note.
       await f.locator('.ts-h[data-c="1"] .ts-resize').dblclick();
-      await frame.waitForFunction((w) => Number(document.querySelectorAll('table[data-tdoc-sheet] thead th')[1].getAttribute('data-width')) > w + 100, w1);
+      // Fitted: wider than the dragged width and the longest note shows whole
+      // (how much wider depends on the system font, so no fixed margin).
+      await frame.waitForFunction((w) => Number(document.querySelectorAll('table[data-tdoc-sheet] thead th')[1].getAttribute('data-width')) > w, w1);
+      const fit = await frame.evaluate(() => {
+        const cell = [...document.querySelectorAll('.ts-row .ts-c[data-c="1"]')].find((c) => c.textContent.startsWith('A long'));
+        const t = cell && (cell.querySelector('.ts-t') || cell);
+        return t ? { sw: t.scrollWidth, cw: t.clientWidth } : null;
+      });
+      assert(fit && fit.sw <= fit.cw, `the longest note shows whole: ${JSON.stringify(fit)}`);
       await save('resize', 2);
       const html = saved('resize', 2);
       assert(/<th[^>]*data-key="c2"[^>]*data-width="\d+"/.test(html), 'v2 holds the width');
