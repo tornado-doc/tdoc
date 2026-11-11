@@ -551,8 +551,10 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await frameLoc().locator('.tdoc-sheet .ts-row').first().waitFor({ timeout: 15000 });
       assert(loaded.length === 1, `SheetJS chunk fetched once: ${loaded}`);
       const frame = docFrame();
-      const info = await frame.evaluate(() => ({ tabs: Array.from(document.querySelectorAll('.ts-tab')).map((t) => t.textContent).join(), dates: Array.from(document.querySelectorAll('.ts-row .ts-c[data-c="2"]')).map((c) => c.textContent).join() }));
-      assert(info.tabs === 'Budget,People' && info.dates === '2026-01-31,2026-02-07', JSON.stringify(info));
+      // Dates are stored ISO; a cell's own Excel date format (m/d/yy) is
+      // kept as its number format and shows that way.
+      const info = await frame.evaluate(() => ({ tabs: Array.from(document.querySelectorAll('.ts-tab')).map((t) => t.textContent).join(), dates: Array.from(document.querySelectorAll('.ts-row .ts-c[data-c="2"]')).map((c) => c.textContent).join(), stored: Array.from(document.querySelectorAll('table[data-tdoc-sheet] tbody tr')).slice(0, 2).map((tr) => tr.cells[2].textContent + (tr.cells[2].getAttribute('data-num') || '')).join() }));
+      assert(info.tabs === 'Budget,People' && info.dates === '2026-01-31,2/7/2026' && info.stored === '2026-01-31,2026-02-07date:us', JSON.stringify(info));
     });
 
     await test('import: a CSV dropped on My docs asks "Import as sheet", then imports', async () => {
