@@ -8,7 +8,9 @@
 // hidden (by a provider style, never by an attribute), and the grid is a
 // provider element the editor strips when it saves. Filter, sort and search
 // are view state: the shell keeps them in the page's #hash and in
-// localStorage, and nothing here writes them into the document.
+// localStorage, and nothing here writes them into the document. So is the
+// summary row at the grid's foot (Sum / Average / Count / Unique per column,
+// over the rows the view shows), picked from a column's menu or the row itself.
 //
 // In Edit mode (doc owners and editors, behind the `sheets` flag) a cell is
 // edited in place and written back into its <td>, rows and columns are added
@@ -45,6 +47,9 @@
     filter: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6.2 7.4V19l-3.6-1.8v-4.8z" fill="currentColor"/></svg>',
     plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
     comment: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 2H12A10 10 0 1 1 2 12V2Z"/></svg>',
+    expand: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   };
   var TYPE_LABEL = { text: 'Text', number: 'Number', date: 'Date', tags: 'Tags', checkbox: 'Checkbox', url: 'Link' };
   var TYPE_GLYPH = { text: 'Aa', number: '#', date: '▦', tags: '◉', checkbox: '☑', url: '↗' };
@@ -115,6 +120,17 @@
     '.ts-resize:hover,.ts-resize.is-on{background:linear-gradient(90deg,transparent 3px,var(--ts-accent) 3px,var(--ts-accent) 5px,transparent 5px)}',
     '.ts-h-add{flex:none;width:40px;display:flex;align-items:center;justify-content:center}',
     '.ts-body{position:relative}',
+    // summary row: stuck to the grid's foot, one figure per column
+    '.ts-foot{position:sticky;bottom:0;z-index:4;display:flex;height:' + ROW_H + 'px;background:var(--ts-head);border-top:1px solid #d9d9df}',
+    '.ts-foot[hidden]{display:none!important}',
+    '.ts-fcorner{position:sticky;left:0;z-index:2;flex:none;display:flex;align-items:center;justify-content:center;background:var(--ts-head);border-right:1px solid var(--ts-line);color:#8a8a94;font-weight:600}',
+    '.ts-fc{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0;height:100%;padding:0 8px;border:0;border-right:1px solid var(--ts-line);border-radius:0;background:var(--ts-head);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-align:right}',
+    '.ts-fc.is-first{position:sticky;z-index:1}',
+    '.ts-fc:hover{background:#ececf0}',
+    '.ts-fc small{color:var(--ts-muted);font-size:11px;font-weight:500}',
+    '.ts-fc b{font-weight:600;overflow:hidden;text-overflow:ellipsis}',
+    '.ts-fc.is-none small{opacity:0}',
+    '.ts-fc.is-none:hover small,.ts-fc.is-none:focus-visible small{opacity:1}',
     '.ts-rows{position:absolute;left:0;top:0}',
     '.ts-row{display:flex;height:' + ROW_H + 'px;background:#fff}',
     '.ts-row:hover{background:#fafafc}',
@@ -188,8 +204,24 @@
     '.ts-tagbox .ts-tag svg{width:12px;height:12px}',
     '.ts-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483600;padding:10px 14px;border-radius:10px;background:#17171a;color:#fff;font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.2);max-width:calc(100vw - 32px)}',
     'html[data-tdoc-interaction-mode="comment"] .tdoc-sheet .ts-c{cursor:cell}',
+    // Full screen: the same grid, fixed over the page (the shell makes the
+    // frame fill the window), so its view and comments carry over as they are.
+    // Not the top layer: menus and filter panels open from <body> and must
+    // stay above it, and the reader's dark inversion on <html> keeps applying.
+    'html[data-tdoc-sheet-expanded],html[data-tdoc-sheet-expanded] body{overflow:hidden!important}',
+    '.tdoc-sheet.is-expanded{position:fixed;inset:0;z-index:2147483000;margin:0;display:flex;flex-direction:column;background:#fff;padding:10px max(16px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}',
+    '.tdoc-sheet.is-expanded .ts-grid{flex:1 1 auto;min-height:0;width:100%;max-width:none}',
+    '.tdoc-sheet.is-expanded .ts-tabs,.tdoc-sheet.is-expanded .ts-bar,.tdoc-sheet.is-expanded .ts-add-row{flex:none}',
+    '.ts-xhead{display:flex;align-items:center;gap:8px;min-height:36px;margin:0 0 8px}',
+    '.ts-xhead[hidden],.tdoc-sheet.is-expanded .ts-tabs[hidden]{display:none!important}',
+    '.ts-xtitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:600}',
+    'a.ts-btn{text-decoration:none;color:inherit}',
+    '.ts-xhead .ts-icon{width:32px;height:32px}',
+    '.ts-xhead .ts-icon svg{width:18px;height:18px}',
     '@media (max-width:640px){',
     '.ts-bar{gap:6px}.ts-search{flex:1 1 100%}.ts-count{margin-left:0}',
+    '.ts-search{order:-2}.ts-bar>.ts-expand{order:-1}.ts-bar:has(>.ts-expand:not([hidden])) .ts-search{flex-basis:calc(100% - 40px)}',
+    '.tdoc-sheet.is-expanded{padding-top:6px}.ts-xhead .ts-btn{padding:0 8px}.ts-xhead .ts-btn span{display:none}',
     '.ts-pop{left:0!important;right:0!important;top:auto!important;bottom:0!important;max-width:none;width:100%;max-height:70vh;border-radius:14px 14px 0 0;padding:10px 10px max(10px,env(safe-area-inset-bottom))}.ts-pop .ts-actions{margin-right:84px}',
     '.ts-mi{min-height:44px}.ts-val{min-height:40px}',
     '.ts-n{padding:0 4px}',
@@ -310,6 +342,9 @@
 
   // ---- mount --------------------------------------------------------------------
   var ui = {};
+  // Full screen: on, opened as the sheet's own page (alone: its tab, 1-based),
+  // whether the doc is nothing but the sheet, and the doc path from the shell.
+  var expand = { on: false, alone: 0, sheetOnly: false, path: '', scroll: null, inert: [] };
   var sel = { r: 0, c: 0, r2: 0, c2: 0 };
   var config = { editing: false, received: false };
   var undoStack = [], redoStack = [];
@@ -345,6 +380,19 @@
     ui.note = h('span', 'ts-note');
     ui.count = h('span', 'ts-count'); ui.count.setAttribute('aria-live', 'polite');
     ui.bar.appendChild(ui.note); ui.bar.appendChild(ui.count); ui.bar.appendChild(ui.comment);
+    // Full screen, at the toolbar's end. A doc that is only the sheet has
+    // nothing else to hide, so it has no such button.
+    ui.expand = iconButton(ICON.expand, 'Expand sheet to full screen', function () { setExpanded(true); });
+    ui.expand.classList.add('ts-expand');
+    ui.bar.appendChild(ui.expand);
+    ui.xhead = h('div', 'ts-xhead'); ui.xhead.hidden = true;
+    ui.xtitle = h('span', 'ts-xtitle');
+    ui.back = h('a', 'ts-btn'); ui.back.innerHTML = ICON.back + '<span>Open the doc</span>'; ui.back.setAttribute('aria-label', 'Open the doc');
+    ui.alone = h('a', 'ts-btn'); ui.alone.target = '_blank'; ui.alone.rel = 'noopener'; ui.alone.innerHTML = ICON.external + '<span>Open on its own</span>'; ui.alone.setAttribute('aria-label', 'Open this sheet on its own page');
+    ui.close = iconButton(ICON.x, 'Close full screen (Esc)', function () { setExpanded(false); });
+    // Kept current with the view (renderBar), and once more when pressed.
+    [ui.back, ui.alone].forEach(function (a) { a.addEventListener('pointerdown', linkHrefs); a.addEventListener('focus', linkHrefs); });
+    ui.xhead.appendChild(ui.back); ui.xhead.appendChild(ui.xtitle); ui.xhead.appendChild(ui.alone); ui.xhead.appendChild(ui.close);
     // grid
     ui.grid = h('div', 'ts-grid');
     ui.grid.tabIndex = 0;
@@ -353,7 +401,8 @@
     ui.body = h('div', 'ts-body');
     ui.rows = h('div', 'ts-rows'); ui.rows.setAttribute('role', 'rowgroup');
     ui.body.appendChild(ui.rows);
-    ui.grid.appendChild(ui.head); ui.grid.appendChild(ui.body);
+    ui.foot = h('div', 'ts-foot'); ui.foot.setAttribute('role', 'row'); ui.foot.setAttribute('aria-label', 'Summary'); ui.foot.hidden = true;
+    ui.grid.appendChild(ui.head); ui.grid.appendChild(ui.body); ui.grid.appendChild(ui.foot);
     ui.addRow = h('button', 'ts-add-row'); ui.addRow.type = 'button'; ui.addRow.innerHTML = ICON.plus + '<span>Add row</span>';
     ui.addRow.addEventListener('click', function (e) { e.stopPropagation(); insertRows(null, 1); ui.grid.focus({ preventScroll: true }); });
     ui.offAbove = h('button', 'ts-off'); ui.offBelow = h('button', 'ts-off');
@@ -363,8 +412,9 @@
       b.addEventListener('click', function (e) { e.stopPropagation(); goOffscreen(b); });
     });
     ui.offHidden = h('div', 'ts-note ts-off-hidden'); ui.offHidden.hidden = true;
-    root.appendChild(ui.tabs); root.appendChild(ui.bar); root.appendChild(ui.offHidden); root.appendChild(ui.grid); root.appendChild(ui.offAbove); root.appendChild(ui.offBelow); root.appendChild(ui.addRow);
+    root.appendChild(ui.xhead); root.appendChild(ui.tabs); root.appendChild(ui.bar); root.appendChild(ui.offHidden); root.appendChild(ui.grid); root.appendChild(ui.offAbove); root.appendChild(ui.offBelow); root.appendChild(ui.addRow);
     host.parentNode.insertBefore(root, host);
+    expand.sheetOnly = isSheetOnly();
     wire();
     renderAll();
     post({ type: 'tdoc:sheetReady', tabs: book.tabs.map(function (t) { return t.name; }) });
@@ -375,7 +425,7 @@
     b.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); fn(); });
     return b;
   }
-  function canEdit() { return config.editing && mode() === 'edit'; }
+  function canEdit() { return config.editing && mode() === 'edit' && !expand.alone; }
 
   // ---- rendering -----------------------------------------------------------------
   function renderAll() {
@@ -386,7 +436,8 @@
   function renderTabs() {
     ui.tabs.textContent = '';
     var editing = canEdit();
-    ui.tabs.hidden = book.tabs.length < 2 && !editing;
+    // On its own page the sheet is one tab: no strip.
+    ui.tabs.hidden = (book.tabs.length < 2 && !editing) || !!expand.alone;
     book.tabs.forEach(function (tab, i) {
       var b = h('button', 'ts-tab', tab.name);
       b.type = 'button'; b.setAttribute('role', 'tab');
@@ -430,7 +481,7 @@
     });
     if (tab.query.sort.length > 1 || any) {
       var clear = h('button', 'ts-link', 'Clear all'); clear.type = 'button';
-      clear.addEventListener('click', function (e) { e.stopPropagation(); setQuery({ search: tab.query.search, filters: {}, sort: [] }); });
+      clear.addEventListener('click', function (e) { e.stopPropagation(); setQuery({ search: tab.query.search, filters: {}, sort: [], totals: Object.assign({}, tab.query.totals) }); });
       ui.chips.appendChild(clear);
     }
     var total = tab.index.size, shown = tab.order.length;
@@ -438,6 +489,12 @@
     var m2 = mode();
     ui.comment.hidden = m2 !== 'comment';
     ui.addRow.hidden = !canEdit();
+    ui.expand.hidden = expand.on || expand.sheetOnly || !canExpand();
+    ui.xhead.hidden = !expand.on;
+    ui.close.hidden = ui.alone.hidden = !!expand.alone;
+    ui.back.hidden = !expand.alone;
+    ui.xtitle.textContent = expand.alone ? docTitle() + ' · ' + tab.name : docTitle();
+    if (expand.on) linkHrefs();
     ui.note.hidden = !(m2 === 'edit');
     ui.note.textContent = canEdit() ? 'Type or double-click to edit · paste a range from Excel or Sheets' : m2 === 'edit' ? 'Editing sheets in the browser is not available yet' : '';
   }
@@ -459,8 +516,9 @@
     var tab = cur();
     var rowsH = Math.max(1, tab.order.length) * ROW_H;
     var room = Math.max(240, innerHeight - (NARROW && NARROW.matches ? 150 : 170));
-    var hgt = Math.min(HEAD_H + rowsH + 2 + (tab.totalW > ui.grid.clientWidth ? 14 : 0), room);
-    ui.grid.style.height = hgt + 'px';
+    var hgt = Math.min(HEAD_H + rowsH + footH() + 2 + (tab.totalW > ui.grid.clientWidth ? 14 : 0), room);
+    // Full screen, the grid takes whatever the window leaves it.
+    ui.grid.style.height = expand.on ? '' : hgt + 'px';
     ui.body.style.height = (tab.order.length ? tab.order.length * ROW_H : 80) + 'px';
     ui.body.style.width = tab.totalW + 'px';
     ui.head.style.width = (tab.totalW + (canEdit() ? 40 : 0)) + 'px';
@@ -483,6 +541,41 @@
     });
     if (canEdit()) html += '<div class="ts-h-add"><button type="button" class="ts-icon" data-act="addcol" aria-label="Add a column" title="Add a column">' + ICON.plus + '</button></div>';
     ui.head.innerHTML = html;
+    renderFoot();
+  }
+  // ---- summary row -----------------------------------------------------------------
+  function hasTotals(tab) { return Object.keys(tab.query.totals || {}).some(function (k) { return Number(k) < tab.data.columns.length; }); }
+  function footH() { var tab = cur(); return tab && hasTotals(tab) ? ROW_H : 0; }
+  function totalText(tab, c, fn) {
+    var v = Q.columnTotal(tab.index, tab.order, c, fn);
+    if (v == null) return '–';
+    if (fn === 'avg') return Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
+    return fmt(v);
+  }
+  function renderFoot() {
+    var tab = cur(), W = numW();
+    var any = hasTotals(tab);
+    ui.foot.hidden = !any;
+    if (!any) { ui.foot.textContent = ''; return; }
+    var html = '<div class="ts-fcorner" style="width:' + W + 'px" title="Summary of the rows shown">Σ</div>';
+    tab.data.columns.forEach(function (col, c) {
+      var fn = tab.query.totals[c];
+      var label = fn ? Q.TOTAL_LABEL[fn] : 'Summary';
+      html += '<button type="button" class="ts-fc' + (c === 0 ? ' is-first' : '') + (fn ? '' : ' is-none') + '" data-c="' + c + '" role="gridcell"' +
+        ' aria-label="' + esc(col.name) + ' summary' + (fn ? ': ' + label + ' ' + esc(totalText(tab, c, fn)) : '') + '"' +
+        ' style="width:' + tab.widths[c] + 'px' + (c === 0 ? ';left:' + W + 'px' : '') + '">' +
+        '<small>' + esc(label) + '</small>' + (fn ? '<b>' + esc(totalText(tab, c, fn)) + '</b>' : '') + '</button>';
+    });
+    ui.foot.innerHTML = html;
+    ui.foot.style.width = (tab.totalW + (canEdit() ? 40 : 0)) + 'px';
+  }
+  function totalItems(c) {
+    var tab = cur(), on = tab.query.totals[c] || null;
+    var items = [{ label: 'None', checked: !on, onSelect: function () { setQuery(Q.setTotal(tab.query, c, null)); } }];
+    Q.totalsFor(tab.index.cols[c].type).forEach(function (fn) {
+      items.push({ label: Q.TOTAL_LABEL[fn], checked: on === fn, onSelect: function () { setQuery(Q.setTotal(tab.query, c, fn)); } });
+    });
+    return items;
   }
   var rendered = { first: -1, last: -1, c0: -1, c1: -1, key: '' };
   function visibleCols(tab) {
@@ -607,6 +700,7 @@
         // A saved view never names a column that is not there.
         Object.keys(q.filters).forEach(function (k) { if (Number(k) >= t.data.columns.length) delete q.filters[k]; });
         q.sort = q.sort.filter(function (s) { return s.col < t.data.columns.length; });
+        Object.keys(q.totals || {}).forEach(function (k) { if (Number(k) >= t.data.columns.length) delete q.totals[k]; });
         t.query = q;
       }
       var w = widths && widths[t.name];
@@ -632,7 +726,7 @@
   // ---- selection & scrolling -------------------------------------------------------
   function ensureVisible(i, c) {
     var tab = cur(), g = ui.grid;
-    var top = i * ROW_H, viewH = g.clientHeight - HEAD_H;
+    var top = i * ROW_H, viewH = g.clientHeight - HEAD_H - footH();
     if (top < g.scrollTop) g.scrollTop = top;
     else if (top + ROW_H > g.scrollTop + viewH) g.scrollTop = top + ROW_H - viewH;
     if (c > 0) {
@@ -726,7 +820,7 @@
   };
   // -1 above the grid's visible rows, 1 below, 0 in view.
   function rowPlace(i) {
-    var top = i * ROW_H, view = ui.grid.clientHeight - HEAD_H;
+    var top = i * ROW_H, view = ui.grid.clientHeight - HEAD_H - footH();
     if (top + ROW_H <= ui.grid.scrollTop + 2) return -1;
     if (top >= ui.grid.scrollTop + view - 2) return 1;
     return 0;
@@ -958,7 +1052,8 @@
       { label: 'Sort ascending', onSelect: function () { setQuery(Object.assign(Q.cloneQuery(tab.query), { sort: [{ col: c, dir: 'asc' }] })); } },
       { label: 'Sort descending', onSelect: function () { setQuery(Object.assign(Q.cloneQuery(tab.query), { sort: [{ col: c, dir: 'desc' }] })); } },
       { label: 'Filter…', onSelect: function () { openFilter(c, anchor); } },
-    ];
+      { header: 'Summary row' },
+    ].concat(totalItems(c));
     if (mode() === 'comment') items.push({ label: 'Comment on this column', onSelect: function () { commentOn(col.th, anchor.getBoundingClientRect(), 'Column ' + Q.columnLetter(c) + ' · ' + col.name); } });
     if (canEdit()) {
       items.push('sep');
@@ -1481,6 +1576,8 @@
     else if (k === 'PageDown') move(page, 0, e.shiftKey);
     else if (k === 'PageUp') move(-page, 0, e.shiftKey);
     else if (k === 'Enter' || k === 'F2') { if (canEdit() && !e.shiftKey) startEdit(); else move(e.shiftKey ? -1 : 1, 0); }
+    // Full screen, Esc on the grid leaves full screen (the view stays as it is).
+    else if (k === 'Escape' && expand.on && !expand.alone) handled = false;
     else if (k === 'Escape') { if (sel.r !== sel.r2 || sel.c !== sel.c2) select(sel.r, sel.c, false); else if (tab.query.search) { ui.search.value = ''; setQuery(Object.assign(Q.cloneQuery(tab.query), { search: '' })); } else handled = false; }
     else if (mod && k.toLowerCase() === 'a') { sel.r = 0; sel.c = 0; sel.r2 = last; sel.c2 = lastC; renderHead(); renderBody(true); }
     else if (mod && k.toLowerCase() === 'f') { ui.search.focus(); ui.search.select(); }
@@ -1505,6 +1602,7 @@
   function wire() {
     ui.grid.addEventListener('keydown', onKey);
     ['input', 'beforeinput', 'keyup'].forEach(function (t) { ui.root.addEventListener(t, function (e) { e.stopPropagation(); }); });
+    ui.root.addEventListener('keydown', escapeClose);
     ui.root.addEventListener('keydown', function (e) { if (e.target !== ui.grid) e.stopPropagation(); });
     ui.search.addEventListener('input', function () {
       clearTimeout(searchTimer);
@@ -1525,6 +1623,13 @@
       requestAnimationFrame(function () { ticking = false; renderBody(); placeOffscreen(); });
       clearTimeout(scrollSettle); scrollSettle = setTimeout(relayout, 200);
     }, { passive: true });
+    ui.foot.addEventListener('click', function (e) {
+      var b = e.target.closest('.ts-fc');
+      if (!b) return;
+      e.stopPropagation();
+      var c = Number(b.getAttribute('data-c'));
+      openMenu(b, totalItems(c), cur().data.columns[c].name + ' summary');
+    });
     ui.head.addEventListener('click', function (e) {
       var b = e.target.closest('[data-act]');
       if (!b) return;
@@ -1639,6 +1744,88 @@
   }
   var scrollSettle = null;
 
+  // ---- full screen ----------------------------------------------------------------------
+  // The grid itself goes full screen (never a copy), so search, filters,
+  // sort, selection, scroll and cell comments are the same before and after.
+  // The shell is told through the slides presenter's bridge: tdoc:visualState
+  // makes the frame fill the window, tdoc:presentState keeps the composer and
+  // comment cards above it. Not in Edit mode, where Save lives in the shell.
+  function canExpand() { return mode() !== 'edit' || !!expand.alone; }
+  function docTitle() {
+    var h1 = document.querySelector('h1:not([data-tdoc-provider] h1)');
+    return cleanName((h1 && h1.textContent) || document.title || 'Sheet');
+  }
+  // A doc whose only content is its sheet (a title and a note at most).
+  function isSheetOnly() {
+    var skip = SEL + ',[data-tdoc-provider],script,style,noscript,template,h1,.sheet-note,caption';
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (n.nodeType === 1) return n.matches(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
+        return n.data.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      },
+    });
+    if (walker.nextNode()) return false;
+    return !Array.prototype.some.call(document.body.querySelectorAll('img,svg,video,canvas,iframe,figure'), function (el) { return !el.closest(skip); });
+  }
+  // The sheet's own page: this doc, this version, `?sheet=<tab>`, carrying
+  // the view of the moment it is pressed.
+  function linkHrefs() {
+    if (!book || !expand.path) return;
+    var view = Q.encodeView(viewObject());
+    var hash = view ? '#sheet=' + encodeURIComponent(view) : '';
+    ui.alone.href = expand.path + '?sheet=' + (book.active + 1) + hash;
+    ui.back.href = expand.path + hash;
+  }
+  function setExpanded(on, quiet) {
+    if (!book || on === expand.on || (on && !canExpand())) return;
+    if (editor) commitEdit();
+    closePop(true);
+    expand.on = on;
+    var html = document.documentElement, root = ui.root;
+    if (on) {
+      expand.scroll = { x: scrollX, y: scrollY };
+      html.setAttribute('data-tdoc-sheet-expanded', '');
+      root.classList.add('is-expanded');
+      root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true');
+      // The rest of the page is out of reach (focus, screen readers) under it.
+      expand.inert = [];
+      for (var branch = root; branch && branch !== document.body && branch.parentElement; branch = branch.parentElement) {
+        Array.prototype.forEach.call(branch.parentElement.children, function (sib) {
+          if (sib !== branch && !sib.hasAttribute('inert') && !sib.hasAttribute('data-tdoc-provider')) { sib.setAttribute('inert', ''); expand.inert.push(sib); }
+        });
+      }
+    } else {
+      html.removeAttribute('data-tdoc-sheet-expanded');
+      root.classList.remove('is-expanded');
+      root.setAttribute('role', 'region'); root.removeAttribute('aria-modal');
+      expand.inert.forEach(function (n) { n.removeAttribute('inert'); });
+      expand.inert = [];
+    }
+    post({ type: 'tdoc:visualState', open: on });
+    post({ type: 'tdoc:presentState', open: on });
+    if (!quiet && !expand.alone) post({ type: 'tdoc:sheetExpand', open: on });
+    renderTabs(); renderBar(); layout(); renderHead(); renderBody(true);
+    // The frame changes size with the shell's next layout: fit again then.
+    requestAnimationFrame(function () {
+      if (!book) return;
+      layout(); renderBody(true); placeOffscreen(); placePill();
+      if (on) { if (sel.touched) ensureVisible(sel.r, sel.c); ui.grid.focus({ preventScroll: true }); }
+      else {
+        if (expand.scroll) window.scrollTo(expand.scroll.x, expand.scroll.y);
+        var r = root.getBoundingClientRect();
+        if (r.bottom < 0 || r.top > innerHeight) root.scrollIntoView({ block: 'start' });
+        ui.expand.focus({ preventScroll: true });
+      }
+    });
+    relayout();
+  }
+  function escapeClose(e) {
+    if (e.key !== 'Escape' || !expand.on || expand.alone || e.defaultPrevented || pop || editor) return;
+    e.preventDefault();
+    setExpanded(false);
+  }
+  document.addEventListener('keydown', escapeClose);
+
   // ---- shell bridge ---------------------------------------------------------------------
   window.addEventListener('message', function (e) {
     if (e.source !== window.parent || !e.data || e.data.source !== 'tdoc-shell' || !book) return;
@@ -1646,11 +1833,19 @@
     if (d.type === 'tdoc:mode') {
       if (editor) commitEdit();
       closePop(true);
+      if (expand.on && !canExpand()) setExpanded(false);
       renderTabs(); renderBar(); layout(); renderHead(); renderBody(true);
     } else if (d.type === 'tdoc:sheetConfig') {
       config.editing = d.editing === true;
-      if (!config.received) { config.received = true; applyView(d.hash, d.widths); }
-      else renderAll();
+      if (typeof d.path === 'string' && /^\/(?!\/)/.test(d.path)) expand.path = d.path;
+      if (!config.received) {
+        config.received = true;
+        var alone = Math.floor(Number(d.alone) || 0);
+        if (alone > 0) expand.alone = Math.min(alone, book.tabs.length);
+        applyView(d.hash, d.widths);
+        if (expand.alone) { book.active = expand.alone - 1; renderAll(); setExpanded(true, true); }
+        else if (d.expanded === true) setExpanded(true, true);
+      } else renderAll();
     } else if (d.type === 'tdoc:editRestore') {
       // A draft was restored into the page: read the tables again.
       setTimeout(reload, 0);
@@ -1677,6 +1872,7 @@
     tabs: function () { return book ? book.tabs.map(function (t) { return { name: t.name, rows: t.index.size, shown: t.order ? t.order.length : 0, query: Q.cloneQuery(t.query) }; }) : []; },
     active: function () { return book ? book.active : -1; },
     selection: function () { return Object.assign({}, sel); },
+    expanded: function () { return { on: expand.on, alone: expand.alone, sheetOnly: expand.sheetOnly }; },
   };
   // Mounted: the tables are hidden by the viewer's own style now, so the
   // frame's 200-row hold (#tdoc-sheets-pending) is no longer needed.

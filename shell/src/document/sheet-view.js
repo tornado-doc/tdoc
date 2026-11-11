@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { readStored, writeStored } from '../safe-storage.js';
 import { isFeatureOn } from '../feature-flags.js';
-import { readHashView, withHashView } from './sheet-hash.js';
+import { readHashExpanded, readHashView, readSheetAlone, withHashExpanded, withHashView } from './sheet-hash.js';
 
 // A sheet's view (search, filters, sort, open tab, column widths) belongs to
 // the reader, not the document. The sandboxed frame has no storage of its
@@ -11,8 +11,13 @@ import { readHashView, withHashView } from './sheet-hash.js';
 // visitor to the homepage keeps nothing: no storage, no hash rewrite.
 //
 //   frame → shell { type:'tdoc:sheetReady', tabs }
-//   shell → frame { type:'tdoc:sheetConfig', editing, hash, widths }
+//   shell → frame { type:'tdoc:sheetConfig', editing, hash, widths, path, expanded, alone }
 //   frame → shell { type:'tdoc:sheetView', hash, widths }
+//   frame → shell { type:'tdoc:sheetExpand', open }
+//
+// Full screen is in the hash too (#expand=1), so a link opens the sheet that
+// way. The sheet's own page is the same doc at ?sheet=<tab>: same version,
+// same comments, only that tab, full screen; `path` lets the frame link to it.
 
 const storeKey = (slug) => `tdoc-sheet-view:${slug}`;
 const INDEX_KEY = 'tdoc-sheet-views';
@@ -50,8 +55,18 @@ export function useSheetView({ slug, send, persist = true }) {
       editing: isFeatureOn('sheets'),
       hash: fromLink || (typeof stored.hash === 'string' ? stored.hash : ''),
       widths: stored.widths && typeof stored.widths === 'object' ? stored.widths : {},
+      path: location.pathname,
+      expanded: readHashExpanded(),
+      alone: readSheetAlone(),
     });
   }, [persist, send, slug]);
+
+  const expandChanged = useCallback((message) => {
+    const next = withHashExpanded(location.hash, message.open === true);
+    if (next !== (location.hash || '')) {
+      try { history.replaceState(history.state, '', `${location.pathname}${location.search}${next}`); } catch {}
+    }
+  }, []);
 
   const viewChanged = useCallback((message) => {
     if (!persist) return;
@@ -66,5 +81,5 @@ export function useSheetView({ slug, send, persist = true }) {
     }
   }, [persist, slug]);
 
-  return { 'tdoc:sheetReady': ready, 'tdoc:sheetView': viewChanged };
+  return { 'tdoc:sheetReady': ready, 'tdoc:sheetView': viewChanged, 'tdoc:sheetExpand': expandChanged };
 }
