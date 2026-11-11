@@ -229,21 +229,179 @@ const PROSE = '<h1>Plan</h1><p>A sentence to comment on.</p>';
     eq(env.META.gets.filter((k) => k.startsWith('inbox:') || k.startsWith('agent-unread:')).length, 0, '/api/me/feedback read the activity');
   });
 
-  await t('docs published before the type was stamped get it on a hub load, a few at a time', async () => {
+  await t('docs published before the type was stamped: typed from the viewer\'s own record, the doc\'s meta never written by a GET', async () => {
     const { env, owner } = fixture;
     for (const slug of ['q-sheet', 'q-deck']) {
       const meta = JSON.parse(await env.META.get(`meta:${slug}`));
       delete meta.preview.kind;
       await env.META.put(`meta:${slug}`, JSON.stringify(meta));
     }
-    const waits = [];
-    const first = await me(env, owner, { waitUntil: (p) => waits.push(p) });
-    eq(row(first.docs, 'q-sheet').doc_type, 'doc', 'unknown reads as a doc until filled');
-    await Promise.all(waits);
-    eq(JSON.parse(await env.META.get('meta:q-sheet')).preview.kind, 'sheet');
-    eq(JSON.parse(await env.META.get('meta:q-deck')).preview.kind, 'slides');
-    const second = await me(env, owner);
-    eq([row(second.docs, 'q-sheet').doc_type, row(second.docs, 'q-deck').doc_type], ['sheet', 'slides']);
+    const metaBefore = { 'q-sheet': await env.META.get('meta:q-sheet'), 'q-deck': await env.META.get('meta:q-deck') };
+    const writes = [];
+    const put = env.META.put.bind(env.META);
+    env.META.put = async (k, v, o) => { writes.push(k); return put(k, v, o); };
+    try {
+      const waits = [];
+      const first = await me(env, owner, { waitUntil: (p) => waits.push(p) });
+      eq(row(first.docs, 'q-sheet').doc_type, 'doc', 'unknown reads as a doc until filled');
+      await Promise.all(waits);
+      const second = await me(env, owner, { waitUntil: (p) => waits.push(p) });
+      eq([row(second.docs, 'q-sheet').doc_type, row(second.docs, 'q-deck').doc_type], ['sheet', 'slides']);
+      eq(row(second.starred, 'q-deck').doc_type, 'slides', 'Starred reads the same record');
+    } finally {
+      env.META.put = put;
+    }
+    eq(writes.filter((k) => k.startsWith('meta:')), [], 'a hub load wrote doc meta');
+    eq(await env.META.get('meta:q-sheet'), metaBefore['q-sheet'], 'q-sheet meta changed');
+    eq(await env.META.get('meta:q-deck'), metaBefore['q-deck'], 'q-deck meta changed');
+    const cache = JSON.parse(await env.META.get('doc-types:owner'));
+    eq([cache.t['q-sheet'], cache.t['q-deck']], ['sheet', 'slides']);
+  });
+
+  await t('a doc whose version cannot be read is marked and left alone for a day', async () => {
+    const { env, owner } = fixture;
+    const meta = JSON.parse(await env.META.get('meta:q-private'));
+    delete meta.preview.kind;
+    await env.META.put('meta:q-private', JSON.stringify(meta));
+    const key = `docs/q-private/v${meta.versions[meta.versions.length - 1].n}/index.html`;
+    const html = await env.DOCS.get(key);
+    const saved = html && await html.text();
+    await env.DOCS.delete(key);
+    try {
+      const waits = [];
+      await me(env, owner, { waitUntil: (p) => waits.push(p) });
+      await Promise.all(waits);
+      const cache = JSON.parse(await env.META.get('doc-types:owner'));
+      assert(cache.f['q-private'] > 0 && !('q-private' in cache.t), `no failure marker: ${JSON.stringify(cache)}`);
+      // The next load does not try it again.
+      const reads = [];
+      const get = env.DOCS.get.bind(env.DOCS);
+      env.DOCS.get = async (k, o) => { reads.push(k); return get(k, o); };
+      const again = [];
+      await me(env, owner, { waitUntil: (p) => again.push(p) });
+      await Promise.all(again);
+      env.DOCS.get = get;
+      eq(reads.filter((k) => k.startsWith('docs/q-private/')), [], 'retried within the day');
+    } finally {
+      if (saved) await env.DOCS.put(key, saved);
+    }
+  });
+
+  await t('type detection is linear: 2 MB of hostile markup in well under 50 ms, and still right', async () => {
+    const workerSrc = fs.readFileSync(path.join(__dirname, '../worker/worker.js'), 'utf8');
+    const grab = (header) => {
+      const at = workerSrc.indexOf(header);
+      assert(at >= 0, `missing ${header}`);
+      let j = workerSrc.indexOf('{', at), d = 0;
+      for (; j < workerSrc.length; j++) {
+        if (workerSrc[j] === '{') d++;
+        else if (workerSrc[j] === '}') { d--; if (d === 0) { j++; break; } }
+      }
+      return workerSrc.slice(at, j);
+    };
+    const docTypeFromHtml = new Function(`${grab('function htmlHasTagAttr(')}\n${grab('function docTypeFromHtml(')}\nreturn docTypeFromHtml;`)();
+    eq(docTypeFromHtml(SHEET), 'sheet');
+    eq(docTypeFromHtml(DECK), 'slides');
+    eq(docTypeFromHtml(PROSE), 'doc');
+    eq(docTypeFromHtml('<TABLE\nclass="x" data-tdoc-sheet>'), 'sheet', 'case and newlines');
+    eq(docTypeFromHtml('<div data-tdoc-sheet>'), 'doc', 'a sheet is a table');
+    eq(docTypeFromHtml('<p>write data-tdoc-slide on a section</p>'), 'doc', 'text, not a tag');
+    eq(docTypeFromHtml('<html data-tdoc-slides><p>x</p>'), 'doc', 'data-tdoc-slides is not data-tdoc-slide');
+    eq(docTypeFromHtml('<section xdata-tdoc-slide>'), 'doc', 'part of another name');
+    eq(docTypeFromHtml('<section class="a" data-tdoc-slide="s1">'), 'slides');
+    const MB2 = 2 * 1024 * 1024;
+    const fill = (unit) => unit.repeat(Math.ceil(MB2 / unit.length)).slice(0, MB2);
+    const hostile = [
+      '<div ' + fill('xdata-tdoc-slide'),
+      '<' + fill('a') + ' data-tdoc-slide',
+      fill('data-tdoc-sheet '),
+      fill(' data-tdoc-slide'),
+      fill('<table data-tdoc-sheetx'),
+      '<table' + fill(' a') + ' data-tdoc-sheetx',
+      fill('<a' + 'b'.repeat(60) + ' data-tdoc-slidez'),
+    ];
+    for (const html of hostile) {
+      const started = process.hrtime.bigint();
+      docTypeFromHtml(html);
+      const ms = Number(process.hrtime.bigint() - started) / 1e6;
+      assert(ms < 50, `${ms.toFixed(1)} ms on ${JSON.stringify(html.slice(0, 40))}…`);
+    }
+  });
+
+  await t('sharing on Recent / Starred follows who manages the doc: a team admin sees it, a member does not', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const ORIGIN = { Origin: 'https://tdoc.dev' };
+    const ann = await issue(worker, env, 'ann');
+    const ben = await issue(worker, env, 'ben');
+    const team = (await call(env, '/api/teams', { method: 'POST', cookie: ann.cookie, headers: ORIGIN, body: { name: 'Acme' } })).body.team;
+    const joined = await call(env, '/api/team/join', { method: 'POST', cookie: ben.cookie, body: { token: team.invite_url.split('/').pop() } });
+    assert(joined.status === 200, `join: ${joined.text}`);
+    // Ben writes the doc; Ann runs the team.
+    const up = await call(env, '/api/upload', { method: 'POST', token: ben.token, body: { slug: 'team-plan', version: 1, html: PROSE } });
+    assert(up.status === 200, `upload ${up.text}`);
+    const moved = await call(env, '/api/team/move', { method: 'POST', cookie: ben.cookie, headers: ORIGIN, body: { team: team.id, slugs: ['team-plan'] } });
+    assert(moved.status === 200, `move ${moved.text}`);
+    for (const who of ['ann', 'ben']) await env.META.put(`recents:${who}`, JSON.stringify({ items: [{ slug: 'team-plan', at: '2026-11-09T08:00:00.000Z' }] }));
+    const annRow = row((await me(env, ann.cookie)).recent, 'team-plan');
+    const benRow = row((await me(env, ben.cookie)).recent, 'team-plan');
+    assert(annRow && typeof annRow.sharing === 'string', `admin sees no sharing: ${JSON.stringify(annRow)}`);
+    assert(benRow && !('sharing' in benRow) && !('shared_with' in benRow), `member sees sharing: ${JSON.stringify(benRow)}`);
+  });
+
+  await t('an agent reply is noted for the last person who spoke in the thread, never an imported or unattested author', async () => {
+    const { env, owner, token } = fixture;
+    // Owner opens the thread, a signed-in reader (with an account) replies:
+    // the reader is the one waiting.
+    const reader = await issue(worker, env, 'reader2');
+    const c = await call(env, '/api/comments', { method: 'POST', cookie: owner, body: { slug: 'q-doc', version: 1, text: 'first', anchor: { kind: 'text', text: 'A sentence' } } });
+    const r = await call(env, '/api/comments', { method: 'POST', cookie: reader.cookie, body: { slug: 'q-doc', version: 1, parent_id: c.body.id, text: 'agent, please check' } });
+    assert(r.status === 200, `reply ${r.status} ${r.text}`);
+    await env.META.delete('agent-unread:owner');
+    const a = await call(env, '/api/agent/reply', { method: 'POST', token, body: { slug: 'q-doc', parent_id: c.body.id, text: 'Checked.', status: 'answered', agent_login: 'claude' } });
+    assert(a.status === 200 && a.body.id, `agent reply ${a.text}`);
+    const readerNote = JSON.parse(await env.META.get('agent-unread:reader2') || '{"items":[]}');
+    eq(readerNote.items.map((i) => i.thread), [c.body.id], 'the last speaker');
+    eq(await env.META.get('agent-unread:owner'), null, 'the thread opener was noted instead');
+
+    // A thread whose only human author was carried in by an import, or has
+    // no account or GitHub id behind the name, notes nobody.
+    const recipient = (() => {
+      const workerSrc = fs.readFileSync(path.join(__dirname, '../worker/worker.js'), 'utf8');
+      const grab = (header) => {
+        const at = workerSrc.indexOf(header);
+        // The body's brace: after the parameter list, which may hold braces.
+        let j = workerSrc.indexOf(') {', at) + 2, d = 0;
+        for (; j < workerSrc.length; j++) {
+          if (workerSrc[j] === '{') d++;
+          else if (workerSrc[j] === '}') { d--; if (d === 0) { j++; break; } }
+        }
+        return workerSrc.slice(at, j);
+      };
+      return new Function(`const snapshotAt = (r) => r; const normalizeActorKey = (k) => String(k || '').toLowerCase() || null;
+        ${grab('function isNonHumanAuthor(')}\n${grab('function agentReplyRecipient(')}\nreturn agentReplyRecipient;`)();
+    })();
+    const human = (login, extra = {}) => ({ kind: 'human', login, account_id: `acct-${login}`, ...extra });
+    const thread = (author, replies = []) => ({ root: { id: 'c_1', author, created: '2026-11-01T00:00:00Z', replies } });
+    eq(recipient(thread(human('ann'))), 'ann');
+    eq(recipient(thread(human('ann'), [{ author: human('bob'), created: '2026-11-02T00:00:00Z' }])), 'bob');
+    eq(recipient(thread(human('ann'), [{ author: { kind: 'agent', login: 'claude' }, created: '2026-11-03T00:00:00Z' }])), 'ann', 'an agent is not waiting');
+    eq(recipient(thread(human('ann', { imported: true }))), '', 'imported author');
+    eq(recipient(thread({ kind: 'human', login: 'ann' })), '', 'no account or GitHub id');
+    eq(recipient(thread({ kind: 'human', login: 'ann', github_id: '42' })), 'ann', 'a GitHub id is enough');
+    eq(recipient(thread(human('ann'), [{ author: human('bob'), created: '2026-11-02T00:00:00Z', deleted: true }])), 'ann', 'a deleted reply');
+    eq(recipient(thread(human('ann'), [{ author: human('bob'), created: '2026-11-02T00:00:00Z' }]), { skip: ['bob'] }), 'ann', 'skip whoever acted');
+  });
+
+  await t('agent-reply notes are rate limited per person', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'rl-owner');
+    await call(env, '/api/upload', { method: 'POST', token: tok.token, body: { slug: 'rl-doc', version: 1, html: PROSE } });
+    const windowId = Math.floor(Date.now() / 3600e3);
+    await env.META.put(`rl:agent-unread:rl-owner:${windowId}`, '60');
+    const c = await call(env, '/api/comments', { method: 'POST', cookie: tok.cookie, body: { slug: 'rl-doc', version: 1, text: 'please', anchor: { kind: 'text', text: 'A sentence' } } });
+    const a = await call(env, '/api/agent/reply', { method: 'POST', token: tok.token, body: { slug: 'rl-doc', parent_id: c.body.id, text: 'ok', status: 'answered', agent_login: 'claude' } });
+    assert(a.status === 200 && a.body.id, `the reply itself must land: ${a.text}`);
+    eq(await env.META.get('agent-unread:rl-owner'), null, 'noted past the limit');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
