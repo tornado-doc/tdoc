@@ -1245,6 +1245,8 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
   });
   await env.META.delete(`answer-locks:${slug}`);
   await env.META.delete(historySummaryKey(slug));
+  // An owner's "Allow sheet embeds" belongs to this doc, not to the slug.
+  await env.META.delete(sheetEmbedAttestKey(slug));
   // Its version cursor too. A failed clear is not a purge cut short: the next
   // owner's saves are refused until the cursor recovery brings it down.
   if (env.COMMENTS) {
@@ -20647,7 +20649,7 @@ const SHEET_EMBED_MAX_WRITERS = 50;
 // theirs), or says that page named nobody.
 function sheetEmbedInherited(srcMeta, attest) {
   const ids = sheetEmbedWriterIds(srcMeta, attest);
-  return ids ? { inherited_writers: ids } : { inherited_unattributed: true };
+  return typeof ids === 'object' ? { inherited_writers: ids } : { inherited_unattributed: true };
 }
 async function sheetEmbedAccountSession(env, accountId) {
   const group = await accountGroup(env, accountId);
@@ -20677,32 +20679,35 @@ async function sheetEmbedAccountSession(env, accountId) {
 // not used: before #823 (2026-10-24) an upload kept version records as the
 // client sent them, `by` included, and the `created` that would tell those
 // apart is the client's too.
+// Returns 'unattributed' or 'copy_unattributed' (a duplicate of a page that
+// named nobody: no attestation can vouch for markup from another page) in
+// place of the ids.
 function sheetEmbedWriterIds(pageMeta, attest) {
   const versions = Array.isArray(pageMeta && pageMeta.versions) ? pageMeta.versions : [];
-  if (!versions.length) return null;
+  if (!versions.length) return 'unattributed';
+  if (versions.some((v) => v && v.inherited_unattributed)) return 'copy_unattributed';
   const accounts = new Set(), teams = new Set();
   const okId = (id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(id);
   let attested = false;
   for (const v of versions) {
-    if (!v || typeof v !== 'object') return null;
-    if (v.inherited_unattributed) return null;
+    if (!v || typeof v !== 'object') return 'unattributed';
     if (v.inherited_writers && typeof v.inherited_writers === 'object') {
       const iw = v.inherited_writers;
-      for (const id of (Array.isArray(iw.accounts) ? iw.accounts : [])) { if (!okId(id)) return null; accounts.add(id); }
-      for (const id of (Array.isArray(iw.teams) ? iw.teams : [])) { if (!validTeamId(id)) return null; teams.add(id); }
+      for (const id of (Array.isArray(iw.accounts) ? iw.accounts : [])) { if (!okId(id)) return 'unattributed'; accounts.add(id); }
+      for (const id of (Array.isArray(iw.teams) ? iw.teams : [])) { if (!validTeamId(id)) return 'unattributed'; teams.add(id); }
     }
     if (v.team_agent && v.team_agent.id) {
       if (validTeamId(v.by_team)) teams.add(v.by_team);
       else if (attest && Number(v.n) <= attest.through) attested = true;
-      else return null;
+      else return 'unattributed';
     } else if (okId(v.by_account)) {
       accounts.add(v.by_account);
     } else if (attest && Number(v.n) <= attest.through) {
       attested = true;
-    } else return null;
+    } else return 'unattributed';
   }
   if (attested) accounts.add(attest.account);
-  if (accounts.size + teams.size > SHEET_EMBED_MAX_WRITERS) return null;
+  if (accounts.size + teams.size > SHEET_EMBED_MAX_WRITERS) return 'unattributed';
   return { accounts: [...accounts], teams: [...teams] };
 }
 // The owner's attestation for a page's unnamed versions (POST
@@ -20717,11 +20722,11 @@ async function sheetEmbedAttest(env, slug, pageMeta) {
 }
 async function sheetEmbedWriters(env, pageMeta, slug) {
   const ids = sheetEmbedWriterIds(pageMeta, await sheetEmbedAttest(env, slug, pageMeta));
-  if (!ids) return null;
+  if (typeof ids === 'string') return ids;
   const out = ids.teams.map((team) => ({ id: null, login: '', email: '', linked_account_ids: [], linked_actor_keys: [], team_ids: [team], team_admin_ids: [] }));
   for (const id of ids.accounts) {
     const session = await sheetEmbedAccountSession(env, id);
-    if (!session) return null;
+    if (!session) return 'unattributed';
     out.push(session);
   }
   return out;
@@ -20755,10 +20760,11 @@ async function sheetEmbedCommentCount(env, origin, slug, ctx) {
 // browser: a cookie session from this origin, never a token.
 async function handleSheetEmbedAttest(env, req, url) {
   if (req.headers.get('authorization')) return json({ error: 'browser_only' }, { status: 403 });
-  if ((req.headers.get('origin') || '') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+  const reading = req.method === 'GET';
+  if (!reading && (req.headers.get('origin') || '') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
   let body = {};
-  try { body = await req.json(); } catch {}
-  const slug = body && typeof body.slug === 'string' ? body.slug : '';
+  if (!reading) { try { body = await req.json(); } catch {} }
+  const slug = reading ? String(url.searchParams.get('slug') || '') : (body && typeof body.slug === 'string' ? body.slug : '');
   if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
   const session = await getSession(env, req);
   if (!sessionPrincipal(session) || !session.account_id) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -20766,6 +20772,20 @@ async function handleSheetEmbedAttest(env, req, url) {
   if (!meta || !isDocOwnerSession(env, session, meta)) return json({ error: 'not_doc_owner' }, { status: 403 });
   const through = latestVersionNumber(meta);
   if (!through) return json({ error: 'not_found' }, { status: 404 });
+  if (sheetEmbedWriterIds(meta, null) === 'copy_unattributed') return json({ error: 'copy_unattributed' }, { status: 409 });
+  // GET: what the owner is about to vouch for -- the versions that name no
+  // writer, and who the history says wrote each.
+  if (reading) {
+    const unnamed = (Array.isArray(meta.versions) ? meta.versions : [])
+      .filter((v) => v && !(typeof v.by_account === 'string' && v.by_account) && !(v.team_agent && validTeamId(v.by_team)))
+      .sort((a, b) => Number(b.n) - Number(a.n)).slice(0, 100);
+    const writers = unnamed.map((v) => versionWriter(meta, v));
+    const names = await historyWhoNames(env, meta, writers);
+    return json({
+      ok: true, slug, through,
+      versions: unnamed.map((v, k) => ({ n: Number(v.n), created: typeof v.created === 'string' ? v.created : null, who: (names.get(writers[k].key) || {}).name || 'Someone' })),
+    });
+  }
   await env.META.put(sheetEmbedAttestKey(slug), JSON.stringify({ account: session.account_id, through, identity: docIdentity(meta), at: new Date().toISOString() }));
   return json({ ok: true, slug, through });
 }
@@ -20801,7 +20821,8 @@ async function handleSheetEmbed(env, req, url, ctx) {
   const pageVersion = Number(url.searchParams.get('pv'));
   if (pageVersion !== latestVersionNumber(pageGate.meta)) return sheetEmbedJson({ error: 'old_version' }, 409);
   const writers = page === ref.slug ? [] : await sheetEmbedWriters(env, pageGate.meta, page);
-  if (!writers) return sheetEmbedJson({ error: 'page_unattributed' }, 409);
+  if (writers === 'copy_unattributed') return sheetEmbedJson({ error: 'copy_unattributed' }, 409);
+  if (!Array.isArray(writers)) return sheetEmbedJson({ error: 'page_unattributed' }, 409);
   const gate = await enforceDocAccess(env, req, ref.slug, null);
   if (!gate.ok) return denied(await getSession(env, req));
   if (feedbackScopeDenied(gate.session, ref.slug)) return denied(gate.session);
@@ -26716,7 +26737,7 @@ const tdocHandlers = {
     if (p === '/api/embed/sheet' && method === 'GET') return handleSheetEmbed(env, req, url, ctx);
     // "Allow sheet embeds on this page": the owner vouches for the page's
     // versions that name no writer (handleSheetEmbedAttest).
-    if (p === '/api/embed/attest' && method === 'POST') return handleSheetEmbedAttest(env, req, url);
+    if (p === '/api/embed/attest' && (method === 'POST' || method === 'GET')) return handleSheetEmbedAttest(env, req, url);
 
     const rawHeadMatch = p.match(/^\/d\/([^/]+)\/raw\/?$/);
     if (rawHeadMatch && (method === 'GET' || method === 'HEAD')) {
@@ -32177,6 +32198,10 @@ const tdocHandlers = {
           await putDocMetaJson(env, slug, JSON.stringify({
             ...(currentMeta || {}),
             ...incoming,
+            // When the doc began is the server's record, not an editor's:
+            // it is the doc's identity (docIdentity), which an "Allow sheet
+            // embeds" attestation is tied to.
+            created: (currentMeta && docIdentity(currentMeta)) || new Date().toISOString(),
             versions: mergedVersions,
             preview: await buildDocPreview(env, stampedHtml, {
               slug,

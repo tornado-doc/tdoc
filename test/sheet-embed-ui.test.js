@@ -268,6 +268,7 @@ ${figure('/d/finance-forecast', ' data-rows="5"', 'Finance forecast')}
       let allowed = false;
       await held.route('**/api/embed/sheet?*', (route) => allowed ? route.fallback() : route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'page_unattributed' }) }));
       let attested = null;
+      await held.route('**/api/embed/attest?*', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, versions: [{ n: 2, created: null, who: 'gail' }] }) }));
       await held.route('**/api/embed/attest', (route) => { attested = route.request().postDataJSON(); allowed = true; route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) }); });
       const p = await held.newPage();
       const frame = await openPage(p);
@@ -277,6 +278,14 @@ ${figure('/d/finance-forecast', ' data-rows="5"', 'Finance forecast')}
       await item.waitFor({ timeout: 5000 });
       await shot(p, 'embed-allow-menu');
       await item.click();
+      // The confirm: who wrote the unnamed versions, the sheets, what it means.
+      const dialog = p.locator('#tdoc-allow-embeds');
+      await dialog.waitFor({ timeout: 5000 });
+      await p.locator('#tdoc-allow-embeds li', { hasText: 'v2 · gail' }).waitFor({ timeout: 5000 });
+      const text = await dialog.textContent();
+      assert(/\/d\/q3-pipeline/.test(text) && /\/d\/finance-forecast/.test(text) && /styles included/.test(text), text);
+      await shot(p, 'embed-allow-dialog');
+      await p.locator('[data-action="confirm-allow-embeds"]').click();
       await p.waitForFunction(() => document.querySelector('iframe[aria-label="Document content"]').src.includes('tdoc_load='), null, { timeout: 10000 });
       assert(attested && attested.slug === 'weekly-update', JSON.stringify(attested));
       const again = p.frames().find((f) => f.url().includes('tdoc_load='));

@@ -69,7 +69,8 @@ import { CommentDocVersionContext } from './document/comment-card.jsx';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
-import { allowSheetEmbeds, createSheetEmbedHandler, embedFrameSrc } from './document/sheet-embed.js';
+import { createSheetEmbedHandler, embedFrameSrc } from './document/sheet-embed.js';
+import { AllowSheetEmbedsDialog } from './document/sheet-embed-dialog.jsx';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
@@ -568,14 +569,12 @@ export function DocumentShell({ boot, config }) {
     page: () => pageRef.current,
     onPageUnattributed: () => { if (config.isOwner) setEmbedsHeld(true); },
   }), []);
-  const allowEmbeds = useCallback(async () => {
-    let ok = false;
-    try { ok = await allowSheetEmbeds(config.slug); } catch {}
-    if (!ok) { showToast('Sheet embeds could not be allowed. Try again.', true); return; }
+  const embedsAllowed = useCallback(() => {
+    setDialog(null);
     setEmbedsHeld(false);
     showToast('Sheet embeds allowed on this page');
     if (bridge.frameRef.current) bridge.frameRef.current.src = embedFrameSrc(boot.frameSrc, true);
-  }, [boot.frameSrc, config.slug, showToast]);
+  }, [boot.frameSrc, showToast]);
   const bridge = useFrameBridge({
     ...sheetHandlers,
     'tdoc:sheetEmbed': sheetEmbed,
@@ -2291,7 +2290,7 @@ export function DocumentShell({ boot, config }) {
             onDelete={() => setDialog({ type: 'delete' })}
             onHistory={historyEnabled ? () => changeHistory(true) : null}
             mode={{ modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
-            onAllowEmbeds={embedsHeld ? allowEmbeds : null}
+            onAllowEmbeds={embedsHeld ? () => setDialog({ type: 'allow-embeds' }) : null}
           />
         )}
         onThemeChange={(nextTheme) => {
@@ -2647,6 +2646,13 @@ export function DocumentShell({ boot, config }) {
           onCopied={() => showToast('Link copied')}
         />
       )}
+      <AllowSheetEmbedsDialog
+        open={dialog?.type === 'allow-embeds'}
+        slug={config.slug}
+        sheets={dialog?.type === 'allow-embeds' ? sheetEmbed.sheets() : []}
+        onOpenChange={(open) => !open && setDialog(null)}
+        onAllowed={embedsAllowed}
+      />
       <DeleteDocumentDialog
         open={dialog?.type === 'delete'}
         config={config}

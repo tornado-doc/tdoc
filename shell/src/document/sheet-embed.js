@@ -54,6 +54,8 @@ function str(value, max) {
 // of this page names no writer (its owner may vouch: "Allow sheet embeds").
 export function createSheetEmbedHandler({ enabled, page, onPageUnattributed = null, fetchImpl = (...args) => fetch(...args) } = {}) {
   const answers = new Map();
+  // The sheets this page asked for (the Allow dialog lists them).
+  const sheets = new Set();
 
   async function load(ref) {
     const p = (typeof page === 'function' ? page() : page) || {};
@@ -78,7 +80,7 @@ export function createSheetEmbedHandler({ enabled, page, onPageUnattributed = nu
     return out;
   }
 
-  return async function handle(message, event) {
+  async function handle(message, event) {
     const port = event && event.ports && event.ports.length === 1 ? event.ports[0] : null;
     if (!port) return;
     const reply = (value) => { try { port.postMessage(value); port.close(); } catch {} };
@@ -101,10 +103,23 @@ export function createSheetEmbedHandler({ enabled, page, onPageUnattributed = nu
     // another server's doc, not the one with that slug here).
     const ref = readEmbedRef((name) => attrs[name] ?? null, [location.host]);
     if (!ref) return reply({ ok: false, error: 'invalid_reference' });
+    if (sheets.size < EMBED_MAX_PER_PAGE) sheets.add(ref.slug);
     const out = await load(ref);
+    // A copy of an unnamed page (copy_unattributed) is not offered: no
+    // owner can vouch for markup from another page.
     if (!out.ok && out.error === 'page_unattributed' && onPageUnattributed) onPageUnattributed();
     reply(out);
-  };
+  }
+  handle.sheets = () => [...sheets];
+  return handle;
+}
+
+// What the owner is about to vouch for: { versions: [{ n, created, who }] }.
+export async function unnamedVersions(slug, fetchImpl = (...args) => fetch(...args)) {
+  const res = await fetchImpl(`/api/embed/attest?slug=${encodeURIComponent(slug)}`, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body || !Array.isArray(body.versions)) throw new Error((body && body.error) || 'failed');
+  return body.versions;
 }
 
 // The owner vouches for this page's unnamed versions (worker

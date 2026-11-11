@@ -115,8 +115,10 @@ sheet updates every page that embeds it.
   the link. A page with a version that names no writer (saved before
   writers were recorded, Nov 2026) shows the link; its owner can turn the
   embeds on with ⋯ › "Allow sheet embeds on this page", which vouches for
-  those versions as the owner's own. A duplicate keeps every writer of the
-  page it was copied from.
+  those versions as the owner's own (it lists those versions' writers and
+  the embedded sheets first). A duplicate keeps every writer of the page it
+  was copied from; a copy of a page with unnamed versions shows links and
+  cannot be allowed (publish the content as a new page instead).
 - Comments on the data go on the sheet; the embed shows their count and
   links there.
 - Markdown and Word downloads of the page show the embed as its link. The

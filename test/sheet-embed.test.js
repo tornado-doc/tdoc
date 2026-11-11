@@ -279,7 +279,10 @@ const root = path.join(__dirname, '..');
     // A copy of a page that named nobody names nobody either.
     const fromUnnamed = await dup('page-unnamed', owner.cookie);
     const u = await embed('s-private', { cookie: owner.cookie, page: fromUnnamed });
-    assert(u.status === 409 && u.body.error === 'page_unattributed', u.text);
+    assert(u.status === 409 && u.body.error === 'copy_unattributed', u.text);
+    // ...and its owner cannot vouch for it: the markup is another page's.
+    const a = await worker.fetch(req('/api/embed/attest', { method: 'POST', cookie: owner.cookie, headers: { Origin: 'https://tdoc.dev' }, body: { slug: fromUnnamed } }), env, {});
+    assert(a.status === 409 && (await a.json()).error === 'copy_unattributed', 'no attestation for a copy');
     // A copy of the owner's own page works.
     readable(await embed('s-private', { cookie: invited, page: await dup('page-owner', owner.cookie) }), 'copy of an owner-only page');
   });
@@ -304,6 +307,11 @@ const root = path.join(__dirname, '..');
     assert((await attest('page-legacy', { cookie: mallory.cookie, headers: { Origin: 'https://tdoc.dev' } })).status === 403, 'another account');
     assert((await attest('page-legacy', { token: owner.token, headers: { Origin: 'https://tdoc.dev' } })).status === 403, 'token');
     assert((await attest('page-legacy', { cookie: owner.cookie, headers: { Origin: 'https://evil.example' } })).status === 403, 'cross-site');
+    // What the owner is shown first: the versions that name nobody, and who.
+    const list = await worker.fetch(req('/api/embed/attest?slug=page-legacy', { cookie: owner.cookie }), env, {});
+    const lb = await list.json();
+    assert(list.status === 200 && lb.versions.length === 1 && lb.versions[0].n === 1 && typeof lb.versions[0].who === 'string', JSON.stringify(lb));
+    assert((await worker.fetch(req('/api/embed/attest?slug=page-legacy', { cookie: stranger }), env, {})).status >= 401, 'list: owner only');
     const ok = await attest('page-legacy', { cookie: owner.cookie, headers: { Origin: 'https://tdoc.dev' } });
     assert(ok.status === 200, `attest ${ok.status} ${await ok.text()}`);
     readable(await embed('s-private', { cookie: invited, page: 'page-legacy' }), 'after the owner vouched');
@@ -329,6 +337,13 @@ const root = path.join(__dirname, '..');
     // A client cannot claim a team, inherited writers or "names nobody".
     const forged = await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'page-forged', version: 1, html: '<!doctype html><html><body><h1>F</h1><p>x</p></body></html>', meta: { title: 'F', versions: [{ n: 1, by_team: TEAM, inherited_writers: { accounts: [owner.account_id], teams: [] }, inherited_unattributed: true }] } } }), env, { waitUntil() {} });
     assert(forged.status === 200, `forged ${forged.status}`);
+    // Nor move when the doc began (the identity an attestation is tied to).
+    const before = JSON.parse(await env.META.get('meta:page-forged')).created;
+    assert(before && before !== '2001-01-01T00:00:00.000Z', `created is the server's: ${before}`);
+    const moved = await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'page-forged', version: 2, html: '<!doctype html><html><body><h1>F</h1><p>y</p></body></html>', meta: { title: 'F', created: '2001-01-01T00:00:00.000Z' } } }), env, { waitUntil() {} });
+    assert(moved.status === 200, `moved ${moved.status}`);
+    const after = JSON.parse(await env.META.get('meta:page-forged'));
+    assert(after.created === before, `created kept: ${before} -> ${after.created} / ${JSON.stringify(after.versions)}`);
     const fv = JSON.parse(await env.META.get('meta:page-forged')).versions[0];
     assert(!fv.by_team && !fv.inherited_writers && !fv.inherited_unattributed && fv.by_account === owner.account_id, JSON.stringify(fv));
     // A browser save.
