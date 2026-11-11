@@ -15707,14 +15707,28 @@ async function serialKvOp(env, lane, kind, args) {
   if (!op) throw new Error(`unknown serial op ${kind}`);
   if (!env || !env.COMMENTS) return op(env, args);
   const name = `${SERIAL_STORE_PREFIX}:${lane}`;
-  const stub = env.COMMENTS.get(env.COMMENTS.idFromName(name));
-  const r = await stub.fetch('https://do/serial', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slug: name, op: { kind, args } }),
-  });
-  const out = await r.json().catch(() => null);
-  if (!out || !out.ok) throw new Error((out && out.error) || `serial ${kind} failed`);
-  return out.result == null ? null : out.result;
+  let out = null;
+  try {
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(name));
+    const r = await stub.fetch('https://do/serial', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: name, op: { kind, args } }),
+    });
+    out = await r.json().catch(() => null);
+  } catch (error) {
+    out = { ok: false, error: (error && error.message) || String(error) };
+  }
+  if (out && out.ok) return out.result == null ? null : out.result;
+  // The lane ran the update and the update itself failed (a refused KV
+  // write): that is the caller's failure, as it was before lanes. Running it
+  // again here would be a retry nobody asked for.
+  if (out && out.error === 'serial_op_failed') throw new Error(`serial ${kind} failed`);
+  // The lane is unreachable, or its instance runs code that does not know
+  // this op yet (a deploy rolling out: an older CommentsStore answers
+  // `/serial` as a comments read). The update is still made, directly, as it
+  // was before lanes: an unserialized write beats a lost row or stamp.
+  console.error('[serial] lane unavailable, writing directly', JSON.stringify({ kind, error: (out && out.error) || 'no_answer' }));
+  return op(env, args);
 }
 
 async function deliverInbox(env, recipientLogin, ev, delivery = {}) {
@@ -18268,7 +18282,8 @@ async function mutateComments(env, slug, op, { ctx = null, meta: knownMeta = nul
       // them shows in Workers Logs (it was silent before as well).
       if (meta) {
         const queued = await searchStoreOp(env, searchScopeOf(meta), { kind: 'comments', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
-        if (!queued) console.error('[comment-followup] search reindex not queued', JSON.stringify({ slug }));
+        // No search store without the DO binding: nothing was meant to queue.
+        if (!queued && env.COMMENTS) console.error('[comment-followup] search reindex not queued', JSON.stringify({ slug }));
       }
       if (meta && validTeamId(meta.workspace_id)) {
         await enqueueTeamBackup(env, { kind: 'comments', team: meta.workspace_id, slug });
@@ -28693,8 +28708,14 @@ const tdocHandlers = {
       await logOnboardingEvent(env, accountId, action, doc ? { doc } : null);
       let record = null;
       if (accountId && step) {
-        record = await stampOnboardingFor(env, accountId, step,
-          step === 'waitlist' ? { started: new Date().toISOString() } : null);
+        // The event is logged above; a stamp that cannot be written now is
+        // not worth a 500 (the next event, or the server's own stamp, makes it).
+        try {
+          record = await stampOnboardingFor(env, accountId, step,
+            step === 'waitlist' ? { started: new Date().toISOString() } : null);
+        } catch (error) {
+          console.error('[onboarding] event stamp failed (non-fatal):', error && error.message ? error.message : String(error));
+        }
       }
       return json({ ok: true, record });
     }

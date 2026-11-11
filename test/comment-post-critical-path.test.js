@@ -3,7 +3,7 @@
 // onboarding stamps, the search reindex, a team backup -- runs after the
 // response (ctx.waitUntil), still runs every time, and never holds the
 // composer on "Posting…" (Julie, 2026-11-11).
-const { loadWorker, makeEnv, req, putSession } = require('./helpers/worker-harness');
+const { loadWorker, makeEnv, req, putSession, issue } = require('./helpers/worker-harness');
 
 let pass = 0;
 let fail = 0;
@@ -149,6 +149,58 @@ async function seedDoc(env, slug, owner = 'alice') {
     assert(again.text === 'Twice.' && again.status === 'open' && Array.isArray(again.replies), `not a snapshot: ${JSON.stringify(again)}`);
     assert(!('events' in again), 'the stored event log leaked into the answer');
   });
+
+  // A deploy rolling out: the Durable Object may still run the previous
+  // code, which answers /serial as a comments op ({ status: 400, unknown_op }),
+  // or may not answer at all. The row is then written directly.
+  for (const [label, answer] of [
+    ['an older CommentsStore (unknown_op)', () => Response.json({ status: 400, body: { error: 'unknown_op' } })],
+    ['a lane that throws', () => { throw new Error('DO unavailable'); }],
+  ]) {
+    await t(`with ${label} the inbox row, contacts and onboarding stamp still land`, async () => {
+      const env = makeEnv(class extends mod.CommentsStore {
+        async fetch(request) {
+          if (new URL(request.url).pathname === '/serial') return answer();
+          return super.fetch(request);
+        }
+      });
+      const slug = `critical-path-fallback-${label.length}`;
+      await seedDoc(env, slug);
+      const meta = JSON.parse(env.META.map.get(`meta:${slug}`));
+      meta.access = { mode: 'public', allowed_users: ['bob', 'carol'] };
+      await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+      const cookie = await putSession(env, 'bob');
+      const logged = [];
+      const error = console.error;
+      console.error = (...args) => { logged.push(args.join(' ')); };
+      let response;
+      try {
+        const ctx = makeCtx();
+        response = await worker.fetch(req('/api/comments', {
+          method: 'POST', cookie, body: { slug, version: 1, text: 'Rolling out, @carol.', anchor: null },
+        }), env, ctx);
+        await Promise.all(ctx.pending);
+      } finally { console.error = error; }
+      assert(response.status === 200, `expected 200, got ${response.status}`);
+      const carol = JSON.parse(env.META.map.get('inbox:carol') || 'null');
+      assert(carol && carol.items.some((row) => row.kind === 'mention'), 'the mention row was lost');
+      const alice = JSON.parse(env.META.map.get('inbox:alice') || 'null');
+      assert(alice && alice.items.some((row) => row.kind === 'comment'), 'the owner row was lost');
+      assert([...env.META.map.keys()].some((k) => k.startsWith('contacts:')), 'the contact was lost');
+      assert(logged.some((line) => line.includes('[serial] lane unavailable')), `fallback not logged: ${logged.join(' | ')}`);
+      // The owner's own comment stamps their journey through the same lane.
+      const owner = await issue(worker, env, 'alice');
+      const ownCtx = makeCtx();
+      const own = await worker.fetch(req('/api/comments', {
+        method: 'POST', cookie: owner.cookie, body: { slug, version: 1, text: 'My own note.', anchor: null },
+      }), env, ownCtx);
+      console.error = () => {};
+      try { await Promise.all(ownCtx.pending); } finally { console.error = error; }
+      assert(own.status === 200, `owner post: ${own.status}`);
+      const journey = JSON.parse(env.META.map.get(`account-onboarding:${owner.account_id}`) || 'null');
+      assert(journey && journey.commented, `the onboarding stamp was lost: ${JSON.stringify(journey)}`);
+    });
+  }
 
   await t('without a request context the follow-up work is awaited, as before', async () => {
     const env = makeEnv(mod.CommentsStore);
