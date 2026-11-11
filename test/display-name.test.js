@@ -237,7 +237,7 @@ const PROVIDER_NAME = 'Jingyu Shi (Julie)';
       const r = await setName(rae.cookie, name);
       assert(r.status === 400 && (r.body.error === 'reserved_name' || r.body.error === 'invalid_name'), `${JSON.stringify(name)} -> ${r.status} ${r.text}`);
     }
-    for (const name of ['Claude Monet', 'Rex Tdocson']) {
+    for (const name of ['Monet Claude', 'Rex Tdocson']) {
       const r = await setName(rex.cookie, name);
       assert(r.status === 200, `${name} -> ${r.status} ${r.text}`);
     }
@@ -293,6 +293,86 @@ const PROVIDER_NAME = 'Jingyu Shi (Julie)';
     for (const c of list) for (const r of c.replies || []) {
       if (r.author && r.author.kind === 'agent') assert(r.author.name !== 'Julie Shi', 'agent renamed');
     }
+  });
+
+  await t('N1: comments a publisher uploads keep the names they carry, whoever they claim', async () => {
+    // carl and erin have chosen names (M1 case above). alice owns plan and
+    // uploads v2 with comments naming them, an account id and an address.
+    const carlId = JSON.parse(env.META.map.get('hosted-account:carl')).account_id;
+    await env.META.put(`account-email:carl@example.com`, JSON.stringify({ account_id: carlId, created: '2026-01-01T00:00:00.000Z' }));
+    const forged = [
+      { id: 'c_forged_1', author: { login: 'carl', name: 'Forged One', avatar_url: '' }, text: 'f1', created: '2026-01-03T00:00:00.000Z', version: 1, anchor: { kind: 'text', text: 'Plan' } },
+      { id: 'c_forged_2', author: { login: 'email:carl@example.com', name: 'Forged Two', avatar_url: '' }, text: 'f2', created: '2026-01-03T00:00:00.000Z', version: 1, anchor: { kind: 'text', text: 'Plan' } },
+      { id: 'c_forged_3', author: { login: 'bob', name: 'Forged Three', avatar_url: '', account_id: carlId }, text: 'f3', created: '2026-01-03T00:00:00.000Z', version: 1, anchor: { kind: 'text', text: 'Plan' },
+        replies: [{ id: 'r_forged', author: { login: 'carl', name: 'Forged Reply', github_id: '1001', account_id: carlId }, text: 'fr', created: '2026-01-03T00:00:00.000Z' }] },
+    ];
+    const up2 = await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'plan', version: 2, html: '<h1>Plan</h1><p>Billing first.</p>', comments: forged } });
+    assert(up2.status === 200, `upload ${up2.status} ${up2.text}`);
+    const all = await call('/api/comments?slug=plan&version=all');
+    assert(!all.text.includes('Carl Chosen'), 'an uploaded comment resolved to carl\'s chosen name');
+    assert(!all.text.includes(carlId), 'an account id left the worker');
+    const byId = Object.fromEntries(all.body.map((c) => [c.id, c]));
+    assert(byId.c_forged_1.author.name === 'Forged One', `f1 ${byId.c_forged_1.author.name}`);
+    assert(byId.c_forged_2.author.name === 'Forged Two', `f2 ${byId.c_forged_2.author.name}`);
+    assert(byId.c_forged_3.author.name === 'Forged Three', `f3 ${byId.c_forged_3.author.name}`);
+    const log = await (await env.COMMENTS.get('plan').fetch('https://do/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug: 'plan' }) })).json();
+    const stored = JSON.stringify(log.list.filter((c) => String(c.id).startsWith('c_forged')));
+    assert(!stored.includes(carlId) && !stored.includes('1001'), 'the uploaded ids were stored');
+    assert(stored.includes('"imported":true'), 'uploaded authors are not marked imported');
+  });
+
+  await t('N3: a record stamped with a GitHub id resolves only while that id holds the handle', async () => {
+    const at = '2026-01-04T00:00:00.000Z';
+    await env.META.put('meta:ghid', JSON.stringify({ title: 'G', slug: 'ghid', created: at, versions: [{ n: 1, created: at }],
+      access: { visibility: 'public', commenting: 'signed_in' }, hosted: { account_id: alice.account_id, github_login: 'alice' } }));
+    await env.DOCS.put('docs/ghid/v1/index.html', '<h1>G</h1><p>Words.</p>');
+    await env.META.put('comments:ghid', JSON.stringify([
+      { id: 'c_g_ok', author: { login: 'carl', name: 'carl then', avatar_url: '', github_id: '1001' }, text: 'a', created: at, version: 1, anchor: { kind: 'text', text: 'Words' } },
+      { id: 'c_g_other', author: { login: 'carl', name: 'another carl', avatar_url: '', github_id: '7777' }, text: 'b', created: at, version: 1, anchor: { kind: 'text', text: 'Words' } },
+    ]));
+    const all = await call('/api/comments?slug=ghid');
+    const byId = Object.fromEntries(all.body.map((c) => [c.id, c]));
+    assert(byId.c_g_ok.author.name === 'Carl Chosen', `same id ${byId.c_g_ok.author.name}`);
+    assert(byId.c_g_other.author.name === 'another carl', `other id ${byId.c_g_other.author.name}`);
+    assert(!all.text.includes('1001') && !all.text.includes('7777'), 'github ids left the worker');
+  });
+
+  await t('N5: the author of a reply with an agent verdict, or with an agent login, is never renamed', async () => {
+    const helper = await issue(worker, env, 'helperbot');
+    env.META.map.set(`account-github:${helper.account_id}`, JSON.stringify({ sub: '3003', handle: 'helperbot', linked_at: '2026-01-01T00:00:00.000Z' }));
+    assert((await setName(helper.cookie, 'Helper Person')).status === 200, 'helper name');
+    const cc = await issue(worker, env, 'claude-code');
+    env.META.map.set(`account-github:${cc.account_id}`, JSON.stringify({ sub: '3004', handle: 'claude-code', linked_at: '2026-01-01T00:00:00.000Z' }));
+    assert((await setName(cc.cookie, 'Some Person')).status === 200, 'cc name');
+    const at = '2026-01-05T00:00:00.000Z';
+    await env.META.put('meta:agentold', JSON.stringify({ title: 'A', slug: 'agentold', created: at, versions: [{ n: 1, created: at }],
+      access: { visibility: 'public', commenting: 'signed_in' }, hosted: { account_id: alice.account_id, github_login: 'alice' } }));
+    await env.DOCS.put('docs/agentold/v1/index.html', '<h1>A</h1><p>Words.</p>');
+    await env.META.put('comments:agentold', JSON.stringify([
+      { id: 'c_a', author: { login: 'helperbot', name: 'helperbot', avatar_url: '' }, text: 'q', created: at, version: 1, anchor: { kind: 'text', text: 'Words' },
+        replies: [
+          { id: 'r_a1', author: { login: 'helperbot', name: 'Helper (agent)', avatar_url: '' }, text: 'done', created: at, agent_status: 'answered' },
+          { id: 'r_a2', author: { login: 'claude-code', name: 'Claude Code', avatar_url: '' }, text: 'ok', created: at },
+        ] },
+    ]));
+    const list = (await call('/api/comments?slug=agentold&version=all')).body;
+    const c = list.find((x) => x.id === 'c_a');
+    assert(c.author.name === 'Helper Person', `human root ${c.author.name}`);
+    const r1 = c.replies.find((r) => r.id === 'r_a1');
+    const r2 = c.replies.find((r) => r.id === 'r_a2');
+    assert(r1 && r1.author.name === 'Helper (agent)', `verdict reply renamed: ${JSON.stringify(r1)}`);
+    assert(r2 && r2.author.name === 'Claude Code', `agent login renamed: ${JSON.stringify(r2)}`);
+  });
+
+  await t('N4/N6: look-alike scripts, runtime prefixes, separators and dotted hosts are refused', async () => {
+    const pat = await issue(worker, env, 'pat');
+    for (const name of ['\u0421laude', 'C\u043edex', '\u0442\u0434oc', 'tdo\u0441', '\u03a4doc AI', 'Claude Monet', 'Codex helper', 'Claude: Julie', 'Grok!',
+      'Julie – Claude', 'Julie — Claude', 'Julie | Claude', 'Julie / Claude', 'shop\u3002example', 'shop\uff61example', 'buy.cheap', 'St.John', '10.0.0.1']) {
+      const r = await setName(pat.cookie, name);
+      assert(r.status === 400 && (r.body.error === 'reserved_name' || r.body.error === 'invalid_name'), `${JSON.stringify(name)} -> ${r.status} ${r.text}`);
+    }
+    const ok = await setName(pat.cookie, 'Сергей Петров');
+    assert(ok.status === 200, `all-Cyrillic name refused: ${ok.text}`);
   });
 
   await t('rate limited per account', async () => {

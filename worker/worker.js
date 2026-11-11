@@ -7704,7 +7704,7 @@ async function teamBackupJob(env, job) {
         return;
       }
       const commentPath = `docs/${job.slug}/comments.json`;
-      const commentObject = await writeJson(commentPath, await readComments(env, job.slug));
+      const commentObject = await writeJson(commentPath, withoutPersonAccountIds(await readComments(env, job.slug)));
       manifest = {
         ...manifest, exported_at: new Date().toISOString(),
         objects: [...manifest.objects.filter((object) => object && object.path !== commentPath), commentObject],
@@ -12469,8 +12469,26 @@ const DISPLAY_NAME_STRIP_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u034f\u115f\u1160\u17b4
 const DISPLAY_NAME_RUNTIMES = ['claude', 'claude code', 'codex', 'cursor', 'gemini', 'grok', 'chatgpt', 'copilot'];
 const DISPLAY_NAME_RESERVED = ['agent', 'deleted user', 'anonymous', 'someone', 'tdoc', 'system', 'admin'];
 // Separators tdoc itself puts between an agent and its owner ("Claude ·
-// Julie") and look-alikes: a name holding one could pass for that line.
-const DISPLAY_NAME_SEPARATOR_RE = /[\u00b7\u2022\u2219\u22c5\u30fb\uff65\u2027\u0387]/u;
+// Julie"), their look-alikes, and the dashes, bars and slashes that read the
+// same way.
+const DISPLAY_NAME_SEPARATOR_RE = /[\u00b7\u2022\u2219\u22c5\u30fb\uff65\u2027\u0387\u2013\u2014\u2015\u2212|\/\u2044\u2215\uff5c\uff0f]/u;
+// Cyrillic and Greek letters that draw like Latin ones, folded before the
+// reserved-name comparison (a small table: the ones that spell tdoc, agent
+// and runtime names).
+const DISPLAY_NAME_CONFUSABLES = new Map([
+  [0x0430, 'a'], [0x0435, 'e'], [0x043e, 'o'], [0x0440, 'p'], [0x0441, 'c'], [0x0443, 'y'], [0x0445, 'x'],
+  [0x043a, 'k'], [0x043c, 'm'], [0x0442, 't'], [0x043d, 'h'], [0x0432, 'b'], [0x0456, 'i'], [0x0458, 'j'],
+  [0x0455, 's'], [0x0501, 'd'], [0x04cf, 'l'], [0x0433, 'r'], [0x0491, 'r'], [0x0457, 'i'], [0x0475, 'v'],
+  [0x0410, 'a'], [0x0415, 'e'], [0x041e, 'o'], [0x0420, 'p'], [0x0421, 'c'], [0x0425, 'x'], [0x041a, 'k'],
+  [0x041c, 'm'], [0x0422, 't'], [0x041d, 'h'], [0x0412, 'b'], [0x0406, 'i'], [0x0408, 'j'], [0x0405, 's'],
+  [0x03b1, 'a'], [0x03bf, 'o'], [0x03c1, 'p'], [0x03bd, 'v'], [0x03c4, 't'], [0x03b9, 'i'], [0x03ba, 'k'],
+  [0x03c7, 'x'], [0x03b5, 'e'], [0x03c5, 'u'], [0x0391, 'a'], [0x039f, 'o'], [0x03a1, 'p'], [0x03a4, 't'],
+  [0x0399, 'i'], [0x039a, 'k'], [0x03a7, 'x'], [0x0395, 'e'], [0x039d, 'n'], [0x039c, 'm'], [0x0392, 'b'],
+  [0x0396, 'z'], [0x0397, 'h'], [0x03a5, 'y'],
+]);
+function foldConfusables(s) {
+  return [...s].map((ch) => DISPLAY_NAME_CONFUSABLES.get(ch.codePointAt(0)) || ch).join('');
+}
 const DISPLAY_NAME_TLDS = 'com|net|org|io|dev|ai|app|co|me|xyz|info|biz|gg|so|ly|to|us|uk|cn|de|ru|site|online|link|page|sh|tv|cc|ws|top|club';
 const DISPLAY_NAME_DOMAIN_RE = new RegExp(`(^|[^\\p{L}\\p{N}])[\\p{L}\\p{N}-]+\\.(?:${DISPLAY_NAME_TLDS})(?=$|[^\\p{L}\\p{N}])`, 'iu');
 
@@ -12480,9 +12498,12 @@ const DISPLAY_NAME_DOMAIN_RE = new RegExp(`(^|[^\\p{L}\\p{N}])[\\p{L}\\p{N}-]+\\
 // l/1/I/0 look-alikes folded).
 function displayNameReserved(folded, teamAgentNames = []) {
   if (DISPLAY_NAME_SEPARATOR_RE.test(folded)) return true;
-  const v = suggestNameSkeleton(folded.replace(/[^\p{L}\p{N}]+/gu, ' '));
+  const v = suggestNameSkeleton(foldConfusables(folded.toLowerCase()).replace(/[^\p{L}\p{N}]+/gu, ' '));
   const tight = v.replace(/ /g, '');
-  if ([...DISPLAY_NAME_RESERVED, ...DISPLAY_NAME_RUNTIMES].some((r) => suggestNameSkeleton(r) === v)) return true;
+  if (DISPLAY_NAME_RESERVED.some((r) => suggestNameSkeleton(r) === v)) return true;
+  // A runtime's name alone or leading the name ("Claude", "Claude: Julie",
+  // "Codex helper"), at a word boundary.
+  if (DISPLAY_NAME_RUNTIMES.some((r) => { const k = suggestNameSkeleton(r); return v === k || v.startsWith(`${k} `); })) return true;
   if (tight === 'tdoc' || tight.startsWith('tdocai') || tight.startsWith('tdocagent') || v.startsWith('tdoc ')) return true;
   if (tight.startsWith('teamagent')) return true;
   return teamAgentNames.some((n) => n && (n === v || n.replace(/ /g, '') === tight));
@@ -12499,10 +12520,17 @@ function normalizeDisplayName(raw, { teamAgentNames = [] } = {}) {
   if (!/[\p{L}\p{N}]/u.test(name)) return { error: 'invalid_name', message: 'Use letters or numbers.' };
   // Stacked combining marks (zalgo) draw over the lines around the name.
   if (/\p{M}{4,}/u.test(name)) return { error: 'invalid_name', message: 'Too many accents on one letter.' };
+  // Latin mixed with Cyrillic or Greek in one name is how look-alikes of
+  // reserved names are spelled.
+  if (/\p{Script=Latin}/u.test(name) && /[\p{Script=Cyrillic}\p{Script=Greek}]/u.test(name)) {
+    return { error: 'invalid_name', message: 'Use one alphabet for a name.' };
+  }
   // Every check below reads the compatibility form, so a fullwidth or
-  // small-form < > @ or dot is the character it looks like.
+  // small-form < > @ or dot is the character it looks like; ideographic
+  // and halfwidth full stops read as dots too.
   let folded = name;
   try { folded = name.normalize('NFKC'); } catch {}
+  folded = folded.replace(/[\u3002\uff0e\uff61]/g, '.');
   // Rendering escapes everywhere; markup in a name is still refused so it
   // never reaches an email client, a notification or an agent prompt as
   // something that looks like markup.
@@ -12511,7 +12539,10 @@ function normalizeDisplayName(raw, { teamAgentNames = [] } = {}) {
   // address (email-keyed commenters show their local part only); a link
   // would turn every comment into an advert.
   if (/@/.test(folded)) return { error: 'invalid_name', message: 'Use a name, not an email address.' };
-  if (/:\/\/|(^|[^\p{L}\p{N}])www\./iu.test(folded) || DISPLAY_NAME_DOMAIN_RE.test(folded)) {
+  // Anything shaped like a host: a link, www., letters.letters (any
+  // ending, not only known ones), or a dotted IP address.
+  if (/:\/\/|(^|[^\p{L}\p{N}])www\./iu.test(folded) || DISPLAY_NAME_DOMAIN_RE.test(folded)
+      || /\p{L}\.\p{L}{2,}/u.test(folded) || /\d+\.\d+\.\d+/.test(folded)) {
     return { error: 'invalid_name', message: 'Use a name, not a web address.' };
   }
   if (displayNameReserved(folded, teamAgentNames)) {
@@ -12570,40 +12601,47 @@ async function accountDisplayName(env, accountId) {
 // carries it. An address counts through the email index, which is the
 // sign-in door itself: whoever signs in with that mailbox reaches that
 // account.
-async function actorKeyCurrentAccount(env, k) {
-  if (k.startsWith('email:')) return accountIdByEmail(env, k.slice(6));
+async function actorKeyCurrentAccount(env, k, githubId = null) {
+  if (k.startsWith('email:')) return null;
   const rec = await lookupHostedAccount(env, k);
   if (!rec || !rec.account_id) return null;
   const group = await accountGroup(env, rec.account_id);
   if (group.deleted_at || group.unavailable) return null;
   const links = await Promise.all(group.ids.slice(0, 8).map((id) => accountGithubLink(env, id).catch(() => null)));
-  return links.some((l) => l && normalizeGithubLogin(l.handle) === k) ? group.canonical : null;
+  // A record that names the GitHub id it was written with must match it too.
+  return links.some((l) => l && normalizeGithubLogin(l.handle) === k && (!githubId || String(l.sub) === githubId)) ? group.canonical : null;
 }
 
-async function actorChosenName(env, key) {
+async function actorChosenName(env, key, githubId = null) {
   const k = normalizeActorKey(key);
   if (!k || !env || !env.META) return '';
-  return displayNameMemo(env, `k:${k}`, async () => {
-    const accountId = await actorKeyCurrentAccount(env, k);
+  return displayNameMemo(env, githubId ? `g:${githubId}:${k}` : `k:${k}`, async () => {
+    const accountId = await actorKeyCurrentAccount(env, k, githubId);
     return accountId ? accountDisplayName(env, accountId) : '';
   });
 }
 
 // Logins that only ever name agents and tdoc itself.
-const DISPLAY_NAME_AGENT_LOGINS = new Set(['tdoc', 'claude', 'codex', 'cursor', 'gemini', 'grok', 'tdoc-agent', 'tdoc-ai', 'mcp-app']);
+const DISPLAY_NAME_AGENT_LOGINS = new Set(['tdoc', 'claude', 'claude-code', 'codex', 'cursor', 'gemini', 'grok', 'chatgpt', 'copilot', 'openai', 'tdoc-agent', 'tdoc-ai', 'mcp-app']);
 
-// The lookup for a { login|key, name, account_id? } person object, or null.
-// Agents, the system note, deleted users and aliases keep what they carry.
+// The lookup for a { login|key, name, account_id? | github_id? } person
+// object, or null. Only authors the worker stamped from a session resolve:
+// agents, the system note, deleted users, aliases and anything a publisher
+// uploaded keep what they carry. An unstamped record (written before
+// stamping) resolves by GitHub handle only -- never by address, which an
+// upload could have forged to learn whose account an address is.
 function personNameRef(v) {
   if (!v || typeof v !== 'object' || Array.isArray(v) || typeof v.name !== 'string') return null;
+  if (v.imported) return null;
   if (v.kind && v.kind !== 'human') return null;
   if (v.handle || v.team_agent || v.agent_status != null) return null;
   const raw = typeof v.login === 'string' ? v.login : (typeof v.key === 'string' ? v.key : '');
   if (!raw || DISPLAY_NAME_AGENT_LOGINS.has(raw.toLowerCase())) return null;
   const k = normalizeActorKey(raw);
   if (!k) return null;
-  // Stamped by the server when the record was written (personRef).
   if (typeof v.account_id === 'string' && v.account_id) return `a:${v.account_id}`;
+  if (k.startsWith('email:')) return null;
+  if (typeof v.github_id === 'string' && /^[0-9]{1,20}$/.test(v.github_id)) return `g:${v.github_id}:${k}`;
   return `k:${k}`;
 }
 
@@ -12616,8 +12654,26 @@ function personRef(session) {
     login: actorKey(session),
     avatar_url: (session && session.avatar_url) || '',
     name: actorDisplayName(session),
-    ...(session && typeof session.account_id === 'string' && session.account_id ? { account_id: session.account_id } : {}),
+    ...(session && typeof session.account_id === 'string' && session.account_id
+      ? { account_id: session.account_id }
+      // No account yet (a spectator's first comment): the GitHub id the
+      // provider attested, so a later read can tell this person from
+      // whoever holds the handle by then.
+      : (sessionGithubId(session) ? { github_id: sessionGithubId(session) } : {})),
   };
+}
+
+// Every author-shaped object in an uploaded comment: flagged imported, and
+// stripped of anything that would let a read resolve it to an account.
+function markImportedAuthors(value, depth = 0, field = '') {
+  if (value == null || typeof value !== 'object' || depth > 12) return;
+  if (Array.isArray(value)) { for (const x of value) markImportedAuthors(x, depth + 1, field); return; }
+  if (field === 'author' || field === 'actor' || isPersonShape(value)) {
+    delete value.account_id;
+    delete value.github_id;
+    value.imported = true;
+  }
+  for (const [k, x] of Object.entries(value)) if (k !== 'anchor' && x && typeof x === 'object') markImportedAuthors(x, depth + 1, k);
 }
 
 function isPersonShape(v) {
@@ -12631,52 +12687,70 @@ function withoutPersonAccountIds(value, depth = 0) {
   const out = {};
   const person = isPersonShape(value);
   for (const [field, x] of Object.entries(value)) {
-    if (person && field === 'account_id') continue;
+    if (person && (field === 'account_id' || field === 'github_id')) continue;
     out[field] = field === 'anchor' ? x : withoutPersonAccountIds(x, depth + 1);
   }
   return out;
 }
 
 const DISPLAY_NAME_RESOLVE_MAX = 60;
+// Handle-keyed lookups cost several reads each: fewer per payload.
+const DISPLAY_NAME_RESOLVE_KEYED_MAX = 30;
 // Replace the `name` of every person object in a payload (comments, replies,
 // events, inbox actors, rosters) with that person's chosen name, if any, and
-// drop the account ids records carry. `only` narrows which objects may be
-// renamed (the @ list).
+// drop the account and GitHub ids records carry. The author of a reply that
+// carries an agent verdict is an agent, whatever its login says. `only`
+// narrows which objects may be renamed (the @ list).
 async function withActorDisplayNames(env, value, { only = null } = {}) {
   if (value == null || typeof value !== 'object') return value;
   const refs = new Set();
   let stamped = false;
-  const collect = (v, depth) => {
+  const eligible = (v, agentParent) => !agentParent && (!only || only(v));
+  const collect = (v, depth, agentParent) => {
     if (v == null || typeof v !== 'object' || depth > 12) return;
-    if (Array.isArray(v)) { for (const x of v) collect(x, depth + 1); return; }
-    if (isPersonShape(v) && 'account_id' in v) stamped = true;
+    if (Array.isArray(v)) { for (const x of v) collect(x, depth + 1, false); return; }
+    if (isPersonShape(v) && ('account_id' in v || 'github_id' in v)) stamped = true;
     const ref = personNameRef(v);
-    if (ref && (!only || only(v))) refs.add(ref);
-    for (const [field, x] of Object.entries(v)) if (field !== 'anchor' && x && typeof x === 'object') collect(x, depth + 1);
+    if (ref && eligible(v, agentParent)) refs.add(ref);
+    const agentHere = v.agent_status != null;
+    for (const [field, x] of Object.entries(v)) {
+      if (field !== 'anchor' && x && typeof x === 'object') collect(x, depth + 1, agentHere && field === 'author');
+    }
   };
-  collect(value, 0);
+  collect(value, 0, false);
   const names = new Map();
   if (refs.size && env && env.META) {
-    await Promise.all([...refs].slice(0, DISPLAY_NAME_RESOLVE_MAX).map(async (ref) => {
-      const n = ref.startsWith('a:') ? await accountDisplayName(env, ref.slice(2)) : await actorChosenName(env, ref.slice(2));
+    const all = [...refs];
+    const picked = [
+      ...all.filter((r) => r.startsWith('a:')).slice(0, DISPLAY_NAME_RESOLVE_MAX),
+      ...all.filter((r) => !r.startsWith('a:')).slice(0, DISPLAY_NAME_RESOLVE_KEYED_MAX),
+    ];
+    await Promise.all(picked.map(async (ref) => {
+      let n = '';
+      if (ref.startsWith('a:')) n = await accountDisplayName(env, ref.slice(2));
+      else if (ref.startsWith('g:')) {
+        const at = ref.indexOf(':', 2);
+        n = await actorChosenName(env, ref.slice(at + 1), ref.slice(2, at));
+      } else n = await actorChosenName(env, ref.slice(2));
       if (n) names.set(ref, n);
     }));
   }
   if (!names.size && !stamped) return value;
-  const walk = (v, depth) => {
+  const walk = (v, depth, agentParent) => {
     if (v == null || typeof v !== 'object' || depth > 12) return v;
-    if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
+    if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1, false));
     const person = isPersonShape(v);
+    const agentHere = v.agent_status != null;
     const out = {};
     for (const [field, x] of Object.entries(v)) {
-      if (person && field === 'account_id') continue;
-      out[field] = field === 'anchor' ? x : walk(x, depth + 1);
+      if (person && (field === 'account_id' || field === 'github_id')) continue;
+      out[field] = field === 'anchor' ? x : walk(x, depth + 1, agentHere && field === 'author');
     }
     const ref = personNameRef(v);
-    if (ref && names.has(ref) && (!only || only(v))) out.name = names.get(ref);
+    if (ref && names.has(ref) && eligible(v, agentParent)) out.name = names.get(ref);
     return out;
   };
-  return walk(value, 0);
+  return walk(value, 0, false);
 }
 
 // Team rosters carry account ids: resolve by account, not by key.
@@ -15882,6 +15956,10 @@ function applyCommentOp(list, op) {
         for (const lc of op.localComments) {
           if (!lc || !lc.id || have.has(lc.id)) continue;
           ensureEventLog(lc);
+          // Words a publisher uploaded, not ones the worker took from a
+          // session: whoever they name, they keep the name they carry and
+          // never borrow an account's chosen one (personNameRef).
+          markImportedAuthors(lc);
           list.push(lc);
           have.add(lc.id);
           merged++;
