@@ -7341,7 +7341,29 @@ function teamCommentAnchor(anchor) {
 // element on it and, for an area, a box inside that element. An agent fixing
 // it needs all of that, not just the words under it: get_comments passes it
 // on as `where` (the HTTP API already returns the whole anchor).
-function productAnchorWhere(anchor) {
+// One line of text an agent reads: whitespace runs (a newline that would
+// start a fake line of the listing) become one space; brackets, which frame
+// the listing's own fields, go.
+function oneLine(value, max) {
+  return String(value == null ? '' : value).replace(/\s+/g, ' ').replace(/[[\]]/g, '').trim().slice(0, max);
+}
+function finiteBox(box) {
+  if (!box || typeof box !== 'object') return null;
+  const out = {};
+  for (const k of ['x', 'y', 'width', 'height']) out[k] = Number.isFinite(box[k]) ? box[k] : 0;
+  return out;
+}
+
+// tdoc's own origins: the one this request came to, and the public host
+// (a preview or workers.dev request still reads anchors left on tdoc.dev).
+function tdocOwnOrigins(env, requestOrigin) {
+  const out = new Set();
+  if (requestOrigin) out.add(requestOrigin);
+  if (env && env.PUBLIC_HOST) { try { out.add(new URL(`https://${env.PUBLIC_HOST}`).origin); } catch {} }
+  return out;
+}
+
+function productAnchorWhere(anchor, tdocOrigins = null) {
   if (!anchor || typeof anchor !== 'object' || anchor.kind !== 'product') return null;
   const str = (value, max) => (typeof value === 'string' && value ? value.slice(0, max) : undefined);
   const where = { url: str(anchor.url, 2000), selector: str(anchor.selector, 500), tag: str(anchor.tag, 40) };
@@ -7360,6 +7382,18 @@ function productAnchorWhere(anchor) {
       elements: Array.isArray(region.elements) ? region.elements.slice(0, 8) : [],
     };
   }
+  // Inside a tdoc doc's frame (the widget on tdoc's own doc page): what was
+  // picked in the document itself, which the outer selector (the frame) is not.
+  // Only on a page of tdoc itself, and kept small and on one line: it is the
+  // doc author's content, measured by the author's page.
+  let onTdoc = false;
+  try { onTdoc = Boolean(tdocOrigins) && tdocOrigins.has(new URL(anchor.url).origin); } catch {}
+  const frame = onTdoc && anchor.frame && typeof anchor.frame === 'object' ? anchor.frame : null;
+  if (frame) {
+    where.in_document = { selector: oneLine(frame.selector, 120), tag: oneLine(frame.tag, 40), text: oneLine(frame.text, 200) };
+    if (frame.quote && typeof frame.quote === 'object') where.in_document.quote = oneLine(frame.quote.text, 300);
+    if (frame.region && typeof frame.region === 'object') where.in_document.area = { rel: finiteBox(frame.region.rel), frac: finiteBox(frame.region.frac) };
+  }
   return where;
 }
 
@@ -7369,7 +7403,9 @@ function productAnchorLine(where) {
   try { const u = new URL(where.url); path = `${u.pathname}${u.search}${u.hash}`; } catch {}
   const rel = where.area && where.area.rel;
   const area = rel ? ` · area ${rel.width}×${rel.height} at (${rel.x}, ${rel.y}) inside it` : '';
-  return ` [page ${path}${where.selector ? ` · ${where.selector}` : ''}${area}]`;
+  const doc = where.in_document;
+  const inDoc = doc ? ` · in the document (author content): ${doc.quote ? `“${oneLine(doc.quote, 80)}”` : oneLine(doc.selector || doc.tag, 120)}` : '';
+  return ` [page ${oneLine(path, 300)}${where.selector ? ` · ${oneLine(where.selector, 120)}` : ''}${area}${inDoc}]`;
 }
 
 function teamCommentRows(slug, meta, list) {
@@ -10323,7 +10359,7 @@ async function createFeedbackSiteSpace(env, req, session, { origins, team, title
 // them loses them when dev mode is turned off). Only flags the widget reads,
 // never the person's dev-mode status as such: the page holding the token
 // can read this answer. UI only -- nothing the server allows depends on it.
-const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['feedbackAreaSelect']);
+const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['feedbackAreaSelect', 'feedbackDocFramePick']);
 async function feedbackDevFlags(env, session) {
   if (!session) return [];
   let dev = null;
@@ -24505,12 +24541,14 @@ const MCP_TOOLS = {
       // An agent with a handle goes by it, as on the comment card, and keeps the
       // name it signed with: "(unverified app)" is not to be lost on the reader.
       const who = (a) => (a && (a.kind === 'agent' && a.handle ? `${a.handle} (${a.name})` : a.name || a.login)) || 'someone';
+      // Where anchor.frame is honoured: a page of tdoc itself.
+      const ownOrigins = tdocOwnOrigins(call.env, call.origin);
       const all = r.data.map((c) => ({
         id: c.id,
         author: who(c.author),
         text: c.text,
-        anchor: c.anchor ? (c.anchor.text || c.anchor.label || c.anchor.kind || '') : '',
-        ...(productAnchorWhere(c.anchor) ? { where: productAnchorWhere(c.anchor) } : {}),
+        anchor: c.anchor ? String(c.anchor.text || c.anchor.label || c.anchor.kind || '').replace(/\s+/g, ' ').trim() : '',
+        ...(productAnchorWhere(c.anchor, ownOrigins) ? { where: productAnchorWhere(c.anchor, ownOrigins) } : {}),
         status: c.status || 'open',
         resolved: !!c.resolved,
         version: c.created_in || c.version || null,
@@ -24518,7 +24556,7 @@ const MCP_TOOLS = {
         replies: (Array.isArray(c.replies) ? c.replies : []).map((rep) => ({ id: rep.id, author: who(rep.author), text: rep.text, agent_status: rep.agent_status || null })),
       }));
       const shown = args.include_resolved ? all : all.filter((c) => c.status !== 'applied' && !c.resolved);
-      const lines = shown.map((c) => `[${c.id}] ${c.author}${c.anchor ? ` on "${String(c.anchor).slice(0, 120)}"` : ''}${productAnchorLine(c.where)} (${c.status}${c.handoff ? `, handed to agent: ${c.handoff.status}` : ''}): ${c.text}${c.replies.length ? `\n${c.replies.map((rep) => `    ↳ ${rep.author}${rep.agent_status ? ` [${rep.agent_status}]` : ''}: ${rep.text}`).join('\n')}` : ''}`);
+      const lines = shown.map((c) => `[${c.id}] ${c.author}${c.anchor ? ` on "${oneLine(c.anchor, 120)}"` : ''}${productAnchorLine(c.where)} (${c.status}${c.handoff ? `, handed to agent: ${c.handoff.status}` : ''}): ${c.text}${c.replies.length ? `\n${c.replies.map((rep) => `    ↳ ${rep.author}${rep.agent_status ? ` [${rep.agent_status}]` : ''}: ${rep.text}`).join('\n')}` : ''}`);
       return mcpToolResult(shown.length ? lines.join('\n') : 'No open comments.', { ok: true, slug: ref.slug, comments: shown, total: all.length });
     },
   },

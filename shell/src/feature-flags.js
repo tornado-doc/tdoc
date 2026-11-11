@@ -40,6 +40,14 @@ export const FLAGS = Object.freeze({
   // feedback.js, not the page, and dev mode is the signed-in viewer's, sent
   // with the widget's session (worker FEEDBACK_WIDGET_DEV_FLAGS).
   feedbackAreaSelect: Object.freeze({ label: 'Feedback: comment on an area', owner: 'julie', added: '2026-11-01', default: false, preview: true }),
+  // Feedback widget on tdoc's own doc page: the doc is a sandboxed frame,
+  // one element to the widget (the whole page). With this on, a click, a
+  // drag over words, a box and the hover outline reach inside it (the frame
+  // answers through the shared selection code, server/frame-probe.js
+  // tdoc:fb*), and the anchor gains a `frame` part. Read like
+  // feedbackAreaSelect: the tdoc origin that served feedback.js, and the
+  // viewer's dev mode from the widget's session.
+  feedbackDocFramePick: Object.freeze({ label: 'Feedback: pick inside a tdoc doc', owner: 'julie', added: '2026-11-10', default: false, preview: true }),
   // Ask/Edit v2: one Ask AI input (tdoc AI answers a question, or proposes
   // edits that show in the doc as red/green suggestions to accept or
   // reject). In a comment, @agent is the one way in (no Edit with AI).

@@ -16,6 +16,8 @@ const path = require('path');
 
 const OFFLINE = [
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
+  'feedback-frame-anchor.test.js', // a comment inside a tdoc doc (anchor.frame): get_comments shows it on one line, no brackets, short, as author content, only for tdoc's own pages
+  'frame-part.test.js', // what the doc frame says it picked is rebuilt: known keys, one line, finite numbers, under the anchor size cap
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
   'selection-bundle.test.js',  // the shared selection modules bundle into the doc frame without a bundler; container keys, adapters, the pick gesture
   'comment-query.test.js',     // one comment query on every surface: Open by default, counts, deleted rule, waiting on you, search, sort, groupBy
@@ -280,6 +282,7 @@ const EXTENDED_BROWSER = [
   'anchor-scenarios.test.js', // #387 everything selectable can carry a comment
   'browser-editing.test.js', // playwright: Read/Comment/Edit + explicit snapshot save/conflict
   'feedback-browser.test.js', // playwright: #564 bookmarklet on a localhost app → connect popup → pin → doc
+  'feedback-doc-frame-ui.test.js', // the widget on tdoc's own doc page picks inside the doc frame (element, quote, pins follow its scroll); a phone tap never opens the doc composer too
   'feedback-connect-coop-ui.test.js', // playwright: sign-in through a COOP page cuts the popup off; the claim still connects and the held comment posts; blocked / cancelled keep it
   'mobile-comment-nav.test.js', // playwright phone: highlight ↔ comment, iOS bare tap
 ];

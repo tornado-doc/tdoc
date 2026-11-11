@@ -892,6 +892,7 @@ const APP = 'http://localhost:3000';
     };
     const dev = await cookieFor('devy', 'dev@tdoc.test');
     assert((await flagsOf(dev)).includes('feedbackAreaSelect'), 'dev mode on did not get area select');
+    assert((await flagsOf(dev)).includes('feedbackDocFramePick'), 'dev mode on did not get picking inside a tdoc doc');
     const off = await cookieFor('offy', 'off@tdoc.test');
     await env.META.put('dev-mode:off@tdoc.test', 'off');
     assert((await flagsOf(off)).length === 0, 'dev mode switched off still got flags');
