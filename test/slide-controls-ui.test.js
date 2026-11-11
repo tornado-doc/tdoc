@@ -194,6 +194,35 @@ async function startServer(worker, env) {
         }
       });
 
+      await t(`${label}: only slides inside the edit root are slides: never <html>, <body> or one outside the root`, async () => {
+        await doc().evaluate(() => {
+          document.documentElement.setAttribute('data-tdoc-slide', '');
+          document.body.setAttribute('data-tdoc-slide', '');
+          const outside = document.createElement('section');
+          outside.id = 'outside-slide';
+          outside.setAttribute('data-tdoc-slide', 'outside');
+          outside.style.cssText = 'height:240px;background:#fde;font-size:20px;padding:20px';
+          outside.innerHTML = '<h2>Outside the edit root</h2>';
+          document.body.appendChild(outside);
+        });
+        try {
+          await pick(1);
+          assert.equal(await bar.getAttribute('aria-label'), 'Slide 2 of 3', 'the count is the edit root\'s slides only');
+          const outside = frame.locator('#outside-slide');
+          await outside.scrollIntoViewIfNeeded();
+          if (phone) await outside.locator('h2').tap();
+          else await outside.hover({ position: { x: 40, y: 40 } });
+          await page.waitForTimeout(150);
+          assert.equal(await bar.isVisible(), false, 'a slide outside the edit root got the bar');
+        } finally {
+          await doc().evaluate(() => {
+            document.getElementById('outside-slide').remove();
+            document.documentElement.removeAttribute('data-tdoc-slide');
+            document.body.removeAttribute('data-tdoc-slide');
+          });
+        }
+      });
+
       await t(`${label}: Add slide offers three layouts and inserts the slide after this one`, async () => {
         await pick(1);
         await press(barButton('Add slide after this one'));
@@ -248,6 +277,39 @@ async function startServer(worker, env) {
         assert.deepEqual(img, { src: 'https://example.com/chart.png', editable: 'false' });
       });
 
+      await t(`${label}: adding, replacing and removing the image can each be undone`, async () => {
+        const src = () => doc().evaluate(() => { const el = document.querySelector('figure[data-tdoc-slide-image] img'); return el ? el.getAttribute('src') : null; });
+        const toast = frame.locator('.tdoc-slide-toast');
+        assert.equal(await toast.textContent().then((x) => x.replace('Undo', '').trim()), 'Image added');
+        assert.equal(await doc().evaluate(() => document.querySelector('figure[data-tdoc-slide-image] img').getAttribute('referrerpolicy')), 'no-referrer');
+        await press(toast.getByRole('button', { name: 'Undo' }));
+        assert.equal(await src(), null, 'Undo took the added image away');
+        // Again, then Replace and Remove, each undone.
+        await pick(2);
+        await press(barButton('Slide image'));
+        let dialog = frame.getByRole('dialog', { name: 'Slide image' });
+        await dialog.getByLabel('Image link').fill('https://example.com/chart.png');
+        await press(dialog.getByRole('button', { name: 'Add image' }));
+        await toast.waitFor();
+        await pick(2);
+        await press(barButton('Slide image'));
+        dialog = frame.getByRole('dialog', { name: 'Slide image' });
+        await dialog.getByLabel('Image link').fill('https://example.com/other.png');
+        await press(dialog.getByRole('button', { name: 'Replace' }));
+        assert.equal(await src(), 'https://example.com/other.png');
+        await toast.getByText('Image replaced').waitFor();
+        await press(toast.getByRole('button', { name: 'Undo' }));
+        assert.equal(await src(), 'https://example.com/chart.png', 'Undo brought the first image back');
+        await pick(2);
+        await press(barButton('Slide image'));
+        dialog = frame.getByRole('dialog', { name: 'Slide image' });
+        await press(dialog.getByRole('button', { name: 'Remove' }));
+        assert.equal(await src(), null);
+        await toast.getByText('Image removed').waitFor();
+        await press(toast.getByRole('button', { name: 'Undo' }));
+        assert.equal(await src(), 'https://example.com/chart.png', 'Undo restored the removed image');
+      });
+
       await t(`${label}: Duplicate copies the slide right after it, with a new id`, async () => {
         await pick(0);
         await press(barButton('Duplicate slide'));
@@ -256,6 +318,8 @@ async function startServer(worker, env) {
         assert.equal(now[1].heading, now[0].heading, 'the copy follows its original');
         assert.notEqual(now[1].value, now[0].value, 'with an id of its own');
         assert.notEqual(now[1].anchor, now[0].anchor, 'so comments on the original stay on the original');
+        const names = await doc().evaluate(() => [...document.querySelectorAll('main > [data-tdoc-slide]')].slice(0, 2).map((el) => el.getAttribute('data-tdoc-artifact')));
+        assert.equal(names[1], `${names[0]} (copy)`, 'the copy is named apart from its original');
         assert.equal(await nested(), 0, 'no slide inside another');
       });
 
@@ -303,6 +367,8 @@ async function startServer(worker, env) {
         assert.ok(!/tdoc-slide-bar|tdoc-slide-pop|tdoc-slide-toast|data-tdoc-provider|contenteditable|data-tdoc-editor/.test(html), 'controls or editor state saved');
         assert.match(html, /<img src="https:\/\/example\.com\/chart\.png"/);
         assert.ok(!/src="data:/.test(html), 'no inline data');
+        assert.ok(!/data-tdoc-interaction-mode/.test(html), 'the editor\'s mode was saved into the page');
+        assert.match(html, /<img src="https:\/\/example\.com\/chart\.png"[^>]*referrerpolicy="no-referrer"/);
         // The saved page, read back: whole slides, side by side.
         await page.goto(`${base}/d/${slug}/v/2`);
         await frame.locator('[data-tdoc-slide]').first().waitFor();
@@ -311,6 +377,25 @@ async function startServer(worker, env) {
         assert.equal(await frame.locator('.tdoc-slide-bar:visible').count(), 0, 'no bar outside Edit mode');
         await frame.locator('[data-tdoc-slide-image] img').scrollIntoViewIfNeeded();
         await shot('saved');
+      });
+
+      await t(`${label}: a page shipped with data-tdoc-interaction-mode="edit" still opens read-only, with no slide bar`, async () => {
+        const kit = new Function(`${require('../server/frame-probe-source.js').slideKitBundle()}\nreturn TdocSlideKit;`)();
+        const shipped = kit.blankDeckHtml('Shipped').replace('<html lang="en">', '<html lang="en" data-tdoc-interaction-mode="edit" data-tdoc-editing>');
+        await env.META.put('meta:shipped-deck', JSON.stringify({
+          title: 'Shipped', slug: 'shipped-deck', created: '2026-10-01T00:00:00.000Z', versions: [{ n: 1, created: '2026-10-01T00:00:00.000Z' }],
+          hosted: { account_id: 'acct-alice', github_login: 'alice', owner_key: 'alice' },
+          access: { visibility: 'unlisted', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] },
+        }));
+        await env.DOCS.put('docs/shipped-deck/v1/index.html', shipped);
+        await page.goto(`${base}/d/shipped-deck/v/1`);
+        await frame.locator('[data-tdoc-slide]').first().waitFor();
+        await doc().waitForFunction(() => /^(read|comment)$/.test(document.documentElement.getAttribute('data-tdoc-interaction-mode') || 'read'));
+        const slide = frame.locator('main > [data-tdoc-slide]').nth(1);
+        if (phone) await slide.locator('h2').tap(); else await slide.hover({ position: { x: 60, y: 60 } });
+        await page.waitForTimeout(200);
+        assert.equal(await bar.isVisible().catch(() => false), false, 'the slide bar showed to a reader');
+        assert.notEqual(await doc().evaluate(() => document.documentElement.getAttribute('data-tdoc-interaction-mode')), 'edit');
       });
 
       assert.deepEqual(errors, [], `page errors: ${errors.join('; ')}`);

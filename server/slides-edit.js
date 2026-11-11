@@ -25,26 +25,42 @@
   var root = document.documentElement;
   var hovered = null, caretSlide = null, shown = null, menu = null, imagePop = null, toast = null, toastTimer = null;
 
+  // The editor's root (frame-probe.js enableEditing marks it). Only Edit mode
+  // has one, and only what is inside it is saved, so only slides inside it
+  // are slides here: never <html>, <head>, <body> or the root itself, and
+  // never one inside another.
+  function editRoot() { return document.querySelector('[data-tdoc-editor-root]'); }
   function editing() {
-    return root.getAttribute('data-tdoc-interaction-mode') === 'edit' && !root.hasAttribute('data-tdoc-presenting');
+    return root.getAttribute('data-tdoc-interaction-mode') === 'edit' && !root.hasAttribute('data-tdoc-presenting') && !!editRoot();
   }
-  // Top-level slides only: a slide is never looked for inside another.
+  function isSlide(el, within) {
+    var host = within || editRoot();
+    if (!host || !(el instanceof HTMLElement) || el === host || !el.matches(SLIDE)) return false;
+    if (/^(HTML|HEAD|BODY)$/.test(el.tagName) || !host.contains(el)) return false;
+    for (var up = el.parentElement; up && up !== host; up = up.parentElement) if (up.matches(SLIDE)) return false;
+    return true;
+  }
   function slides() {
-    return Array.prototype.filter.call(document.querySelectorAll(SLIDE), function (el) {
-      return el instanceof HTMLElement && !(el.parentElement && el.parentElement.closest(SLIDE));
-    });
+    var host = editRoot();
+    if (!host) return [];
+    return Array.prototype.filter.call(host.querySelectorAll(SLIDE), function (el) { return isSlide(el, host); });
   }
   function slideOf(node) {
+    var host = editRoot();
     var el = node && (node.nodeType === 1 ? node : node.parentNode);
-    var found = el && el.closest ? el.closest(SLIDE) : null;
-    while (found && found.parentElement && found.parentElement.closest(SLIDE)) found = found.parentElement.closest(SLIDE);
-    return found;
+    if (!host || !el || !host.contains(el)) return null;
+    var found = null;
+    for (var up = el; up && up !== host; up = up.parentElement) if (up.matches && up.matches(SLIDE)) found = up;
+    return found && isSlide(found, host) ? found : null;
   }
   function sibling(el, dir) {
     var next = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
-    while (next && !next.matches(SLIDE)) next = dir < 0 ? next.previousElementSibling : next.nextElementSibling;
+    while (next && !isSlide(next)) next = dir < 0 ? next.previousElementSibling : next.nextElementSibling;
     return next;
   }
+  // A Big number slide's picture: the kit's <figure data-tdoc-slide-image>,
+  // and nothing else that happens to carry the attribute.
+  function imageSlot(el) { return el ? el.querySelector('figure[data-tdoc-slide-image]') : null; }
   function provider(el) { el.setAttribute('data-tdoc-provider', ''); return el; }
   function changed(added) {
     document.dispatchEvent(new CustomEvent('tdoc:slides-edit', { detail: { added: added || null } }));
@@ -142,7 +158,7 @@
     upBtn.disabled = !sibling(el, -1);
     downBtn.disabled = !sibling(el, 1);
     deleteBtn.disabled = list.length <= 1;
-    imageBtn.hidden = !el.querySelector('[data-tdoc-slide-image]');
+    imageBtn.hidden = !imageSlot(el);
     bar.setAttribute('aria-label', 'Slide ' + (at + 1) + ' of ' + list.length);
     bar.hidden = false;
     var r = el.getBoundingClientRect();
@@ -215,7 +231,7 @@
   function openImage(el) {
     if (imagePop) { closePops(true); return; }
     closePops();
-    var slot = el.querySelector('[data-tdoc-slide-image]');
+    var slot = imageSlot(el);
     if (!slot) return;
     var current = slot.querySelector('img');
     imagePop = provider(document.createElement('div'));
@@ -252,12 +268,11 @@
       img.src = href;
       img.alt = '';
       img.setAttribute('loading', 'lazy');
-      slot.textContent = '';
-      slot.appendChild(img);
-      closePops(true);
-      changed(slot);
+      // The picture's host learns nothing about the deck it is shown in.
+      img.setAttribute('referrerpolicy', 'no-referrer');
+      setSlot(slot, [img], current ? 'Image replaced' : 'Image added');
     }
-    if (current) rowButton('Remove', function () { slot.textContent = ''; closePops(true); changed(); });
+    if (current) rowButton('Remove', function () { setSlot(slot, [], 'Image removed'); });
     rowButton('Cancel', function () { closePops(true); });
     rowButton(current ? 'Replace' : 'Add image', apply, true);
     input.addEventListener('input', function () { error.hidden = true; input.removeAttribute('aria-invalid'); });
@@ -269,6 +284,23 @@
     imageBtn.setAttribute('aria-expanded', 'true');
     placePop(imagePop, imageBtn);
     input.focus({ preventScroll: true });
+  }
+
+  // Every change to a slot can be undone, like a deleted slide.
+  function setSlot(slot, nodes, said) {
+    var before = Array.prototype.slice.call(slot.childNodes);
+    var owner = slideOf(slot);
+    slot.textContent = '';
+    nodes.forEach(function (node) { slot.appendChild(node); });
+    closePops(true);
+    changed(slot);
+    showToast(said, function () {
+      if (!slot.isConnected) return;
+      slot.textContent = '';
+      before.forEach(function (node) { slot.appendChild(node); });
+      if (owner && owner.isConnected) caretSlide = owner;
+      changed(slot);
+    });
   }
 
   // ---- what the buttons do ----------------------------------------------
@@ -315,10 +347,19 @@
     var copy = el.cloneNode(true);
     // Its own identity: a twin would share the original's comments' id.
     copy.setAttribute('data-tdoc-slide', Kit.newSlideId());
-    copy.removeAttribute('id');
-    copy.removeAttribute('aria-current');
-    Array.prototype.forEach.call(copy.querySelectorAll('[id]'), function (node) { node.removeAttribute('id'); });
-    Array.prototype.forEach.call(copy.querySelectorAll('[data-tdoc-caret]'), function (node) { node.removeAttribute('data-tdoc-caret'); });
+    // Nothing a comment anchors by may appear twice: ids, the names
+    // element anchors match (selection/anchors/element.js), and editor marks.
+    [copy].concat(Array.prototype.slice.call(copy.querySelectorAll('*'))).forEach(function (node) {
+      node.removeAttribute('id');
+      node.removeAttribute('aria-current');
+      ['data-tdoc-caret', 'data-tdoc-sugg', 'data-tdoc-sugg-active', 'data-tdoc-sugg-busy', 'data-tdoc-demo-rewrite'].forEach(function (name) { node.removeAttribute(name); });
+      var name = node.getAttribute('data-tdoc-artifact');
+      if (name) node.setAttribute('data-tdoc-artifact', name + ' (copy)');
+      ['aria-label', 'title'].forEach(function (attr) {
+        var label = node.getAttribute(attr);
+        if (label && node !== copy && node.matches('img,svg,canvas,video,figure,iframe,[data-tdoc-artifact]')) node.setAttribute(attr, label + ' (copy)');
+      });
+    });
     el.parentNode.insertBefore(copy, el.nextSibling);
     settle(copy, false);
     copyBtn.focus({ preventScroll: true });
@@ -376,8 +417,13 @@
   document.addEventListener('selectionchange', function () {
     if (!editing()) return;
     var sel = window.getSelection();
-    var next = sel && sel.rangeCount ? slideOf(sel.getRangeAt(0).startContainer) : null;
-    if (next && next !== caretSlide) { caretSlide = next; place(); }
+    if (!sel || !sel.rangeCount) return;
+    var at = sel.getRangeAt(0).startContainer;
+    var el = at && (at.nodeType === 1 ? at : at.parentNode);
+    // The bar's own controls never move the slide it is for.
+    if (!el || bar.contains(el) || (menu && menu.contains(el)) || (imagePop && imagePop.contains(el)) || (toast && toast.contains(el))) return;
+    var next = slideOf(at);
+    if (next !== caretSlide) { caretSlide = next; place(); }
   });
   document.addEventListener('pointerdown', function (e) {
     if (!menu && !imagePop) return;

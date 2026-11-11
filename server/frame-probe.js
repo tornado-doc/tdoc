@@ -85,6 +85,10 @@
     });
   }
   var interactionMode = 'read';
+  // The mode is this script's to set, never the document's: a page saved or
+  // published with data-tdoc-interaction-mode="edit" on <html> must not open
+  // in Edit mode's chrome (the slide bar, edit-only styles) for its readers.
+  document.documentElement.removeAttribute('data-tdoc-interaction-mode');
   // Site pages (home, pricing, start, templates, privacy) load the frame with
   // ?tdoc_site=1. They read as an ordinary website: a normal cursor, no
   // document chrome on visuals, and no comment on a bare click. Selecting text
@@ -1647,6 +1651,7 @@
     clone.removeAttribute('data-tdoc-slides');
     clone.removeAttribute('data-tdoc-presenting');
     clone.removeAttribute('data-tdoc-visual-open');
+    clone.removeAttribute('data-tdoc-interaction-mode');
     return '<!doctype html>\n' + clone.outerHTML;
   }
 
