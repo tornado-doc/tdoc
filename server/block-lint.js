@@ -170,6 +170,19 @@
     }
     return { rows: rows, cols: cols };
   }
+  // The text of seg[from, to) without its tags: one pass, everything from a
+  // '<' to the next '>' dropped (an unclosed '<' drops the rest), so no tag
+  // can survive the way it can with a single regex replace.
+  function textOf(seg, from, to) {
+    var out = '', tag = false;
+    for (var i = from; i < to; i++) {
+      var ch = seg.charCodeAt(i);
+      if (tag) { if (ch === 62) tag = false; }
+      else if (ch === 60) tag = true;
+      else out += seg[i];
+    }
+    return out;
+  }
   function hasLongCell(seg) {
     var seen = 0, limit = (SMALL_SHEET_ROWS + 1) * SMALL_SHEET_COLS, m;
     TD.lastIndex = 0;
@@ -179,7 +192,7 @@
       CELL_END.lastIndex = open + 1;
       var end = CELL_END.exec(seg);
       var stop = Math.min(end ? end.index : seg.length, open + 1 + SHORT_CELL * 20);
-      var text = seg.slice(open + 1, stop).replace(/<[^>]*>/g, '').replace(/&[#\w]+;/g, ' ').replace(/\s+/g, ' ').trim();
+      var text = textOf(seg, open + 1, stop).replace(/&[#\w]+;/g, ' ').replace(/\s+/g, ' ').trim();
       if (text.length > SHORT_CELL) return true;
       TD.lastIndex = stop;
     }
