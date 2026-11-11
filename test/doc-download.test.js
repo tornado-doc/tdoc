@@ -122,6 +122,50 @@ function wellFormed(name, text) {
     assert(d === '![a\\](javascript:x) \\*b\\*](https://e.com/i.png)\n', JSON.stringify(d));
   });
 
+  await t('Markdown: hostile markup renders inert through a real Markdown renderer (marked)', async () => {
+    // marked comes with mermaid (a dependency); GFM tables on, as GitHub.
+    const { marked } = require('marked');
+    const o = { title: 't', baseUrl: 'https://tdoc.dev/d/a/v/1/', docUrl: 'https://tdoc.dev/d/a/v/1' };
+    const X = '&lt;img src=x onerror=alert(1)&gt;';
+    const cases = {
+      cellBackslashPipe: `<table><tr><th>h</th><th>h2</th></tr><tr><td><code>a\\|${X}</code></td><td>z</td></tr></table>`,
+      cellBackslashPipeTick: `<table><tr><th>h</th><th>h2</th></tr><tr><td><code>a\\|${X}\`</code></td><td>z</td></tr></table>`,
+      cellSplitCode: `<table><tr><th>h</th><th>h2</th></tr><tr><td><code>a\\</code>|<code>${X}</code></td><td>z</td></tr></table>`,
+      cellTickPipe: `<table><tr><th>h</th><th>h2</th></tr><tr><td><code>\`|${X}</code></td><td>z</td></tr></table>`,
+      cellKbdLink: `<table><tr><th>h</th></tr><tr><td><kbd>\\|<a href="https://ok/">x](javascript:alert(2))</a></kbd></td></tr></table>`,
+      cell: `<table><tr><td><code>${X}|</code></td><td><kbd>${X}</kbd></td></tr></table>`,
+      unclosedCode: `<p><code>${X}</p><p>[x](javascript:alert(2))</p>`,
+      misnested: `<p><code><b>${X}</code></b></p>`,
+      linkCode: `<p><a href="https://ok/"><code>](javascript:alert(3))</code></a></p>`,
+      codeLink: `<p><code><a href="https://ok/">${X}</a></code></p>`,
+      heading: `<h2><code>${X}</code> &lt;b&gt;</h2>`,
+      backtickBefore: `<p>a\`<code>${X}</code>\`b</p>`,
+      backslashBefore: `<p>\\<code>${X}</code></p>`,
+      backslashEnd: `<p><code>x\\</code>${X}</p>`,
+      nested: `<p><code>a<code>\\&lt;b&gt;</code>c</code></p>`,
+      spaceOnly: `<p><code> </code>${X}</p>`,
+      ticks: `<p><code>\`\`\`${X}</code></p>`,
+      altInCode: `<p><code><img alt="](javascript:alert(5))" src="https://i/x.png"></code></p>`,
+      listItem: `<ul><li><code>${X}</li><li>${X}</li></ul>`,
+      quote: `<blockquote><kbd>${X}</kbd></blockquote>`,
+      autolink: `<p><code>&lt;javascript:alert(6)&gt;</code> &lt;https://x&gt;</p>`,
+      entity: `<p><code>&amp;lt;img&amp;gt;</code> &amp;lt;img src=x onerror=alert(7)&amp;gt;</p>`,
+      jsLink: `<p><a href="javascript:alert(9)">js</a> <a href="https://ok/a|b">pipe</a></p>`,
+    };
+    const titles = { title: '<img src=x onerror=alert(8)> [a](javascript:1)' };
+    for (const [name, html] of Object.entries({ ...cases, title: '<p>x</p>' })) {
+      const md = SHELL.documentMarkdown(html, name === 'title' ? { ...o, ...titles } : o);
+      const out = marked.parse(md);
+      // Only real tags count: escaped text such as "&lt;img onerror…" is inert.
+      const tags = out.match(/<[a-z][^>]*>/gi) || [];
+      const live = tags.filter((tag) => /^<(img|script|svg|iframe|object|embed)\b/i.test(tag) || /\son\w+\s*=/i.test(tag) || /href="\s*javascript:/i.test(tag));
+      assert(!live.length, `${name}: live markup ${live.join(' ')}\n${md}\n=> ${out}`);
+    }
+    // The review repro, exactly: the cell holds the text, the next cell is z.
+    const repro = marked.parse(SHELL.documentMarkdown(cases.cellBackslashPipe, o));
+    assert(/<td>a\\\|&lt;img src=x onerror=alert\(1\)&gt;<\/td>\s*<td>z<\/td>/.test(repro), repro);
+  });
+
   await t('Markdown: linear time on hostile input (unclosed blocks, tags, declarations, marks; huge tables)', async () => {
     const cases = [
       ['2 MB of unclosed <svg>', '<p>x</p>' + '<svg>'.repeat(400000), 200],

@@ -380,7 +380,7 @@
   // A link or image target: the characters that could end it or start
   // markup are percent-encoded.
   function mdUrl(u) {
-    return String(u).replace(/[\s()<>\\`]/g, function (c) { return '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'); });
+    return String(u).replace(/[\s()<>\\`|]/g, function (c) { return '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'); });
   }
   // Bold / italic / code marks ride in the text as \u0001x (open) and
   // \u0002x (close) and become Markdown here, in one pass per paragraph:
@@ -388,7 +388,7 @@
   // leaves none, an unclosed one is dropped, and an inline code fence is
   // longer than any run of backticks inside it.
   const MARK_RE = /([\u0001\u0002])([bic])/g;
-  function resolveMarks(str) {
+  function resolveMarks(str, inCell) {
     if (str.indexOf('\u0001') === -1) return str.indexOf('\u0002') === -1 ? str : str.replace(MARK_RE, '');
     const parts = [];
     const stack = [];
@@ -412,6 +412,13 @@
       let open = top.code === 'b' ? '**' : top.code === 'i' ? '*' : '`';
       let close = open;
       let body = words;
+      if (top.code === 'c' && inCell) {
+        // In a table cell a code span is plain escaped text: the cell's
+        // `|` escaping is read before code spans, so an un-escaped span
+        // could be split by an author backslash before a pipe.
+        parts.push(seg);
+        continue;
+      }
       if (top.code === 'c') {
         // Inside a paired code span text is literal: the escapes come out.
         body = words.replace(/\\([\\`*_[\]<>!&])/g, '$1');
@@ -532,19 +539,19 @@
       }
       if (rich && tag === 'blockquote') { flush(); quote += close ? -1 : 1; if (quote < 0) quote = 0; continue; }
       if (tag === 'tr') {
-        if (cell != null) { if (row) row.push(clean(rich ? resolveMarks(cell) : cell)); cell = null; }
+        if (cell != null) { if (row) row.push(clean(rich ? resolveMarks(cell, true) : cell)); cell = null; }
         if (row && row.some(Boolean)) push({ t: 'row', cells: row }, row.join(' | ').length);
         row = close ? null : [];
         continue;
       }
       if (tag === 'td' || tag === 'th') {
-        if (cell != null && row) row.push(clean(rich ? resolveMarks(cell) : cell));
+        if (cell != null && row) row.push(clean(rich ? resolveMarks(cell, true) : cell));
         cell = close ? null : '';
         if (!close && !row) row = [];
         continue;
       }
       if (rich && tag === 'table') {
-        if (cell != null && row) row.push(clean(rich ? resolveMarks(cell) : cell));
+        if (cell != null && row) row.push(clean(rich ? resolveMarks(cell, true) : cell));
         if (row && row.some(Boolean)) push({ t: 'row', cells: row }, row.join(' | ').length);
         cell = null; row = null;
         flush();
