@@ -667,11 +667,13 @@ async function sessionFromHostedBearer(env, req) {
     };
   }
   const group = await accountGroup(env, actor.account_id);
-  const allTeamIds = await loadAccountTeamIds(env, group.canonical);
+  const [allTeamIds, chosenName] = await Promise.all([
+    loadAccountTeamIds(env, group.canonical),
+    displayNameForGroup(env, group).catch(() => ''),
+  ]);
   // A workspace-scoped token sees only the teams it was given, and My docs
   // only if that was ticked too (see tokenScopeAllows).
   const teamIds = actor.scope ? allTeamIds.filter((id) => actor.scope.teams.includes(id)) : allTeamIds;
-  const chosenName = await displayNameForGroup(env, group).catch(() => '');
   return {
     id: null,
     login: actor.github_login || '',
@@ -5659,11 +5661,16 @@ async function mergeVerifiedAccountState(env, group) {
     for (const slug of normalizeProfilePins(profile)) if (!pins.includes(slug)) pins.push(slug);
   }
   const fallbackProfile = profiles.find(Boolean) || {};
+  // The chosen name lives on the canonical profile only (displayNameForGroup
+  // reads nothing else): carry a member's over when the canonical has none.
+  const named = canonicalProfile.display_name ? canonicalProfile : (profiles.find((p) => p && p.display_name) || {});
   await putAccountProfile(env, group.canonical, {
     ...fallbackProfile,
     ...canonicalProfile,
     bio: canonicalProfile.bio || fallbackProfile.bio || '',
     pins,
+    display_name: named.display_name || undefined,
+    display_name_at: named.display_name_at || undefined,
   });
 
   const teamIds = new Set();
@@ -7287,6 +7294,8 @@ function teamCommentAuthor(author) {
     name: String(a.name || (email ? email.split('@')[0] : login) || 'Someone').slice(0, 100),
     avatar_url: typeof a.avatar_url === 'string' ? a.avatar_url : '',
     kind: a.kind === 'agent' ? 'agent' : 'human',
+    // Resolved to the chosen name and dropped on the way out (redactCommentEmails).
+    ...(typeof a.account_id === 'string' && a.account_id ? { account_id: a.account_id } : {}),
   };
 }
 
@@ -7711,7 +7720,7 @@ async function teamBackupJob(env, job) {
       if (!job.cursor) {
         objects.push(...await Promise.all([
           writeJson(`docs/${job.slug}/meta.json`, backupMetaExport(meta)),
-          writeJson(`docs/${job.slug}/comments.json`, await readComments(env, job.slug)),
+          writeJson(`docs/${job.slug}/comments.json`, withoutPersonAccountIds(await readComments(env, job.slug))),
         ]));
       }
       const page = await env.DOCS.list({ prefix: `docs/${job.slug}/`, cursor: job.cursor, limit: TEAM_BACKUP_OBJECT_PAGE });
@@ -12442,32 +12451,72 @@ function suggestHandleFromEmail(email) {
 }
 
 // ---- Display name (Settings -> Profile -> Name) -------------------------
-// The name a person chose for themselves, stored on their account profile
-// (`account-profile:<id>.display_name`). Sign-in never writes it: every
-// provider door stamps its own name on the session, and getSession lays the
-// chosen one over it, so signing in again with GitHub or Clerk cannot undo
-// the choice. Comment records, inbox rows and team rosters keep the name
-// they were written with as a snapshot; readers resolve the current one by
-// actor key (or account id) at read time and fall back to the snapshot.
+// The name a person chose for themselves, stored on their canonical
+// account's profile (`account-profile:<id>.display_name`). Sign-in never
+// writes it: every provider door stamps its own name on the session, and
+// getSession lays the chosen one over it, so signing in again with GitHub or
+// Clerk cannot undo the choice. Comment records, inbox rows and team rosters
+// keep the name they were written with as a snapshot; readers resolve the
+// current one at read time -- by the account id stamped on records written
+// since, and for older ones only while the account still holds the identity
+// the record names -- and fall back to the snapshot.
 const DISPLAY_NAME_MAX = 60;
-// C0/C1 controls, and the invisible format characters that can reorder or
-// hide text around a name (bidi overrides and isolates, zero-width joiners,
-// BOM, soft hyphen, line/paragraph separators).
-const DISPLAY_NAME_STRIP_RE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufeff\ufff9-\ufffb]/g;
-function normalizeDisplayName(raw) {
+// Controls, every format character (bidi, zero-width, tags, BOM, soft
+// hyphen...), separators, and the blank-looking fillers and variation
+// selectors that are letters or marks to Unicode but draw nothing.
+const DISPLAY_NAME_STRIP_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164\uffa0\ufe00-\ufe0f\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
+// Folded with suggestNameSkeleton when compared, as names are.
+const DISPLAY_NAME_RUNTIMES = ['claude', 'claude code', 'codex', 'cursor', 'gemini', 'grok', 'chatgpt', 'copilot'];
+const DISPLAY_NAME_RESERVED = ['agent', 'deleted user', 'anonymous', 'someone', 'tdoc', 'system', 'admin'];
+// Separators tdoc itself puts between an agent and its owner ("Claude ·
+// Julie") and look-alikes: a name holding one could pass for that line.
+const DISPLAY_NAME_SEPARATOR_RE = /[\u00b7\u2022\u2219\u22c5\u30fb\uff65\u2027\u0387]/u;
+const DISPLAY_NAME_TLDS = 'com|net|org|io|dev|ai|app|co|me|xyz|info|biz|gg|so|ly|to|us|uk|cn|de|ru|site|online|link|page|sh|tv|cc|ws|top|club';
+const DISPLAY_NAME_DOMAIN_RE = new RegExp(`(^|[^\\p{L}\\p{N}])[\\p{L}\\p{N}-]+\\.(?:${DISPLAY_NAME_TLDS})(?=$|[^\\p{L}\\p{N}])`, 'iu');
+
+// Reads as tdoc, tdoc AI, a team agent, an agent runtime, a placeholder
+// tdoc prints for nobody, or one of the given team agents' names --
+// compared as suggestNameSkeleton reads agent names (case, spacing and
+// l/1/I/0 look-alikes folded).
+function displayNameReserved(folded, teamAgentNames = []) {
+  if (DISPLAY_NAME_SEPARATOR_RE.test(folded)) return true;
+  const v = suggestNameSkeleton(folded.replace(/[^\p{L}\p{N}]+/gu, ' '));
+  const tight = v.replace(/ /g, '');
+  if ([...DISPLAY_NAME_RESERVED, ...DISPLAY_NAME_RUNTIMES].some((r) => suggestNameSkeleton(r) === v)) return true;
+  if (tight === 'tdoc' || tight.startsWith('tdocai') || tight.startsWith('tdocagent') || v.startsWith('tdoc ')) return true;
+  if (tight.startsWith('teamagent')) return true;
+  return teamAgentNames.some((n) => n && (n === v || n.replace(/ /g, '') === tight));
+}
+
+function normalizeDisplayName(raw, { teamAgentNames = [] } = {}) {
   if (typeof raw !== 'string') return { error: 'invalid_name', message: 'Enter a name.' };
+  if (raw.length > DISPLAY_NAME_MAX * 8) return { error: 'name_too_long', message: `Use ${DISPLAY_NAME_MAX} characters or fewer.` };
   let name = raw;
   try { name = name.normalize('NFC'); } catch {}
   name = name.replace(DISPLAY_NAME_STRIP_RE, '').replace(/\s+/g, ' ').trim();
   if (!name) return { error: 'invalid_name', message: 'Enter a name.' };
   if ([...name].length > DISPLAY_NAME_MAX) return { error: 'name_too_long', message: `Use ${DISPLAY_NAME_MAX} characters or fewer.` };
+  if (!/[\p{L}\p{N}]/u.test(name)) return { error: 'invalid_name', message: 'Use letters or numbers.' };
+  // Stacked combining marks (zalgo) draw over the lines around the name.
+  if (/\p{M}{4,}/u.test(name)) return { error: 'invalid_name', message: 'Too many accents on one letter.' };
+  // Every check below reads the compatibility form, so a fullwidth or
+  // small-form < > @ or dot is the character it looks like.
+  let folded = name;
+  try { folded = name.normalize('NFKC'); } catch {}
   // Rendering escapes everywhere; markup in a name is still refused so it
   // never reaches an email client, a notification or an agent prompt as
   // something that looks like markup.
-  if (/[<>]/.test(name)) return { error: 'invalid_name', message: 'Names can’t contain < or >.' };
+  if (/[<>]/.test(folded)) return { error: 'invalid_name', message: 'Names can’t contain < or >.' };
   // An address as a name would print where tdoc deliberately shows no
-  // address (email-keyed commenters show their local part only).
-  if (/[^\s@]+@[^\s@]+\.[^\s@]+/.test(name)) return { error: 'invalid_name', message: 'Use a name, not an email address.' };
+  // address (email-keyed commenters show their local part only); a link
+  // would turn every comment into an advert.
+  if (/@/.test(folded)) return { error: 'invalid_name', message: 'Use a name, not an email address.' };
+  if (/:\/\/|(^|[^\p{L}\p{N}])www\./iu.test(folded) || DISPLAY_NAME_DOMAIN_RE.test(folded)) {
+    return { error: 'invalid_name', message: 'Use a name, not a web address.' };
+  }
+  if (displayNameReserved(folded, teamAgentNames)) {
+    return { error: 'reserved_name', message: 'That name is reserved for tdoc and agents. Pick another.' };
+  }
   return { name };
 }
 
@@ -12479,7 +12528,7 @@ function storedDisplayName(rec) {
 
 // Per-isolate memo, short so another person's change shows up within about
 // half a minute (KV's own edge cache can add up to a minute more). The
-// account's own isolate clears its entries on save.
+// saving isolate clears its entries.
 const DISPLAY_NAME_CACHE = new WeakMap(); // env.META -> Map(key -> { v, t })
 const DISPLAY_NAME_CACHE_MS = 30 * 1000;
 const DISPLAY_NAME_CACHE_MAX = 2000;
@@ -12496,20 +12545,16 @@ function displayNameMemo(env, key, load) {
 }
 function forgetDisplayNames(env) { if (env && env.META) DISPLAY_NAME_CACHE.delete(env.META); }
 
-// The chosen name of an account group: the canonical account's, else any
-// member's (a merge keeps both profiles until the next write).
+// The chosen name of an account group: one read, the canonical account's.
+// A merge carries a member's name onto the canonical profile, and a save
+// clears it on the members, so nothing else is consulted.
 async function displayNameForGroup(env, group) {
-  const ids = group && Array.isArray(group.ids) && group.ids.length ? group.ids : [];
-  const order = [group && group.canonical, ...ids].filter((id, i, a) => id && a.indexOf(id) === i);
-  for (const id of order.slice(0, 8)) {
-    const name = storedDisplayName(await accountProfile(env, id));
-    if (name) return name;
-  }
-  return '';
+  if (!group || !group.canonical) return '';
+  return storedDisplayName(await accountProfile(env, group.canonical));
 }
 
 async function accountDisplayName(env, accountId) {
-  if (!accountId || !env || !env.META) return '';
+  if (typeof accountId !== 'string' || !accountId || !env || !env.META) return '';
   return displayNameMemo(env, `a:${accountId}`, async () => {
     const group = await accountGroup(env, accountId);
     if (group.deleted_at || group.unavailable) return '';
@@ -12517,58 +12562,118 @@ async function accountDisplayName(env, accountId) {
   });
 }
 
-// An actor key (GitHub handle or email:<address>) -> its chosen name, or ''.
+// The account that holds this actor key NOW, or null. A record written
+// before account ids were stamped names only a handle or an address, and
+// the hosted-account:<login> pointer never moves: a login its owner gave up
+// and somebody else registered still points at the first account. So a
+// handle counts only while the account's linked GitHub identity still
+// carries it. An address counts through the email index, which is the
+// sign-in door itself: whoever signs in with that mailbox reaches that
+// account.
+async function actorKeyCurrentAccount(env, k) {
+  if (k.startsWith('email:')) return accountIdByEmail(env, k.slice(6));
+  const rec = await lookupHostedAccount(env, k);
+  if (!rec || !rec.account_id) return null;
+  const group = await accountGroup(env, rec.account_id);
+  if (group.deleted_at || group.unavailable) return null;
+  const links = await Promise.all(group.ids.slice(0, 8).map((id) => accountGithubLink(env, id).catch(() => null)));
+  return links.some((l) => l && normalizeGithubLogin(l.handle) === k) ? group.canonical : null;
+}
+
 async function actorChosenName(env, key) {
   const k = normalizeActorKey(key);
   if (!k || !env || !env.META) return '';
   return displayNameMemo(env, `k:${k}`, async () => {
-    const accountId = k.startsWith('email:')
-      ? await accountIdByEmail(env, k.slice(6))
-      : (await lookupHostedAccount(env, k))?.account_id;
+    const accountId = await actorKeyCurrentAccount(env, k);
     return accountId ? accountDisplayName(env, accountId) : '';
   });
 }
 
-// Is this { login|key, name } object a person whose name may be replaced?
+// Logins that only ever name agents and tdoc itself.
+const DISPLAY_NAME_AGENT_LOGINS = new Set(['tdoc', 'claude', 'codex', 'cursor', 'gemini', 'grok', 'tdoc-agent', 'tdoc-ai', 'mcp-app']);
+
+// The lookup for a { login|key, name, account_id? } person object, or null.
 // Agents, the system note, deleted users and aliases keep what they carry.
-function personNameKey(v) {
+function personNameRef(v) {
   if (!v || typeof v !== 'object' || Array.isArray(v) || typeof v.name !== 'string') return null;
   if (v.kind && v.kind !== 'human') return null;
-  if (v.handle || v.team_agent) return null;
+  if (v.handle || v.team_agent || v.agent_status != null) return null;
   const raw = typeof v.login === 'string' ? v.login : (typeof v.key === 'string' ? v.key : '');
-  if (!raw || raw.toLowerCase() === 'tdoc') return null;
-  return normalizeActorKey(raw);
+  if (!raw || DISPLAY_NAME_AGENT_LOGINS.has(raw.toLowerCase())) return null;
+  const k = normalizeActorKey(raw);
+  if (!k) return null;
+  // Stamped by the server when the record was written (personRef).
+  if (typeof v.account_id === 'string' && v.account_id) return `a:${v.account_id}`;
+  return `k:${k}`;
+}
+
+// The person as records store them: the actor key, the name at the time,
+// and the account, so a later read finds the person, not whoever holds the
+// handle by then. The account id never leaves the worker (see
+// withActorDisplayNames and the backup copy).
+function personRef(session) {
+  return {
+    login: actorKey(session),
+    avatar_url: (session && session.avatar_url) || '',
+    name: actorDisplayName(session),
+    ...(session && typeof session.account_id === 'string' && session.account_id ? { account_id: session.account_id } : {}),
+  };
+}
+
+function isPersonShape(v) {
+  return (typeof v.login === 'string' || typeof v.key === 'string') && typeof v.name === 'string';
+}
+
+// Records that carry a person's account id, without it.
+function withoutPersonAccountIds(value, depth = 0) {
+  if (value == null || typeof value !== 'object' || depth > 12) return value;
+  if (Array.isArray(value)) return value.map((x) => withoutPersonAccountIds(x, depth + 1));
+  const out = {};
+  const person = isPersonShape(value);
+  for (const [field, x] of Object.entries(value)) {
+    if (person && field === 'account_id') continue;
+    out[field] = field === 'anchor' ? x : withoutPersonAccountIds(x, depth + 1);
+  }
+  return out;
 }
 
 const DISPLAY_NAME_RESOLVE_MAX = 60;
 // Replace the `name` of every person object in a payload (comments, replies,
-// events, inbox actors, rosters) with that person's chosen name, if any.
-// Returns the value unchanged when nobody in it has chosen one.
-async function withActorDisplayNames(env, value) {
-  if (!env || !env.META || value == null || typeof value !== 'object') return value;
-  const keys = new Set();
+// events, inbox actors, rosters) with that person's chosen name, if any, and
+// drop the account ids records carry. `only` narrows which objects may be
+// renamed (the @ list).
+async function withActorDisplayNames(env, value, { only = null } = {}) {
+  if (value == null || typeof value !== 'object') return value;
+  const refs = new Set();
+  let stamped = false;
   const collect = (v, depth) => {
     if (v == null || typeof v !== 'object' || depth > 12) return;
     if (Array.isArray(v)) { for (const x of v) collect(x, depth + 1); return; }
-    const k = personNameKey(v);
-    if (k) keys.add(k);
+    if (isPersonShape(v) && 'account_id' in v) stamped = true;
+    const ref = personNameRef(v);
+    if (ref && (!only || only(v))) refs.add(ref);
     for (const [field, x] of Object.entries(v)) if (field !== 'anchor' && x && typeof x === 'object') collect(x, depth + 1);
   };
   collect(value, 0);
-  if (!keys.size) return value;
   const names = new Map();
-  await Promise.all([...keys].slice(0, DISPLAY_NAME_RESOLVE_MAX).map(async (k) => {
-    const n = await actorChosenName(env, k);
-    if (n) names.set(k, n);
-  }));
-  if (!names.size) return value;
+  if (refs.size && env && env.META) {
+    await Promise.all([...refs].slice(0, DISPLAY_NAME_RESOLVE_MAX).map(async (ref) => {
+      const n = ref.startsWith('a:') ? await accountDisplayName(env, ref.slice(2)) : await actorChosenName(env, ref.slice(2));
+      if (n) names.set(ref, n);
+    }));
+  }
+  if (!names.size && !stamped) return value;
   const walk = (v, depth) => {
     if (v == null || typeof v !== 'object' || depth > 12) return v;
     if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
+    const person = isPersonShape(v);
     const out = {};
-    for (const [field, x] of Object.entries(v)) out[field] = field === 'anchor' ? x : walk(x, depth + 1);
-    const k = personNameKey(v);
-    if (k && names.has(k)) out.name = names.get(k);
+    for (const [field, x] of Object.entries(v)) {
+      if (person && field === 'account_id') continue;
+      out[field] = field === 'anchor' ? x : walk(x, depth + 1);
+    }
+    const ref = personNameRef(v);
+    if (ref && names.has(ref) && (!only || only(v))) out.name = names.get(ref);
     return out;
   };
   return walk(value, 0);
@@ -12577,7 +12682,7 @@ async function withActorDisplayNames(env, value) {
 // Team rosters carry account ids: resolve by account, not by key.
 async function withMemberDisplayNames(env, members) {
   if (!Array.isArray(members) || !members.length) return members;
-  const names = await Promise.all(members.map((m) => (m && m.account_id ? accountDisplayName(env, m.account_id) : '')));
+  const names = await Promise.all(members.slice(0, 200).map((m) => (m && m.account_id ? accountDisplayName(env, m.account_id) : '')));
   return members.map((m, i) => (names[i] ? { ...m, name: names[i] } : m));
 }
 
@@ -12593,19 +12698,19 @@ function displayNameFields(session) {
 
 const DISPLAY_NAME_RATE = 20; // saves per account per hour
 
-// Written on the canonical account and cleared on every member, so a merged
-// group never resurrects a name the person removed.
+// Written on the canonical account and cleared on every other member (each
+// through putAccountProfile, the one profile writer), so a later merge never
+// brings back a name the person removed.
 async function setAccountDisplayName(env, group, name) {
-  const ids = [group.canonical, ...group.ids.filter((id) => id !== group.canonical)];
-  for (const id of ids) {
+  const at = new Date().toISOString();
+  const members = group.ids.filter((id) => id !== group.canonical).slice(0, 8);
+  await putAccountProfile(env, group.canonical, name
+    ? { display_name: name, display_name_at: at }
+    : { display_name: undefined, display_name_at: at });
+  await Promise.all(members.map(async (id) => {
     const prev = await accountProfile(env, id);
-    if (id === group.canonical && name) {
-      await putAccountProfile(env, id, { display_name: name, display_name_at: new Date().toISOString() });
-    } else if (prev && (prev.display_name || prev.display_name_at)) {
-      const { display_name: _n, display_name_at: _t, ...rest } = prev;
-      await env.META.put(`account-profile:${id}`, JSON.stringify({ ...rest, account_id: id }));
-    }
-  }
+    if (prev && prev.display_name) await putAccountProfile(env, id, { display_name: undefined });
+  }));
 }
 
 async function accountProfile(env, accountId) {
@@ -15510,10 +15615,22 @@ async function mentionDirectory(env, s, meta, access, list) {
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '', tags: [], at: '', order: order++ };
     if (!prev.name && entry.name) prev.name = entry.name;
     if (!prev.avatar_url && entry.avatar_url) prev.avatar_url = entry.avatar_url;
+    // The account a record was stamped with, for the chosen name; dropped
+    // before the list leaves the worker (withActorDisplayNames).
+    const acct = entry.account_id || stampedAccounts.get(login);
+    if (!prev.account_id && typeof acct === 'string' && acct) prev.account_id = acct;
     if (!prev.tags.includes(tag)) prev.tags.push(tag);
     if (at && String(at) > String(prev.at || '')) prev.at = at;
     byLogin.set(login, prev);
   };
+  const stampedAccounts = new Map();
+  for (const c of (Array.isArray(list) ? list : [])) {
+    const authors = [c && c.author, ...((c && c.events) || []).map((e) => e && e.kind === 'reply_added' && e.reply && e.reply.author), ...((c && c.replies) || []).map((r) => r && r.author)];
+    for (const a of authors) {
+      const k = a && !isNonHumanAuthor(a) && normalizeActorKey(a.login);
+      if (k && typeof a.account_id === 'string' && a.account_id) stampedAccounts.set(k, a.account_id);
+    }
+  }
   const insider = isAllowlisted(access, s, env, meta);
   add({ login: ownerActorKey(meta, env) }, 'doc');
   for (const p of commentParticipants(list)) add(p, 'doc');
@@ -15522,7 +15639,7 @@ async function mentionDirectory(env, s, meta, access, list) {
   const teams = await Promise.all([...teamIds].slice(0, 5).map((id) => loadTeam(env, id).catch(() => null)));
   for (const team of teams) {
     if (!team || !teamMember(team, s.account_id)) continue;
-    for (const m of team.members || []) add({ login: m.key, name: m.name, avatar_url: memberAvatar(m.key) }, 'teammate');
+    for (const m of team.members || []) add({ login: m.key, name: m.name, avatar_url: memberAvatar(m.key), account_id: m.account_id }, 'teammate');
   }
   const [contacts, inbox] = await Promise.all([loadContacts(env, me), loadInbox(env, me).then((r) => r.inbox.items || []).catch(() => [])]);
   for (const c of contacts) add(c, 'recent', c.at);
@@ -25016,13 +25133,20 @@ const tdocHandlers = {
       if (await rateLimited(env, `display-name:${group.canonical}`, DISPLAY_NAME_RATE, 3600)) {
         return json({ error: 'rate_limited', message: 'Too many name changes. Try again in an hour.' }, { status: 429, headers: { 'Retry-After': '3600' } });
       }
-      let body = {};
+      let body = null;
       try { body = await req.json(); } catch {}
-      const raw = body && body.name;
-      const clearing = raw == null || (typeof raw === 'string' && !raw.replace(DISPLAY_NAME_STRIP_RE, '').trim());
+      // Only an explicit "" or null clears: a body that did not parse, or
+      // that names no `name`, changes nothing.
+      if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.prototype.hasOwnProperty.call(body, 'name')) {
+        return json({ error: 'invalid_request', message: 'Send { "name": "..." }.' }, { status: 400 });
+      }
+      const raw = body.name;
       let chosen = '';
-      if (!clearing) {
-        const n = normalizeDisplayName(raw);
+      if (!(raw === null || raw === '')) {
+        // Not one of the agents of a team this person is in, either.
+        const teams = await Promise.all((s.team_ids || []).slice(0, 20).map((id) => loadTeam(env, id).catch(() => null)));
+        const teamAgentNames = teams.flatMap((team) => (team ? teamAgents(team).map((a) => suggestNameSkeleton(a.name)) : [])).filter(Boolean);
+        const n = normalizeDisplayName(raw, { teamAgentNames });
         if (n.error) return json({ error: n.error, message: n.message }, { status: 400 });
         chosen = n.name;
       }
@@ -27901,7 +28025,7 @@ const tdocHandlers = {
           await writeInboxEvent(env, admin.key, {
             kind: 'team_join_request', slug, team_id: team.id, title: team.name,
             target_id: requester, requester, at: new Date().toISOString(),
-            actor: { login: requester, name: actorDisplayName(gate.session), avatar_url: gate.session.avatar_url || '' },
+            actor: { ...personRef(gate.session), login: requester },
           }, { ctx, origin: url.origin });
         }
         await env.META.put(key, '1', { expirationTtl: 24 * 60 * 60 });
@@ -28973,7 +29097,11 @@ const tdocHandlers = {
       // An address this person is not entitled to is not offered at all: a
       // tag inserts the address into the comment text.
       const privacy = await emailPrivacyFor(env, s, slug, meta);
-      const users = (await withActorDisplayNames(env, await mentionDirectory(env, s, meta, access, list))).filter((u) => {
+      // A chosen name is filled in only for people this list already names
+      // (a snapshot name) or who are in this doc or team: an owner typing
+      // logins into the invite list must not learn whose account each is.
+      const known = (u) => Boolean(u.name) || (Array.isArray(u.tags) && (u.tags.includes('doc') || u.tags.includes('teammate')));
+      const users = (await withActorDisplayNames(env, await mentionDirectory(env, s, meta, access, list), { only: known })).filter((u) => {
         const m = String(u.login || '').match(EMAIL_KEY_RE);
         return !m || privacy.reveal.has(m[1].toLowerCase());
       });
@@ -29008,7 +29136,7 @@ const tdocHandlers = {
       // login carries the actor key (a handle, or email:<addr>); name is what
       // readers see, and for an email identity that is the local part only —
       // the address itself never renders in a thread.
-      const author = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
+      const author = personRef(s);
       const created = new Date().toISOString();
       const V = coerceBodyVersion(version);
       const ownerLogin = ownerActorKey(meta, env);
@@ -29310,7 +29438,7 @@ const tdocHandlers = {
         await deliverInbox(env, target && target.login, {
           kind: 'reaction', slug, version: V, comment_id,
           thread_id: thread && thread.root && thread.root.id, target_id: comment_id,
-          actor: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
+          actor: personRef(s),
           title: (meta && meta.title) || slug, emoji,
         }, { ctx, origin: url.origin });
       }
@@ -31203,7 +31331,7 @@ const tdocHandlers = {
             target_id: asker,
             requester: asker,
             at: new Date().toISOString(),
-            actor: { login: asker, name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
+            actor: { ...personRef(session), login: asker },
         }, { ctx, origin: url.origin });
       }
       await env.META.put(dedupeKey, '1', { expirationTtl: 7 * 24 * 60 * 60 });
@@ -31265,7 +31393,7 @@ const tdocHandlers = {
           slug,
           title,
           actor: approver
-            ? { login: actorKey(approver), name: actorDisplayName(approver), avatar_url: approver.avatar_url || '' }
+            ? personRef(approver)
             : null,
         }, { ctx, origin: url.origin });
       }

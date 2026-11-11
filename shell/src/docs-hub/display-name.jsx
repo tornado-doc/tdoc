@@ -29,7 +29,7 @@ export function DisplayNameField({ profile, onSaved }) {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: value }),
+        body: JSON.stringify({ name: value.trim() }),
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) {

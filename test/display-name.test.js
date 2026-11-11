@@ -102,6 +102,7 @@ const PROVIDER_NAME = 'Jingyu Shi (Julie)';
       const r = (bobs.replies || []).find((x) => x.text === 'Agreed.');
       assert(r && r.author.name === 'Julie Shi', `${path} reply ${r && r.author.name}`);
       assert(!JSON.stringify(list).includes(PROVIDER_NAME), `${path} still shows the provider name`);
+      assert(!JSON.stringify(list).includes(alice.account_id), `${path} leaks the account id`);
     }
     const after = await readLog();
     assert(after.includes(PROVIDER_NAME), 'the stored snapshot lost the provider name');
@@ -153,7 +154,7 @@ const PROVIDER_NAME = 'Jingyu Shi (Julie)';
   });
 
   await t('an empty name goes back to the provider name, everywhere', async () => {
-    const r = await setName(aliceCookie, '   ');
+    const r = await setName(aliceCookie, '');
     assert(r.status === 200 && r.body.name === PROVIDER_NAME && r.body.display_name === '', JSON.stringify(r.body));
     const list = (await call('/api/comments?slug=plan')).body;
     assert(list.find((c) => c.id === root.body.id).author.name === PROVIDER_NAME, 'old comment did not fall back to its snapshot');
@@ -173,6 +174,125 @@ const PROVIDER_NAME = 'Jingyu Shi (Julie)';
     assert(byok.status === 404, `self-hosted ${byok.status}`);
     const prof = JSON.parse(env.META.map.get(`account-profile:${alice.account_id}`));
     assert(prof.display_name === 'Julie Shi', `a refused request changed the name to ${prof.display_name}`);
+  });
+
+  await t('L4: a body that does not parse, or names no `name`, changes nothing', async () => {
+    const before = env.META.map.get(`account-profile:${alice.account_id}`);
+    const bad = await worker.fetch(new Request('https://tdoc.dev/api/me/name', { method: 'POST', headers: { Cookie: aliceCookie, 'Content-Type': 'application/json', ...ORIGIN }, body: '{"name": ' }), env, {});
+    assert(bad.status === 400, `malformed ${bad.status}`);
+    for (const body of [{}, { nme: 'x' }, []]) {
+      const r = await call('/api/me/name', { method: 'POST', cookie: aliceCookie, body, headers: ORIGIN });
+      assert(r.status === 400, `${JSON.stringify(body)} -> ${r.status}`);
+    }
+    const blank = await setName(aliceCookie, '   ');
+    assert(blank.status === 400, `whitespace only ${blank.status}`);
+    assert(env.META.map.get(`account-profile:${alice.account_id}`) === before, 'a refused request changed the profile');
+  });
+
+  await t('L1: invisible, look-alike and link-shaped input', async () => {
+    const vera = await issue(worker, env, 'vera');
+    const cases = [
+      // [input, expected name | error]
+      ['\u202eVera\u2066 \u200dLin\u{e0041}\u{e007f}', 'Vera Lin'],
+      ['Vera\u034f\u17b4\u180b\ufe0f\u2800\uffa0 Lin', 'Vera Lin'],
+      ['José 李小龙', 'José 李小龙'],
+      ['\u2800\u2800\u3164', 'invalid_name'],
+      ['!!! ---', 'invalid_name'],
+      ['e\u0301\u0302\u0303\u0304\u0305', 'invalid_name'],
+      ['vera\uff20example.com', 'invalid_name'],
+      ['vera\ufe6bexample', 'invalid_name'],
+      ['\uff1cb\uff1eVera', 'invalid_name'],
+      ['https://spam.example', 'invalid_name'],
+      ['www.spam', 'invalid_name'],
+      ['Buy cheap.io', 'invalid_name'],
+      ['vera\uff0ecom', 'invalid_name'],
+    ];
+    for (const [input, want] of cases) {
+      const r = await setName(vera.cookie, input);
+      if (want === 'invalid_name') assert(r.status === 400 && r.body.error === 'invalid_name', `${JSON.stringify(input)} -> ${r.status} ${r.text}`);
+      else assert(r.status === 200 && r.body.name === want, `${JSON.stringify(input)} -> ${r.status} ${r.text}`);
+    }
+  });
+
+  await t('M2: names that pass for tdoc, an agent, a placeholder or a team agent are refused', async () => {
+    const rex = await issue(worker, env, 'rex');
+    const team = await call('/api/teams', { method: 'POST', cookie: rex.cookie, body: { name: 'Ops' }, headers: ORIGIN });
+    assert(team.status === 200, `team ${team.status} ${team.text}`);
+    const raw = JSON.parse(env.META.map.get(`team:${team.body.team.id}`));
+    raw.agents = [{ id: 'ta_0123456789abcdef', name: 'Report Bot' }];
+    env.META.map.set(`team:${raw.id}`, JSON.stringify(raw));
+    for (const name of ['tdoc', 'TDOC', 'tdoc AI', 'Tdoc  ai helper', 'td0c-AI', 'tdoc agent', 'Team agent', 'team-agent 2', 'Claude', 'CLAUDE CODE', 'C1aude', 'Codex', 'cursor', 'Gemini', 'grok',
+    ]) {
+      const r = await setName(rex.cookie, name);
+      assert(r.status === 400 && (r.body.error === 'reserved_name' || r.body.error === 'invalid_name'), `${JSON.stringify(name)} -> ${r.status} ${r.text}`);
+    }
+    // A second person in the same team: the rest of the list (20 saves an hour each).
+    const rae = await issue(worker, env, 'rae');
+    const ids = JSON.parse(env.META.map.get(`account-teams:${rae.account_id}`) || '[]');
+    env.META.map.set(`account-teams:${rae.account_id}`, JSON.stringify([...ids, raw.id]));
+    raw.members.push({ account_id: rae.account_id, key: 'rae', name: 'rae', role: 'member', joined: '2026-01-01T00:00:00.000Z' });
+    env.META.map.set(`team:${raw.id}`, JSON.stringify(raw));
+    for (const name of [
+      'Deleted user', 'anonymous', 'Someone', 'Agent', 'Julie · Claude', 'Julie \u2022 Claude', 'report bot', 'Rep0rt-B0t', '\uff34doc']) {
+      const r = await setName(rae.cookie, name);
+      assert(r.status === 400 && (r.body.error === 'reserved_name' || r.body.error === 'invalid_name'), `${JSON.stringify(name)} -> ${r.status} ${r.text}`);
+    }
+    for (const name of ['Claude Monet', 'Rex Tdocson']) {
+      const r = await setName(rex.cookie, name);
+      assert(r.status === 200, `${name} -> ${r.status} ${r.text}`);
+    }
+  });
+
+  await t('M1: an old comment shows a chosen name only while the account still holds that identity', async () => {
+    // Two accounts: carl still holds GitHub "carl"; erin's account once had
+    // "erin", gave it up on GitHub, and someone else wrote under "erin".
+    const carl = await issue(worker, env, 'carl');
+    const erin = await issue(worker, env, 'erin');
+    env.META.map.set(`account-github:${carl.account_id}`, JSON.stringify({ sub: '1001', handle: 'carl', linked_at: '2026-01-01T00:00:00.000Z' }));
+    env.META.map.set(`account-github:${erin.account_id}`, JSON.stringify({ sub: '1002', handle: 'erin-renamed', linked_at: '2026-01-01T00:00:00.000Z' }));
+    assert((await setName(carl.cookie, 'Carl Chosen')).status === 200, 'carl name');
+    assert((await setName(erin.cookie, 'Erin Chosen')).status === 200, 'erin name');
+    const at = '2026-01-02T00:00:00.000Z';
+    // Records from before account ids were stamped: a handle and a snapshot.
+    await env.META.put('meta:legacy', JSON.stringify({ title: 'Legacy', slug: 'legacy', created: at, versions: [{ n: 1, created: at }],
+      access: { visibility: 'public', commenting: 'signed_in' }, hosted: { account_id: carl.account_id, github_login: 'carl' } }));
+    await env.DOCS.put('docs/legacy/v1/index.html', '<h1>Legacy</h1><p>Old words.</p>');
+    await env.META.put('comments:legacy', JSON.stringify([
+      { id: 'c_old_carl', author: { login: 'carl', name: 'carl (old)', avatar_url: '' }, text: 'Old note.', created: at, version: 1, anchor: { kind: 'text', text: 'Old' } },
+      { id: 'c_old_erin', author: { login: 'erin', name: 'Erin Snapshot', avatar_url: '' }, text: 'Not the same erin.', created: at, version: 1, anchor: { kind: 'text', text: 'words' } },
+    ]));
+    const list = (await call('/api/comments?slug=legacy')).body;
+    const byId = Object.fromEntries(list.map((c) => [c.id, c]));
+    assert(byId.c_old_carl.author.name === 'Carl Chosen', `carl ${byId.c_old_carl.author.name}`);
+    assert(byId.c_old_erin.author.name === 'Erin Snapshot', `erin got ${byId.c_old_erin.author.name}`);
+    // New records carry the account: resolved by it, and the id never leaves.
+    const fresh = await call('/api/comments', { method: 'POST', cookie: erin.cookie, body: { slug: 'legacy', version: 1, text: 'New one.', anchor: { kind: 'text', text: 'Old' } } });
+    assert(fresh.status === 200 && fresh.body.author.name === 'Erin Chosen', `fresh ${fresh.text}`);
+    const all = await call('/api/comments?slug=legacy&version=all');
+    assert(!all.text.includes(erin.account_id) && !all.text.includes(carl.account_id), 'an account id left the worker');
+    assert(all.body.find((c) => c.id === fresh.body.id).author.name === 'Erin Chosen', 'fresh by account');
+  });
+
+  await t('L2: the @ list does not name accounts behind invite-only logins', async () => {
+    // Owner alice invites "carl" by handle; carl has never spoken on plan.
+    const meta = JSON.parse(env.META.map.get('meta:plan'));
+    meta.access = { ...(meta.access || {}), allowed_users: [...((meta.access && meta.access.allowed_users) || []), 'carl'] };
+    env.META.map.set('meta:plan', JSON.stringify(meta));
+    const m = (await call('/api/mentions?slug=plan', { cookie: aliceCookie })).body;
+    const c = m.users.find((u) => u.login === 'carl');
+    assert(c, `carl not listed: ${JSON.stringify(m.users)}`);
+    assert(c.name !== 'Carl Chosen', 'invite-only entry revealed the account name');
+    const b = m.users.find((u) => u.login === 'bob');
+    assert(b && b.name === 'bob', `participant ${JSON.stringify(b)}`);
+  });
+
+  await t('L6: agent-looking authors keep their names', async () => {
+    const out = await env.META.get('x');
+    assert(out === null);
+    const list = (await call('/api/comments?slug=plan')).body;
+    for (const c of list) for (const r of c.replies || []) {
+      if (r.author && r.author.kind === 'agent') assert(r.author.name !== 'Julie Shi', 'agent renamed');
+    }
   });
 
   await t('rate limited per account', async () => {
