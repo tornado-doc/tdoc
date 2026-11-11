@@ -7298,7 +7298,16 @@ function finiteBox(box) {
   return out;
 }
 
-function productAnchorWhere(anchor, tdocOrigin = null) {
+// tdoc's own origins: the one this request came to, and the public host
+// (a preview or workers.dev request still reads anchors left on tdoc.dev).
+function tdocOwnOrigins(env, requestOrigin) {
+  const out = new Set();
+  if (requestOrigin) out.add(requestOrigin);
+  if (env && env.PUBLIC_HOST) { try { out.add(new URL(`https://${env.PUBLIC_HOST}`).origin); } catch {} }
+  return out;
+}
+
+function productAnchorWhere(anchor, tdocOrigins = null) {
   if (!anchor || typeof anchor !== 'object' || anchor.kind !== 'product') return null;
   const str = (value, max) => (typeof value === 'string' && value ? value.slice(0, max) : undefined);
   const where = { url: str(anchor.url, 2000), selector: str(anchor.selector, 500), tag: str(anchor.tag, 40) };
@@ -7322,7 +7331,7 @@ function productAnchorWhere(anchor, tdocOrigin = null) {
   // Only on a page of tdoc itself, and kept small and on one line: it is the
   // doc author's content, measured by the author's page.
   let onTdoc = false;
-  try { onTdoc = Boolean(tdocOrigin) && new URL(anchor.url).origin === tdocOrigin; } catch {}
+  try { onTdoc = Boolean(tdocOrigins) && tdocOrigins.has(new URL(anchor.url).origin); } catch {}
   const frame = onTdoc && anchor.frame && typeof anchor.frame === 'object' ? anchor.frame : null;
   if (frame) {
     where.in_document = { selector: oneLine(frame.selector, 120), tag: oneLine(frame.tag, 40), text: oneLine(frame.text, 200) };
@@ -23958,12 +23967,14 @@ const MCP_TOOLS = {
       // An agent with a handle goes by it, as on the comment card, and keeps the
       // name it signed with: "(unverified app)" is not to be lost on the reader.
       const who = (a) => (a && (a.kind === 'agent' && a.handle ? `${a.handle} (${a.name})` : a.name || a.login)) || 'someone';
+      // Where anchor.frame is honoured: a page of tdoc itself.
+      const ownOrigins = tdocOwnOrigins(call.env, call.origin);
       const all = r.data.map((c) => ({
         id: c.id,
         author: who(c.author),
         text: c.text,
         anchor: c.anchor ? String(c.anchor.text || c.anchor.label || c.anchor.kind || '').replace(/\s+/g, ' ').trim() : '',
-        ...(productAnchorWhere(c.anchor, call.origin) ? { where: productAnchorWhere(c.anchor, call.origin) } : {}),
+        ...(productAnchorWhere(c.anchor, ownOrigins) ? { where: productAnchorWhere(c.anchor, ownOrigins) } : {}),
         status: c.status || 'open',
         resolved: !!c.resolved,
         version: c.created_in || c.version || null,
@@ -23971,7 +23982,7 @@ const MCP_TOOLS = {
         replies: (Array.isArray(c.replies) ? c.replies : []).map((rep) => ({ id: rep.id, author: who(rep.author), text: rep.text, agent_status: rep.agent_status || null })),
       }));
       const shown = args.include_resolved ? all : all.filter((c) => c.status !== 'applied' && !c.resolved);
-      const lines = shown.map((c) => `[${c.id}] ${c.author}${c.anchor ? ` on "${String(c.anchor).slice(0, 120)}"` : ''}${productAnchorLine(c.where)} (${c.status}${c.handoff ? `, handed to agent: ${c.handoff.status}` : ''}): ${c.text}${c.replies.length ? `\n${c.replies.map((rep) => `    ↳ ${rep.author}${rep.agent_status ? ` [${rep.agent_status}]` : ''}: ${rep.text}`).join('\n')}` : ''}`);
+      const lines = shown.map((c) => `[${c.id}] ${c.author}${c.anchor ? ` on "${oneLine(c.anchor, 120)}"` : ''}${productAnchorLine(c.where)} (${c.status}${c.handoff ? `, handed to agent: ${c.handoff.status}` : ''}): ${c.text}${c.replies.length ? `\n${c.replies.map((rep) => `    ↳ ${rep.author}${rep.agent_status ? ` [${rep.agent_status}]` : ''}: ${rep.text}`).join('\n')}` : ''}`);
       return mcpToolResult(shown.length ? lines.join('\n') : 'No open comments.', { ok: true, slug: ref.slug, comments: shown, total: all.length });
     },
   },

@@ -957,16 +957,23 @@ ${uiCss}
   }
   // The doc frame (re)loaded: the shell page's own load event for it, not
   // anything the frame says; at most once a second.
-  let lastFrameLoad = 0;
+  // A load inside that second is not dropped: one resend follows at its end.
+  let lastFrameLoad = 0, trailingLoad = 0;
+  function frameLoaded() {
+    lastFrameLoad = Date.now();
+    placesLast = '';
+    frameListeners.forEach((fn) => fn('ready'));
+  }
   document.addEventListener('load', (event) => {
     const frame = docFrame();
     if (!frame || event.target !== frame) return;
-    const now = Date.now();
-    if (now - lastFrameLoad < 1000) return;
-    lastFrameLoad = now;
-    placesLast = '';
-    frameListeners.forEach((fn) => fn('ready'));
+    const wait = lastFrameLoad + 1000 - Date.now();
+    if (wait <= 0) { frameLoaded(); return; }
+    if (!trailingLoad) trailingLoad = setTimeout(() => { trailingLoad = 0; frameLoaded(); }, wait);
   }, true);
+  // Whether the frame has been told of any anchors (so hiding has something
+  // to clear).
+  let frameAnchorsSent = false;
   function toFrame(message, frame = docFrame()) {
     if (!frame) return false;
     try { frame.contentWindow.postMessage({ ...message, source: 'tdoc-feedback' }, '*'); return true; } catch (_) { return false; }
@@ -1909,14 +1916,18 @@ ${uiCss}
       .map((c) => ({ ...c.anchor.frame, id: frameToken(c.id) })), [area.pageComments]);
     useEffect(() => {
       if (!shown || !docFrame()) return undefined;
-      const send = () => toFrame({ type: 'tdoc:fbAnchors', anchors: frameAnchors });
+      const send = () => { if (toFrame({ type: 'tdoc:fbAnchors', anchors: frameAnchors })) frameAnchorsSent = true; };
       send();
       const listen = (what) => { if (what === 'ready') send(); else setFrameTick((t) => t + 1); };
       frameListeners.add(listen);
       return () => { frameListeners.delete(listen); };
     }, [shown, frameAnchors, session]);
-    // Hidden: the frame forgets them (no pins, no marks, no reports).
-    useEffect(() => { if (!shown) toFrame({ type: 'tdoc:fbAnchors', anchors: [] }); }, [shown]);
+    // Shown → hidden, after the frame was told of anchors: it forgets them
+    // (no pins, no marks, no reports). Never sent otherwise.
+    useEffect(() => {
+      if (shown || !frameAnchorsSent) return;
+      if (toFrame({ type: 'tdoc:fbAnchors', anchors: [] })) frameAnchorsSent = false;
+    }, [shown]);
 
     // Quotes on this page are marked in the app's own text, through the CSS
     // Highlight API: one constructed stylesheet adopted by the page (an
