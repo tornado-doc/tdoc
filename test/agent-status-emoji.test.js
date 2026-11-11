@@ -150,6 +150,7 @@ async function loadWorker() {
   let src = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
   const readerCss = fs.readFileSync(path.join(root, 'server', 'reader.css'), 'utf8');
   src = src.replace(/const READER_CSS = `__TDOC_READER_CSS__`;/, 'const READER_CSS = ' + JSON.stringify(readerCss) + ';');
+  src = src.replace('/* __TDOC_DOC_TYPE__ */', () => fs.readFileSync(path.join(root, 'shared', 'doc-type.mjs'), 'utf8').replace(/^export /gm, ''));
   src = src.replace('/* __TDOC_SHELL_MODULE__ */', fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8'));
   src = src.replace(
     /const PROBE_JS = `__TDOC_PROBE_JS__`;/,

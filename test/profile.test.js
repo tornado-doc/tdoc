@@ -97,6 +97,7 @@ async function loadWorker() {
     /const READER_CSS = `__TDOC_READER_CSS__`;/,
     'const READER_CSS = ' + JSON.stringify(readerCss) + ';'
   );
+  src = src.replace('/* __TDOC_DOC_TYPE__ */', () => fs.readFileSync(path.join(root, 'shared', 'doc-type.mjs'), 'utf8').replace(/^export /gm, ''));
   const shellMod = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
   const probeJs = require(path.join(root, 'server', 'frame-probe-source.js'))();
   src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);

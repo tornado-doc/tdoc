@@ -1273,6 +1273,33 @@ function shellDocument(slug, version, nonce, reqUrl) {
   });
 }
 
+// What a local doc is (shared/doc-type.mjs, the rule the hosted list and the
+// sheets viewer use): the stamp a hosted meta carries when it is of this
+// version of the rule, else read off the head of the local file.
+let DocTypeRule = null;
+function docTypeRule() {
+  if (!DocTypeRule) {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'shared', 'doc-type.mjs'), 'utf8').replace(/^export /gm, '');
+    DocTypeRule = new Function(`${src}\nreturn { DOC_TYPE_VERSION, docTypeFromHtml };`)();
+  }
+  return DocTypeRule;
+}
+function localDocType(slug, latest, preview) {
+  const rule = docTypeRule();
+  if (Number(preview.kind_v) === rule.DOC_TYPE_VERSION && (preview.kind === 'sheet' || preview.kind === 'slides' || preview.kind === 'doc')) return preview.kind;
+  let fd = null;
+  try {
+    fd = fs.openSync(path.join(ROOT, slug, `v${latest}`, 'index.html'), 'r');
+    const buf = Buffer.alloc(256 * 1024);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    return rule.docTypeFromHtml(buf.subarray(0, n).toString('utf8'));
+  } catch {
+    return 'doc';
+  } finally {
+    if (fd !== null) try { fs.closeSync(fd); } catch {}
+  }
+}
+
 function localDocsData() {
   const docs = [];
   for (const entry of fs.readdirSync(ROOT, { withFileTypes: true })) {
@@ -1291,7 +1318,7 @@ function localDocsData() {
     const preview = meta.preview && typeof meta.preview === 'object' ? meta.preview : {};
     const excerpt = typeof preview.excerpt === 'string' ? preview.excerpt.slice(0, 220) : '';
     const image = typeof preview.image === 'string' && /^(?:https?:\/\/|\/)/i.test(preview.image) ? preview.image : '';
-    const docType = preview.kind === 'sheet' || preview.kind === 'slides' ? preview.kind : 'doc';
+    const docType = localDocType(slug, latest, preview);
     docs.push({ slug, title: meta.title || slug, latest, created, updated, owner: '', starred: false, folder: '', excerpt, image, doc_type: docType });
   }
   docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)) || a.title.localeCompare(b.title));

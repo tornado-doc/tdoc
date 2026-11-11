@@ -71,6 +71,7 @@ async function loadWorker() {
   let src = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
   const readerCss = fs.readFileSync(path.join(root, 'server', 'reader.css'), 'utf8');
   src = src.replace(/const READER_CSS = `__TDOC_READER_CSS__`;/, 'const READER_CSS = ' + JSON.stringify(readerCss) + ';');
+  src = src.replace('/* __TDOC_DOC_TYPE__ */', () => fs.readFileSync(path.join(root, 'shared', 'doc-type.mjs'), 'utf8').replace(/^export /gm, ''));
   const tmp = path.join(os.tmpdir(), `tdoc-wi-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
   fs.writeFileSync(tmp, src);
   const mod = await import(`file://${tmp}`);

@@ -19,7 +19,7 @@ const bundler = read('bin/tdoc-bundle');
   console.log('React worker shell architecture\n');
 
   await t('bundle embeds the shell, runtime and preview renderer assets', async () => {
-    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__', '__TDOC_FEEDBACK_JS__', '__TDOC_PUSH_SW_JS__', '__TDOC_NOTIFICATION_TEXT__', '__TDOC_PREVIEW_RENDERER__', '__TDOC_PREVIEW_WASM__', '__TDOC_PREVIEW_FONTS__', '__TDOC_PREVIEW_FONT_COVERAGE__', '__TDOC_PREVIEW_VALIDATOR__', '__TDOC_HTML_PARSER__', '__TDOC_VERSION_DIFF__', '__TDOC_BLOCK_LINT__']) {
+    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__', '__TDOC_FEEDBACK_JS__', '__TDOC_PUSH_SW_JS__', '__TDOC_NOTIFICATION_TEXT__', '/* __TDOC_DOC_TYPE__ */', '__TDOC_PREVIEW_RENDERER__', '__TDOC_PREVIEW_WASM__', '__TDOC_PREVIEW_FONTS__', '__TDOC_PREVIEW_FONT_COVERAGE__', '__TDOC_PREVIEW_VALIDATOR__', '__TDOC_HTML_PARSER__', '__TDOC_VERSION_DIFF__', '__TDOC_BLOCK_LINT__']) {
       if (!bundler.includes(marker)) throw new Error(`missing ${marker}`);
     }
     for (const retired of ['CHROME_MODULE', 'CHROME_JS', 'MANAGE_JS', 'SIGNIN_JS', 'ONBOARD_JS']) {

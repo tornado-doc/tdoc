@@ -19,8 +19,9 @@
 // change goes through the editor's own draft and Save (a new version).
 //
 // Served at /sheets-viewer.js and loaded by server/sheets-loader.js only when
-// the doc has a sheet. SheetQuery and SheetMarkup are shared/sheet-query.mjs
-// and shared/sheet-markup.mjs, inlined by server/sheets-source.js.
+// the doc has a sheet. SheetQuery, SheetMarkup and DocType are
+// shared/sheet-query.mjs, shared/sheet-markup.mjs and shared/doc-type.mjs,
+// inlined by server/sheets-source.js.
 (function () {
   'use strict';
   if (window === window.parent || window.__tdocSheets) return;
@@ -1756,8 +1757,10 @@
     return cleanName((h1 && h1.textContent) || document.title || 'Sheet');
   }
   // A doc whose only content is its sheet (a title and a note at most).
+  // The sheet-only rule is shared/doc-type.mjs's, the one My docs labels a
+  // doc "Sheet" by: a title and a note at most, around sheet tables.
   function isSheetOnly() {
-    var skip = SEL + ',[data-tdoc-provider],script,style,noscript,template,h1,.sheet-note,caption';
+    var skip = DocType.SHEET_ONLY_SKIP_SELECTOR;
     var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
       acceptNode: function (n) {
         if (n.nodeType === 1) return n.matches(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
@@ -1765,7 +1768,7 @@
       },
     });
     if (walker.nextNode()) return false;
-    return !Array.prototype.some.call(document.body.querySelectorAll('img,svg,video,canvas,iframe,figure'), function (el) { return !el.closest(skip); });
+    return !Array.prototype.some.call(document.body.querySelectorAll(DocType.SHEET_ONLY_MEDIA_SELECTOR), function (el) { return !el.closest(skip); });
   }
   // The sheet's own page: this doc, this version, `?sheet=<tab>`, carrying
   // the view of the moment it is pressed.
