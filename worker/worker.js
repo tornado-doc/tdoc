@@ -9935,7 +9935,7 @@ async function createDocForSession(env, req, session, { html, meta, version, tea
     ...meta,
     slug: newSlug,
     created: now,
-    versions: [{ n: 1, created: now, ...version }],
+    versions: [{ n: 1, created: now, ...version, ...(session && session.account_id ? { by_account: session.account_id } : {}) }],
     created_by: session.login,
   };
   delete incoming.workspace_id;
@@ -18363,6 +18363,7 @@ async function handleVersionRestore(env, req, url, slug, n) {
     baseVersion: latest,
     html,
     actorLogin: sessionLogin(auth.session) || '',
+    actorAccount: (auth.session && auth.session.account_id) || '',
     prompt: `Restored v${target}`,
     restored_from: target,
     // The old version's widget paths and widget files, not the latest's.
@@ -19543,6 +19544,7 @@ export class CommentsStore {
         ...(Number.isInteger(Number(op.restored_from)) && Number(op.restored_from) > 0 ? { restored_from: Number(op.restored_from) } : {}),
         sha: stamped.sha,
         ...(op.actorLogin ? { author: op.actorLogin } : {}),
+        ...(typeof op.actorAccount === 'string' && op.actorAccount ? { by_account: op.actorAccount.slice(0, 96) } : {}),
       });
       versions.sort((a, b) => Number(a.n) - Number(b.n));
       let pendingPreviewTask = null;
@@ -20587,9 +20589,9 @@ function blockLintOf(html) {
 // author wrote runs in the page that embeds it.
 //
 // Access: the person asking must be able to read the page (`page`, sent by
-// the shell from its own config, never by the frame) and the SHEET, and the
-// publisher of the page's latest version must be able to read the sheet too
-// (see handleSheetEmbed). The page grants nothing. Every refusal -- no such doc, in
+// the shell from its own config, never by the frame) and the SHEET, and
+// every account that wrote the page must be able to read the sheet too
+// (see handleSheetEmbed). Only the page's latest version embeds. Every refusal -- no such doc, in
 // Trash, private, not signed in, a feedback token for another doc -- is the
 // same answer with no title, so an embed cannot be used to learn whether a
 // private doc exists or what it is called.
@@ -20631,50 +20633,57 @@ function sheetEmbedOpenThreads(list) {
   }
   return n;
 }
-// Who published the page's latest version, as an identity the access rules
-// can read: the account that uploaded it (an agent, the CLI), the person who
-// saved it in the browser, a team agent (its team), else the page's owner.
-// For ACL checks only; never a session anything is attributed to. null when
-// nobody can be named: then nothing is embedded.
-async function sheetEmbedAuthorSession(env, pageMeta) {
-  const versions = Array.isArray(pageMeta && pageMeta.versions) ? pageMeta.versions : [];
-  const latest = latestVersionNumber(pageMeta);
-  const v = versions.find((x) => x && Number(x.n) === latest) || null;
-  const w = v ? versionWriter(pageMeta, v) : null;
-  if (w && w.kind === 'team_agent') {
-    return pageMeta.workspace_id
-      ? { id: null, login: '', email: '', linked_account_ids: [], linked_actor_keys: [], team_ids: [pageMeta.workspace_id], team_admin_ids: [] }
-      : null;
-  }
-  let accountId = w && w.kind === 'agent' ? w.account_id : null;
-  let login = w && w.kind === 'person' && !w.legacy ? String(w.login || '') : '';
-  if (!accountId && login) {
-    try { accountId = await sessionAccountId(env, { login }); } catch { accountId = null; }
-  }
-  if (!accountId && !login) {
-    accountId = (pageMeta.hosted && pageMeta.hosted.account_id) || null;
-    if (!accountId) login = hostedGithubLogin(pageMeta) || '';
-  }
-  if (!accountId) {
-    return login ? { id: null, login, email: login.startsWith('email:') ? login.slice(6) : '', linked_account_ids: [], linked_actor_keys: [], team_ids: [], team_admin_ids: [] } : null;
-  }
+// Every account that ever wrote the page, as identities the access rules can
+// read (ACL checks only; never a session anything is attributed to). The
+// card is drawn inside the page's document, so any of them -- not only the
+// latest -- shaped the markup it sits in. A version names its writer by
+// `by_account` (recorded on every write path) or as a team agent (its
+// team); a version that names nobody (older than by_account, a recovered
+// version, an admin token) is never guessed at: null, and nothing is
+// embedded until the page is published again by a named account. Also null
+// past SHEET_EMBED_MAX_WRITERS distinct writers.
+const SHEET_EMBED_MAX_WRITERS = 50;
+async function sheetEmbedAccountSession(env, accountId) {
   const group = await accountGroup(env, accountId);
   if (!group || group.unavailable || group.deleted_at || !group.canonical) return null;
   const keys = Array.isArray(group.actor_keys) ? group.actor_keys : [];
   const teamIds = await loadAccountTeamIds(env, group.canonical);
-  const email = (keys.find((k) => k.startsWith('email:')) || '').slice(6);
-  const name = login || (pageMeta.hosted && pageMeta.hosted.account_id === accountId && pageMeta.hosted.github_login) || keys.find((k) => !k.includes(':')) || '';
+  const login = keys.find((k) => !k.includes(':')) || '';
   return {
     id: null,
-    login: name.startsWith('email:') ? '' : name,
-    email,
+    login,
+    email: (keys.find((k) => k.startsWith('email:')) || '').slice(6),
     account_id: group.canonical,
     linked_account_ids: group.ids.filter((id) => id !== group.canonical),
     linked_actor_keys: keys,
     team_ids: teamIds,
     team_admin_ids: await loadAdminTeamIds(env, group.canonical, teamIds),
-    reborn: await loadReborn(env, [...keys, name].filter(Boolean)),
+    reborn: await loadReborn(env, keys),
   };
+}
+async function sheetEmbedWriters(env, pageMeta) {
+  const versions = Array.isArray(pageMeta && pageMeta.versions) ? pageMeta.versions : [];
+  if (!versions.length) return null;
+  const accounts = new Set();
+  let team = false;
+  for (const v of versions) {
+    if (!v || typeof v !== 'object') return null;
+    if (v.team_agent && v.team_agent.id) {
+      if (!pageMeta.workspace_id) return null;
+      team = true;
+    } else if (typeof v.by_account === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(v.by_account)) {
+      accounts.add(v.by_account);
+    } else return null;
+    if (accounts.size + (team ? 1 : 0) > SHEET_EMBED_MAX_WRITERS) return null;
+  }
+  const out = [];
+  if (team) out.push({ id: null, login: '', email: '', linked_account_ids: [], linked_actor_keys: [], team_ids: [pageMeta.workspace_id], team_admin_ids: [] });
+  for (const id of accounts) {
+    const session = await sheetEmbedAccountSession(env, id);
+    if (!session) return null;
+    out.push(session);
+  }
+  return out;
 }
 // The sheet's open thread count, kept a minute in the edge cache: a page
 // with embeds does not cost a Durable Object read per view. Read only after
@@ -20713,11 +20722,11 @@ async function handleSheetEmbed(env, req, url, ctx) {
   const denied = (session) => sheetEmbedJson({ error: 'no_access', signed_in: Boolean(sessionPrincipal(session)) }, 403);
   // Both must hold, or nothing is embedded (the same refusal either way):
   //  1. the reader may read the PAGE that embeds the sheet, and the SHEET;
-  //  2. whoever published the page's latest version may read the sheet.
+  //  2. every account that ever wrote the page may read the sheet
+  //     (sheetEmbedWriters: named on every version, or nothing embeds).
   // (2) is what stops a confused deputy: the card is drawn inside the
-  // author's document, so an author must never get a sheet drawn there that
-  // they could not read themselves -- whatever their CSS could observe of
-  // it, it observes only what they could already see.
+  // authors' document, so no author may get a sheet drawn there that they
+  // could not read themselves.
   const pageGate = await enforceDocAccess(env, req, page, null);
   if (!pageGate.ok) return denied(await getSession(env, req));
   const gate = await enforceDocAccess(env, req, ref.slug, null);
@@ -20726,9 +20735,14 @@ async function handleSheetEmbed(env, req, url, ctx) {
   const meta = gate.meta;
   const latest = latestVersionNumber(meta);
   if (!meta || !latest || !pageGate.meta) return denied(gate.session);
+  // Only the page's latest version embeds; an old one (history, a /v/<n>
+  // link) shows the figure's link. Says nothing about the sheet.
+  const pageVersion = Number(url.searchParams.get('pv'));
+  if (pageVersion !== latestVersionNumber(pageGate.meta)) return sheetEmbedJson({ error: 'old_version' }, 409);
   if (page !== ref.slug) {
-    const author = await sheetEmbedAuthorSession(env, pageGate.meta);
-    if (!author || !canReadDoc(accessFromMeta(meta), author, env, meta)) return denied(gate.session);
+    const writers = await sheetEmbedWriters(env, pageGate.meta);
+    const access = accessFromMeta(meta);
+    if (!writers || !writers.every((w) => canReadDoc(access, w, env, meta))) return denied(gate.session);
   }
   const docKey = `docs/${ref.slug}/v${latest}/index.html`;
   const params = `${ref.tab}\n${ref.tabIndex}\n${ref.view}\n${ref.rows}\n${ref.columns}`;
@@ -20781,7 +20795,7 @@ async function handleSheetEmbed(env, req, url, ctx) {
     ...data,
   };
   const entry = (Array.isArray(meta.versions) ? meta.versions : []).find((v) => Number(v.n) === latest);
-  const etag = `W/"${(await sha256Hex(`${page}\n${ref.slug}\n${latest}\n${entry && entry.sha || ''}\n${params}\n${comments}\n${title}`)).slice(0, 24)}"`;
+  const etag = `W/"${(await sha256Hex(`${page}\n${pageVersion}\n${ref.slug}\n${latest}\n${entry && entry.sha || ''}\n${params}\n${comments}\n${title}`)).slice(0, 24)}"`;
   if ((req.headers.get('if-none-match') || '') === etag) {
     return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': 'private, no-cache', 'Vary': 'Cookie, Authorization' } });
   }
@@ -21692,6 +21706,7 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
       baseVersion: latest,
       html: nextHtml,
       actorLogin: sessionLogin(session) || '',
+      actorAccount: (session && session.account_id) || '',
       prompt: `Accepted ${who} suggestion${good.length > 1 ? `s (${good.length})` : ''}: ${pairs}`.slice(0, 200),
       suggested_by: set.agent && set.agent.login ? String(set.agent.login).slice(0, 80) : 'agent',
       keep_title: true,
@@ -24150,7 +24165,7 @@ function mcpWritingGuide(style, kind) {
     // A deck is slides, not a reading page: its own rules follow below.
     // A live sheet from another doc (the sheets kind says more).
     ...(kind === 'slides' || kind === 'sheets' ? [] : [
-      '- Live sheet from a sheet doc: <figure data-tdoc-embed="sheet" data-src="/d/<slug>" data-rows="10"><a href="/d/<slug>">Name</a></figure> (latest rows; shows only if you and the reader can read the sheet).',
+      '- Live sheet from a sheet doc: <figure data-tdoc-embed="sheet" data-src="/d/<slug>" data-rows="10"><a href="/d/<slug>">Name</a></figure> (latest rows; shows only if every writer and the reader can read the sheet).',
     ]),
     ...(kind === 'slides' ? [] : [
       '- Stat tiles: <div class="tdoc-tiles"><div class="tdoc-tile"><p class="tdoc-tile-num">11%</p><p>what it counts</p></div>…</div>',
@@ -27762,7 +27777,7 @@ const tdocHandlers = {
         title,
         slug: newSlug,
         created: now,
-        versions: [{ n: 1, created: now, prompt: `Duplicated from ${slug} v${version}`, human: true, ...(sessionLogin(session) ? { author: sessionLogin(session) } : {}) }],
+        versions: [{ n: 1, created: now, prompt: `Duplicated from ${slug} v${version}`, human: true, ...(sessionLogin(session) ? { author: sessionLogin(session) } : {}), ...(session && session.account_id ? { by_account: session.account_id } : {}) }],
         source: { slug, version },
         duplicated_by: session.login,
         // Deliberately NOT inherited from the source: on tdoc.dev a reader may
@@ -31459,6 +31474,7 @@ const tdocHandlers = {
         baseVersion,
         html: doc,
         actorLogin: sessionLogin(auth.session) || '',
+        actorAccount: (auth.session && auth.session.account_id) || '',
       });
       return json(result.body, { status: result.status });
     }
@@ -32039,7 +32055,7 @@ const tdocHandlers = {
             // server's record of who wrote a version (docLastWriter decides
             // who may hand edits to an agent from them); a client cannot
             // write any of them.
-            const { token: _clientToken, team_agent: _clientAgent, by: _clientBy, publisher_agent: _clientPublisher, source: _clientSource, author: _clientAuthor, blank: _clientBlank, human: _clientHuman, restored_from: _clientRestored, suggested_by: _clientSuggested, unattributed: _clientUnattributed, ...clean } = item || {};
+            const { token: _clientToken, team_agent: _clientAgent, by: _clientBy, by_account: _clientByAccount, publisher_agent: _clientPublisher, source: _clientSource, author: _clientAuthor, blank: _clientBlank, human: _clientHuman, restored_from: _clientRestored, suggested_by: _clientSuggested, unattributed: _clientUnattributed, ...clean } = item || {};
             if (number === verNum) versionByNumber.set(number, clean);
             else if (!versionByNumber.has(number)) { versionByNumber.set(number, clean); clientOnly.add(number); }
           }
@@ -32061,6 +32077,10 @@ const tdocHandlers = {
           // Whose agent wrote it (docLastWriter): the account behind the token.
           if (auth.actor && auth.actor.kind === 'hosted' && auth.actor.account_id && !auth.actor.team_agent) storedEntry.by = auth.actor.account_id;
           else delete storedEntry.by;
+          // The account that wrote it, on every write path (sheetEmbedWriters
+          // reads it): a team agent is its team's, an admin token nobody's.
+          if (auth.actor && auth.actor.kind === 'hosted' && auth.actor.account_id && !auth.actor.team_agent) storedEntry.by_account = auth.actor.account_id;
+          else delete storedEntry.by_account;
           if (publishingAgent) storedEntry.publisher_agent = notifyTargetIdentity(publishingAgent);
           else delete storedEntry.publisher_agent;
           versionByNumber.set(verNum, storedEntry);
@@ -32070,7 +32090,7 @@ const tdocHandlers = {
           for (const number of clientOnly) {
             if (number === verNum) continue;
             const entry = { ...versionByNumber.get(number) };
-            for (const field of ['token', 'team_agent', 'by', 'publisher_agent']) {
+            for (const field of ['token', 'team_agent', 'by', 'by_account', 'publisher_agent']) {
               if (storedEntry[field]) entry[field] = storedEntry[field];
             }
             if (!entry.by && !entry.team_agent) entry.unattributed = true;

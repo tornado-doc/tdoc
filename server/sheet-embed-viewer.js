@@ -94,6 +94,7 @@
       + 'visibility:visible!important;opacity:1!important;transform:none!important;filter:none!important}\n';
   }
   var CSS = [
+    ':host(:focus-visible){outline:2px solid #1652f0!important;outline-offset:2px!important}',
     '.se{--se-accent:#1652f0;--se-ink:#17171a;--se-muted:#666670;--se-line:#e6e6ea;--se-head:#f7f7f8;',
     'box-sizing:border-box;height:100%;display:flex;flex-direction:column;margin:0;border:1px solid var(--se-line);border-radius:10px;background:#fff;color:var(--se-ink);',
     'font:13px/1.45 system-ui,sans-serif;text-align:left;overflow:hidden;-webkit-user-select:none;user-select:none}',
@@ -150,9 +151,13 @@
   // click handling would otherwise read a click on the card as a click on
   // the page), and only for these links.
   var targets = new WeakMap();
+  // No link inside the card is focusable, in any state: the host is the one
+  // stop in the tab order (the same in every state), and Enter on it opens
+  // the sheet. Pointer clicks still reach each link (onClick below).
   function link(cls, href, blank) {
     var a = h('a', cls);
     a.href = href;
+    a.tabIndex = -1;
     targets.set(a, { href: href, blank: !!blank });
     return a;
   }
@@ -174,6 +179,17 @@
       return;
     }
   }
+  function onKey(ev) {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    for (var i = 0; i < embeds.length; i++) {
+      if (ev.target !== embeds[i].host) continue;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      post({ type: 'tdoc:navigate', href: embeds[i].openHref, blank: !!(ev.metaKey || ev.ctrlKey) });
+      return;
+    }
+  }
+  window.addEventListener('keydown', onKey, true);
   window.addEventListener('click', onClick, true);
   window.addEventListener('auxclick', onClick, true);
 
@@ -243,6 +259,7 @@
 
   function renderData(embed, d) {
     var href = safeSheetHref(d.href, embed.slug);
+    embed.openHref = href;
     var card = frame(embed);
     var title = String(d.title || embed.slug);
     embed.title = title;
@@ -330,7 +347,9 @@
     }
     var href = '/d/' + embed.slug;
     var err = String(msg.error || '');
-    if (err === 'disabled') return fallback(embed);
+    // Off for this reader, or an old version of the page: nothing here is
+    // about the sheet, so the figure goes back to its link.
+    if (err === 'disabled' || err === 'old_version') return fallback(embed);
     setState(embed, err === 'no_access' ? 'no-access' : 'error');
     if (err === 'no_access') {
       renderMessage(embed, 'lock', 'You don’t have access to this sheet.', msg.signedIn === false ? 'Sign in, or ask its owner to share it.' : 'Ask its owner to share it with you.', href);
@@ -390,12 +409,16 @@
       host.setAttribute('data-tdoc-provider', '');
       host.setAttribute('data-tdoc-embed-host', '');
       host.setAttribute('contenteditable', 'false');
+      // The same in every state: one focus stop, one name, one action.
+      host.setAttribute('tabindex', '0');
+      host.setAttribute('role', 'link');
+      host.setAttribute('aria-label', 'Embedded sheet');
       fig.insertBefore(host, fig.firstChild);
       var embed = {
         id: 'e' + i, fig: fig, host: host, root: host.attachShadow({ mode: 'closed' }),
         slug: slug, src: attr('data-src'), tab: attr('data-tab'), view: attr('data-view'),
         rowsWanted: attr('data-rows'), columns: attr('data-columns'),
-        state: 'loading', rows: 0, rowsShown: rowsOf(attr('data-rows')), title: '', timer: null,
+        openHref: '/d/' + slug, state: 'loading', rows: 0, rowsShown: rowsOf(attr('data-rows')), title: '', timer: null,
       };
       embeds.push(embed);
       setState(embed, 'loading');

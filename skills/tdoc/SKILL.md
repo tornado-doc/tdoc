@@ -121,8 +121,8 @@ To show a standalone sheet inside another page, embed it by reference
 instead of copying its rows: `<figure data-tdoc-embed="sheet"
 data-src="/d/<sheet-slug>" data-tab="Tab" data-rows="10"><a
 href="/d/<sheet-slug>">Sheet name</a></figure>`. Readers see the sheet's
-latest rows live, only if both you (the page's publisher) and the reader
-can read the sheet; exports show the link. Use
+latest rows live, only if the reader and everyone who wrote the page
+(you included) can read the sheet; exports show the link. Use
 it when the data is kept up to date elsewhere or used by several pages; a
 small settled table stays a plain `<table>` (sheets.md, "Embed, or a table
 in the page?").

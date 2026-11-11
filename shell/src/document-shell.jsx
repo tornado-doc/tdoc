@@ -558,9 +558,11 @@ export function DocumentShell({ boot, config }) {
   const [docShape, setDocShape] = useState({ sheets: 0, sheetDoc: false });
   // The signed-out homepage remembers nothing about a visitor's view.
   const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity) });
+  const pageRef = useRef(null);
+  pageRef.current = { slug: config.slug, version: Number(config.version) || 0, latest: Math.max(...(config.versions || []).map((v) => Number(v.n) || 0), Number(config.version) || 0) };
   // Sheets embedded in the page (flag sheetEmbeds): the frame asks, this
   // fetches as the reader and answers on the request's own port.
-  const sheetEmbed = useMemo(() => createSheetEmbedHandler({ enabled: () => isFeatureOn('sheetEmbeds'), page: config.slug }), [config.slug]);
+  const sheetEmbed = useMemo(() => createSheetEmbedHandler({ enabled: () => isFeatureOn('sheetEmbeds'), page: () => pageRef.current }), []);
   const bridge = useFrameBridge({
     ...sheetHandlers,
     'tdoc:sheetEmbed': sheetEmbed,

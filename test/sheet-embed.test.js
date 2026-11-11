@@ -141,9 +141,9 @@ const root = path.join(__dirname, '..');
   const mallory = await issue(worker, env, 'mallory');
   const tess = await issue(worker, env, 'tess');
   await env.META.put(`account-teams:${tess.account_id}`, JSON.stringify([TEAM]));
-  async function seedPage(slug, by, access, extra = {}) {
+  async function seedPage(slug, by, access, extra = {}, versions = null) {
     await env.META.put(`meta:${slug}`, JSON.stringify({
-      title: slug, slug, created, versions: [{ n: 1, created, by: by.account_id }],
+      title: slug, slug, created, versions: versions || [{ n: 1, created, by: by.account_id, by_account: by.account_id }],
       hosted: { account_id: by.account_id, github_login: by.login },
       access: { history_visibility: 'owner', commenting: 'signed_in', allowed_users: [], ...access },
       ...extra,
@@ -155,10 +155,23 @@ const root = path.join(__dirname, '..');
   await seedPage('page-team', tess, { visibility: 'public' }, { workspace_id: TEAM });
   await seedPage('page-team-private', tess, { visibility: 'private', team: true }, { workspace_id: TEAM });
   await seedPage('page-private', owner, { visibility: 'private' });
+  const tom = await issue(worker, env, 'tom');
+  await env.META.put(`account-teams:${tom.account_id}`, JSON.stringify([TEAM]));
+  const gail = await issue(worker, env, 'gail');
+  const v = (n, extra) => ({ n, created, ...extra });
+  // Two team members wrote it.
+  await seedPage('page-team-two', tess, { visibility: 'private', team: true }, { workspace_id: TEAM }, [v(1, { by_account: tess.account_id }), v(2, { source: 'browser', by_account: tom.account_id })]);
+  // A guest editor's browser save (by an account that cannot read the sheet), then the owner's.
+  await seedPage('page-guest-edit', owner, { visibility: 'public' }, {}, [v(1, { by_account: owner.account_id }), v(2, { source: 'browser', by_account: gail.account_id }), v(3, { by_account: owner.account_id })]);
+  // A save from before writers were recorded (a Google/email session: no login, no id).
+  await seedPage('page-unnamed', owner, { visibility: 'public' }, {}, [v(1, { by_account: owner.account_id }), v(2, { source: 'browser', author: '' })]);
+  // A version from before by_account, even by the owner's agent.
+  await seedPage('page-legacy', owner, { visibility: 'public' }, {}, [v(1, { by: owner.account_id })]);
 
   const embed = async (slug, o = {}, q = '') => {
     const page = o.page === undefined ? 'page-owner' : o.page;
-    const r = await worker.fetch(req(`/api/embed/sheet?${page ? `page=${page}&` : ''}slug=${slug}&tab=Deals&rows=3${q}`, { headers: { 'Sec-Fetch-Site': 'same-origin', ...(o.headers || {}) }, ...o }), env, {});
+    const pv = o.pv === undefined ? (JSON.parse(await env.META.get(`meta:${page}`) || '{"versions":[]}').versions || []).reduce((m, x) => Math.max(m, x.n), 0) : o.pv;
+    const r = await worker.fetch(req(`/api/embed/sheet?${page ? `page=${page}&pv=${pv}&` : ''}slug=${slug}&tab=Deals&rows=3${q}`, { headers: { 'Sec-Fetch-Site': 'same-origin', ...(o.headers || {}) }, ...o }), env, {});
     const text = r.status === 304 ? '' : await r.text();
     let body = null;
     try { body = JSON.parse(text); } catch {}
@@ -226,6 +239,39 @@ const root = path.join(__dirname, '..');
     refused(await embed('s-team-other', { cookie: stranger, page: 'page-team-private' }), 'reader who cannot read the page');
   });
 
+  await t('every writer of the page must be able to read the sheet, on every version', async () => {
+    readable(await embed('s-private', { cookie: invited, page: 'page-owner' }), 'owner-only page');
+    // v2 by a guest editor who cannot read the sheet, v3 by the owner: refused
+    // on the latest, and an old version never embeds at all.
+    refused(await embed('s-private', { cookie: owner.cookie, page: 'page-guest-edit' }), 'guest editor then owner');
+    const old = await embed('s-private', { cookie: owner.cookie, page: 'page-guest-edit', pv: 2 });
+    assert(old.status === 409 && old.body.error === 'old_version' && !/Secret|Acme/.test(old.text), `old version: ${old.status} ${old.text}`);
+    // A version that names no account is never guessed to be the owner's.
+    refused(await embed('s-private', { cookie: owner.cookie, page: 'page-unnamed' }), 'unnamed browser save');
+    refused(await embed('s-private', { cookie: owner.cookie, page: 'page-legacy' }), 'version from before by_account');
+  });
+
+  await t('a team page whose writers can all read the team sheet works; one who left the team stops it', async () => {
+    readable(await embed('s-team-other', { cookie: member, page: 'page-team-two' }), 'two team writers');
+    await env.META.put(`account-teams:${tom.account_id}`, JSON.stringify([]));
+    refused(await embed('s-team-other', { cookie: member, page: 'page-team-two' }), 'a writer left the team');
+    await env.META.put(`account-teams:${tom.account_id}`, JSON.stringify([TEAM]));
+  });
+
+  await t('every write path records the writer\'s account (by_account)', async () => {
+    // Agent / CLI / MCP publish (all /api/upload).
+    const up = await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'page-written', version: 1, html: '<!doctype html><html><body><h1>W</h1><p>x</p></body></html>', meta: { title: 'W', versions: [{ n: 1, by_account: gail.account_id }] } } }), env, { waitUntil() {} });
+    assert(up.status === 200, `upload ${up.status} ${await up.text()}`);
+    let m = JSON.parse(await env.META.get('meta:page-written'));
+    assert(m.versions[0].by_account === owner.account_id, `upload: ${JSON.stringify(m.versions[0])}`);
+    // A browser save.
+    const save = await worker.fetch(req('/api/doc/versions', { method: 'POST', cookie: owner.cookie, headers: { Origin: 'https://tdoc.dev' }, body: { slug: 'page-written', baseVersion: 1, html: '<!doctype html><html><body><h1>W</h1><p>y</p></body></html>' } }), env, { waitUntil() {} });
+    assert(save.status === 200, `save ${save.status} ${await save.text()}`);
+    m = JSON.parse(await env.META.get('meta:page-written'));
+    assert(m.versions[1].by_account === owner.account_id, `browser save: ${JSON.stringify(m.versions[1])}`);
+    readable(await embed('s-private', { cookie: invited, page: 'page-written' }), 'a page written on the new paths');
+  });
+
   await t('the reader must be able to read the page, and the shell must name it', async () => {
     refused(await embed('s-public', { page: 'page-private' }), 'anonymous, private page');
     readable(await embed('s-public', { cookie: owner.cookie, page: 'page-private' }), 'owner, own private page');
@@ -269,10 +315,10 @@ const root = path.join(__dirname, '..');
     assert(cross.status === 403 && cross.body.error === 'cross_site', 'cross-site refused');
     const prose = await embed('s-prose');
     assert(prose.status === 422 && prose.body.error === 'not_a_sheet', `${prose.status}`);
-    const tab = await worker.fetch(req('/api/embed/sheet?page=page-owner&slug=s-public&tab=Nope', { headers: { 'Sec-Fetch-Site': 'same-origin' } }), env, {});
+    const tab = await worker.fetch(req('/api/embed/sheet?page=page-owner&pv=1&slug=s-public&tab=Nope', { headers: { 'Sec-Fetch-Site': 'same-origin' } }), env, {});
     const tb = await tab.json();
     assert(tab.status === 404 && tb.error === 'no_tab' && tb.tabs.join() === 'Deals,Contacts', JSON.stringify(tb));
-    const tabPrivate = await worker.fetch(req('/api/embed/sheet?page=page-owner&slug=s-private&tab=Nope', { cookie: stranger, headers: { 'Sec-Fetch-Site': 'same-origin' } }), env, {});
+    const tabPrivate = await worker.fetch(req('/api/embed/sheet?page=page-owner&pv=1&slug=s-private&tab=Nope', { cookie: stranger, headers: { 'Sec-Fetch-Site': 'same-origin' } }), env, {});
     assert(tabPrivate.status === 403 && !/Deals/.test(await tabPrivate.text()), 'tab names only for readers');
   });
 

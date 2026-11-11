@@ -75,6 +75,12 @@ ${figure('/d/finance-forecast', ' data-rows="5"', 'Finance forecast')}
 <h2>Next</h2><p>Close Granite before the end of the month.</p>
 </main></body></html>`, 'Weekly update');
 
+  // A page with two versions: only the latest embeds.
+  {
+    const html = fs.readFileSync(path.join(root, 'weekly-update', 'v1', 'index.html'), 'utf8');
+    for (const n of [1, 2]) { fs.mkdirSync(path.join(root, 'two-versions', `v${n}`), { recursive: true }); fs.writeFileSync(path.join(root, 'two-versions', `v${n}`, 'index.html'), html); }
+    fs.writeFileSync(path.join(root, 'two-versions', 'meta.json'), JSON.stringify({ slug: 'two-versions', title: 'Two versions', versions: [{ n: 1, created: new Date().toISOString() }, { n: 2, created: new Date().toISOString() }] }));
+  }
   const port = await reservePort();
   const server = spawn(process.execPath, [path.join(__dirname, '..', 'server', 'server.js')], {
     env: { ...process.env, TDOC_DIR: root, TDOC_PORT: String(port), TDOC_E2E_USER: 'owner' },
@@ -142,7 +148,10 @@ ${figure('/d/finance-forecast', ' data-rows="5"', 'Finance forecast')}
       const boxes = await frame.evaluate(() => Array.from(document.querySelectorAll('[data-tdoc-embed-host]')).map((h) => ({ h: h.getBoundingClientRect().height, attrs: h.getAttributeNames().sort().join() })));
       const expect = (rows) => 2 + 44 + 33 + rows * 34 + 32;
       assert(boxes[0].h === expect(3) && boxes[1].h === expect(5), JSON.stringify(boxes));
-      assert(boxes.every((b) => b.attrs === 'contenteditable,data-tdoc-embed-host,data-tdoc-provider'), JSON.stringify(boxes));
+      assert(boxes.every((b) => b.attrs === 'aria-label,contenteditable,data-tdoc-embed-host,data-tdoc-provider,role,tabindex'), JSON.stringify(boxes));
+      // The same focus stops in every state: the host only, never a link inside.
+      const focusables = await frame.evaluate(() => Array.from(document.querySelectorAll('[data-tdoc-embed-host]')).map((h) => [h.tabIndex, Array.from(h.shadowRoot.querySelectorAll('a,button,[tabindex]')).filter((n) => n.tabIndex >= 0).length].join(':')));
+      assert(focusables.every((f) => f === '0:0'), JSON.stringify(focusables));
       const hostile = await frame.evaluate(() => {
         const st = document.createElement('style');
         st.textContent = '[data-tdoc-embed-host]{display:none!important;height:1px!important;contain:none!important;font-family:Evil!important}';
@@ -192,6 +201,16 @@ ${figure('/d/finance-forecast', ' data-rows="5"', 'Finance forecast')}
       await page.frameLocator('iframe[aria-label="Document content"]').locator('.tdoc-sheet .ts-row').first().waitFor({ timeout: 15000 });
     });
 
+    await test('Enter on the focused card opens the sheet', async () => {
+      const frame = await openPage(page);
+      await settled(frame);
+      await frame.evaluate(() => document.querySelector('[data-tdoc-embed-host]').focus());
+      await Promise.all([
+        page.waitForURL((u) => u.pathname.startsWith('/d/q3-pipeline'), { timeout: 10000 }),
+        page.keyboard.press('Enter'),
+      ]);
+    });
+
     await test('in Comment mode a click on the card\'s title still opens the sheet', async () => {
       const frame = await openPage(page);
       await settled(frame);
@@ -226,6 +245,22 @@ ${figure('/d/finance-forecast', ' data-rows="5"', 'Finance forecast')}
       const info = await cf.evaluate(() => ({ hosts: document.querySelectorAll('[data-tdoc-embed-host]').length, link: getComputedStyle(document.querySelector('figure a')).display }));
       assert(info.hosts === 0 && info.link !== 'none', JSON.stringify(info));
       await raw.close();
+    });
+
+    await test('an old version of the page shows the links; the latest embeds', async () => {
+      const p = await desktop.newPage();
+      await p.goto(`${base}/d/two-versions/v/1`);
+      await p.frameLocator('iframe[aria-label="Document content"]').locator('h1').first().waitFor({ timeout: 15000 });
+      const old = frameOf(p);
+      await old.waitForFunction(() => window.__tdocSheetEmbeds && window.__tdocSheetEmbeds.list().length === 2 && window.__tdocSheetEmbeds.list().every((e) => e.state === 'fallback'), null, { timeout: 15000 });
+      const shown = await old.evaluate(() => Array.from(document.querySelectorAll('figure > a')).map((a) => getComputedStyle(a).display));
+      assert(shown.every((d) => d !== 'none'), JSON.stringify(shown));
+      await p.goto(`${base}/d/two-versions/v/2`);
+      await p.frameLocator('iframe[aria-label="Document content"]').locator('h1').first().waitFor({ timeout: 15000 });
+      const cur = frameOf(p);
+      await settled(cur);
+      assert((await cur.evaluate(() => window.__tdocSheetEmbeds.list()[0].state)) === 'live', 'latest embeds');
+      await p.close();
     });
 
     await test('flag off: the figure is its link, and no data is asked for', async () => {

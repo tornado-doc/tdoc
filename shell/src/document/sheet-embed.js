@@ -45,15 +45,17 @@ function str(value, max) {
   return typeof value === 'string' ? value.slice(0, max) : '';
 }
 
-// `page`: this page's slug, from the shell's own config (never from the
-// frame). The server embeds a sheet only if the reader can read this page
-// and the sheet, and this page's author can read the sheet.
+// `page`: { slug, version, latest } of the page on screen, from the shell's
+// own config (never from the frame). Only the latest version embeds (an old
+// one shows each figure's link). The server embeds a sheet only if the
+// reader can read this page and the sheet, and every account that wrote the
+// page can read the sheet.
 export function createSheetEmbedHandler({ enabled, page, fetchImpl = (...args) => fetch(...args) } = {}) {
   const answers = new Map();
 
   async function load(ref) {
-    const slug = typeof page === 'function' ? page() : page;
-    const query = `page=${encodeURIComponent(String(slug || ''))}&${embedQuery(ref)}`;
+    const p = (typeof page === 'function' ? page() : page) || {};
+    const query = `page=${encodeURIComponent(String(p.slug || ''))}&pv=${Number(p.version) || 0}&${embedQuery(ref)}`;
     const cached = answers.get(query);
     if (cached && Date.now() - cached.at < ANSWER_CACHE_MS) return cached.answer;
     const answer = (async () => {
@@ -81,6 +83,8 @@ export function createSheetEmbedHandler({ enabled, page, fetchImpl = (...args) =
     // Not the frame this shell opened: no answer at all.
     if (!message || !currentKey || message.key !== currentKey) { try { port.close(); } catch {} return; }
     if (!(typeof enabled === 'function' ? enabled() : enabled)) return reply({ ok: false, error: 'disabled' });
+    const p = (typeof page === 'function' ? page() : page) || {};
+    if (Number(p.version) !== Number(p.latest)) return reply({ ok: false, error: 'old_version' });
     if (++requestsThisLoad > MAX_REQUESTS) return reply({ ok: false, error: 'rate_limited' });
     const attrs = {
       'data-tdoc-embed': 'sheet',
