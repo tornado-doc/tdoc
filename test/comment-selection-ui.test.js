@@ -89,6 +89,19 @@ async function startServer(worker, env) {
     assert.equal(r.status, 200, JSON.stringify(r.body));
   };
   const comments = async (slug, version = 1) => (await call(`/api/comments?slug=${slug}&version=${version}`, { cookie })).body;
+  // Wait for a comment to reach the store. Not page.waitForFunction with an
+  // async predicate: Playwright only checks that the returned Promise is
+  // truthy, so it resolves after one fetch whatever the list holds, and the
+  // assertion then races the composer's POST (#997, #1001 flakes).
+  const savedComment = async (slug, text, timeout = 10000) => {
+    const until = Date.now() + timeout;
+    for (;;) {
+      const hit = (await comments(slug)).find((c) => c.text === text);
+      if (hit) return hit;
+      if (Date.now() > until) throw new Error(`"${text}" was never saved on ${slug}`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
   const post = async (slug, version, text, anchor) => {
     const r = await call('/api/comments', { method: 'POST', cookie, body: { slug, version, text, anchor } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -254,8 +267,7 @@ async function startServer(worker, env) {
       await shot(page, 'doc-area-composer');
       await composer.fill('This bar looks wrong');
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
-      await page.waitForFunction(async (s) => { const r = await fetch(`/api/comments?slug=${s}&version=1`); const list = await r.json(); return list.some((c) => c.text === 'This bar looks wrong'); }, slug, { timeout: 10000 });
-      const saved = (await comments(slug)).find((c) => c.text === 'This bar looks wrong');
+      const saved = await savedComment(slug, 'This bar looks wrong');
       assert.equal(saved.anchor.kind, 'element');
       assert.ok(saved.anchor.region && saved.anchor.region.frac, JSON.stringify(saved.anchor));
       assert.ok(saved.anchor.region.frac.width > 0.2 && saved.anchor.region.frac.width < 0.6, JSON.stringify(saved.anchor.region));
@@ -291,8 +303,7 @@ async function startServer(worker, env) {
         await composer.waitFor({ timeout: 8000 });
         await composer.fill('About the whole thing');
         await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
-        await page.waitForFunction(async (s) => { const r = await fetch(`/api/comments?slug=${s}&version=1`); return (await r.json()).some((c) => c.text === 'About the whole thing'); }, slug, { timeout: 10000 });
-        const saved = (await comments(slug)).find((c) => c.text === 'About the whole thing');
+        const saved = await savedComment(slug, 'About the whole thing');
         assert.ok(!saved.anchor || saved.anchor.kind === 'document', JSON.stringify(saved.anchor));
         assert.deepEqual(page.errors, []);
         await ctx.close();
@@ -321,8 +332,7 @@ async function startServer(worker, env) {
       await composer.waitFor({ timeout: 8000 });
       await composer.fill(`The whole page ${tag}`);
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
-      await page.waitForFunction(async ([s, text]) => (await (await fetch(`/api/comments?slug=${s}&version=1`)).json()).some((c) => c.text === text), [space.slug, `The whole page ${tag}`], { timeout: 10000 });
-      const saved = (await comments(space.slug)).find((c) => c.text === `The whole page ${tag}`);
+      const saved = await savedComment(space.slug, `The whole page ${tag}`);
       assert.equal(saved.anchor.page, true, JSON.stringify(saved.anchor));
       assert.equal(saved.anchor.url, `${base}/__page`);
       assert.deepEqual(page.errors, []);
@@ -352,8 +362,7 @@ async function startServer(worker, env) {
         await shot(page, 'widget-quote-composer');
         await composer.fill('Is this number right?');
         await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
-        await page.waitForFunction(async (s) => (await (await fetch(`/api/comments?slug=${s}&version=1`)).json()).some((c) => c.text === 'Is this number right?'), space.slug, { timeout: 10000 });
-        const saved = (await comments(space.slug)).find((c) => c.text === 'Is this number right?');
+        const saved = await savedComment(space.slug, 'Is this number right?');
         assert.ok(saved.anchor.quote && /1,284/.test(saved.anchor.quote.text), JSON.stringify(saved.anchor));
         assert.ok(saved.anchor.quote.context_before.length > 0, 'no context saved');
         // Reload: the pin sits on the words, and they are marked in the page.
