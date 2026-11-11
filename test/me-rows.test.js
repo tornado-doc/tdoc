@@ -265,41 +265,55 @@ const PROSE_WITH_SHEET = `<h1>Runs and plan</h1><p>What we ran, and what is next
     eq([cache.t['q-sheet'], cache.t['q-deck']], [{ v: 2, kind: 'sheet' }, { v: 2, kind: 'slides' }]);
   });
 
-  await t('types stamped or cached by the old rule (v1: any sheet table is a sheet) are ignored and detected again; GET never writes meta', async () => {
+  await t('old-rule (v1) types: "doc" and "slides" are trusted, a v1 "sheet" is ignored and detected again; GET never writes meta', async () => {
     const env = makeEnv(mod.CommentsStore);
     const tok = await issue(worker, env, 'owner');
     const owner = await putSession(env, 'owner');
-    for (const [slug, html] of [['m-stamped', PROSE_WITH_SHEET], ['m-cached', PROSE_WITH_SHEET], ['m-sheet', SHEET]]) {
+    const docs = [
+      ['m-stamped', PROSE_WITH_SHEET], ['m-cached', PROSE_WITH_SHEET], ['m-sheet', SHEET],
+      ['m-v1-deck', DECK], ['m-v1-doc', PROSE], ['m-c-deck', DECK], ['m-c-doc', PROSE],
+    ];
+    for (const [slug, html] of docs) {
       const up = await call(env, '/api/upload', { method: 'POST', token: tok.token, body: { slug, version: 1, html } });
       assert(up.status === 200, `upload ${slug}: ${up.status} ${up.text}`);
     }
-    // What v1 left behind: a v1 stamp (no kind_v) saying sheet on the meta,
-    // and a bare-string answer in the viewer's record.
-    const stamped = JSON.parse(await env.META.get('meta:m-stamped'));
-    stamped.preview.kind = 'sheet';
-    delete stamped.preview.kind_v;
-    await env.META.put('meta:m-stamped', JSON.stringify(stamped));
-    const cached = JSON.parse(await env.META.get('meta:m-cached'));
-    delete cached.preview.kind;
-    delete cached.preview.kind_v;
-    await env.META.put('meta:m-cached', JSON.stringify(cached));
-    await env.META.put('doc-types:owner', JSON.stringify({ t: { 'm-cached': 'sheet', 'm-stamped': 'sheet' }, f: {} }));
+    // What v1 left behind: stamps without kind_v on the meta, and bare-string
+    // answers in the viewer's record.
+    const restamp = async (slug, kind) => {
+      const meta = JSON.parse(await env.META.get(`meta:${slug}`));
+      if (kind) meta.preview.kind = kind; else delete meta.preview.kind;
+      delete meta.preview.kind_v;
+      await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+    };
+    await restamp('m-stamped', 'sheet');
+    await restamp('m-v1-deck', 'slides');
+    await restamp('m-v1-doc', 'doc');
+    for (const slug of ['m-cached', 'm-c-deck', 'm-c-doc']) await restamp(slug, null);
+    await env.META.put('doc-types:owner', JSON.stringify({ t: { 'm-cached': 'sheet', 'm-stamped': 'sheet', 'm-c-deck': 'slides', 'm-c-doc': 'doc' }, f: {} }));
     const metaBefore = await env.META.get('meta:m-stamped');
     const writes = [];
+    const reads = [];
     const put = env.META.put.bind(env.META);
+    const get = env.DOCS.get.bind(env.DOCS);
     env.META.put = async (k, v, o) => { writes.push(k); return put(k, v, o); };
+    env.DOCS.get = async (k, o) => { reads.push(k); return get(k, o); };
     try {
       const waits = [];
       const first = await me(env, owner, { waitUntil: (p) => waits.push(p) });
-      eq([row(first.docs, 'm-stamped').doc_type, row(first.docs, 'm-cached').doc_type], ['doc', 'doc'], 'an old "sheet" is not shown');
+      const types = (list, slugs) => slugs.map((slug) => row(list, slug).doc_type);
+      eq(types(first.docs, ['m-stamped', 'm-cached']), ['doc', 'doc'], 'an old "sheet" is not shown');
       eq(row(first.docs, 'm-sheet').doc_type, 'sheet', 'a current stamp is');
+      eq(types(first.docs, ['m-v1-deck', 'm-v1-doc', 'm-c-deck', 'm-c-doc']), ['slides', 'doc', 'slides', 'doc'], 'old doc / slides are trusted at once');
       await Promise.all(waits);
+      eq([...new Set(reads.map((k) => k.split('/')[1]))].sort(), ['m-cached', 'm-stamped'], 'only the old sheets are read again');
       const cache = JSON.parse(await env.META.get('doc-types:owner'));
       eq([cache.t['m-stamped'], cache.t['m-cached']], [{ v: 2, kind: 'doc' }, { v: 2, kind: 'doc' }], 'detected again');
+      eq([cache.t['m-c-deck'], cache.t['m-c-doc']], [{ v: 2, kind: 'slides' }, { v: 2, kind: 'doc' }], 'trusted answers kept');
       const second = await me(env, owner, { waitUntil: (p) => waits.push(p) });
-      eq([row(second.docs, 'm-stamped').doc_type, row(second.docs, 'm-cached').doc_type], ['doc', 'doc']);
+      eq(types(second.docs, ['m-stamped', 'm-cached', 'm-c-deck', 'm-c-doc']), ['doc', 'doc', 'slides', 'doc']);
     } finally {
       env.META.put = put;
+      env.DOCS.get = get;
     }
     eq(writes.filter((k) => k.startsWith('meta:')), [], 'a hub load wrote doc meta');
     eq(await env.META.get('meta:m-stamped'), metaBefore, 'meta changed on GET');

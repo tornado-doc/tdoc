@@ -12950,13 +12950,20 @@ async function putAccountProfile(env, accountId, patch) {
 // htmlHasTagAttr and DOC_TYPE_VERSION come from there.
 /* __TDOC_DOC_TYPE__ */
 // The type a publish stamped, or '' for a doc published before that or
-// stamped by another version of the rule (v1 called any doc holding a sheet
-// table a sheet): those are detected again (fillDocTypes).
+// stamped by another version of the rule: those are detected again
+// (fillDocTypes). A v1 stamp (no kind_v) of "doc" or "slides" still holds --
+// v1 differed only in calling a prose doc holding a sheet table a sheet -- so
+// only a v1 "sheet" is detected again.
 function docTypeOfMeta(meta) {
   const preview = meta && meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
-  if (!preview || Number(preview.kind_v) !== DOC_TYPE_VERSION) return '';
-  const kind = preview.kind;
-  return kind === 'sheet' || kind === 'slides' || kind === 'doc' ? kind : '';
+  if (!preview) return '';
+  return docTypeOfStamp(preview.kind_v === undefined ? 1 : preview.kind_v, preview.kind);
+}
+// A type stamped or cached by version v of the rule, if it holds under this one.
+function docTypeOfStamp(v, kind) {
+  if (kind !== 'sheet' && kind !== 'slides' && kind !== 'doc') return '';
+  if (Number(v) === DOC_TYPE_VERSION) return kind;
+  return Number(v) === 1 && kind !== 'sheet' ? kind : '';
 }
 
 function docPreviewFromHtml(html, { slug, version, title } = {}) {
@@ -13414,10 +13421,11 @@ async function fillMissingPreviewCards(env, slugs) {
 // meta itself, which wins. A doc that could not be read is left alone for a
 // day (so it neither blocks the others nor costs every load).
 //
-// Each answer is kept as { v, kind }, v the rule's DOC_TYPE_VERSION: an
-// answer of another version (v1 stored a bare string, and called a prose doc
-// holding a sheet table a sheet) is dropped on read and the doc detected
-// again, exactly like a meta stamp of another version.
+// Each answer is kept as { v, kind }, v the rule's DOC_TYPE_VERSION. v1
+// stored a bare string and called a prose doc holding a sheet table a sheet:
+// its "doc" and "slides" still hold and are kept; its "sheet", and an answer
+// of any other version, is dropped on read and the doc detected again,
+// exactly like a meta stamp (docTypeOfStamp).
 const DOC_TYPE_FILL_PER_LOAD = 6;
 const DOC_TYPE_SCAN_BYTES = 256 * 1024;
 const DOC_TYPE_CACHE_MAX = 2000;
@@ -13433,8 +13441,10 @@ function cleanDocTypeCache(raw) {
   const out = { t: {}, f: {} };
   if (!parsed || typeof parsed !== 'object') return out;
   for (const [slug, entry] of Object.entries(parsed.t || {})) {
-    if (!isValidSlug(slug) || !entry || typeof entry !== 'object' || Number(entry.v) !== DOC_TYPE_VERSION || !DOC_TYPES.has(entry.kind)) continue;
-    out.t[slug] = entry.kind;
+    if (!isValidSlug(slug) || !entry) continue;
+    const kind = typeof entry === 'string' ? docTypeOfStamp(1, entry)
+      : typeof entry === 'object' ? docTypeOfStamp(entry.v, entry.kind) : '';
+    if (DOC_TYPES.has(kind)) out.t[slug] = kind;
   }
   for (const [slug, at] of Object.entries(parsed.f || {})) if (isValidSlug(slug) && Number.isFinite(Number(at))) out.f[slug] = Number(at);
   return out;

@@ -1274,8 +1274,8 @@ function shellDocument(slug, version, nonce, reqUrl) {
 }
 
 // What a local doc is (shared/doc-type.mjs, the rule the hosted list and the
-// sheets viewer use): the stamp a hosted meta carries when it is of this
-// version of the rule, else read off the head of the local file.
+// sheets viewer use): the stamp a hosted meta carries when it holds under
+// this version of the rule, else read off the head of the local file.
 let DocTypeRule = null;
 function docTypeRule() {
   if (!DocTypeRule) {
@@ -1286,7 +1286,10 @@ function docTypeRule() {
 }
 function localDocType(slug, latest, preview) {
   const rule = docTypeRule();
-  if (Number(preview.kind_v) === rule.DOC_TYPE_VERSION && (preview.kind === 'sheet' || preview.kind === 'slides' || preview.kind === 'doc')) return preview.kind;
+  const kind = preview.kind === 'sheet' || preview.kind === 'slides' || preview.kind === 'doc' ? preview.kind : '';
+  // A v1 stamp (no kind_v) of doc or slides still holds; only its "sheet" is not trusted.
+  const v = preview.kind_v === undefined ? 1 : Number(preview.kind_v);
+  if (kind && (v === rule.DOC_TYPE_VERSION || (v === 1 && kind !== 'sheet'))) return kind;
   let fd = null;
   try {
     fd = fs.openSync(path.join(ROOT, slug, `v${latest}`, 'index.html'), 'r');

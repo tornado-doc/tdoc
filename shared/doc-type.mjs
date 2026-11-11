@@ -17,8 +17,10 @@
 // inlined into the worker and into the frame.
 
 // Bumped whenever the rule changes: a stamp (meta.preview.kind_v) or a cached
-// answer (doc-types:<actor>) of another version is ignored and detected
-// again. v1 (#1008) called any doc holding a sheet table a sheet.
+// answer (doc-types:<actor>) that may not hold under this version is ignored
+// and detected again. v1 (#1008) called any doc holding a sheet table a
+// sheet, so of its answers only "sheet" is detected again: its "doc" and
+// "slides" still hold (worker docTypeOfStamp).
 export const DOC_TYPE_VERSION = 2;
 
 // The sheet-only rule, as data: outside these elements a sheet-only doc's
