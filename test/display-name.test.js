@@ -366,13 +366,60 @@ const PROVIDER_NAME = 'Jingyu Shi (Julie)';
 
   await t('N4/N6: look-alike scripts, runtime prefixes, separators and dotted hosts are refused', async () => {
     const pat = await issue(worker, env, 'pat');
-    for (const name of ['\u0421laude', 'C\u043edex', '\u0442\u0434oc', 'tdo\u0441', '\u03a4doc AI', 'Claude Monet', 'Codex helper', 'Claude: Julie', 'Grok!',
-      'Julie – Claude', 'Julie — Claude', 'Julie | Claude', 'Julie / Claude', 'shop\u3002example', 'shop\uff61example', 'buy.cheap', 'St.John', '10.0.0.1']) {
+    for (const name of ['\u0421laude', 'C\u043edex', '\u0442\u0434oc', 'tdo\u0441', '\u03a4doc AI', 'Claude: Julie', 'Grok!',
+      'Julie – Claude', 'Julie — Claude', 'Julie | Claude', 'Julie / Claude', 'shop\u3002example', 'shop\uff61example', 'buy.cheap', '10.0.0.1']) {
       const r = await setName(pat.cookie, name);
       assert(r.status === 400 && (r.body.error === 'reserved_name' || r.body.error === 'invalid_name'), `${JSON.stringify(name)} -> ${r.status} ${r.text}`);
     }
     const ok = await setName(pat.cookie, 'Сергей Петров');
     assert(ok.status === 200, `all-Cyrillic name refused: ${ok.text}`);
+  });
+
+  await t('R1: team review and the @ list keep upload and agent protections', async () => {
+    // A team doc: a legacy thread whose reply carries an agent verdict from
+    // helperbot (who has a chosen name), and a comment uploaded naming carl.
+    const otto = await issue(worker, env, 'otto');
+    const team = await call('/api/teams', { method: 'POST', cookie: otto.cookie, body: { name: 'Review' }, headers: ORIGIN });
+    assert(team.status === 200, `team ${team.status} ${team.text}`);
+    const at = '2026-01-06T00:00:00.000Z';
+    await env.META.put('comments:opsdoc', JSON.stringify([
+      { id: 'c_ops', author: { login: 'otto', name: 'otto', avatar_url: '' }, text: 'q', created: at, version: 1, anchor: { kind: 'text', text: 'Words' },
+        replies: [{ id: 'r_ops', author: { login: 'helperbot', name: 'Helper (agent)', avatar_url: '' }, text: 'done', created: at, agent_status: 'answered' }] },
+    ]));
+    const up = await call('/api/upload', { method: 'POST', token: otto.token, body: { slug: 'opsdoc', version: 1, html: '<h1>Ops</h1><p>Words.</p>',
+      comments: [{ id: 'c_ops_forged', author: { login: 'carl', name: 'Forged Carl', avatar_url: '' }, text: 'f', created: at, version: 1, anchor: { kind: 'text', text: 'Words' } }] } });
+    assert(up.status === 200, `upload ${up.status} ${up.text}`);
+    const moved = await call('/api/team/move', { method: 'POST', cookie: otto.cookie, body: { slugs: ['opsdoc'], team: team.body.team.id }, headers: ORIGIN });
+    assert(moved.status === 200, `move ${moved.status} ${moved.text}`);
+    const review = await call(`/api/team/comments?id=${team.body.team.id}`, { cookie: otto.cookie });
+    assert(review.status === 200, `review ${review.status} ${review.text}`);
+    assert(!review.text.includes('Carl Chosen') && !review.text.includes('Helper Person'), `team review renamed: ${review.text.slice(0, 600)}`);
+    const items = review.body.items || [];
+    const forgedRow = items.find((x) => x.id === 'c_ops_forged');
+    const agentRow = items.find((x) => x.id === 'r_ops');
+    assert(forgedRow && forgedRow.author.name === 'Forged Carl', `forged ${JSON.stringify(forgedRow)}`);
+    assert(agentRow && agentRow.author.name === 'Helper (agent)' && agentRow.author.kind === 'agent', `agent ${JSON.stringify(agentRow)}`);
+    assert(!/account_id|github_id/.test(review.text), 'ids left the worker');
+    // The @ list on the same doc: the uploaded carl is not resolved, and
+    // helperbot (an agent here) is not offered.
+    const m = (await call('/api/mentions?slug=opsdoc', { cookie: otto.cookie })).body;
+    const c = m.users.find((u) => u.login === 'carl');
+    assert(c && c.name === 'Forged Carl', `@ carl ${JSON.stringify(c)}`);
+    assert(!m.users.some((u) => u.login === 'helperbot'), `agent offered: ${JSON.stringify(m.users)}`);
+    assert(!/account_id|github_id/.test(JSON.stringify(m)), 'ids in the @ list');
+  });
+
+  await t('R2: real names pass; agent-ish, look-alike and host-shaped ones do not', async () => {
+    const quinn = await issue(worker, env, 'quinn');
+    for (const name of ['Claude Dupont', 'Claude Monet', 'Dr.Smith', 'St.John', 'Alexei (Алексей)', 'Claudette Roy']) {
+      const r = await setName(quinn.cookie, name);
+      assert(r.status === 200 && r.body.name === name, `${JSON.stringify(name)} -> ${r.status} ${r.text}`);
+    }
+    const uma = await issue(worker, env, 'uma');
+    for (const name of ['Claude AI', 'Claude Bot', 'Codex agent', 'Gemini Assistant', 'Grok GPT', 'Claude Code', 'Claude: Julie', 'Claude, Julie', '\u0421laude', '\u1d1bdoc', '\u1d1b\u1d05\u1d0f\u1d04 AI', 'evil.fr', 'x.shop/path', 'buy.cheap']) {
+      const r = await setName(uma.cookie, name);
+      assert(r.status === 400 && (r.body.error === 'reserved_name' || r.body.error === 'invalid_name'), `${JSON.stringify(name)} -> ${r.status} ${r.text}`);
+    }
   });
 
   await t('rate limited per account', async () => {

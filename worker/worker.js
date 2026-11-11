@@ -7285,17 +7285,24 @@ async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
 // also gives the first rows back quickly while the rest continue loading.
 const TEAM_COMMENT_DOC_PAGE = 12;
 
-function teamCommentAuthor(author) {
+// `agentVerdict`: the reply carries an agent's status, so its author is an
+// agent whatever its login says. The fields display names need (imported,
+// account and GitHub ids) ride along; redactCommentEmails resolves and
+// drops the ids on the way out.
+function teamCommentAuthor(author, { agentVerdict = false } = {}) {
   const a = author && typeof author === 'object' ? author : {};
   const login = typeof a.login === 'string' ? a.login : '';
   const email = login.startsWith('email:') ? normalizeEmail(login.slice(6)) : null;
+  const kind = a.kind === 'agent' || agentVerdict ? 'agent'
+    : (typeof a.kind === 'string' && a.kind && a.kind !== 'human' ? a.kind : 'human');
   return {
     key: normalizeActorKey(login) || login,
     name: String(a.name || (email ? email.split('@')[0] : login) || 'Someone').slice(0, 100),
     avatar_url: typeof a.avatar_url === 'string' ? a.avatar_url : '',
-    kind: a.kind === 'agent' ? 'agent' : 'human',
-    // Resolved to the chosen name and dropped on the way out (redactCommentEmails).
+    kind,
+    ...(a.imported ? { imported: true } : {}),
     ...(typeof a.account_id === 'string' && a.account_id ? { account_id: a.account_id } : {}),
+    ...(typeof a.github_id === 'string' && a.github_id ? { github_id: a.github_id } : {}),
   };
 }
 
@@ -7377,7 +7384,7 @@ function teamCommentRows(slug, meta, list) {
         version: Math.max(1, Number(reply.created_in || reply.version || thread.created_in || thread.version) || 1),
         text: String(reply.text || '').slice(0, 2000),
         created: reply.created || '',
-        author: teamCommentAuthor(reply.author),
+        author: teamCommentAuthor(reply.author, { agentVerdict: reply.agent_status != null }),
       });
     }
   }
@@ -12467,6 +12474,9 @@ const DISPLAY_NAME_MAX = 60;
 const DISPLAY_NAME_STRIP_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164\uffa0\ufe00-\ufe0f\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
 // Folded with suggestNameSkeleton when compared, as names are.
 const DISPLAY_NAME_RUNTIMES = ['claude', 'claude code', 'codex', 'cursor', 'gemini', 'grok', 'chatgpt', 'copilot'];
+// Words after a runtime's name that make it read as the agent itself
+// (skeleton form: l -> i).
+const DISPLAY_NAME_AGENTISH = new Set(['ai', 'bot', 'agent', 'code', 'assistant', 'gpt', 'agents', 'bots']);
 const DISPLAY_NAME_RESERVED = ['agent', 'deleted user', 'anonymous', 'someone', 'tdoc', 'system', 'admin'];
 // Separators tdoc itself puts between an agent and its owner ("Claude ·
 // Julie"), their look-alikes, and the dashes, bars and slashes that read the
@@ -12485,6 +12495,11 @@ const DISPLAY_NAME_CONFUSABLES = new Map([
   [0x03c7, 'x'], [0x03b5, 'e'], [0x03c5, 'u'], [0x0391, 'a'], [0x039f, 'o'], [0x03a1, 'p'], [0x03a4, 't'],
   [0x0399, 'i'], [0x039a, 'k'], [0x03a7, 'x'], [0x0395, 'e'], [0x039d, 'n'], [0x039c, 'm'], [0x0392, 'b'],
   [0x0396, 'z'], [0x0397, 'h'], [0x03a5, 'y'],
+  // Latin small capitals: Latin script, so the mixed-script rule misses them.
+  [0x1d00, 'a'], [0x1d04, 'c'], [0x1d05, 'd'], [0x1d07, 'e'], [0x1d0a, 'j'], [0x1d0b, 'k'], [0x1d0c, 'l'],
+  [0x1d0d, 'm'], [0x1d0f, 'o'], [0x1d18, 'p'], [0x1d1b, 't'], [0x1d1c, 'u'], [0x1d20, 'v'], [0x1d21, 'w'],
+  [0x1d22, 'z'], [0x0299, 'b'], [0x0262, 'g'], [0x029c, 'h'], [0x026a, 'i'], [0x0274, 'n'], [0x0280, 'r'],
+  [0x028f, 'y'],
 ]);
 function foldConfusables(s) {
   return [...s].map((ch) => DISPLAY_NAME_CONFUSABLES.get(ch.codePointAt(0)) || ch).join('');
@@ -12501,9 +12516,16 @@ function displayNameReserved(folded, teamAgentNames = []) {
   const v = suggestNameSkeleton(foldConfusables(folded.toLowerCase()).replace(/[^\p{L}\p{N}]+/gu, ' '));
   const tight = v.replace(/ /g, '');
   if (DISPLAY_NAME_RESERVED.some((r) => suggestNameSkeleton(r) === v)) return true;
-  // A runtime's name alone or leading the name ("Claude", "Claude: Julie",
-  // "Codex helper"), at a word boundary.
-  if (DISPLAY_NAME_RUNTIMES.some((r) => { const k = suggestNameSkeleton(r); return v === k || v.startsWith(`${k} `); })) return true;
+  // A runtime's name alone, followed by an agent-ish word ("Claude AI",
+  // "Codex bot", "Claude Code"), or followed by punctuation ("Claude: Julie",
+  // "Grok!"). A person called Claude Dupont keeps their name.
+  const punct = foldConfusables(folded.toLowerCase()).replace(/[l1|]/g, 'i').replace(/0/g, 'o').replace(/\s+/g, ' ').trim();
+  for (const r of DISPLAY_NAME_RUNTIMES) {
+    const k = suggestNameSkeleton(r);
+    if (v === k) return true;
+    if (v.startsWith(`${k} `) && DISPLAY_NAME_AGENTISH.has(v.slice(k.length + 1).split(' ')[0])) return true;
+    if (punct.startsWith(k) && /^\s*[^\p{L}\p{N}\s]/u.test(punct.slice(k.length))) return true;
+  }
   if (tight === 'tdoc' || tight.startsWith('tdocai') || tight.startsWith('tdocagent') || v.startsWith('tdoc ')) return true;
   if (tight.startsWith('teamagent')) return true;
   return teamAgentNames.some((n) => n && (n === v || n.replace(/ /g, '') === tight));
@@ -12520,10 +12542,11 @@ function normalizeDisplayName(raw, { teamAgentNames = [] } = {}) {
   if (!/[\p{L}\p{N}]/u.test(name)) return { error: 'invalid_name', message: 'Use letters or numbers.' };
   // Stacked combining marks (zalgo) draw over the lines around the name.
   if (/\p{M}{4,}/u.test(name)) return { error: 'invalid_name', message: 'Too many accents on one letter.' };
-  // Latin mixed with Cyrillic or Greek in one name is how look-alikes of
-  // reserved names are spelled.
-  if (/\p{Script=Latin}/u.test(name) && /[\p{Script=Cyrillic}\p{Script=Greek}]/u.test(name)) {
-    return { error: 'invalid_name', message: 'Use one alphabet for a name.' };
+  // Latin mixed with Cyrillic or Greek inside one word is how look-alikes
+  // of reserved names are spelled ("Сlaude"); a name may still give itself
+  // in two alphabets ("Alexei (Алексей)").
+  if (name.split(' ').some((w) => /\p{Script=Latin}/u.test(w) && /[\p{Script=Cyrillic}\p{Script=Greek}]/u.test(w))) {
+    return { error: 'invalid_name', message: 'Use one alphabet within a word.' };
   }
   // Every check below reads the compatibility form, so a fullwidth or
   // small-form < > @ or dot is the character it looks like; ideographic
@@ -12539,10 +12562,11 @@ function normalizeDisplayName(raw, { teamAgentNames = [] } = {}) {
   // address (email-keyed commenters show their local part only); a link
   // would turn every comment into an advert.
   if (/@/.test(folded)) return { error: 'invalid_name', message: 'Use a name, not an email address.' };
-  // Anything shaped like a host: a link, www., letters.letters (any
-  // ending, not only known ones), or a dotted IP address.
+  // Anything shaped like a host: a link, www., a known ending, any
+  // lowercase ending that closes the name or starts a path ("evil.fr",
+  // "x.shop/"), or a dotted IP address. "Dr.Smith" is a name.
   if (/:\/\/|(^|[^\p{L}\p{N}])www\./iu.test(folded) || DISPLAY_NAME_DOMAIN_RE.test(folded)
-      || /\p{L}\.\p{L}{2,}/u.test(folded) || /\d+\.\d+\.\d+/.test(folded)) {
+      || /\p{L}\.[a-z]{2,}(?:$|\/)/u.test(folded) || /\d+\.\d+\.\d+/.test(folded)) {
     return { error: 'invalid_name', message: 'Use a name, not a web address.' };
   }
   if (displayNameReserved(folded, teamAgentNames)) {
@@ -15602,9 +15626,10 @@ function commentParticipants(list) {
     if (!c) continue;
     push(c.author);
     for (const e of (Array.isArray(c.events) ? c.events : [])) {
-      if (e && e.kind === 'reply_added' && e.reply) push(e.reply.author);
+      if (e && e.kind === 'reply_added' && e.reply && e.reply.agent_status == null) push(e.reply.author);
     }
-    for (const r of (Array.isArray(c.replies) ? c.replies : [])) push(r && r.author);
+    // A reply carrying an agent's verdict was written by an agent.
+    for (const r of (Array.isArray(c.replies) ? c.replies : [])) if (r && r.agent_status == null) push(r.author);
   }
   return [...byLogin.values()];
 }
@@ -15682,6 +15707,8 @@ async function mentionDirectory(env, s, meta, access, list) {
   for (const c of (Array.isArray(list) ? list : [])) {
     const authors = [c && c.author, ...((c && c.events) || []).map((e) => e && e.kind === 'reply_added' && e.reply && e.reply.author), ...((c && c.replies) || []).map((r) => r && r.author)];
     for (const a of authors) if (isNonHumanAuthor(a)) agents.add(normalizeActorKey(a.login));
+    const replies = [...((c && c.replies) || []), ...((c && c.events) || []).map((e) => e && e.kind === 'reply_added' && e.reply)];
+    for (const r of replies) if (r && r.agent_status != null && r.author) agents.add(normalizeActorKey(r.author.login));
   }
   const add = (entry, tag, at) => {
     const login = normalizeActorKey(entry && entry.login);
@@ -15691,18 +15718,31 @@ async function mentionDirectory(env, s, meta, access, list) {
     if (!prev.avatar_url && entry.avatar_url) prev.avatar_url = entry.avatar_url;
     // The account a record was stamped with, for the chosen name; dropped
     // before the list leaves the worker (withActorDisplayNames).
-    const acct = entry.account_id || stampedAccounts.get(login);
+    const acct = entry.account_id || (stamped.get(login) || {}).account_id;
     if (!prev.account_id && typeof acct === 'string' && acct) prev.account_id = acct;
+    // No account to go by: a GitHub id the record was written with, or the
+    // mark that this doc knows the login only from an upload.
+    const seen = stamped.get(login) || {};
+    if (!prev.account_id && !prev.github_id && seen.github_id) prev.github_id = seen.github_id;
+    if (!prev.account_id && seen.imported) prev.imported = true;
     if (!prev.tags.includes(tag)) prev.tags.push(tag);
     if (at && String(at) > String(prev.at || '')) prev.at = at;
     byLogin.set(login, prev);
   };
-  const stampedAccounts = new Map();
+  // What the doc's own records say about each login: the account or GitHub
+  // id the worker stamped, and whether an upload named it (then it is never
+  // resolved by handle).
+  const stamped = new Map();
   for (const c of (Array.isArray(list) ? list : [])) {
     const authors = [c && c.author, ...((c && c.events) || []).map((e) => e && e.kind === 'reply_added' && e.reply && e.reply.author), ...((c && c.replies) || []).map((r) => r && r.author)];
     for (const a of authors) {
       const k = a && !isNonHumanAuthor(a) && normalizeActorKey(a.login);
-      if (k && typeof a.account_id === 'string' && a.account_id) stampedAccounts.set(k, a.account_id);
+      if (!k) continue;
+      const rec = stamped.get(k) || {};
+      if (a.imported) rec.imported = true;
+      else if (typeof a.account_id === 'string' && a.account_id) rec.account_id = a.account_id;
+      else if (typeof a.github_id === 'string' && a.github_id && !rec.github_id) rec.github_id = a.github_id;
+      stamped.set(k, rec);
     }
   }
   const insider = isAllowlisted(access, s, env, meta);
