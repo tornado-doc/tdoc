@@ -77,6 +77,12 @@ function sameFormat(a, b) {
   for (const k of keys) if (Boolean((a || {})[k]) !== Boolean((b || {})[k]) || ((a || {})[k] || '') !== ((b || {})[k] || '')) return false;
   return true;
 }
+// An integer attribute within [min, max], else `fallback`.
+function intAttr(node, name, min, max, fallback) {
+  const n = parseInt(attr(node, name), 10);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
+const spanOf = (cell) => intAttr(cell, 'colspan', 1, 1000, 1);
 function px(value) {
   const m = /^\s*([\d.]+)\s*(px)?\s*$/i.exec(String(value || ''));
   return m ? Number(m[1]) : 0;
@@ -345,7 +351,7 @@ export async function htmlToDocx(doc, options = {}) {
     if (caption && textOf(caption).trim()) out.push(paragraphXml({ style: 'Caption', keepNext: true }, [{ kind: 'text', text: textOf(caption).replace(/\s+/g, ' ').trim(), fmt: { b: true } }]));
     if (!rows.length) return;
     const cellsOf = (tr) => kids(tr).filter((c) => tagOf(c) === 'td' || tagOf(c) === 'th');
-    const width = Math.max(1, ...rows.map((r) => cellsOf(r.tr).reduce((n, c) => n + Math.max(1, Number(attr(c, 'colspan')) || 1), 0)));
+    const width = Math.min(1000, rows.reduce((w, r) => Math.max(w, cellsOf(r.tr).reduce((n, c) => n + spanOf(c), 0)), 1));
     const colW = Math.floor(COLUMN_TWIPS / width);
     let xmlRows = '';
     let leading = true;
@@ -358,7 +364,7 @@ export async function htmlToDocx(doc, options = {}) {
       let tcs = '';
       let used = 0;
       for (const c of cells) {
-        const span = Math.min(width - used, Math.max(1, Number(attr(c, 'colspan')) || 1));
+        const span = Math.min(width - used, spanOf(c));
         if (span <= 0) break;
         used += span;
         const inner = [];
@@ -448,7 +454,7 @@ export async function htmlToDocx(doc, options = {}) {
         await blocks(n, out, { ...c, para: { ...c.para, indent: 720 } });
       } else if (t === 'ul' || t === 'ol') {
         const level = c.list ? Math.min(8, c.list.ilvl + 1) : 0;
-        const start = Number(attr(n, 'start')) || 1;
+        const start = intAttr(n, 'start', 0, 2147483647, 1);
         const numId = newNum(t === 'ol', start, level);
         for (const li of kids(n)) {
           if (tagOf(li) !== 'li' || hidden(li)) {

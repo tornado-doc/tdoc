@@ -98,6 +98,37 @@ function wellFormed(name, text) {
     assert(view.blocks.some((b) => b.t === 'p' && b.text.includes('the spec (https://example.com/spec)')), 'agent links kept as text (url)');
   });
 
+  await t('Markdown: author text cannot become syntax; links cannot break out; fences outgrow their contents', async () => {
+    const md = SHELL.documentMarkdown('<h2>a *b* [c](d)</h2><p>Use <code>a_b</code> and <code>x``y</code>, <b> bold </b>&lt;tag&gt; 2 * 3 &amp; _u_ ![x] \\ok</p>'
+      + '<p><a href="https://e.com/a b(c)">see ](https://evil.example) </a> <a href="javascript:alert(1)">js</a></p><pre>a ```` b</pre>', { title: 'T*' });
+    for (const want of ['# T\\*', '## a \\*b\\* \\[c\\](d)', 'Use `a_b` and ``` x``y ```, **bold** \\<tag\\> 2 \\* 3 \\& \\_u\\_ \\!\\[x\\] \\\\ok',
+      '[see \\](https://evil.example) ](https://e.com/a%20b%28c%29) js', '`````\na ```` b\n`````']) {
+      assert(md.includes(want), `lacks ${want}\n--- got:\n${md}`);
+    }
+    assert(!md.includes('javascript:'), 'a javascript: link survived');
+  });
+
+  await t('Markdown: linear time on hostile input (unclosed blocks, tags, declarations, marks; huge tables)', async () => {
+    const cases = [
+      ['2 MB of unclosed <svg>', '<p>x</p>' + '<svg>'.repeat(400000), 200],
+      ['unclosed <script', '<p>x</p>' + '<script '.repeat(250000), 200],
+      ['unterminated tags', '<p>' + '<a '.repeat(700000), 200],
+      ['unterminated declarations', '<p>' + '<!x'.repeat(700000), 200],
+      ['comments without an end', '<p>' + '<!--'.repeat(500000), 200],
+      ['<head> with no end', '<p>' + '<head '.repeat(350000), 200],
+      ['unclosed bold', '<p>' + '<b>x '.repeat(400000), 1500],
+      ['250k bold pairs', '<p>' + '<b>x</b> '.repeat(250000), 2000],
+      ['200k table rows', '<table>' + '<tr><td>1</td></tr>'.repeat(200000) + '</table>', 2000],
+    ];
+    for (const [name, html, budget] of cases) {
+      const start = process.hrtime.bigint();
+      SHELL.documentMarkdown(html, { title: 'T' });
+      SHELL.agentBlocksFromHtml(html.slice(0, 256 * 1024));
+      const ms = Number(process.hrtime.bigint() - start) / 1e6;
+      assert(ms < budget, `${name}: ${ms.toFixed(0)} ms (budget ${budget})`);
+    }
+  });
+
   // ---- the route ----
   const mod = await loadWorker();
   const worker = mod.default;
@@ -121,8 +152,16 @@ function wellFormed(name, text) {
     assert(/no-store/.test(r.headers.get('cache-control') || ''), 'cache-control');
     const md = await r.text();
     assert(md.startsWith('# Q3 launch plan\n') && md.includes('[team notes](https://tdoc.dev/d/q3-plan/v/1/notes)') && !md.includes('stolen'), md.slice(0, 300));
-    const head = await call('/d/q3-plan/v/1/export.md', { method: 'HEAD' });
-    assert(head.status === 200 && (await head.text()) === '', 'HEAD');
+    // HEAD reads the object's metadata, never the document.
+    const get = env.DOCS.get;
+    let reads = 0;
+    env.DOCS.get = async (...a) => { reads++; return get.apply(env.DOCS, a); };
+    try {
+      const head = await call('/d/q3-plan/v/1/export.md', { method: 'HEAD' });
+      assert(head.status === 200 && (await head.text()) === '' && head.headers.get('content-disposition'), 'HEAD');
+      assert((await call('/d/q3-plan/v/7/export.md', { method: 'HEAD' })).status === 404, 'HEAD of a missing version');
+      assert(reads === 0, `HEAD read the document ${reads} time(s)`);
+    } finally { env.DOCS.get = get; }
   });
 
   await t('/export.md has the gate of reading the doc: a private doc is its readers\' only', async () => {
@@ -139,6 +178,35 @@ function wellFormed(name, text) {
     }
     assert((await call('/d/q3-plan/v/9/export.md')).status === 404, 'missing version');
     assert((await call('/d/Bad..Slug/v/1/export.md')).status >= 400, 'bad slug');
+  });
+
+  await t('/export.md converts a version once (edge cache by content hash and title), after the gate', async () => {
+    const store = new Map();
+    globalThis.caches = { default: {
+      match: async (k) => (store.has(k) ? new Response(store.get(k)) : undefined),
+      put: async (k, r) => { store.set(k, await r.text()); },
+    } };
+    try {
+      const sha = 'a1b2c3d4e5f60718';
+      await env.META.put('meta:cached', JSON.stringify({ title: 'Cached', slug: 'cached', created, versions: [{ n: 1, created, sha }], access: { visibility: 'private', allowed_users: [] }, hosted: { account_id: alice.account_id, github_login: 'alice' } }));
+      await env.DOCS.put('docs/cached/v1/index.html', SAMPLE);
+      const first = await (await call('/d/cached/v/1/export.md', { cookie: alice.cookie })).text();
+      assert(store.size === 1 && [...store.keys()][0].includes('/__markdown-cache/cached/v1/' + sha), [...store.keys()].join());
+      const get = env.DOCS.get;
+      let reads = 0;
+      env.DOCS.get = async (...a) => { reads++; return get.apply(env.DOCS, a); };
+      try {
+        const again = await call('/d/cached/v/1/export.md', { cookie: alice.cookie });
+        assert(again.status === 200 && (await again.text()) === first && reads === 0, `cache hit read R2 ${reads}x`);
+        assert(again.headers.get('content-disposition') === 'attachment; filename="cached.md"', 'hit headers');
+        const denied = await call('/d/cached/v/1/export.md', { cookie: eve.cookie });
+        assert(denied.status >= 400 && !(await denied.text()).includes('importer'), 'the cache answered a reader the gate refuses');
+      } finally { env.DOCS.get = get; }
+      // A new title is a new file.
+      await env.META.put('meta:cached', JSON.stringify({ title: 'Renamed', slug: 'cached', created, versions: [{ n: 1, created, sha }], access: { visibility: 'private', allowed_users: [] }, hosted: { account_id: alice.account_id, github_login: 'alice' } }));
+      await call('/d/cached/v/1/export.md', { cookie: alice.cookie });
+      assert(store.size === 2, 'title change reused the old file');
+    } finally { delete globalThis.caches; }
   });
 
   // ---- Word ----
@@ -214,12 +282,30 @@ function wellFormed(name, text) {
     assert(xml.includes('Interactive content: see it in the online document'), 'canvas placeholder');
   });
 
+  await t('Word: colspan and list start are clamped integers', async () => {
+    const z = unzip(await htmlToDocx(parseHtml('<h1>x</h1><table><tr><td colspan="99999999">a</td></tr><tr><td colspan="-4">b</td><td colspan="2.9">c</td></tr></table><ol start="99999999999999"><li>n</li></ol><ol start="abc"><li>m</li></ol>'), { title: 'x' }));
+    const xml = z['word/document.xml'].toString();
+    const num = z['word/numbering.xml'].toString();
+    wellFormed('document.xml', xml);
+    assert((xml.match(/<w:gridCol /g) || []).length === 1000 && xml.includes('<w:gridSpan w:val="1000"/>') && xml.includes('<w:gridSpan w:val="2"/>'), 'colspan clamp');
+    assert(num.includes('<w:startOverride w:val="2147483647"/>') && num.includes('<w:startOverride w:val="1"/>'), 'start clamp');
+  });
+
+  await t('Word: image fetches carry no cookies except for this doc\'s files, and are capped', async () => {
+    const src = fs.readFileSync(path.join(ROOT, 'shell', 'src', 'document', 'doc-download.js'), 'utf8');
+    assert(/credentials: mine \? 'same-origin' : 'omit'/.test(src) && src.includes('url.pathname.startsWith(own)') && src.includes("const own = `/d/${encodeURIComponent(slug)}/`"), 'credentials');
+    assert(/IMAGE_LIMITS = Object\.freeze\(\{ count: 100, bytes: 50 \* 1024 \* 1024, each: 20 \* 1024 \* 1024, ms: 15_000 \}\)/.test(src), 'limits');
+    assert(src.includes('response.body?.getReader()') && !src.includes('response.blob()') && src.includes('controller.abort()'), 'stream read with a cap and a timeout');
+  });
+
   // ---- Sheets ----
   const S = await import(path.join(ROOT, 'shell', 'src', 'document', 'sheet-export.mjs'));
   const sheets = S.sheetsFromDocument(parseHtml(SHEET));
 
   await t('CSV: the tab on screen, RFC 4180, BOM, formula-like text neutralised', async () => {
     assert(sheets.length === 2 && sheets[0].name === 'Q3' && sheets[1].name === 'Q4 [plan]', JSON.stringify(sheets.map((s) => s.name)));
+    const guard = S.sheetCsv({ columns: [{ name: 'a' }], rows: [['\uFF1D1+1'], ['\uFF20x'], ['-5'], ['+x']] });
+    assert(guard === "\uFEFFa\r\n'\uFF1D1+1\r\n'\uFF20x\r\n-5\r\n'+x\r\n", JSON.stringify(guard));
     const csv = S.sheetCsv(S.activeSheet(sheets, ''));
     assert(csv === '\uFEFFItem,Amount,Paid,Tags\r\n"Laptop, 14""","1,899.00",✓,"hardware, ana"\r\nCoffee,12.5,,office\r\n\'-SUM(A1),-3,✓,\r\n', JSON.stringify(csv));
     assert(S.activeSheet(sheets, 'Q4 [plan]') === sheets[1], 'the tab named in the view');

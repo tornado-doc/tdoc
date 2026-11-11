@@ -306,6 +306,122 @@
       return Object.prototype.hasOwnProperty.call(ENTITIES, e.toLowerCase()) ? ENTITIES[e.toLowerCase()] : ' ';
     });
   }
+  // What the text reader skips, removed in one forward pass: comments,
+  // <!…> / <?…> declarations, <head>, and the blocks whose contents are not
+  // text (script, style, svg, …). Each search starts where the last ended,
+  // so a 10 MB source of unclosed openers costs one pass, not one per
+  // opener (a lazy `[\s\S]*?</\1>` regex rescans to the end each time).
+  // A block with no closer cuts the source there.
+  const SKIP_BLOCK = /<(script|style|noscript|template|svg|iframe|object|canvas|math)\b/gi;
+  function stripForText(source, embed) {
+    // Comments, then declarations.
+    let out = [];
+    let at = 0;
+    for (;;) {
+      const i = source.indexOf('<!--', at);
+      if (i === -1) { out.push(source.slice(at)); break; }
+      out.push(source.slice(at, i), ' ');
+      const j = source.indexOf('-->', i + 4);
+      if (j === -1) { at = source.length; break; }
+      at = j + 3;
+    }
+    let s = out.join('');
+    out = [];
+    at = 0;
+    const decl = /<[!?]/g;
+    for (;;) {
+      decl.lastIndex = at;
+      const m = decl.exec(s);
+      if (!m) { out.push(s.slice(at)); break; }
+      out.push(s.slice(at, m.index), ' ');
+      const j = s.indexOf('>', m.index + 2);
+      if (j === -1) { at = s.length; break; }
+      at = j + 1;
+    }
+    s = out.join('');
+    // <head> up to </head>, or up to <body> when it never closes.
+    const lower = asciiLower(s);
+    const h = /<head\b/.exec(lower);
+    if (h) {
+      const close = /<\/head\s*>/g;
+      close.lastIndex = h.index;
+      const c = close.exec(lower);
+      const body = lower.indexOf('<body', h.index);
+      const end = c && (body === -1 || c.index < body) ? c.index + c[0].length : body !== -1 ? body : -1;
+      if (end !== -1) s = s.slice(0, h.index) + ' ' + s.slice(end);
+    }
+    const low = asciiLower(s);
+    out = [];
+    at = 0;
+    let cut = false;
+    for (;;) {
+      SKIP_BLOCK.lastIndex = at;
+      const m = SKIP_BLOCK.exec(low);
+      if (!m) { out.push(s.slice(at)); break; }
+      const name = m[1];
+      const openEnd = tagEnd(s, m.index + name.length + 1);
+      const closeEnd = openEnd === -1 ? -1 : closingTagEnd(s, low, name, openEnd);
+      out.push(s.slice(at, m.index));
+      if (closeEnd === -1) { cut = true; break; }
+      out.push(embed);
+      at = closeEnd;
+    }
+    s = out.join('');
+    // A source cut inside a tag: drop the unfinished tag.
+    const lastGt = s.lastIndexOf('>');
+    const tail = s.indexOf('<', lastGt + 1);
+    if (tail !== -1) s = s.slice(0, tail) + ' ';
+    return { body: s, cut: cut };
+  }
+  // Markdown punctuation in author text, escaped so it stays text.
+  function mdEscape(t) {
+    return String(t).replace(/[\u0001\u0002]/g, '').replace(/[\\`*_[\]<>!&]/g, '\\$&');
+  }
+  // A link or image target: the characters that could end it or start
+  // markup are percent-encoded.
+  function mdUrl(u) {
+    return String(u).replace(/[\s()<>\\`]/g, function (c) { return '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'); });
+  }
+  // Bold / italic / code marks ride in the text as \u0001x (open) and
+  // \u0002x (close) and become Markdown here, in one pass per paragraph:
+  // spaces inside an element move outside its marks, an empty element
+  // leaves none, an unclosed one is dropped, and an inline code fence is
+  // longer than any run of backticks inside it.
+  const MARK_RE = /([\u0001\u0002])([bic])/g;
+  function resolveMarks(str) {
+    if (str.indexOf('\u0001') === -1) return str.indexOf('\u0002') === -1 ? str : str.replace(MARK_RE, '');
+    const parts = [];
+    const stack = [];
+    let last = 0;
+    let m;
+    MARK_RE.lastIndex = 0;
+    while ((m = MARK_RE.exec(str))) {
+      parts.push(str.slice(last, m.index));
+      last = m.index + 2;
+      if (m[1] === '\u0001') {
+        if (stack.length < 16) { stack.push({ code: m[2], slot: parts.length }); parts.push(''); }
+        continue;
+      }
+      const top = stack[stack.length - 1];
+      if (!top || top.code !== m[2]) continue;
+      stack.pop();
+      const seg = parts.slice(top.slot + 1).join('');
+      const words = seg.replace(/^\s+|\s+$/g, '');
+      parts.length = top.slot;
+      if (!words) { parts.push(seg); continue; }
+      let open = top.code === 'b' ? '**' : top.code === 'i' ? '*' : '`';
+      let close = open;
+      if (top.code === 'c') {
+        let longest = 0;
+        (words.match(/`+/g) || []).forEach(function (run) { if (run.length > longest) longest = run.length; });
+        open = close = '`'.repeat(longest + 1);
+        if (longest) { open += ' '; close = ' ' + close; }
+      }
+      parts.push((/^\s/.test(seg) ? ' ' : '') + open + words + close + (/\s$/.test(seg) ? ' ' : ''));
+    }
+    parts.push(str.slice(last));
+    return parts.join('');
+  }
   const BREAK_TAGS = /^(p|div|section|article|header|footer|main|aside|nav|blockquote|pre|figure|figcaption|dl|dt|dd|ul|ol|table|thead|tbody|tfoot|details|summary|form|fieldset|hr|br|caption)$/;
   // `opts` is for the Markdown download (documentMarkdown below) and leaves
   // the agent view untouched when absent: { scanBytes } reads past the
@@ -325,15 +441,10 @@
     // scanned and says it is cut short.
     let cut = rich ? truncated : false;
     if (rich) truncated = false;
-    let body = source
-      .replace(/<!--[\s\S]*?(-->|$)/g, ' ')
-      .replace(/<[!?][^>]*>/g, ' ')
-      .replace(/<head\b[\s\S]*?(<\/head\s*>|(?=<body\b))/i, ' ')
-      .replace(/<(script|style|noscript|template|svg|iframe|object|canvas|math)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>/gi, rich ? ' \u0000embed\u0000 ' : ' ');
+    const stripped = stripForText(source, rich ? ' \u0000embed\u0000 ' : ' ');
+    let body = stripped.body;
     // A cut source can end inside one of those blocks, or inside a tag.
-    const open = body.search(/<(script|style|noscript|template|svg|iframe|object|canvas|math)\b/i);
-    if (open >= 0) { body = body.slice(0, open); if (rich) cut = true; else truncated = true; }
-    body = body.replace(/<[^>]*$/, ' ');
+    if (stripped.cut) { if (rich) cut = true; else truncated = true; }
     const blocks = [];
     let used = 0;
     let buf = '';
@@ -347,7 +458,10 @@
     let preLang = '';
     let item = null;
     let quote = 0;
-    const marks = [];
+    let codeDepth = 0;
+    // Author text in the Markdown file: what would read as syntax is
+    // escaped (inside inline code it is literal, and the fence grows).
+    const literal = (t) => (!rich ? t : codeDepth ? t.replace(/[\u0001\u0002]/g, '') : mdEscape(t));
     const items = [];
     const lists = [];
     const base = rich && typeof o.baseUrl === 'string' ? o.baseUrl : '';
@@ -366,7 +480,7 @@
       blocks.push(block); used += size; return true;
     };
     const flush = () => {
-      const t = clean(buf);
+      const t = clean(rich ? resolveMarks(buf) : buf);
       buf = '';
       if (t) {
         if (kind === 'h') push({ t: 'h', level: level, text: t }, t.length);
@@ -384,11 +498,11 @@
           const parts = m[4].split('\u0000embed\u0000');
           parts.forEach(function (part, i) {
             if (i > 0 && cell == null) { const keep = kind; flush(); push({ t: 'embed' }, 0); if (keep === 'li') kind = keep; }
-            add(decodeEntities(part));
+            add(literal(decodeEntities(part)));
           });
           continue;
         }
-        add(decodeEntities(m[4]));
+        add(literal(decodeEntities(m[4])));
         continue;
       }
       const close = m[1] === '/';
@@ -409,40 +523,26 @@
       // Bold, italic and inline code as Markdown. The marks hug the words:
       // spaces inside an element move outside its marks.
       if (rich && /^(b|strong|i|em|code|kbd)$/.test(tag)) {
-        const mark = tag === 'b' || tag === 'strong' ? '**' : tag === 'i' || tag === 'em' ? '*' : '`';
-        const inCell = cell != null;
-        if (!close) { marks.push({ tag: tag, at: (inCell ? cell : buf).length, inCell: inCell }); continue; }
-        let k = marks.length - 1;
-        while (k >= 0 && marks[k].tag !== tag) k--;
-        if (k < 0) continue;
-        const open = marks[k];
-        marks.splice(k);
-        if (open.inCell !== inCell) continue;
-        const text = inCell ? cell : buf;
-        const seg = text.slice(open.at);
-        const words = seg.replace(/^\s+|\s+$/g, '');
-        if (!words) continue;
-        const fence = mark === '`' && words.indexOf('`') !== -1 ? '`` ' : mark;
-        const end = fence === '`` ' ? ' ``' : mark;
-        const next = text.slice(0, open.at) + (/^\s/.test(seg) ? ' ' : '') + fence + words + end + (/\s$/.test(seg) ? ' ' : '');
-        if (inCell) cell = next; else buf = next;
+        const code = tag === 'b' || tag === 'strong' ? 'b' : tag === 'i' || tag === 'em' ? 'i' : 'c';
+        if (code === 'c') codeDepth = Math.max(0, codeDepth + (close ? -1 : 1));
+        add((close ? '\u0002' : '\u0001') + code);
         continue;
       }
       if (rich && tag === 'blockquote') { flush(); quote += close ? -1 : 1; if (quote < 0) quote = 0; continue; }
       if (tag === 'tr') {
-        if (cell != null) { if (row) row.push(clean(cell)); cell = null; }
+        if (cell != null) { if (row) row.push(clean(rich ? resolveMarks(cell) : cell)); cell = null; }
         if (row && row.some(Boolean)) push({ t: 'row', cells: row }, row.join(' | ').length);
         row = close ? null : [];
         continue;
       }
       if (tag === 'td' || tag === 'th') {
-        if (cell != null && row) row.push(clean(cell));
+        if (cell != null && row) row.push(clean(rich ? resolveMarks(cell) : cell));
         cell = close ? null : '';
         if (!close && !row) row = [];
         continue;
       }
       if (rich && tag === 'table') {
-        if (cell != null && row) row.push(clean(cell));
+        if (cell != null && row) row.push(clean(rich ? resolveMarks(cell) : cell));
         if (row && row.some(Boolean)) push({ t: 'row', cells: row }, row.join(' | ').length);
         cell = null; row = null;
         flush();
@@ -456,7 +556,7 @@
             linked = /^(https?:|mailto:)/i.test(h) ? h : false;
             if (linked) add('[');
           } else if (linked) {
-            add('](' + linked.replace(/\)/g, '%29').replace(/ /g, '%20') + ')');
+            add('](' + mdUrl(linked) + ')');
             linked = false;
           }
           continue;
@@ -474,7 +574,7 @@
         const a = clean(attr(m[3], 'alt'));
         if (rich) {
           const src = resolve(attr(m[3], 'src'));
-          if (/^https?:/i.test(src)) { add(' ![' + a.replace(/[\[\]]/g, '') + '](' + src.replace(/\)/g, '%29').replace(/ /g, '%20') + ') '); continue; }
+          if (/^https?:/i.test(src)) { add(' ![' + literal(a) + '](' + mdUrl(src) + ') '); continue; }
         }
         if (a) { const s = ' [image: ' + a + '] '; if (cell != null) cell += s; else buf += s; }
         continue;
@@ -537,14 +637,14 @@
     let out = '';
     const title = line(o.title || '').trim();
     const first = blocks.find(function (b) { return b.t !== 'end' && b.t !== 'embed'; });
-    if (title && !(first && first.t === 'h' && first.level === 1)) out += '# ' + title + '\n\n';
+    if (title && !(first && first.t === 'h' && first.level === 1)) out += '# ' + mdEscape(title) + '\n\n';
     let i = 0;
     while (i < blocks.length) {
       const b = blocks[i];
       if (b.t === 'row') {
         const rows = [];
         while (i < blocks.length && blocks[i].t === 'row') rows.push(blocks[i++].cells);
-        const width = Math.max.apply(null, rows.map(function (r) { return r.length; }));
+        const width = rows.reduce(function (n, r) { return Math.max(n, r.length); }, 0);
         const fit = function (r) { const c = r.slice(); while (c.length < width) c.push(''); return '| ' + c.map(cellText).join(' | ') + ' |\n'; };
         out += fit(rows[0]);
         out += '|' + new Array(width).fill(' --- ').join('|') + '|\n';
@@ -562,7 +662,9 @@
       }
       if (b.t === 'h') out += '#'.repeat(Math.min(6, b.level || 1)) + ' ' + line(b.text) + '\n\n';
       else if (b.t === 'code') {
-        const fence = /```/.test(b.text) ? '~~~~' : '```';
+        let longest = 0;
+        (b.text.match(/`+/g) || []).forEach(function (run) { if (run.length > longest) longest = run.length; });
+        const fence = '`'.repeat(Math.max(3, longest + 1));
         out += fence + (b.lang || '') + '\n' + b.text + '\n' + fence + '\n\n';
       } else if (b.t === 'embed') {
         if (o.docUrl) out += '*[Figure or interactive content: see the online document: ' + o.docUrl + ']*\n\n';

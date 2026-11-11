@@ -1677,7 +1677,7 @@ export function DocumentShell({ boot, config }) {
     try {
       const html = await exportHtml.request();
       if (kind === 'docx') {
-        const blob = await buildWord(html, { title, docUrl: `${location.origin}/d/${encodeURIComponent(config.slug)}`, baseUrl: `${versionBase}/frame` });
+        const blob = await buildWord(html, { title, slug: config.slug, docUrl: `${location.origin}/d/${encodeURIComponent(config.slug)}`, baseUrl: `${versionBase}/frame` });
         downloadBlob(blob, `${config.slug}.docx`);
       } else {
         const file = await buildSheetFile(html, kind, { slug: config.slug });

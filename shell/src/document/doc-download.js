@@ -107,26 +107,77 @@ async function rasterize(blob, size = null) {
   }
 }
 
-async function loadImage(src) {
-  let url;
-  try { url = new URL(src, location.href); } catch { return null; }
-  if (!/^(https?:|data:|blob:)$/.test(url.protocol)) return null;
-  const own = url.protocol === 'data:' || url.protocol === 'blob:' || url.origin === location.origin;
-  const response = await fetch(url.href, own ? { credentials: 'same-origin' } : { mode: 'cors', credentials: 'omit' });
-  if (!response.ok) return null;
-  const blob = await response.blob();
-  if (blob.size > 20 * 1024 * 1024) return null;
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const type = sniff(bytes);
-  if (!type) return rasterize(blob); // SVG, WebP, AVIF: Word wants PNG
-  try {
-    const bitmap = await createImageBitmap(blob);
-    const out = { bytes, type, width: bitmap.width, height: bitmap.height };
-    bitmap.close?.();
-    return out;
-  } catch {
-    return rasterize(blob);
+// Limits for one Word file: images fetched, bytes read, and how long one
+// fetch may take. Past them an image is its alt text, linked.
+export const IMAGE_LIMITS = Object.freeze({ count: 100, bytes: 50 * 1024 * 1024, each: 20 * 1024 * 1024, ms: 15_000 });
+
+// The body of a response, read as a stream and abandoned past `limit`.
+async function readCapped(response, limit) {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > limit) return null;
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > limit) { reader.cancel().catch(() => {}); return null; }
+    chunks.push(value);
   }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.length; }
+  return out;
+}
+
+// Images for the Word file. Only this doc's own files (/d/<slug>/…) are
+// fetched with the reader's cookies; anything else, on this site or not,
+// goes without credentials. Every fetch counts against IMAGE_LIMITS.
+export function imageLoader(slug, limits = IMAGE_LIMITS) {
+  const own = `/d/${encodeURIComponent(slug)}/`;
+  const budget = { count: 0, bytes: 0 };
+  const load = async (src) => {
+    let url;
+    try { url = new URL(src, location.href); } catch { return null; }
+    if (!/^(https?:|data:|blob:)$/.test(url.protocol)) return null;
+    if (budget.count >= limits.count || budget.bytes >= limits.bytes) return null;
+    budget.count += 1;
+    const local = url.protocol === 'data:' || url.protocol === 'blob:';
+    const mine = url.origin === location.origin && url.pathname.startsWith(own);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), limits.ms);
+    try {
+      const response = await fetch(url.href, {
+        credentials: mine ? 'same-origin' : 'omit',
+        mode: local || url.origin === location.origin ? 'same-origin' : 'cors',
+        redirect: mine ? 'follow' : 'error',
+        signal: controller.signal,
+      });
+      if (!response.ok) return null;
+      const bytes = await readCapped(response, Math.min(limits.each, limits.bytes - budget.bytes));
+      if (!bytes) return null;
+      budget.bytes += bytes.length;
+      const type = sniff(bytes);
+      const blob = new Blob([bytes], { type: response.headers.get('content-type') || '' });
+      if (!type) return rasterize(blob); // SVG, WebP, AVIF: Word wants PNG
+      try {
+        const bitmap = await createImageBitmap(blob);
+        const out = { bytes, type, width: bitmap.width, height: bitmap.height };
+        bitmap.close?.();
+        return out;
+      } catch {
+        return rasterize(blob);
+      }
+    } catch {
+      return null;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  };
+  load.budget = budget;
+  return load;
 }
 
 // An inline <svg> figure (a chart, a diagram) drawn to PNG. The document's
@@ -153,10 +204,18 @@ function svgRenderer(doc) {
   };
 }
 
-export async function buildWord(html, { title, docUrl, baseUrl }) {
+export async function buildWord(html, { title, slug, docUrl, baseUrl }) {
   const { htmlToDocx, DOCX_MIME } = await import('./docx-export.mjs');
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  const bytes = await htmlToDocx(doc, { title, docUrl, baseUrl, loadImage, renderSvg: svgRenderer(doc) });
+  const loadImage = imageLoader(slug);
+  // Inline SVG figures count against the same image budget.
+  const drawSvg = svgRenderer(doc);
+  const renderSvg = async (node) => {
+    if (loadImage.budget.count >= IMAGE_LIMITS.count) return null;
+    loadImage.budget.count += 1;
+    return drawSvg(node);
+  };
+  const bytes = await htmlToDocx(doc, { title, docUrl, baseUrl, loadImage, renderSvg });
   return new Blob([bytes], { type: DOCX_MIME });
 }
 

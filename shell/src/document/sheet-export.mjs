@@ -24,7 +24,8 @@ export function sheetsFromDocument(doc) {
 const cellText = (v) => (Array.isArray(v) ? v.join(', ') : String(v == null ? '' : v));
 
 // A value Excel or Sheets would run as a formula when it opens a CSV.
-const FORMULA = /^[=+\-@\t\r]/;
+// Fullwidth ＝＋－＠ too: some spreadsheet apps read them as the ASCII ones.
+const FORMULA = /^[=+\-@\t\r\uFF1D\uFF0B\uFF0D\uFF20]/;
 const PLAIN_NUMBER = /^-?(\d{1,3}(,\d{3})+|\d+)?(\.\d+)?([eE][-+]?\d+)?$/;
 
 function csvField(value) {
