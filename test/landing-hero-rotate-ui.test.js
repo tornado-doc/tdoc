@@ -240,6 +240,20 @@ function setTime(ms) {
     await swipe(-20);
     s = await frame.evaluate(state);
     assert(s.shown.join() === 'sheet', 'a short drag is not a swipe');
+    // A comment-selection drag (text selected) never flips the slide under its anchor.
+    await frame.evaluate(() => { const r = document.createRange(); r.selectNodeContents(document.querySelector('#hd-sheet .hd-real-cap')); getSelection().removeAllRanges(); getSelection().addRange(r); });
+    await swipe(-120);
+    s = await frame.evaluate(state);
+    assert(s.shown.join() === 'sheet', `a swipe over a text selection moved the slide: ${s.shown}`);
+    await frame.evaluate(() => getSelection().removeAllRanges());
+    // Only the checked radio's group is cycled: a radio of another group inside is skipped.
+    await frame.evaluate(() => { const x = document.createElement('input'); x.type = 'radio'; x.name = 'elsewhere'; x.id = 'hd-foreign'; x.className = 'hd-r'; document.querySelector('.hd-show').prepend(x); });
+    await swipe(-120);
+    s = await frame.evaluate(state);
+    const foreign = await frame.evaluate(() => document.getElementById('hd-foreign').checked);
+    assert(s.shown.join() === 'deck' && !foreign, `swipe with a foreign radio present: ${s.shown}, foreign checked ${foreign}`);
+    await swipe(120);
+    await frame.evaluate(() => document.getElementById('hd-foreign').remove());
     await f.locator('label[for="hd-r-bookmark"]').tap();
     s = await frame.evaluate(state);
     assert(s.shown.join() === 'bookmark', `tap Any web app: ${s.shown}`);

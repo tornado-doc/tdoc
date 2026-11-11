@@ -980,18 +980,34 @@
     var radio = document.getElementById(label.htmlFor);
     if (radio && radio.type === 'radio' && radio.checked && host.contains(radio)) carouselRestart(host);
   }, true);
+  // A swipe is only a swipe in Read/Comment with nothing else under way: not
+  // while + Comment is picking, not in Edit, not while a box is being drawn
+  // and not over a text selection, so a comment-selection drag can never
+  // flip the slide under its own anchor.
+  function carouselGestureBusy() {
+    if (picking || interactionMode === 'edit') return true;
+    if (marquee && marquee.style.display !== 'none') return true;
+    var sel = window.getSelection && window.getSelection();
+    return !!(sel && sel.rangeCount && !sel.isCollapsed);
+  }
   var swipeStart = null;
   document.addEventListener('touchstart', function (e) {
     var host = e.target && e.target.closest && e.target.closest('[data-tdoc-carousel]');
-    swipeStart = host && e.touches.length === 1 ? { host: host, x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+    swipeStart = host && e.touches.length === 1 && !carouselGestureBusy() ? { host: host, x: e.touches[0].clientX, y: e.touches[0].clientY, busy: false } : null;
+  }, { passive: true, capture: true });
+  document.addEventListener('touchmove', function () {
+    if (swipeStart && carouselGestureBusy()) swipeStart.busy = true;
   }, { passive: true, capture: true });
   document.addEventListener('touchend', function (e) {
     var start = swipeStart; swipeStart = null;
-    if (!start || !e.changedTouches.length) return;
+    if (!start || start.busy || carouselGestureBusy() || !e.changedTouches.length) return;
     var dx = e.changedTouches[0].clientX - start.x, dy = e.changedTouches[0].clientY - start.y;
     if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     var host = start.host;
-    var radios = Array.prototype.filter.call(host.querySelectorAll('input[type="radio"]'), function (r) { return !r.disabled; });
+    // One group: the checked radio's (else the first one's) name.
+    var all = Array.prototype.slice.call(host.querySelectorAll('input[type="radio"]'));
+    var lead = all.filter(function (r) { return r.checked; })[0] || all[0];
+    var radios = all.filter(function (r) { return !r.disabled && lead && r.name === lead.name; });
     if (radios.length < 2) return;
     var at = -1, box = host.getBoundingClientRect(), cx = box.left + box.width / 2, cy = box.top + box.height / 2, best = Infinity;
     Array.prototype.forEach.call(host.querySelectorAll('[data-tdoc-carousel-for]'), function (item) {
