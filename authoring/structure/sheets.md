@@ -143,6 +143,39 @@ value. Use it for a label that spans a group of rows, not to lay out a page.
 <tr data-row="r3"><td data-fmt="b" colspan="2">Total</td><td data-fmt="b" data-num="currency:USD:2" data-border="t">2319.5</td></tr>
 ```
 
+## Groups, hidden rows, frozen rows
+
+Optional attributes, each read through a cleaner (an unknown value is the
+default), never a style:
+
+```html
+<table data-tdoc-sheet data-name="Budget" data-freeze-rows="1" data-freeze-cols="2">
+  <thead><tr><th data-key="c1">Item</th><th data-key="c2">Q1</th><th data-key="c3">Q2</th><th data-key="c4" data-hidden>Notes</th></tr></thead>
+  <tbody>
+    <tr data-row="r1"><td>Team A</td>…</tr>
+    <tr data-row="r2" data-group="1"><td>Travel</td>…</tr>
+    <tr data-row="r3" data-group="2" data-collapsed="2"><td>Flights</td>…</tr>
+    <tr data-row="r4" data-group="2"><td>Hotels</td>…</tr>
+    <tr data-row="r5" data-hidden><td>Old line</td>…</tr>
+  </tbody>
+</table>
+```
+
+- **Groups.** `data-group="1"` to `"3"` on a `<tr>` is its outline level.
+  Neighbouring rows at a level or deeper are one group, so a level-2 run
+  inside a level-1 run is a nested group. Put the summary row (a team, a
+  total) just above its group at a lower level.
+- **Collapsed by default.** `data-collapsed="2"` on a group's first row folds
+  the group of that level starting there (`"1 2"` for both). Readers open
+  and close groups for themselves; that never changes the doc.
+- **Hidden.** `data-hidden` on a `<tr>` or `<th>` hides it until an editor
+  unhides it. Its cells stay in the doc and in exports.
+- **Frozen.** `data-freeze-rows` freezes that many rows under the header (up
+  to 10); `data-freeze-cols` that many columns (default 1, the first).
+- **Tab order.** Tabs follow the tables' order in the doc. `data-order="0"`,
+  `"1"`, … on the tables puts them in another order in the strip (the editor
+  writes it when someone drags a tab in a doc with prose around the sheet).
+
 ## Size
 
 A doc whose bulk is sheet tables may be up to 8 MB of HTML (10,000 rows of

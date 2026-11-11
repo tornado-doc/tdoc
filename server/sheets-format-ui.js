@@ -123,11 +123,22 @@ function SheetFormatUI(api) {
     if (api.ui.root) api.ui.root.classList.toggle('fx-merged', !!merges.length);
     if (!merges.length) return;
     tab.mview = new Map(); tab.mlist = [];
+    // [structure] hidden columns and frozen rows (sheets-structure.js): a
+    // merge whose top-left column is hidden, or that the frozen rows' edge
+    // cuts through, is drawn cell by cell too; hidden columns inside a merge
+    // add no width. (Frozen columns stay as before: the top-left cell is
+    // the sticky one, as with the first column.)
+    var St = api.structure && api.structure();
+    var fr = St && St.frozenRows ? St.frozenRows(tab) : 0;
     merges.forEach(function (m) {
       var i0 = tab.pos[m.r];
       if (i0 < 0) return;
       for (var k = 1; k < m.rs; k++) if (tab.pos[m.r + k] !== i0 + k) return;
-      var v = { r: m.r, c: m.c, rs: m.rs, cs: m.cs, i0: i0 };
+      if (St && !St.colShown(tab, m.c)) return;
+      if (i0 < fr && i0 + m.rs > fr) return;
+      var shown = m.cs;
+      if (St) { shown = 0; for (var q = m.c; q < m.c + m.cs; q++) if (St.colShown(tab, q)) shown++; }
+      var v = { r: m.r, c: m.c, rs: m.rs, cs: m.cs, i0: i0, shownCs: shown };
       tab.mlist.push(v);
       for (var r = m.r; r < m.r + m.rs; r++) for (var c = m.c; c < m.c + m.cs; c++) tab.mview.set(r * K + c, v);
     });
@@ -137,6 +148,7 @@ function SheetFormatUI(api) {
     var far = -1;
     tab.mlist.forEach(function (m, k) { far = Math.max(far, m.i0 + m.rs); tab.mend[k] = far; });
   }
+  function St0() { return api.structure ? api.structure() : null; }
   function covered(tab, r, c) { return !!(tab.fcovered && tab.fcovered.has(r * K + c)); }
   function fmtOf(tab, r, c) { return (tab.fmt && tab.fmt.get(r * K + c)) || null; }
 
@@ -174,7 +186,7 @@ function SheetFormatUI(api) {
         return { cov: '<div class="ts-c fx-cov" aria-hidden="true" style="width:' + w + 'px"></div>' };
       }
       var ww = 0, hh = 0;
-      for (var k = 0; k < m.cs; k++) ww += tab.widths[c + k] || 0;
+      for (var k = 0; k < m.cs; k++) ww += (St0() ? St0().colW(tab, c + k) : tab.widths[c + k]) || 0; // [structure] a hidden column adds nothing
       for (var j = 0; j < m.rs; j++) hh += api.rowH(tab, i + j);
       out = { cls: m.rs > 1 ? ' fx-span fx-tall' : ' fx-span', text: null, w: ww, style: m.rs > 1 ? ';height:' + hh + 'px' : '' };
     }
@@ -191,7 +203,8 @@ function SheetFormatUI(api) {
     var m = !cards && tab.mview && tab.mview.get(r * K + c), out = { cls: '', text: null, span: '' };
     if (m) {
       if (m.r !== r || m.c !== c) return { skip: true };
-      out.span = (m.cs > 1 ? ' colspan="' + m.cs + '"' : '') + (m.rs > 1 ? ' rowspan="' + m.rs + '"' : '');
+      var cs = m.shownCs != null ? m.shownCs : m.cs; // [structure] hidden columns are left out of the flat view
+      out.span = (cs > 1 ? ' colspan="' + cs + '"' : '') + (m.rs > 1 ? ' rowspan="' + m.rs + '"' : '');
     }
     var f = fmtOf(tab, r, c);
     if (f) { var d = decor(f, type, text, tab.align && tab.align[c]); out.cls = d.cls; out.text = d.text; }
