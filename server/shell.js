@@ -317,21 +317,155 @@
       return Object.prototype.hasOwnProperty.call(ENTITIES, e.toLowerCase()) ? ENTITIES[e.toLowerCase()] : ' ';
     });
   }
+  // What the text reader skips, removed in one forward pass: comments,
+  // <!…> / <?…> declarations, <head>, and the blocks whose contents are not
+  // text (script, style, svg, …). Each search starts where the last ended,
+  // so a 10 MB source of unclosed openers costs one pass, not one per
+  // opener (a lazy `[\s\S]*?</\1>` regex rescans to the end each time).
+  // A block with no closer cuts the source there.
+  const SKIP_BLOCK = /<(script|style|noscript|template|svg|iframe|object|canvas|math)\b/gi;
+  function stripForText(source, embed) {
+    // Comments, then declarations.
+    let out = [];
+    let at = 0;
+    for (;;) {
+      const i = source.indexOf('<!--', at);
+      if (i === -1) { out.push(source.slice(at)); break; }
+      out.push(source.slice(at, i), ' ');
+      const j = source.indexOf('-->', i + 4);
+      if (j === -1) { at = source.length; break; }
+      at = j + 3;
+    }
+    let s = out.join('');
+    out = [];
+    at = 0;
+    const decl = /<[!?]/g;
+    for (;;) {
+      decl.lastIndex = at;
+      const m = decl.exec(s);
+      if (!m) { out.push(s.slice(at)); break; }
+      out.push(s.slice(at, m.index), ' ');
+      const j = s.indexOf('>', m.index + 2);
+      if (j === -1) { at = s.length; break; }
+      at = j + 1;
+    }
+    s = out.join('');
+    // <head> up to </head>, or up to <body> when it never closes.
+    const lower = asciiLower(s);
+    const h = /<head\b/.exec(lower);
+    if (h) {
+      const close = /<\/head\s*>/g;
+      close.lastIndex = h.index;
+      const c = close.exec(lower);
+      const body = lower.indexOf('<body', h.index);
+      const end = c && (body === -1 || c.index < body) ? c.index + c[0].length : body !== -1 ? body : -1;
+      if (end !== -1) s = s.slice(0, h.index) + ' ' + s.slice(end);
+    }
+    const low = asciiLower(s);
+    out = [];
+    at = 0;
+    let cut = false;
+    for (;;) {
+      SKIP_BLOCK.lastIndex = at;
+      const m = SKIP_BLOCK.exec(low);
+      if (!m) { out.push(s.slice(at)); break; }
+      const name = m[1];
+      const openEnd = tagEnd(s, m.index + name.length + 1);
+      const closeEnd = openEnd === -1 ? -1 : closingTagEnd(s, low, name, openEnd);
+      out.push(s.slice(at, m.index));
+      if (closeEnd === -1) { cut = true; break; }
+      out.push(embed);
+      at = closeEnd;
+    }
+    s = out.join('');
+    // A source cut inside a tag: drop the unfinished tag.
+    const lastGt = s.lastIndexOf('>');
+    const tail = s.indexOf('<', lastGt + 1);
+    if (tail !== -1) s = s.slice(0, tail) + ' ';
+    return { body: s, cut: cut };
+  }
+  // Markdown punctuation in author text, escaped so it stays text.
+  function mdEscape(t) {
+    return String(t).replace(/[\u0001\u0002]/g, '').replace(/[\\`*_[\]<>!&]/g, '\\$&');
+  }
+  // A link or image target: the characters that could end it or start
+  // markup are percent-encoded.
+  function mdUrl(u) {
+    return String(u).replace(/[\s()<>\\`|]/g, function (c) { return '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'); });
+  }
+  // Bold / italic / code marks ride in the text as \u0001x (open) and
+  // \u0002x (close) and become Markdown here, in one pass per paragraph:
+  // spaces inside an element move outside its marks, an empty element
+  // leaves none, an unclosed one is dropped, and an inline code fence is
+  // longer than any run of backticks inside it.
+  const MARK_RE = /([\u0001\u0002])([bic])/g;
+  function resolveMarks(str, inCell) {
+    if (str.indexOf('\u0001') === -1) return str.indexOf('\u0002') === -1 ? str : str.replace(MARK_RE, '');
+    const parts = [];
+    const stack = [];
+    let last = 0;
+    let m;
+    MARK_RE.lastIndex = 0;
+    while ((m = MARK_RE.exec(str))) {
+      parts.push(str.slice(last, m.index));
+      last = m.index + 2;
+      if (m[1] === '\u0001') {
+        if (stack.length < 16) { stack.push({ code: m[2], slot: parts.length }); parts.push(''); }
+        continue;
+      }
+      const top = stack[stack.length - 1];
+      if (!top || top.code !== m[2]) continue;
+      stack.pop();
+      const seg = parts.slice(top.slot + 1).join('');
+      const words = seg.replace(/^\s+|\s+$/g, '');
+      parts.length = top.slot;
+      if (!words) { parts.push(seg); continue; }
+      let open = top.code === 'b' ? '**' : top.code === 'i' ? '*' : '`';
+      let close = open;
+      let body = words;
+      if (top.code === 'c' && inCell) {
+        // In a table cell a code span is plain escaped text: the cell's
+        // `|` escaping is read before code spans, so an un-escaped span
+        // could be split by an author backslash before a pipe.
+        parts.push(seg);
+        continue;
+      }
+      if (top.code === 'c') {
+        // Inside a paired code span text is literal: the escapes come out.
+        body = words.replace(/\\([\\`*_[\]<>!&])/g, '$1');
+        let longest = 0;
+        (body.match(/`+/g) || []).forEach(function (run) { if (run.length > longest) longest = run.length; });
+        open = close = '`'.repeat(longest + 1);
+        if (longest || /^`|`$/.test(body)) { open += ' '; close = ' ' + close; }
+      }
+      parts.push((/^\s/.test(seg) ? ' ' : '') + open + body + close + (/\s$/.test(seg) ? ' ' : ''));
+    }
+    parts.push(str.slice(last));
+    return parts.join('');
+  }
   const BREAK_TAGS = /^(p|div|section|article|header|footer|main|aside|nav|blockquote|pre|figure|figcaption|dl|dt|dd|ul|ol|table|thead|tbody|tfoot|details|summary|form|fieldset|hr|br|caption)$/;
-  function agentBlocksFromHtml(html, maxChars) {
+  // `opts` is for the Markdown download (documentMarkdown below) and leaves
+  // the agent view untouched when absent: { scanBytes } reads past the
+  // agent's 256 KB head; { rich: true } keeps what a file needs and the agent
+  // text does not: code blocks verbatim, numbered and nested list items,
+  // links and images as Markdown, and where one table ends.
+  function agentBlocksFromHtml(html, maxChars, opts) {
+    const o = opts || {};
+    const rich = o.rich === true;
+    const scan = Number(o.scanBytes) || AGENT_SCAN_BYTES;
     const limit = Number(maxChars) || AGENT_TEXT_CHARS;
     if (typeof html !== 'string' || !html) return { blocks: [], truncated: false };
-    const source = html.length > AGENT_SCAN_BYTES ? html.slice(0, AGENT_SCAN_BYTES) : html;
-    let truncated = html.length > AGENT_SCAN_BYTES;
-    let body = source
-      .replace(/<!--[\s\S]*?(-->|$)/g, ' ')
-      .replace(/<[!?][^>]*>/g, ' ')
-      .replace(/<head\b[\s\S]*?(<\/head\s*>|(?=<body\b))/i, ' ')
-      .replace(/<(script|style|noscript|template|svg|iframe|object|canvas|math)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>/gi, ' ');
+    const source = html.length > scan ? html.slice(0, scan) : html;
+    let truncated = html.length > scan;
+    // The agent path has always stopped here for a source past its scan
+    // (the worker only ever hands it the head); a download reads what it
+    // scanned and says it is cut short.
+    let cut = rich ? truncated : false;
+    if (rich) truncated = false;
+    const stripped = stripForText(source, rich ? ' \u0000embed\u0000 ' : ' ');
+    let body = stripped.body;
     // A cut source can end inside one of those blocks, or inside a tag.
-    const open = body.search(/<(script|style|noscript|template|svg|iframe|object|canvas|math)\b/i);
-    if (open >= 0) { body = body.slice(0, open); truncated = true; }
-    body = body.replace(/<[^>]*$/, ' ');
+    if (stripped.cut) { if (rich) cut = true; else truncated = true; }
     const blocks = [];
     let used = 0;
     let buf = '';
@@ -340,40 +474,113 @@
     let row = null;
     let cell = null;
     let href = null;
+    let linked = false;
+    let pre = null;
+    let preLang = '';
+    let item = null;
+    let quote = 0;
+    // Author text in the Markdown file: what would read as syntax is always
+    // escaped as it arrives. Only a code span whose open and close pair up
+    // takes the escapes back out (resolveMarks), where nothing is syntax.
+    const literal = (t) => (rich ? mdEscape(t) : t);
+    const items = [];
+    const lists = [];
+    const base = rich && typeof o.baseUrl === 'string' ? o.baseUrl : '';
+    const resolve = (u) => {
+      if (!base || !u || /^[a-z][a-z0-9+.-]*:/i.test(u) || u[0] === '#') return u;
+      try { return new URL(u, base).href; } catch (e) { return u; }
+    };
+    const attr = (attrs, name) => {
+      const a = new RegExp('\\b' + name + '\\s*=\\s*("([^"]*)"|\'([^\']*)\'|([^\\s"\'>]+))', 'i').exec(attrs);
+      return a ? decodeEntities(a[2] != null ? a[2] : a[3] != null ? a[3] : a[4]).trim() : '';
+    };
     const clean = (s) => s.replace(/\s+/g, ' ').trim();
+    const add = (s) => { if (cell != null) cell += s; else buf += s; };
     const push = (block, size) => {
       if (used + size > limit) { truncated = true; return false; }
       blocks.push(block); used += size; return true;
     };
     const flush = () => {
-      const t = clean(buf);
+      const t = clean(rich ? resolveMarks(buf) : buf);
       buf = '';
-      if (t) push(kind === 'h' ? { t: 'h', level: level, text: t } : { t: kind, text: t }, t.length);
+      if (t) {
+        if (kind === 'h') push({ t: 'h', level: level, text: t }, t.length);
+        else if (kind === 'li' && item) push({ t: 'li', text: t, depth: item.depth, n: item.n, cont: item.cont === true }, t.length);
+        else push(quote && kind === 'p' ? { t: 'p', text: t, quote: true } : { t: kind, text: t }, t.length);
+      }
       kind = 'p'; level = 0;
     };
     const re = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>|([^<]+|<)/g;
     let m;
     while ((m = re.exec(body)) && !truncated) {
       if (m[4] != null) {
-        const t = decodeEntities(m[4]);
-        if (cell != null) cell += t; else buf += t;
+        if (pre != null) { pre += decodeEntities(m[4]); continue; }
+        if (rich && m[4].indexOf('\u0000embed\u0000') !== -1) {
+          const parts = m[4].split('\u0000embed\u0000');
+          parts.forEach(function (part, i) {
+            if (i > 0 && cell == null) { const keep = kind; flush(); push({ t: 'embed' }, 0); if (keep === 'li') kind = keep; }
+            add(literal(decodeEntities(part)));
+          });
+          continue;
+        }
+        add(literal(decodeEntities(m[4])));
         continue;
       }
       const close = m[1] === '/';
       const tag = m[2].toLowerCase();
+      if (pre != null) {
+        if (tag === 'pre' && close) {
+          const text = pre.replace(/^\n/, '').replace(/\s+$/, '');
+          pre = null;
+          if (text) push({ t: 'code', text: text, lang: preLang }, text.length);
+        } else if (tag === 'br') pre += '\n';
+        else if (tag === 'code' && !close && !pre) {
+          const lang = /(?:^|\s)(?:language|lang)-([\w+-]+)/.exec(attr(m[3], 'class'));
+          if (lang) preLang = lang[1];
+        }
+        continue;
+      }
+      if (rich && tag === 'pre' && !close) { flush(); pre = ''; preLang = ''; continue; }
+      // Bold, italic and inline code as Markdown. The marks hug the words:
+      // spaces inside an element move outside its marks.
+      if (rich && /^(b|strong|i|em|code|kbd)$/.test(tag)) {
+        const code = tag === 'b' || tag === 'strong' ? 'b' : tag === 'i' || tag === 'em' ? 'i' : 'c';
+        add((close ? '\u0002' : '\u0001') + code);
+        continue;
+      }
+      if (rich && tag === 'blockquote') { flush(); quote += close ? -1 : 1; if (quote < 0) quote = 0; continue; }
       if (tag === 'tr') {
-        if (cell != null) { if (row) row.push(clean(cell)); cell = null; }
+        if (cell != null) { if (row) row.push(clean(rich ? resolveMarks(cell, true) : cell)); cell = null; }
         if (row && row.some(Boolean)) push({ t: 'row', cells: row }, row.join(' | ').length);
         row = close ? null : [];
         continue;
       }
       if (tag === 'td' || tag === 'th') {
-        if (cell != null && row) row.push(clean(cell));
+        if (cell != null && row) row.push(clean(rich ? resolveMarks(cell, true) : cell));
         cell = close ? null : '';
         if (!close && !row) row = [];
         continue;
       }
+      if (rich && tag === 'table') {
+        if (cell != null && row) row.push(clean(rich ? resolveMarks(cell, true) : cell));
+        if (row && row.some(Boolean)) push({ t: 'row', cells: row }, row.join(' | ').length);
+        cell = null; row = null;
+        flush();
+        if (close) push({ t: 'end' }, 0);
+        continue;
+      }
       if (tag === 'a') {
+        if (rich) {
+          if (!close) {
+            const h = resolve(attr(m[3], 'href'));
+            linked = /^(https?:|mailto:)/i.test(h) ? h : false;
+            if (linked) add('[');
+          } else if (linked) {
+            add('](' + mdUrl(linked) + ')');
+            linked = false;
+          }
+          continue;
+        }
         if (!close) {
           const h = /\bhref\s*=\s*("([^"]*)"|'([^']*)')/i.exec(m[3]);
           href = h ? decodeEntities(h[2] != null ? h[2] : h[3]).trim() : null;
@@ -384,13 +591,43 @@
         continue;
       }
       if (tag === 'img' && !close) {
-        const alt = /\balt\s*=\s*("([^"]*)"|'([^']*)')/i.exec(m[3]);
-        const a = alt ? clean(decodeEntities(alt[2] != null ? alt[2] : alt[3])) : '';
+        const a = clean(attr(m[3], 'alt'));
+        if (rich) {
+          const src = resolve(attr(m[3], 'src'));
+          if (/^https?:/i.test(src)) { add(' ![' + literal(a) + '](' + mdUrl(src) + ') '); continue; }
+        }
         if (a) { const s = ' [image: ' + a + '] '; if (cell != null) cell += s; else buf += s; }
         continue;
       }
       if (/^h[1-6]$/.test(tag)) { flush(); if (!close) { kind = 'h'; level = Number(tag[1]); } continue; }
-      if (tag === 'li') { flush(); if (!close) kind = 'li'; continue; }
+      if (rich && (tag === 'ul' || tag === 'ol')) {
+        flush();
+        if (close) { lists.pop(); if (!lists.length) push({ t: 'end' }, 0); }
+        else {
+          const start = parseInt(attr(m[3], 'start'), 10);
+          lists.push({ ordered: tag === 'ol', n: Number.isFinite(start) ? start - 1 : 0 });
+        }
+        // Text after a nested list is still the outer item's.
+        item = items.length ? { depth: items[items.length - 1].depth, n: 0, cont: true } : null;
+        if (close && item) kind = 'li';
+        continue;
+      }
+      if (tag === 'li') {
+        flush();
+        if (!close) {
+          kind = 'li';
+          if (rich) {
+            const list = lists[lists.length - 1];
+            if (list) list.n += 1;
+            item = { depth: Math.max(0, lists.length - 1), n: list && list.ordered ? list.n : 0 };
+            items.push(item);
+          }
+        } else if (rich) {
+          items.pop();
+          item = null;
+        }
+        continue;
+      }
       if (BREAK_TAGS.test(tag)) {
         if (cell != null) { cell += ' '; continue; }
         const keep = kind;
@@ -401,7 +638,65 @@
       }
     }
     if (!truncated) flush();
-    return { blocks: blocks, truncated: truncated };
+    return { blocks: blocks, truncated: truncated || cut };
+  }
+
+  // A document as a Markdown file, for Download: its own text only (no tdoc
+  // preamble, no comments), headings at their own levels, tables with a
+  // header rule. Same parser as the agent text, in its `rich` mode.
+  const DOWNLOAD_SCAN_BYTES = 10 * 1024 * 1024;
+  const DOWNLOAD_TEXT_CHARS = 4 * 1024 * 1024;
+  function documentMarkdown(html, opts) {
+    const o = opts || {};
+    const doc = agentBlocksFromHtml(html, DOWNLOAD_TEXT_CHARS, { rich: true, scanBytes: DOWNLOAD_SCAN_BYTES, baseUrl: o.baseUrl });
+    const blocks = doc.blocks;
+    const line = (s) => String(s == null ? '' : s).replace(/\r?\n/g, ' ');
+    // Text that would otherwise read as Markdown syntax at a line start.
+    const lead = (s) => line(s).replace(/^(#{1,6}\s|>|[-+*]\s|\d+[.)]\s)/, '\\$1');
+    const cellText = (s) => line(s).replace(/\|/g, '\\|');
+    let out = '';
+    const title = line(o.title || '').trim();
+    const first = blocks.find(function (b) { return b.t !== 'end' && b.t !== 'embed'; });
+    if (title && !(first && first.t === 'h' && first.level === 1)) out += '# ' + mdEscape(title) + '\n\n';
+    let i = 0;
+    while (i < blocks.length) {
+      const b = blocks[i];
+      if (b.t === 'row') {
+        const rows = [];
+        while (i < blocks.length && blocks[i].t === 'row') rows.push(blocks[i++].cells);
+        const width = rows.reduce(function (n, r) { return Math.max(n, r.length); }, 0);
+        const fit = function (r) { const c = r.slice(); while (c.length < width) c.push(''); return '| ' + c.map(cellText).join(' | ') + ' |\n'; };
+        out += fit(rows[0]);
+        out += '|' + new Array(width).fill(' --- ').join('|') + '|\n';
+        rows.slice(1).forEach(function (r) { out += fit(r); });
+        out += '\n';
+        continue;
+      }
+      if (b.t === 'li') {
+        while (i < blocks.length && blocks[i].t === 'li') {
+          const li = blocks[i++];
+          out += '  '.repeat(li.depth || 0) + (li.cont ? '  ' : li.n ? li.n + '. ' : '- ') + line(li.text) + '\n';
+        }
+        out += '\n';
+        continue;
+      }
+      if (b.t === 'h') out += '#'.repeat(Math.min(6, b.level || 1)) + ' ' + line(b.text) + '\n\n';
+      else if (b.t === 'code') {
+        let longest = 0;
+        (b.text.match(/`+/g) || []).forEach(function (run) { if (run.length > longest) longest = run.length; });
+        const fence = '`'.repeat(Math.max(3, longest + 1));
+        out += fence + (b.lang || '') + '\n' + b.text + '\n' + fence + '\n\n';
+      } else if (b.t === 'embed') {
+        if (o.docUrl) out += '*[Figure or interactive content: see the online document: ' + o.docUrl + ']*\n\n';
+      } else if (b.t === 'p' && b.quote) {
+        while (i < blocks.length && blocks[i].t === 'p' && blocks[i].quote) { out += '> ' + line(blocks[i++].text) + '\n>\n'; }
+        out = out.replace(/>\n$/, '') + '\n';
+        continue;
+      } else if (b.t === 'p') out += lead(b.text) + '\n\n';
+      i++;
+    }
+    if (doc.truncated) out += '*The document is longer than this file' + (o.docUrl ? ': the rest is at ' + o.docUrl : '') + '.*\n\n';
+    return out.replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
   }
 
   function commentLine(c) {
@@ -586,6 +881,7 @@ agentBodyHtml(d) +
     previewFromHtml: previewFromHtml,
     agentBlocksFromHtml: agentBlocksFromHtml,
     agentMarkdown: agentMarkdown,
+    documentMarkdown: documentMarkdown,
     linksFromHtml: linksFromHtml,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

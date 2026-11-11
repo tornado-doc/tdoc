@@ -95,23 +95,46 @@ async function t(name, fn) {
   });
 
   await t('view state survives the URL and rejects junk', () => {
-    const view = { active: 'Tab 2', tabs: { 'Tab 1': { search: 'a,b', filters: { 3: { values: ['x'] }, 1: { min: 2 } }, sort: [{ col: 1, dir: 'desc' }, { col: 0, dir: 'asc' }] }, Empty: Q.emptyQuery() } };
+    const view = { active: 'Tab 2', tabs: { 'Tab 1': { search: 'a,b', filters: { 3: { values: ['x'] }, 1: { min: 2 } }, sort: [{ col: 1, dir: 'desc' }, { col: 0, dir: 'asc' }], totals: { 1: 'sum', 0: 'unique' } }, Empty: Q.emptyQuery() } };
     const text = Q.encodeView(view);
     const back = Q.decodeView(text);
     assert.equal(back.active, 'Tab 2');
     assert.deepEqual(back.tabs['Tab 1'], view.tabs['Tab 1']);
     assert(!('Empty' in back.tabs));
     assert.deepEqual(Q.decodeView('%7Bnot json'), { active: '', tabs: {} });
-    assert.deepEqual(Q.decodeView(encodeURIComponent(JSON.stringify({ t: { a: { f: { '-1': { values: [1] }, x: {} }, s: 'evil,2' } } }))).tabs.a, { search: '', filters: {}, sort: [{ col: 2, dir: 'asc' }] });
+    assert.deepEqual(Q.decodeView(encodeURIComponent(JSON.stringify({ t: { a: { f: { '-1': { values: [1] }, x: {} }, s: 'evil,2', g: { 0: 'sum', '-1': 'avg', 2: 'drop table', 3: 'count' } } } }))).tabs.a, { search: '', filters: {}, sort: [{ col: 2, dir: 'asc' }], totals: { 0: 'sum', 3: 'count' } });
     assert.equal(Q.encodeView({ active: '', tabs: { a: Q.emptyQuery() } }), '');
   });
 
   await t('inserting or deleting a column re-keys a saved view', () => {
-    const q = { search: '', filters: { 1: { values: ['a'] }, 3: { min: 1 } }, sort: [{ col: 3, dir: 'asc' }, { col: 1, dir: 'desc' }] };
+    const q = { search: '', filters: { 1: { values: ['a'] }, 3: { min: 1 } }, sort: [{ col: 3, dir: 'asc' }, { col: 1, dir: 'desc' }], totals: { 1: 'count', 3: 'sum' } };
     assert.deepEqual(Q.shiftQueryColumns(q, 2, 1).filters, { 1: { values: ['a'] }, 4: { min: 1 } });
+    assert.deepEqual(Q.shiftQueryColumns(q, 2, 1).totals, { 1: 'count', 4: 'sum' });
     const del = Q.shiftQueryColumns(q, 1, -1);
     assert.deepEqual(del.filters, { 2: { min: 1 } });
     assert.deepEqual(del.sort, [{ col: 2, dir: 'asc' }]);
+    assert.deepEqual(del.totals, { 2: 'sum' });
+  });
+
+  await t('the summary row: sum / average / count / unique over the rows the view shows', () => {
+    const all = Q.runQuery(index, Q.emptyQuery());
+    assert.equal(Q.columnTotal(index, all, 1, 'sum'), 1355.5);
+    assert.equal(Q.columnTotal(index, all, 1, 'avg'), 1355.5 / 4);
+    assert.equal(Q.columnTotal(index, all, 1, 'count'), 4, 'a blank is not counted');
+    assert.equal(Q.columnTotal(index, all, 0, 'count'), 5);
+    assert.equal(Q.columnTotal(index, all, 0, 'unique'), 4, 'Alice twice is one');
+    assert.equal(Q.columnTotal(index, all, 3, 'unique'), 3, 'tags count one by one');
+    assert.equal(Q.columnTotal(index, all, 4, 'count'), 2, 'a checkbox counts the checked');
+    assert.equal(Q.columnTotal(index, all, 0, 'sum'), null, 'no sum of text');
+    // Filters apply: only the rows shown are summed.
+    const shown = Q.runQuery(index, { search: 'alice', filters: {}, sort: [] });
+    assert.equal(Q.columnTotal(index, shown, 1, 'sum'), 1280.5);
+    assert.equal(Q.columnTotal(index, [], 1, 'avg'), null);
+    assert.deepEqual(Q.totalsFor('number'), ['sum', 'avg', 'count']);
+    assert.deepEqual(Q.totalsFor('tags'), ['count', 'unique']);
+    assert.deepEqual(Q.setTotal(Q.emptyQuery(), 2, 'count').totals, { 2: 'count' });
+    assert.deepEqual(Q.setTotal({ ...Q.emptyQuery(), totals: { 2: 'count' } }, 2, null).totals, {});
+    assert.equal(Q.isEmptyQuery({ ...Q.emptyQuery(), totals: { 0: 'count' } }), false, 'a summary alone is a view worth a link');
   });
 
   await t('value parsing: numbers with separators, currency, parentheses; dates; checkboxes', () => {

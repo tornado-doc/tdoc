@@ -15,6 +15,7 @@ import { CommentPanel } from './comments/panel/comment-panel.jsx';
 import { useCommentArea, useCommentListPrefs } from './comments/core/comment-area.js';
 import { groupBy } from './comments/core/comment-query.js';
 import { useCommentFeed } from './comments/core/use-comment-feed.js';
+import { withPostedComment } from './comments/core/posted-comment.js';
 import {
   createComment, listComments, listMentionableUsers, listTeams, moveDocsToTeam, removeComment,
   setCommentResolved, toggleReaction, updateCommentText,
@@ -57,7 +58,8 @@ export function FeedbackSpace({ boot }) {
   const canManage = Boolean(boot.ownerManage || boot.teamManage?.canManage);
   const currentTeam = boot.workspaceId || boot.teamManage?.team?.id || null;
 
-  const notify = useNotifyTargets(slug, Boolean(isOwner));
+  const notifyViewer = (identity && (identity.account_id || identity.login)) || '';
+  const notify = useNotifyTargets(slug, Boolean(isOwner), notifyViewer);
   const canSendToAgent = Boolean(isOwner && notify.ready && notify.available && notify.reason !== 'no_agent_bound'
     && (notify.default || (notify.candidates || []).length || notify.fallback));
   // Anyone else who joined: their OWN agents, which answer in the thread
@@ -240,20 +242,33 @@ export function FeedbackSpace({ boot }) {
               onReply: async (parentId, text, opts = {}) => {
                 if (!canComment) { setNotice('Join to reply.'); return false; }
                 let made = null;
-                const ok = await act(async () => { made = await createComment({ slug, version, text, parent_id: parentId }); });
-                if (ok && opts.sendToAgent && canSendToAgent) {
-                  const target = opts.handoffCommentId || (made && made.id);
-                  if (target) await act(() => sendOneCommentToAgent(slug, target, opts.recipient));
+                try {
+                  made = await createComment({ slug, version, text, parent_id: parentId });
+                } catch (err) {
+                  setNotice(err.message || 'That did not work');
+                  return false;
                 }
-                // Their own agent (or their team's) answers the reply they
-                // just wrote (only a comment of theirs may ask it).
-                const own = threadAskPick(opts);
-                if (ok && own && made && made.id) {
-                  const sent = await askOwnAgent(slug, made.id, own);
-                  if (sent.ask) myAgent.addAsk(sent.ask);
-                  setNotice(sent.message);
-                }
-                return ok;
+                // Posted: it shows now (comments/core/posted-comment.js) and
+                // the reply box is done. The re-read and an agent hand-off
+                // follow on their own and report through the notice.
+                setComments((prev) => withPostedComment(prev || [], made, parentId));
+                (async () => {
+                  if (opts.sendToAgent && canSendToAgent) {
+                    const target = opts.handoffCommentId || (made && made.id);
+                    if (target) await act(() => sendOneCommentToAgent(slug, target, opts.recipient));
+                  } else {
+                    await refresh();
+                  }
+                  // Their own agent (or their team's) answers the reply they
+                  // just wrote (only a comment of theirs may ask it).
+                  const own = threadAskPick(opts);
+                  if (own && made && made.id) {
+                    const sent = await askOwnAgent(slug, made.id, own);
+                    if (sent.ask) myAgent.addAsk(sent.ask);
+                    setNotice(sent.message);
+                  }
+                })().catch((err) => setNotice((err && err.message) || 'Posted; could not refresh the list'));
+                return true;
               },
               onReact: (id, emoji) => act(() => toggleReaction({ slug, version, comment_id: id, emoji })),
               onDelete: (id) => act(() => removeComment(slug, version, id)),
@@ -299,7 +314,7 @@ export function FeedbackSpace({ boot }) {
         />
       ) : null}
       {notifyIds ? (
-        <NotifyHandoffPanel slug={slug} open commentIds={notifyIds} onClose={() => setNotifyIds(null)} onSent={() => refresh()} onTargetsChanged={notify.refresh} />
+        <NotifyHandoffPanel slug={slug} open commentIds={notifyIds} onClose={() => setNotifyIds(null)} onSent={() => refresh()} onTargetsChanged={notify.refresh} viewer={notifyViewer} />
       ) : null}
     </div>
     </AgentMentionContext.Provider>

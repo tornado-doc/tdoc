@@ -16,6 +16,8 @@ const path = require('path');
 
 const OFFLINE = [
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
+  'feedback-frame-anchor.test.js', // a comment inside a tdoc doc (anchor.frame): get_comments shows it on one line, no brackets, short, as author content, only for tdoc's own pages
+  'frame-part.test.js', // what the doc frame says it picked is rebuilt: known keys, one line, finite numbers, under the anchor size cap
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
   'selection-bundle.test.js',  // the shared selection modules bundle into the doc frame without a bundler; container keys, adapters, the pick gesture
   'comment-query.test.js',     // one comment query on every surface: Open by default, counts, deleted rule, waiting on you, search, sort, groupBy
@@ -27,6 +29,7 @@ const OFFLINE = [
   'version-history.test.js', // history rows: same writer within 30 min grouped, paged, what changed cached, access, Restore
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
+  'no-async-wait-for-function.test.js', // browser tests never waitForFunction(async ...): Playwright does not await the predicate's value
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'block-lint.test.js',       // publish-time block check: loose text and non-house wrappers warned, never refused; linear on 8 MB sheets; house blocks baked
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
@@ -38,6 +41,8 @@ const OFFLINE = [
   'comment-history.test.js',  // event-log fold + cross-version pull
   'comment-dedupe.test.js',   // the same words twice within seconds is one comment
   'comment-notification-failure.test.js', // inbox KV trouble never turns a saved comment into HTTP 500
+  'comment-post-critical-path.test.js', // POST /api/comments answers once the comment is saved; inbox, contacts, onboarding, index run after (waitUntil), still every time
+  'posted-comment.test.js',   // the POST's answer merged into a surface's list (new thread, reply, duplicate), before the re-read
   'event-convergence.test.js',// eid dedup convergence + fold ordering
   'reconcile.test.js',        // anchor reconcile branches + compaction
   'agent-status-emoji.test.js',// agent verdict folds without synthetic reactions
@@ -120,6 +125,7 @@ const OFFLINE = [
   'email-identity-surface.test.js', // phase-4: actor keys — email identities comment, are invited, own their words
   'identity-recycling.test.js', // renamed handles and recycled addresses must not inherit an account
   'duplicate-download.test.js', // #146 Duplicate vs Download chrome + route contract
+  'doc-download.test.js',      // Download as Markdown (/export.md, same gate as reading), Word (.docx from the doc HTML), CSV / Excel for sheets
   'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
@@ -223,6 +229,7 @@ const BROWSER = [
   'slides-scale.test.js', // slide view scales cards once: cqw type the same in WebKit and Chromium, desktop and phone
   'slides-mode.test.js', // data-tdoc-slide decks present one slide at a time, fitted, and restore on exit
   'landing-sheets-ui.test.js', // the homepage's live sample sheet: viewer fetched only for it; search, tag filter, sort, comment composer on a cell, desktop + phone, nothing written
+  'doc-download-ui.test.js', // ⋯ → Download & copy: PDF / Word / Markdown for prose, CSV (this tab) / Excel for sheets, each a file of its type; desktop + phone; flag off unchanged
   'sheets-ui.test.js', // data-tdoc-sheet: grid, search/filter/sort/tags, view in #hash, cell comments, Edit + Save, CSV/XLSX import, CLI, 10k rows, phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
@@ -261,6 +268,7 @@ const BROWSER = [
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
   'dev-mode-ui.test.js', // account menu Dev mode on/off and nested onboarding controls; two-press exit/replay, refused off the list, re-login skips the gate; desktop + phone
   'ui-fonts-ui.test.js', // no serif in product controls: doc page (bar, card, composer, menus, drawer, Ask AI, Agent activity), /me, account + team settings, /feedback; settings hints muted, /me views fit a phone; desktop + phone
+  'comment-post-no-hang-ui.test.js', // "Posting…" ends at the POST on the widget, space page and doc page while later reads hang; Send to agent opens on the list already loaded
   'feedback-own-agent-ui.test.js', // a joiner's @ lists their own agents (answer only) on the space page and the widget on tdoc's own pages; none on a third-party space; desktop + phone
   'feedback-share-ui.test.js', // feedback space Share = the doc Share dialog; owner moves it to a team; site mode offers the team first; desktop + phone
   'feedback-invites-ui.test.js', // share from the widget: copy link + invite by name; landing page; Join / Keep my own; switcher; SDK Join; Reconnect without a popup; desktop + phone
@@ -276,12 +284,16 @@ const EXTENDED_BROWSER = [
   'anchor-scenarios.test.js', // #387 everything selectable can carry a comment
   'browser-editing.test.js', // playwright: Read/Comment/Edit + explicit snapshot save/conflict
   'feedback-browser.test.js', // playwright: #564 bookmarklet on a localhost app → connect popup → pin → doc
+  'feedback-doc-frame-ui.test.js', // the widget on tdoc's own doc page picks inside the doc frame (element, quote, pins follow its scroll); a phone tap never opens the doc composer too
   'feedback-connect-coop-ui.test.js', // playwright: sign-in through a COOP page cuts the popup off; the claim still connects and the held comment posts; blocked / cancelled keep it
   'mobile-comment-nav.test.js', // playwright phone: highlight ↔ comment, iOS bare tap
 ];
 
 const INTEGRATION = ['onboarding.test.js', 'publish.test.js'];
-const RUNTIME = ['preview-workerd.test.js']; // needs npm ci; real workerd WASM and font modules
+const RUNTIME = [
+  'preview-workerd.test.js', // needs npm ci; real workerd WASM and font modules
+  'doc-download-deps.test.js', // needs npm ci; download output read back with marked and SheetJS (CI: shell runtime job)
+];
 const runAll = process.argv.includes('--all');
 const runBrowser = process.argv.includes('--browser');
 const allFiles = runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;

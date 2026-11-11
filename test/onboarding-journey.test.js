@@ -143,7 +143,8 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   assert(worker.includes("if (!journey.first_doc || journey.first_doc === slug) await stampOnboardingFor(env, accountId, 'commented');")
     && server.includes("if (!journey.first_doc || journey.first_doc === slug) stampOnboardingLocal('commented');"),
     'and both hosts stamp it the same way');
-  assert(/if \(res\.status === 200 && isDocOwner\)/.test(worker), "only the owner's own words move their journey");
+  // A saved comment's follow-ups (onboarding among them) run after the response.
+  assert(/if \(res\.status === 200\) await afterResponse\(ctx, \(async \(\) => \{[\s\S]{0,4000}?if \(isDocOwner\) \{/.test(worker), "only the owner's own words move their journey");
   assert(get.includes("stampOnboardingFor(agentAuth.actor.account_id, 'comments_read')") === false
     && get.includes("'comments_read'"), 'a Bearer read stamps comments_read on the account');
   const upload = worker.slice(worker.indexOf("if (p === '/api/upload' && method === 'POST')"), worker.indexOf("if (p === '/api/doc/access' && method === 'PATCH')"));
@@ -178,7 +179,7 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   assert(server.includes('function isFirstDocProductMeta(meta)') && server.includes('function adoptFirstDocLocal(slug)') && server.includes('if (marked && rec.first_doc !== marked.slug && !rec.shared) {'), 'the local twin adopts the marked doc too');
   assert(upload.indexOf("'published_first'") > upload.indexOf("productEvent(env, 'publish_succeeded'"), 'stamps happen after the write succeeded, never before');
   const post = worker.slice(worker.indexOf("if (p === '/api/comments' && method === 'POST')"), worker.indexOf("if (p === '/api/comments' && method === 'PATCH')"));
-  assert(/res\.status === 200 && isDocOwner[\s\S]*'commented'[\s\S]*'tagged'/.test(post), "the owner's own comment and their first tag are steps");
+  assert(/res\.status === 200\) await afterResponse[\s\S]*isDocOwner\) \{[\s\S]*'commented'[\s\S]*'tagged'/.test(post), "the owner's own comment and their first tag are steps");
   assert(post.includes("if (!journey.first_doc || journey.first_doc === slug) await stampOnboardingFor(env, accountId, 'commented');"), "only a comment on the journey's doc is the journey's comment");
   const local = server.slice(server.indexOf("if (p === '/api/comments' && req.method === 'POST')"), server.indexOf("if (p === '/api/agent/reply'"));
   assert(local.includes("if (!journey.first_doc || journey.first_doc === slug) stampOnboardingLocal('commented');"), "local twin stamps commented, on the journey's doc only");

@@ -3,7 +3,8 @@
 // rows. No DOM and no framework: the in-frame viewer (server/sheets-viewer.js,
 // which inlines this file with its `export`s stripped), the shell (view state in
 // the URL, and later the comment panel) and the CLI importer all run this same
-// code. Filter, sort and search are VIEW state: nothing here edits a document.
+// code. Filter, sort, search and the summary row are VIEW state: nothing here
+// edits a document.
 //
 // Data shape. A sheet is { columns, rows }:
 //   columns[c] = { name, type, palette? }      type: one of TYPES
@@ -217,11 +218,58 @@ export function buildIndex(sheet) {
 // ---- queries --------------------------------------------------------------
 
 export function emptyQuery() {
-  return { search: '', filters: {}, sort: [] };
+  return { search: '', filters: {}, sort: [], totals: {} };
 }
 
 export function isEmptyQuery(q) {
-  return !q || (!q.search && !Object.keys(q.filters || {}).length && !(q.sort || []).length);
+  return !q || (!q.search && !Object.keys(q.filters || {}).length && !(q.sort || []).length && !Object.keys(q.totals || {}).length);
+}
+
+// ---- the summary row ------------------------------------------------------
+// One figure per column, picked by the reader, over the rows the view shows
+// (search and filters applied). totals = { [col]: 'sum' | 'avg' | 'count' |
+// 'unique' }: Sum and Average for a number column, Count (non-blank; checked
+// for a checkbox) and Unique for any column.
+export const TOTALS = Object.freeze(['sum', 'avg', 'count', 'unique']);
+export const TOTAL_LABEL = Object.freeze({ sum: 'Sum', avg: 'Average', count: 'Count', unique: 'Unique' });
+
+export function totalsFor(type) {
+  return normalizeType(type) === 'number' ? ['sum', 'avg', 'count'] : ['count', 'unique'];
+}
+
+// The figure for column c over the rows in `order`: a number, or null for an
+// average of no numbers.
+export function columnTotal(index, order, c, fn) {
+  const col = index.cols[c];
+  if (!col) return null;
+  if (fn === 'sum' || fn === 'avg') {
+    if (!col.num || col.type !== 'number') return null;
+    let sum = 0, n = 0;
+    for (const r of order) { const v = col.num[r]; if (!Number.isNaN(v)) { sum += v; n++; } }
+    if (fn === 'sum') return n ? Math.round(sum * 1e9) / 1e9 : 0;
+    return n ? sum / n : null;
+  }
+  if (fn === 'count') {
+    let n = 0;
+    if (col.type === 'checkbox') { for (const r of order) if (col.num[r] === 1) n++; }
+    else for (const r of order) if (col.text[r].trim() !== '') n++;
+    return n;
+  }
+  if (fn === 'unique') {
+    const seen = new Set();
+    for (const r of order) {
+      if (col.tags) col.tags[r].forEach((t) => seen.add(t.toLowerCase()));
+      else if (col.text[r].trim() !== '') seen.add(col.lower[r].trim());
+    }
+    return seen.size;
+  }
+  return null;
+}
+
+export function setTotal(query, col, fn) {
+  const q = cloneQuery(query);
+  if (fn && TOTALS.includes(fn)) q.totals[col] = fn; else delete q.totals[col];
+  return q;
 }
 
 // One filter per column, keyed by column position:
@@ -384,6 +432,7 @@ export function cloneQuery(query) {
     search: String(q.search || ''),
     filters: JSON.parse(JSON.stringify(q.filters || {})),
     sort: (q.sort || []).map((s) => ({ col: s.col, dir: s.dir })),
+    totals: Object.assign({}, q.totals || {}),
   };
 }
 
@@ -400,6 +449,13 @@ export function shiftQueryColumns(query, at, delta) {
   });
   q.filters = filters;
   q.sort = q.sort.filter((s) => !(delta < 0 && s.col === at)).map((s) => ({ col: move(s.col), dir: s.dir }));
+  const totals = {};
+  Object.keys(q.totals).forEach((k) => {
+    const c = Number(k);
+    if (delta < 0 && c === at) return;
+    totals[move(c)] = q.totals[k];
+  });
+  q.totals = totals;
   return q;
 }
 
@@ -417,6 +473,7 @@ export function encodeView(view) {
     if (q.search) o.q = q.search;
     if (Object.keys(q.filters || {}).length) o.f = q.filters;
     if ((q.sort || []).length) o.s = q.sort.map((s) => (s.dir === 'desc' ? '-' : '') + s.col).join(',');
+    if (Object.keys(q.totals || {}).length) o.g = q.totals;
     tabs[tab] = o;
   });
   const out = {};
@@ -456,6 +513,12 @@ export function decodeView(text) {
       o.s.split(',').slice(0, 10).forEach((part) => {
         const m = /^(-?)(\d+)$/.exec(part.trim());
         if (m) q.sort.push({ col: Number(m[2]), dir: m[1] ? 'desc' : 'asc' });
+      });
+    }
+    if (o.g && typeof o.g === 'object') {
+      Object.keys(o.g).slice(0, 200).forEach((k) => {
+        const c = Number(k);
+        if (Number.isInteger(c) && c >= 0 && TOTALS.includes(o.g[k])) q.totals[c] = o.g[k];
       });
     }
     view.tabs[tab] = q;

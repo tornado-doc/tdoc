@@ -89,6 +89,9 @@ import { filterOptions, groupBy, matchesFilter, sortThreads } from './comments/c
 import { useCommentFeed } from './comments/core/use-comment-feed.js';
 import { useNarrowViewport } from './comments/core/narrow.js';
 import { useSheetView } from './document/sheet-view.js';
+import { createExportHtmlRequest } from './document/export-html.js';
+// The download converters load on the first Download (doc-download.js).
+const loadDownloads = () => import('./document/doc-download.js');
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
 import { useMyAgent } from './document/my-agent.js';
@@ -546,6 +549,11 @@ export function DocumentShell({ boot, config }) {
   }, [comments.moveAnchor, config.canComment, config.signInToComment]);
 
   const sendToFrame = useCallback((message) => bridgeRef.current?.(message), []);
+  // Download: Word, CSV and Excel are built from the document's HTML, which
+  // the frame sends; what the doc is (a sheet, or prose) comes with the
+  // frame's ready message.
+  const exportHtml = useMemo(() => createExportHtmlRequest(sendToFrame), [sendToFrame]);
+  const [docShape, setDocShape] = useState({ sheets: 0, sheetDoc: false });
   // The signed-out homepage remembers nothing about a visitor's view.
   const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity) });
   const bridge = useFrameBridge({
@@ -592,8 +600,10 @@ export function DocumentShell({ boot, config }) {
       // typed question is the page's (askAiDraft), so it is there on reopen.
       setHandoffDetailsOpen(false);
     },
+    'tdoc:exportHtml': (message) => exportHtml.handle(message),
     'tdoc:ready': (message) => {
       setVisualOpen(false);
+      setDocShape({ sheets: Number(message.sheets) || 0, sheetDoc: message.sheetDoc === true });
       setSupportsTheme(message.supportsTheme === true);
       const storedTheme = readStored('tdoc-theme');
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
@@ -633,11 +643,6 @@ export function DocumentShell({ boot, config }) {
       copyText(message.text);
       showToast(`Prompt copied. Opening ${link.name}…`);
       openAppLink(link.href);
-    },
-    'tdoc:docMarkdown': (message) => {
-      copyText(message.markdown || '').then((copied) => {
-        showToast(copied ? 'Copied as Markdown' : 'Copy failed', !copied);
-      });
     },
     'tdoc:anchorClick': (message) => {
       if (!visibleCommentsById.has(message.id)) return;
@@ -1222,7 +1227,8 @@ export function DocumentShell({ boot, config }) {
   // their own connections); the server lists only those. Send to agent shows
   // on a team doc once there is someone to send to.
   const notifyQuery = Boolean((config.isOwner || config.teamManage) && !config.isLanding && config.mode !== 'local');
-  const notifyTargets = useNotifyTargets(config.slug, notifyQuery);
+  const notifyViewer = (config.identity && (config.identity.account_id || config.identity.login)) || '';
+  const notifyTargets = useNotifyTargets(config.slug, notifyQuery, notifyViewer);
   const hasNotifyTargets = Boolean(
     notifyTargets.ready
     && notifyTargets.available
@@ -1636,16 +1642,52 @@ export function DocumentShell({ boot, config }) {
     anchor.click();
   };
 
+  // The browser's print of the reading column, with the print rules
+  // (doc-download.js).
   const printPdf = () => {
-    const frame = document.createElement('iframe');
-    frame.hidden = true;
-    frame.src = `/d/${encodeURIComponent(config.slug)}/v/${config.version}/export?download=0`;
-    frame.onload = () => {
-      frame.contentWindow?.focus();
-      frame.contentWindow?.print();
-      window.setTimeout(() => frame.remove(), 1_000);
-    };
-    document.body.appendChild(frame);
+    const src = `/d/${encodeURIComponent(config.slug)}/v/${config.version}/export?download=0`;
+    loadDownloads().then(({ printDocument }) => printDocument(src));
+  };
+
+  // Download as Word / Markdown / CSV / Excel.
+  const versionBase = `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
+  // Copy as Markdown: the same Markdown as Download Markdown (/export.md).
+  // The fetch rides inside a ClipboardItem so Safari keeps the click's
+  // permission to write; elsewhere the text is written when it arrives.
+  const copyMarkdown = async () => {
+    const text = fetch(`${versionBase}/export.md`, { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))));
+    let copied = false;
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then((t) => new Blob([t], { type: 'text/plain' })) })]);
+        copied = true;
+      }
+    } catch {}
+    if (!copied) copied = await text.then(copyText, () => false);
+    showToast(copied ? 'Copied as Markdown' : 'Copy failed', !copied);
+  };
+
+  const downloadAs = async (kind) => {
+    const { buildSheetFile, buildWord, downloadBlob, downloadUrl } = await loadDownloads();
+    if (kind === 'md') {
+      downloadUrl(`${versionBase}/export.md`, `${config.slug}.md`);
+      return;
+    }
+    showToast(kind === 'docx' ? 'Preparing the Word file…' : kind === 'xlsx' ? 'Preparing the Excel file…' : 'Preparing the CSV file…');
+    try {
+      const html = await exportHtml.request();
+      if (kind === 'docx') {
+        const blob = await buildWord(html, { title, slug: config.slug, docUrl: `${location.origin}/d/${encodeURIComponent(config.slug)}`, baseUrl: `${versionBase}/frame` });
+        downloadBlob(blob, `${config.slug}.docx`);
+      } else {
+        const file = await buildSheetFile(html, kind, { slug: config.slug });
+        downloadBlob(file.blob, file.filename);
+      }
+      setToast(null);
+    } catch (error) {
+      showToast(error?.message ? `Download failed: ${error.message}` : 'Download failed', true);
+    }
   };
 
   // What Share copies: the doc's own address, which always opens the newest
@@ -2219,10 +2261,12 @@ export function DocumentShell({ boot, config }) {
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
             onShare={() => setDialog({ type: 'share' })}
-            onCopyMarkdown={() => bridge.send({ type: 'tdoc:copyDoc', requestId: Date.now() })}
+            onCopyMarkdown={copyMarkdown}
             onDuplicate={duplicate}
             onDownload={download}
             onPrint={printPdf}
+            onDownloadAs={downloadAs}
+            docShape={docShape}
             onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
             onCompare={() => changeComparison(true)}
@@ -2553,6 +2597,7 @@ export function DocumentShell({ boot, config }) {
           onClose={() => setNotifyOpen(false)}
           onSent={async () => { await comments.refresh(); }}
           onTargetsChanged={notifyTargets.refresh}
+          viewer={notifyViewer}
         />
       ) : null}
 

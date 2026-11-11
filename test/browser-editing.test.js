@@ -733,15 +733,18 @@ async function selectParagraph(frame, id = 'editable-paragraph') {
       await page.waitForTimeout(300);
       await clickWord('hotel');
 
-      await page.waitForFunction(async (slugName) => {
-        const list = await (await fetch(`/api/comments?slug=${slugName}&version=1`)).json();
-        return list.some((entry) => entry.anchor && entry.anchor.text === 'hotel');
-      }, anchorSlug, { timeout: 10_000 }).catch(() => {});
-
-      const anchors = await page.evaluate(async (slugName) => {
-        const list = await (await fetch(`/api/comments?slug=${slugName}&version=1`)).json();
-        return list.map((entry) => entry.anchor && entry.anchor.text);
-      }, anchorSlug);
+      // Poll until the move lands. Not page.waitForFunction with an async
+      // predicate: Playwright only checks that the returned Promise is truthy,
+      // so it resolves after one fetch whatever the list holds.
+      let anchors = [];
+      for (const until = Date.now() + 10_000; ;) {
+        anchors = await page.evaluate(async (slugName) => {
+          const list = await (await fetch(`/api/comments?slug=${slugName}&version=1`)).json();
+          return list.map((entry) => entry.anchor && entry.anchor.text);
+        }, anchorSlug);
+        if (anchors.includes('hotel') || Date.now() > until) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       assert(anchors.includes('hotel'),
         `Move anchor did not land: anchors are ${JSON.stringify(anchors)}`);
     });

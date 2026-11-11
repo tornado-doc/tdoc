@@ -11,6 +11,12 @@
 //     hand-written markup) renders as a grid
 //   - 10,000 rows × 20 columns: loads, scrolls within a frame budget, sorts
 //   - a phone: no sideways page scroll, menus as bottom sheets, tap to select
+//   - a sheet in a prose doc expands to full screen and back with its view
+//     (search, sort, scroll) intact, #expand=1 opens it so, Esc closes, cell
+//     comments work there; ?sheet=<n> is that tab on its own page; a doc that
+//     is only a sheet has no expand button
+//   - the summary row: Sum / Average / Count / Unique per column, over the
+//     rows the filters leave, in the #hash, never in the document
 // Screenshots for the PR: TDOC_TEST_SCREENSHOTS=<dir>.
 const fs = require('fs');
 const http = require('http');
@@ -81,6 +87,12 @@ async function shot(page, name, opts = {}) {
     }
     fs.writeFileSync(bigCsv, lines.join('\n'));
   }
+  // A prose doc with two sheets in it (the RaftBench shape).
+  writeDoc('prose', `<!doctype html><html><head><meta charset="utf-8"><title>Runs report</title></head><body><main><h1>Runs report</h1>
+<p>What we ran and what came out of it. The tables below can be searched, filtered and sorted.</p>
+${M.tableHtml({ name: 'Runs', columns: [{ name: 'Run', type: 'text' }, { name: 'Tasks', type: 'number' }, { name: 'Product', type: 'tags' }], rows: Array.from({ length: 60 }, (_, k) => ({ id: `r${k + 1}`, cells: [`run ${k + 1}`, String((k * 7) % 23), [k % 2 ? 'Raft' : 'Claude Code']] })) })}
+${M.tableHtml({ name: 'Notes', columns: [{ name: 'Note', type: 'text' }], rows: [{ id: 'r1', cells: ['first'] }, { id: 'r2', cells: ['second'] }] })}
+<h2>What next</h2><p>Three options, below.</p></main></body></html>`, 'Runs report');
   // Agent-authored markup, no row ids, no thead (a <th> row in the body).
   writeDoc('handwritten', `<!doctype html><html><head><meta charset="utf-8"><title>Hand</title></head><body><main><h1>Inventory</h1>
 <table data-tdoc-sheet data-name="Stock"><tr><th>Item</th><th data-type="number">Qty</th><th data-type="tags">Where</th></tr>
@@ -119,10 +131,10 @@ async function shot(page, name, opts = {}) {
     await waitForServer(port);
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
-    // The editing and import surfaces are behind the `sheets` flag; reading is not.
+    // Editing and import are on for everyone (the `sheets` flag defaults on):
+    // no flag is pinned here.
     await context.addInitScript(() => {
       try { localStorage.setItem('tdoc-save-notice-dismissed', '1'); } catch {}
-      if (window === window.top) window.__TDOC_FLAGS__ = Object.assign({}, window.__TDOC_FLAGS__, { sheets: true });
     });
     const page = await context.newPage();
     const errors = [];
@@ -591,7 +603,6 @@ async function shot(page, name, opts = {}) {
       assert(JSON.parse(fs.readFileSync(path.join(root, slug, 'meta.json'), 'utf8')).title === 'Untitled sheet');
       // Phone: the same menu, the same sheet.
       const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
-      await phone.addInitScript(() => { if (window === window.top) window.__TDOC_FLAGS__ = { sheets: true }; });
       const p2 = await phone.newPage();
       await p2.goto(`${base}/`);
       await p2.getByRole('button', { name: 'Create a doc' }).tap();
@@ -711,6 +722,202 @@ async function shot(page, name, opts = {}) {
       await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '6 of 30 rows');
       await shot(p, 'sheet-phone-filter');
       await phone.close();
+    });
+
+    await test('full screen: a sheet in a prose doc expands and closes with its view intact; #expand=1 opens it so', async () => {
+      // A doc that is only its sheet has no expand button: nothing to hide.
+      let frame = await open('tracker');
+      assert(await frame.evaluate(() => window.__tdocSheets.expanded().sheetOnly), 'tracker is a sheet-only doc');
+      assert(!(await frameLoc().getByRole('button', { name: 'Expand sheet to full screen' }).isVisible()), 'no expand button on a sheet-only doc');
+
+      frame = await open('prose');
+      const f = frameLoc();
+      assert(!(await frame.evaluate(() => window.__tdocSheets.expanded().sheetOnly)), 'prose is not sheet-only');
+      await shot(page, 'sheet-expand-before');
+      // A view to carry over: a search, a sort, a scrolled grid, a selected cell.
+      await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('run');
+      await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '60 rows');
+      await f.locator('.ts-h[data-c="1"] .ts-hname').click();
+      await frame.waitForFunction(() => window.__tdocSheets.tabs()[0].query.sort.length === 1);
+      // (after the search's debounce, which scrolls to the top)
+      await page.waitForTimeout(300);
+      await frame.evaluate(() => { document.querySelector('.ts-grid').scrollTop = 400; });
+      await page.waitForTimeout(100);
+      const before = await frame.evaluate(() => ({ q: window.__tdocSheets.tabs()[0].query, top: document.querySelector('.ts-grid').scrollTop, first: document.querySelector('.ts-row .ts-c').textContent }));
+      assert(before.top >= 390, `scrolled: ${before.top}`);
+
+      await f.getByRole('button', { name: 'Expand sheet to full screen' }).click();
+      await page.waitForFunction(() => document.querySelector('.tdoc-document-app[data-visual-open][data-presenting]'));
+      await frame.waitForFunction(() => window.__tdocSheets.expanded().on);
+      await page.waitForFunction(() => /(^#|&)expand=1(&|$)/.test(location.hash));
+      await page.waitForTimeout(150);
+      const big = await frame.evaluate(() => {
+        const g = document.querySelector('.ts-grid').getBoundingClientRect();
+        return { q: window.__tdocSheets.tabs()[0].query, top: document.querySelector('.ts-grid').scrollTop, search: document.querySelector('.ts-search input').value, w: g.width, h: g.height, vw: innerWidth, vh: innerHeight, close: !!document.querySelector('.ts-xhead button[aria-label^="Close full screen"]') };
+      });
+      const frameBox = await page.locator('iframe[aria-label="Document content"]').boundingBox();
+      assert(frameBox.width === 1280 && frameBox.height === 860, `the frame fills the window: ${JSON.stringify(frameBox)}`);
+      assert(big.w > 1200 && big.h > 600, `the grid fills the frame: ${JSON.stringify(big)}`);
+      assert(JSON.stringify(big.q) === JSON.stringify(before.q) && big.search === 'run', `search and sort carry in: ${JSON.stringify(big)}`);
+      assert(Math.abs(big.top - before.top) < 2, `scroll carries in: ${big.top} vs ${before.top}`);
+      await shot(page, 'sheet-expanded-desktop');
+
+      // Change the view full screen, then Esc: the doc gets it back.
+      await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('run 1');
+      await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '11 of 60 rows');
+      await f.locator('.ts-row[data-i="2"] .ts-c[data-c="0"]').click();
+      await page.keyboard.press('Escape');
+      await frame.waitForFunction(() => !window.__tdocSheets.expanded().on);
+      await page.waitForFunction(() => !document.querySelector('.tdoc-document-app[data-visual-open]') && !/expand=1/.test(location.hash));
+      const back = await frame.evaluate(() => ({ count: document.querySelector('.ts-count').textContent, search: document.querySelector('.ts-search input').value, sel: window.__tdocSheets.selection(), inert: document.querySelectorAll('[inert]').length, expandShown: !document.querySelector('.ts-expand').hidden }));
+      assert(back.count === '11 of 60 rows' && back.search === 'run 1' && back.sel.r === 2, `the view carries out: ${JSON.stringify(back)}`);
+      assert(back.inert === 0 && back.expandShown, JSON.stringify(back));
+      assert(await page.evaluate(() => /(^#|&)sheet=/.test(location.hash)), 'the view is still in the hash');
+
+      // A link with #expand=1 opens the sheet full screen, view and all.
+      await page.waitForTimeout(400);
+      const link = await page.evaluate(() => location.href.split('#')[0] + location.hash + '&expand=1');
+      const p2 = await context.newPage();
+      await p2.goto(link);
+      await p2.waitForFunction(() => document.querySelector('.tdoc-document-app[data-visual-open]'), null, { timeout: 15000 });
+      const fr2 = p2.frames().find((x) => x.url().includes('/frame'));
+      await fr2.waitForFunction(() => window.__tdocSheets && window.__tdocSheets.expanded().on && document.querySelector('.ts-count').textContent === '11 of 60 rows');
+      // The close button exits too.
+      await p2.frameLocator('iframe[aria-label="Document content"]').getByRole('button', { name: 'Close full screen (Esc)' }).click();
+      await fr2.waitForFunction(() => !window.__tdocSheets.expanded().on);
+      await p2.close();
+    });
+
+    await test('full screen keeps commenting: a cell comment there anchors to its cell', async () => {
+      // A fresh load (not a hash change on the page already open), no saved view.
+      await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('tdoc-sheet-view:')) localStorage.removeItem(k); });
+      await page.goto('about:blank');
+      const frame = await open('prose', '#expand=1');
+      await frame.waitForFunction(() => window.__tdocSheets.expanded().on);
+      await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
+      const f = frameLoc();
+      // Once the frame has grown to the window and the grid with it.
+      await frame.waitForFunction(() => innerHeight === 860 && document.querySelector('.ts-grid').getBoundingClientRect().height > 600);
+      await page.waitForTimeout(100);
+      await f.locator('.ts-row[data-i="3"] .ts-c[data-c="0"]').click();
+      await f.getByRole('button', { name: 'Comment on Runs!A4' }).click();
+      await page.waitForSelector('.tdoc-popup textarea', { timeout: 5000 });
+      assert(await page.locator('.tdoc-popup textarea').isVisible(), 'the composer shows above the full-screen frame');
+      await page.fill('.tdoc-popup textarea', 'Why only this run?');
+      await page.click('.tdoc-popup .submit');
+      const file = path.join(root, 'prose', 'comments.json');
+      let saved = [];
+      for (let k = 0; k < 50 && !saved.length; k++) { try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {} if (!saved.length) await page.waitForTimeout(100); }
+      assert(saved.length === 1 && saved[0].anchor.sheet && saved[0].anchor.sheet.table === 'Runs' && saved[0].anchor.sheet.row === 'r4', JSON.stringify(saved[0] && saved[0].anchor));
+      await frame.waitForFunction(() => document.querySelector('.ts-row[data-i="3"] .ts-c[data-c="0"]').classList.contains('has-comment'));
+    });
+
+    await test('full screen, open on its own: ?sheet=<n> is that tab of the same doc, full page, with its comments', async () => {
+      const frame = await open('prose');
+      const f = frameLoc();
+      await f.getByRole('tab', { name: 'Notes' }).click();
+      await f.getByRole('tab', { name: 'Runs' }).click();
+      await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('run 4');
+      await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '11 of 60 rows');
+      await f.getByRole('button', { name: 'Expand sheet to full screen' }).click();
+      await frame.waitForFunction(() => window.__tdocSheets.expanded().on);
+      const alone = f.getByRole('link', { name: 'Open this sheet on its own page' });
+      await alone.hover();
+      const href = await alone.getAttribute('href');
+      assert(/^\/d\/prose\/v\/1\?sheet=1#sheet=/.test(href), href);
+      const [tab] = await Promise.all([context.waitForEvent('page'), alone.click()]);
+      await tab.waitForLoadState();
+      assert(new URL(tab.url()).pathname === '/d/prose/v/1' && new URL(tab.url()).searchParams.get('sheet') === '1', tab.url());
+      const fl = tab.frameLocator('iframe[aria-label="Document content"]');
+      await fl.locator('.tdoc-sheet.is-expanded .ts-row').first().waitFor({ timeout: 15000 });
+      const tf = tab.frames().find((x) => x.url().includes('/frame'));
+      const info = await tf.evaluate(() => ({ x: window.__tdocSheets.expanded(), count: document.querySelector('.ts-count').textContent, tabs: getComputedStyle(document.querySelector('.ts-tabs')).display, close: !document.querySelector('.ts-xhead button[aria-label^="Close"]').hidden, back: document.querySelector('.ts-xhead a[aria-label="Open the doc"]').getAttribute('href'), title: document.querySelector('.ts-xtitle').textContent }));
+      assert(info.x.on && info.x.alone === 1 && info.count === '11 of 60 rows', `the view came along: ${JSON.stringify(info)}`);
+      assert(info.tabs === 'none' && !info.close && /^\/d\/prose\/v\/1#sheet=/.test(info.back), JSON.stringify(info));
+      assert(info.title === 'Runs report · Runs', info.title);
+      // The same doc: the comment on Runs!A4 shows on its cell here. Esc does not leave.
+      await fl.getByRole('searchbox', { name: 'Search this sheet' }).fill('');
+      await tf.waitForFunction(() => document.querySelector('.ts-row[data-i="3"] .ts-c[data-c="0"]') && document.querySelector('.ts-row[data-i="3"] .ts-c[data-c="0"]').classList.contains('has-comment'));
+      await tab.keyboard.press('Escape');
+      await tab.waitForTimeout(150);
+      assert(await tf.evaluate(() => window.__tdocSheets.expanded().on), 'Esc keeps the sheet page');
+      await shot(tab, 'sheet-alone-desktop');
+      // ?sheet=2 is the second tab, alone.
+      await tab.goto(`${base}/d/prose/v/1?sheet=2`);
+      await fl.locator('.tdoc-sheet.is-expanded .ts-row').first().waitFor({ timeout: 15000 });
+      const tf2 = tab.frames().find((x) => x.url().includes('/frame'));
+      assert(await tf2.evaluate(() => window.__tdocSheets.active() === 1 && document.querySelector('.ts-count').textContent === '2 rows'), 'tab 2 alone');
+      // "Open the doc" goes back to the doc.
+      await fl.getByRole('link', { name: 'Open the doc' }).click();
+      await tab.waitForURL((u) => !u.search.includes('sheet='));
+      await tab.close();
+    });
+
+    await test('full screen on a phone', async () => {
+      const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+      const p = await phone.newPage();
+      const frame = await open('prose', '', p);
+      const f = p.frameLocator('iframe[aria-label="Document content"]');
+      await f.locator('.tdoc-sheet').scrollIntoViewIfNeeded();
+      await shot(p, 'sheet-expand-phone-before');
+      await f.getByRole('button', { name: 'Expand sheet to full screen' }).tap();
+      await frame.waitForFunction(() => window.__tdocSheets.expanded().on);
+      await p.waitForTimeout(200);
+      const box = await p.locator('iframe[aria-label="Document content"]').boundingBox();
+      assert(box.width === 390 && box.height === 844, JSON.stringify(box));
+      const m = await frame.evaluate(() => { const r = document.querySelector('.ts-grid').getBoundingClientRect(); return { w: r.width, h: r.height, overflow: document.documentElement.scrollWidth - innerWidth }; });
+      assert(m.w > 340 && m.h > 500 && m.overflow <= 1, JSON.stringify(m));
+      await shot(p, 'sheet-expanded-phone');
+      await f.getByRole('button', { name: 'Close full screen (Esc)' }).tap();
+      await frame.waitForFunction(() => !window.__tdocSheets.expanded().on);
+      await phone.close();
+    });
+
+    await test('the summary row: picked per column, follows the filters, rides in the #hash, is not an edit', async () => {
+      const frame = await open('prose');
+      const f = frameLoc();
+      const tasks = Array.from({ length: 60 }, (_, k) => (k * 7) % 23);
+      const sumOf = (ks) => ks.reduce((n, k) => n + tasks[k], 0);
+      assert(await frame.evaluate(() => document.querySelector('.ts-foot').hidden), 'no summary row until one is asked for');
+      await f.getByRole('button', { name: 'Tasks column menu' }).click();
+      await f.getByRole('menuitemradio', { name: 'Sum' }).click();
+      const footText = (c) => frame.evaluate((col) => document.querySelector(`.ts-fc[data-c="${col}"]`).textContent, c);
+      await frame.waitForFunction(() => !document.querySelector('.ts-foot').hidden);
+      assert(await footText(1) === `Sum${sumOf(tasks.map((_, k) => k)).toLocaleString('en-US')}`, await footText(1));
+      // The foot stays in view at the grid's bottom while the rows scroll.
+      const stuck = await frame.evaluate(() => { const g = document.querySelector('.ts-grid'); g.scrollTop = 300; const a = g.getBoundingClientRect(), b = document.querySelector('.ts-foot').getBoundingClientRect(); return Math.abs(a.bottom - b.bottom) < 4; });
+      assert(stuck, 'the summary row sticks to the bottom');
+      // A filter changes what is summed.
+      await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('run 1');
+      await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '11 of 60 rows');
+      const shown = [0, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+      await frame.waitForFunction((want) => document.querySelector('.ts-fc[data-c="1"]').textContent === want, `Sum${sumOf(shown)}`);
+      // From the row itself: Unique on Product, then Average on Tasks.
+      await f.locator('.ts-fc[data-c="2"]').click();
+      await f.getByRole('menuitemradio', { name: 'Unique' }).click();
+      await frame.waitForFunction(() => document.querySelector('.ts-fc[data-c="2"]').textContent === 'Unique2');
+      assert(!(await f.getByRole('menuitemradio', { name: 'Sum' }).count()), 'menu closed');
+      await f.locator('.ts-fc[data-c="1"]').click();
+      const offered = await f.locator('.ts-pop [role="menuitemradio"]').allTextContents();
+      assert(offered.join() === 'None,Sum,Average,Count', offered.join());
+      await f.getByRole('menuitemradio', { name: 'Average' }).click();
+      const avg = (sumOf(shown) / shown.length).toLocaleString('en-US', { maximumFractionDigits: 2 });
+      await frame.waitForFunction((want) => document.querySelector('.ts-fc[data-c="1"]').textContent === want, `Average${avg}`);
+      // In the hash; a reload brings it back.
+      await page.waitForFunction(() => /%2522g%2522/.test(location.hash));
+      await page.reload();
+      await frameLoc().locator('.tdoc-sheet .ts-row').first().waitFor();
+      const again = page.frames().find((x) => x.url().includes('/frame'));
+      await again.waitForFunction((want) => document.querySelector('.ts-fc[data-c="1"]') && document.querySelector('.ts-fc[data-c="1"]').textContent === want, `Average${avg}`);
+      // View state only: the author's table has no trace of it, nothing to save.
+      assert(await again.evaluate(() => !document.querySelector('table[data-tdoc-sheet] .ts-foot, table[data-tdoc-sheet] [data-total]') && !/Average|Unique/.test(document.querySelector('table[data-tdoc-sheet]').outerHTML)), 'the document is untouched');
+      await shot(page, 'sheet-summary-row');
+      // None on both: the row goes away.
+      for (const c of [1, 2]) {
+        await frameLoc().locator(`.ts-fc[data-c="${c}"]`).click();
+        await frameLoc().getByRole('menuitemradio', { name: 'None' }).click();
+      }
+      await again.waitForFunction(() => document.querySelector('.ts-foot').hidden);
     });
 
     await test('no page errors', async () => {

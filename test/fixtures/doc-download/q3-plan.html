@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Q3 launch plan</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; color: #17171a; }
+  main { max-width: 44rem; margin: 0 auto; padding: 2rem 1.25rem; }
+  .bar { fill: #1652f0; }
+  .callout { background: #eef3ff; border-left: 3px solid #1652f0; padding: .75rem 1rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Q3 launch plan</h1>
+<p>We ship the <strong>importer</strong> first, then <em>billing</em>. Read <a href="https://example.com/spec">the spec</a> or the <a href="notes">team notes</a>; run <code>tdoc-pull q3</code> to see comments.</p>
+<h2>Milestones</h2>
+<ul>
+  <li>Importer &mdash; July
+    <ul><li>CSV and XLSX</li><li>Google Sheets link</li></ul>
+  </li>
+  <li><p>Billing &mdash; August</p></li>
+</ul>
+<ol start="3">
+  <li>Beta invite</li>
+  <li>Public launch</li>
+</ol>
+<blockquote><p>Ship the smallest thing that a team will pay for.</p></blockquote>
+<h2>Owners</h2>
+<div class="tdoc-table-scroll"><table>
+  <thead><tr><th>Owner</th><th>Item</th><th>Due</th></tr></thead>
+  <tbody>
+    <tr><td>Ana</td><td>Importer</td><td>2026-07-15</td></tr>
+    <tr><td>Bo</td><td>Billing | invoices</td><td>2026-08-20</td></tr>
+    <tr><td colspan="2">Everyone</td><td>2026-09-01</td></tr>
+  </tbody>
+</table></div>
+<h3>Setup</h3>
+<pre><code class="language-bash">npm install
+  tdoc-new --slug q3 \
+    --from-csv owners.csv</code></pre>
+<figure>
+  <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAIAAABwJOjsAAAAJElEQVR4nGMQC/owIIhh1OJRi0ctHrV41OJRi0ctHrV45FgMAJfNMz1fZAFiAAAAAElFTkSuQmCC" alt="Revenue by month" width="320" height="160">
+  <figcaption>Revenue by month (illustrative).</figcaption>
+</figure>
+<figure>
+  <svg viewBox="0 0 200 100" width="400" height="200" role="img" aria-label="Signups chart"><title>Signups chart</title>
+    <rect class="bar" x="10" y="40" width="40" height="60"/><rect class="bar" x="80" y="20" width="40" height="80"/><rect class="bar" x="150" y="5" width="40" height="95"/>
+  </svg>
+  <figcaption>Signups per week.</figcaption>
+</figure>
+<iframe src="/d/q3-plan/v/1/widget/forecast" title="Forecast model" sandbox="allow-scripts" width="600" height="300"></iframe>
+<h2>Budget</h2>
+<table data-tdoc-sheet data-name="Budget">
+<thead><tr><th data-key="c1" data-type="text">Line</th><th data-key="c2" data-type="number">Amount</th><th data-key="c3" data-type="tags">Tags</th></tr></thead>
+<tbody>
+<tr data-row="r1"><td>Ads</td><td>1,200</td><td><span data-tag>growth</span> <span data-tag>q3</span></td></tr>
+<tr data-row="r2"><td>=HYPERLINK("x")</td><td>300.5</td><td></td></tr>
+</tbody>
+</table>
+<hr>
+<p class="callout">Questions? Comment on any line of this doc.</p>
+<script>window.stolen = document.cookie</script>
+</main>
+</body>
+</html>
