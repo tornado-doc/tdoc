@@ -14,6 +14,7 @@ import { useDoubleTapOption, useEscapeLadder } from '../../shell/src/comments/pa
 import { findElement, selectorFor as sharedSelectorFor } from '../../shell/src/comments/selection/anchors/element.js';
 import { enclosingFor as sharedEnclosingFor, regionOf, regionRect, toRect as sharedToRect } from '../../shell/src/comments/selection/anchors/region.js';
 import { captureTextAnchor, collectTextNodes, findTextRange } from '../../shell/src/comments/selection/anchors/text-range.js';
+import { cleanFrameAnchor, cleanRect, frameLabel } from '../../shell/src/comments/selection/anchors/frame-part.js';
 import { createPickGesture, rangeBetweenPoints } from '../../shell/src/comments/selection/pick-gesture.js';
 import { useCommentFeed } from '../../shell/src/comments/core/use-comment-feed.js';
 import { isNarrowViewport } from '../../shell/src/comments/core/narrow.js';
@@ -766,7 +767,8 @@ ${uiCss}
     const anchor = comment && comment.anchor;
     if (!anchor || anchor.page) return null;
     // Inside the doc frame: the frame stands for it here; where in it, the
-    // frame says (framePlaces). Without the flag it is the frame element.
+    // frame says (framePlaces). Without the flag (or off tdoc's doc page)
+    // it has no element here: the card says it is not anchored.
     if (anchor.frame) return docFrame() || null;
     const cached = found.get(comment.id);
     if (cached && cached.el && cached.el.isConnected) return cached.el;
@@ -892,85 +894,77 @@ ${uiCss}
   // belongs (the page, the space) never comes from it.
   let framePickOn = false;
   const onTdocPage = (() => { try { return new URL(base).origin === location.origin; } catch (_) { return false; } })();
-  // The doc frame on tdoc's own doc page, flag or not (tdoc:fbPicking: the
-  // doc's own composer stays shut while the widget picks).
-  function tdocDocFrame() {
-    if (!onTdocPage) return null;
+  function docFrame() {
+    if (!onTdocPage || !framePickOn) return null;
     const frame = document.querySelector('iframe.tdoc-doc-frame');
     return frame && frame.contentWindow ? frame : null;
   }
-  function docFrame() { return framePickOn ? tdocDocFrame() : null; }
   function overFrame(x, y) {
     const frame = docFrame();
     if (!frame) return null;
     const r = frame.getBoundingClientRect();
     return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom ? frame : null;
   }
-  const fnum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-  const fstr = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
-  function cleanRect(r) {
-    if (!r || typeof r !== 'object') return null;
-    return { left: fnum(r.left), top: fnum(r.top), width: Math.max(0, fnum(r.width)), height: Math.max(0, fnum(r.height)) };
-  }
-  function cleanBox(r, keys = ['x', 'y', 'width', 'height']) {
-    if (!r || typeof r !== 'object') return null;
-    const out = {};
-    for (const k of keys) out[k] = fnum(r[k]);
-    return out;
-  }
-  function cleanFlat(o, max = 200) {
-    if (!o || typeof o !== 'object') return null;
-    const out = {};
-    for (const [k, v] of Object.entries(o).slice(0, 12)) {
-      if (typeof v === 'string') out[fstr(k, 40)] = v.slice(0, max);
-      else if (typeof v === 'number' && Number.isFinite(v)) out[fstr(k, 40)] = v;
-      else if (typeof v === 'boolean') out[fstr(k, 40)] = v;
-    }
-    return out;
-  }
-  // What the frame picked, as the anchor's `frame` part.
-  function cleanFrameAnchor(a) {
-    if (!a || typeof a !== 'object') return null;
-    const out = { selector: fstr(a.selector, 500), tag: fstr(a.tag, 40), text: fstr(a.text, 500), accessible_name: fstr(a.accessible_name, 200) };
-    if (!out.selector && !out.text) return null;
-    if (a.label) out.label = fstr(a.label, 120);
-    if (a.container) out.container = cleanFlat(a.container);
-    if (a.container_is_target === true) out.container_is_target = true;
-    if (a.rect) out.rect = cleanBox(a.rect);
-    if (a.quote && typeof a.quote === 'object' && typeof a.quote.text === 'string' && a.quote.text.trim()) {
-      out.quote = {
-        text: fstr(a.quote.text, 2000), context_before: fstr(a.quote.context_before, 300), context_after: fstr(a.quote.context_after, 300),
-        occurrence: Number.isInteger(a.quote.occurrence) ? a.quote.occurrence : null,
-        occurrences: Number.isInteger(a.quote.occurrences) ? a.quote.occurrences : null,
-      };
-    }
-    if (a.region && typeof a.region === 'object') {
-      const r = a.region;
-      out.region = {
-        container_text: fstr(r.container_text, 500),
-        rel: cleanBox(r.rel), frac: cleanBox(r.frac),
-        elements: Array.isArray(r.elements) ? r.elements.slice(0, 8).map((e) => cleanFlat(e, 80)).filter(Boolean) : [],
-      };
-    }
-    return out;
-  }
-  // The words to show for it, as for any anchor here.
-  function frameLabel(a) {
-    if (a.quote) return `“${a.quote.text.slice(0, 48)}${a.quote.text.length > 48 ? '…' : ''}”`;
-    if (a.region) return a.label || 'Area';
-    const text = String(a.text || '').trim();
-    return a.accessible_name || (text ? `${a.tag || 'element'} · “${text.slice(0, 48)}${text.length > 48 ? '…' : ''}”` : (a.tag || 'element'));
-  }
-  // A rect in the frame's viewport, in ours.
+  // A rect in the frame's viewport, in ours, clipped to the frame: the
+  // frame never places anything (a pin, an outline, a composer) outside
+  // itself. Nothing left of it: null.
   function fromFrame(rect, frame = docFrame()) {
     if (!rect || !frame) return null;
     const f = frame.getBoundingClientRect();
-    return toRect({ left: f.left + rect.left, top: f.top + rect.top, width: rect.width, height: rect.height });
+    const left = Math.max(f.left, f.left + rect.left), top = Math.max(f.top, f.top + rect.top);
+    const right = Math.min(f.right, f.left + rect.left + rect.width), bottom = Math.min(f.bottom, f.top + rect.top + rect.height);
+    if (right < left || bottom < top) return null;
+    return toRect({ left, top, width: right - left, height: bottom - top });
   }
   let frameSeq = 0;
   const frameWaits = new Map();
+  // Comments are known to the frame by tokens of this page load, never by
+  // their ids (the doc's author must not be able to tell whose they are).
   let framePlaces = new Map();
   const frameListeners = new Set();
+  const frameTokens = new Map(); // comment id → token
+  const frameTokenIds = new Map(); // token → comment id
+  function frameToken(id) {
+    if (!frameTokens.has(id)) {
+      const bytes = new Uint8Array(9);
+      crypto.getRandomValues(bytes);
+      const token = `t${[...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+      frameTokens.set(id, token); frameTokenIds.set(token, id);
+    }
+    return frameTokens.get(id);
+  }
+  // The frame's position reports: one update per animation frame, none for
+  // a report that changes nothing.
+  let placesPending = null, placesFrame = 0, placesLast = '';
+  function takePlaces(list) {
+    placesPending = list;
+    if (placesFrame) return;
+    placesFrame = requestAnimationFrame(() => {
+      placesFrame = 0;
+      const key = JSON.stringify(placesPending);
+      if (key === placesLast) return;
+      placesLast = key;
+      const next = new Map();
+      for (const place of placesPending) {
+        const id = place && typeof place.id === 'string' ? frameTokenIds.get(place.id) : null;
+        if (id) next.set(id, cleanRect(place.rect));
+      }
+      framePlaces = next;
+      frameListeners.forEach((fn) => fn('places'));
+    });
+  }
+  // The doc frame (re)loaded: the shell page's own load event for it, not
+  // anything the frame says; at most once a second.
+  let lastFrameLoad = 0;
+  document.addEventListener('load', (event) => {
+    const frame = docFrame();
+    if (!frame || event.target !== frame) return;
+    const now = Date.now();
+    if (now - lastFrameLoad < 1000) return;
+    lastFrameLoad = now;
+    placesLast = '';
+    frameListeners.forEach((fn) => fn('ready'));
+  }, true);
   function toFrame(message, frame = docFrame()) {
     if (!frame) return false;
     try { frame.contentWindow.postMessage({ ...message, source: 'tdoc-feedback' }, '*'); return true; } catch (_) { return false; }
@@ -993,14 +987,7 @@ ${uiCss}
         ? { rect: cleanRect(d.rect), onText: d.onText === true }
         : { anchor: cleanFrameAnchor(d.anchor), rect: cleanRect(d.rect) });
     } else if (d.type === 'tdoc:fbPlaces') {
-      const next = new Map();
-      for (const place of (Array.isArray(d.places) ? d.places : []).slice(0, 500)) {
-        if (place && typeof place.id === 'string') next.set(place.id, cleanRect(place.rect));
-      }
-      framePlaces = next;
-      frameListeners.forEach((fn) => fn('places'));
-    } else if (d.type === 'tdoc:ready') {
-      frameListeners.forEach((fn) => fn('ready'));
+      takePlaces((Array.isArray(d.places) ? d.places : []).slice(0, 500));
     }
   });
   // The anchor of a comment on something inside the doc frame: the frame
@@ -1613,8 +1600,27 @@ ${uiCss}
     //     and a plain swipe still scrolls.
     useEffect(() => {
       if (!picking && !reanchorId) { shield.hidden = true; return undefined; }
-      shield.hidden = Boolean(selected);
-      if (selected) return undefined;
+      if (selected) {
+        // The tap that picked still sends its mouse events and click a
+        // moment later. With the sheet already gone they would land on what
+        // is under it: in a frame (tdoc's doc, someone's embed), where our
+        // click guard cannot reach, they start the frame's own thing (the
+        // doc's composer under ours). The sheet stays, inert, until then.
+        const linger = swallowClickUntil - Date.now();
+        if (linger <= 0) { shield.hidden = true; return undefined; }
+        shield.hidden = false;
+        const stop = (event) => {
+          if (event.composedPath()[0] !== shield) return;
+          event.stopImmediatePropagation();
+          if (event.cancelable) event.preventDefault();
+        };
+        const kinds = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'touchstart', 'touchend'];
+        kinds.forEach((type) => window.addEventListener(type, stop, { capture: true, passive: false }));
+        const done = () => { shield.hidden = true; kinds.forEach((type) => window.removeEventListener(type, stop, { capture: true, passive: false })); };
+        const timer = setTimeout(done, linger);
+        return () => { clearTimeout(timer); done(); };
+      }
+      shield.hidden = false;
       const priorCursor = document.documentElement.style.cursor;
       document.documentElement.style.cursor = 'crosshair';
       // The doc frame scrolls itself (its document is not ours to scroll).
@@ -1846,18 +1852,9 @@ ${uiCss}
       };
     }, [picking, reanchorId, selected, apply, areaSelectOn]);
 
-    // The doc frame (tdoc's own doc page): while picking, its presses are the
-    // widget's (no doc composer opens as well); a thing picked in it keeps
-    // its highlight until the composer closes.
+    // A thing picked in the doc frame keeps its highlight until the
+    // composer closes.
     const frameSelOpen = Boolean(frameSel);
-    useEffect(() => {
-      if (!shown) return undefined;
-      const on = Boolean((picking || reanchorId) && !selected);
-      // Not behind the flag: a tap that picks must not also open the doc's
-      // own composer under it (a bug, not the feature).
-      toFrame({ type: 'tdoc:fbPicking', on }, tdocDocFrame());
-      return () => { if (on) toFrame({ type: 'tdoc:fbPicking', on: false }, tdocDocFrame()); };
-    }, [shown, picking, reanchorId, selected, session]);
     useEffect(() => { if (!selected) setFrameSel(null); }, [selected]);
     useEffect(() => (frameSelOpen ? () => { toFrame({ type: 'tdoc:fbClear' }); } : undefined), [frameSelOpen]);
 
@@ -1904,7 +1901,7 @@ ${uiCss}
     // pins. Only their anchors go to the frame, never what was said.
     const frameAnchors = useMemo(() => area.pageComments
       .filter((c) => !c.deleted && c.anchor && c.anchor.frame)
-      .map((c) => ({ ...c.anchor.frame, id: c.id })), [area.pageComments]);
+      .map((c) => ({ ...c.anchor.frame, id: frameToken(c.id) })), [area.pageComments]);
     useEffect(() => {
       if (!shown || !docFrame()) return undefined;
       const send = () => toFrame({ type: 'tdoc:fbAnchors', anchors: frameAnchors });
@@ -1913,6 +1910,8 @@ ${uiCss}
       frameListeners.add(listen);
       return () => { frameListeners.delete(listen); };
     }, [shown, frameAnchors, session]);
+    // Hidden: the frame forgets them (no pins, no marks, no reports).
+    useEffect(() => { if (!shown) toFrame({ type: 'tdoc:fbAnchors', anchors: [] }); }, [shown]);
 
     // Quotes on this page are marked in the app's own text, through the CSS
     // Highlight API: one constructed stylesheet adopted by the page (an
@@ -2070,7 +2069,7 @@ ${uiCss}
         return;
       }
       const el = elementFor(c);
-      if (el && c.anchor && c.anchor.frame) toFrame({ type: 'tdoc:fbReveal', id: c.id });
+      if (el && c.anchor && c.anchor.frame) toFrame({ type: 'tdoc:fbReveal', id: frameToken(c.id) });
       else if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       else if (stateLabel(c.anchor)) say(`Left ${stateLabel(c.anchor)} — open it to see the comment in place.`);
       setPicking(false);

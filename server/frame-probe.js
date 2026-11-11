@@ -322,14 +322,7 @@
            occurrences: placed ? placed.occurrences : null,
            rect: selectionRect(range) });
   }
-  // While tdoc's feedback widget is picking on this doc (tdoc:fbPicking), a
-  // press is the widget's: the doc's own composer does not open as well.
-  // The tap that made the pick still sends its mouse events and click a
-  // moment later, after the widget's sheet is gone: they land here, so the
-  // press stays the widget's a little past the end of picking.
-  function fbOwnsPress() { return !!(fbState && (fbState.picking || Date.now() < fbState.until)); }
   function reportSelection() {
-    if (fbOwnsPress()) return;
     if (interactionMode !== 'comment' || visualViewerOpen()) return;
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
@@ -387,7 +380,6 @@
     return false;
   }
   function reportPointSelection(event) {
-    if (fbOwnsPress()) return false;
     if (interactionMode !== 'comment' || event.button !== 0) return false;
     if (SITE && !SITE_DEMO && !reanchorMode) return false;
     if (event.target && event.target.closest && event.target.closest('a,button,input,label,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return false;
@@ -2124,8 +2116,8 @@
   //     { type:'tdoc:fbAnchors', anchors:[{ id, selector, tag, text, container, quote, region }] }
   //                                                         → tdoc:fbPlaces { places:[{ id, rect }] } (again on scroll/resize)
   //     { type:'tdoc:fbReveal',  id }   { type:'tdoc:fbScroll', dx, dy }   { type:'tdoc:fbClear' }
-  //     { type:'tdoc:fbPicking', on }   (the widget's pick owns presses: no doc composer opens)
-  var fbState = { anchors: [], resolved: [], ticking: false, picking: false, until: 0 };
+  //   ids are the widget's per-page tokens, not comment ids.
+  var fbState = { anchors: [], resolved: [], ticking: false, lastPlaces: '' };
   function fbNum(v) { v = Number(v); return isFinite(v) ? v : 0; }
   function fbRect(r) { return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : null; }
   function fbExclude(el) { return isProbeUI(el); }
@@ -2206,6 +2198,10 @@
       else if (r.el && !r.anchor.quote) rect = clipRect(visibleFor(r.el));
       if (rect && (rect.width || rect.height)) places.push({ id: r.id, rect: fbRect(rect) });
     });
+    // Nothing moved, nothing said.
+    var key = JSON.stringify(places);
+    if (key === fbState.lastPlaces) return;
+    fbState.lastPlaces = key;
     post({ type: 'tdoc:fbPlaces', places: places });
   }
   function fbSchedule() {
@@ -2222,6 +2218,7 @@
     else if (d.type === 'tdoc:fbPick') fbPick(d);
     else if (d.type === 'tdoc:fbAnchors') {
       fbState.anchors = (Array.isArray(d.anchors) ? d.anchors : []).slice(0, 500).filter(function (a) { return a && typeof a === 'object' && a.id; });
+      fbState.lastPlaces = '';
       fbResolve();
     }
     else if (d.type === 'tdoc:fbReveal') {
@@ -2234,11 +2231,6 @@
     }
     else if (d.type === 'tdoc:fbScroll') { try { window.scrollBy(fbNum(d.dx), fbNum(d.dy)); } catch (x) {} }
     else if (d.type === 'tdoc:fbClear') { if (HL) CSS.highlights.delete('tdoc-pending'); }
-    else if (d.type === 'tdoc:fbPicking') {
-      if (fbState.picking && !d.on) fbState.until = Date.now() + 700;
-      fbState.picking = !!d.on;
-      if (fbState.picking) { hideHover(); try { var s1 = window.getSelection(); if (s1) s1.removeAllRanges(); } catch (x1) {} }
-    }
   });
 
   // --- scroll sync ---------------------------------------------------------

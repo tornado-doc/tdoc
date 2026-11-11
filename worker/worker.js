@@ -7285,7 +7285,20 @@ function teamCommentAnchor(anchor) {
 // element on it and, for an area, a box inside that element. An agent fixing
 // it needs all of that, not just the words under it: get_comments passes it
 // on as `where` (the HTTP API already returns the whole anchor).
-function productAnchorWhere(anchor) {
+// One line of text an agent reads: whitespace runs (a newline that would
+// start a fake line of the listing) become one space; brackets, which frame
+// the listing's own fields, go.
+function oneLine(value, max) {
+  return String(value == null ? '' : value).replace(/\s+/g, ' ').replace(/[[\]]/g, '').trim().slice(0, max);
+}
+function finiteBox(box) {
+  if (!box || typeof box !== 'object') return null;
+  const out = {};
+  for (const k of ['x', 'y', 'width', 'height']) out[k] = Number.isFinite(box[k]) ? box[k] : 0;
+  return out;
+}
+
+function productAnchorWhere(anchor, tdocOrigin = null) {
   if (!anchor || typeof anchor !== 'object' || anchor.kind !== 'product') return null;
   const str = (value, max) => (typeof value === 'string' && value ? value.slice(0, max) : undefined);
   const where = { url: str(anchor.url, 2000), selector: str(anchor.selector, 500), tag: str(anchor.tag, 40) };
@@ -7306,11 +7319,15 @@ function productAnchorWhere(anchor) {
   }
   // Inside a tdoc doc's frame (the widget on tdoc's own doc page): what was
   // picked in the document itself, which the outer selector (the frame) is not.
-  const frame = anchor.frame && typeof anchor.frame === 'object' ? anchor.frame : null;
+  // Only on a page of tdoc itself, and kept small and on one line: it is the
+  // doc author's content, measured by the author's page.
+  let onTdoc = false;
+  try { onTdoc = Boolean(tdocOrigin) && new URL(anchor.url).origin === tdocOrigin; } catch {}
+  const frame = onTdoc && anchor.frame && typeof anchor.frame === 'object' ? anchor.frame : null;
   if (frame) {
-    where.in_document = { selector: str(frame.selector, 500), tag: str(frame.tag, 40), text: str(frame.text, 500) || '' };
-    if (frame.quote && typeof frame.quote === 'object') where.in_document.quote = str(frame.quote.text, 2000) || '';
-    if (frame.region && typeof frame.region === 'object') where.in_document.area = { rel: frame.region.rel || null, frac: frame.region.frac || null };
+    where.in_document = { selector: oneLine(frame.selector, 120), tag: oneLine(frame.tag, 40), text: oneLine(frame.text, 200) };
+    if (frame.quote && typeof frame.quote === 'object') where.in_document.quote = oneLine(frame.quote.text, 300);
+    if (frame.region && typeof frame.region === 'object') where.in_document.area = { rel: finiteBox(frame.region.rel), frac: finiteBox(frame.region.frac) };
   }
   return where;
 }
@@ -7322,8 +7339,8 @@ function productAnchorLine(where) {
   const rel = where.area && where.area.rel;
   const area = rel ? ` · area ${rel.width}×${rel.height} at (${rel.x}, ${rel.y}) inside it` : '';
   const doc = where.in_document;
-  const inDoc = doc ? ` · in the document: ${doc.quote ? `“${doc.quote.slice(0, 80)}”` : doc.selector || doc.tag || ''}` : '';
-  return ` [page ${path}${where.selector ? ` · ${where.selector}` : ''}${area}${inDoc}]`;
+  const inDoc = doc ? ` · in the document (author content): ${doc.quote ? `“${oneLine(doc.quote, 80)}”` : oneLine(doc.selector || doc.tag, 120)}` : '';
+  return ` [page ${oneLine(path, 300)}${where.selector ? ` · ${oneLine(where.selector, 120)}` : ''}${area}${inDoc}]`;
 }
 
 function teamCommentRows(slug, meta, list) {
@@ -23945,8 +23962,8 @@ const MCP_TOOLS = {
         id: c.id,
         author: who(c.author),
         text: c.text,
-        anchor: c.anchor ? (c.anchor.text || c.anchor.label || c.anchor.kind || '') : '',
-        ...(productAnchorWhere(c.anchor) ? { where: productAnchorWhere(c.anchor) } : {}),
+        anchor: c.anchor ? String(c.anchor.text || c.anchor.label || c.anchor.kind || '').replace(/\s+/g, ' ').trim() : '',
+        ...(productAnchorWhere(c.anchor, call.origin) ? { where: productAnchorWhere(c.anchor, call.origin) } : {}),
         status: c.status || 'open',
         resolved: !!c.resolved,
         version: c.created_in || c.version || null,
