@@ -18,6 +18,7 @@ import { createPickGesture, rangeBetweenPoints } from '../../shell/src/comments/
 import { useCommentFeed } from '../../shell/src/comments/core/use-comment-feed.js';
 import { isNarrowViewport } from '../../shell/src/comments/core/narrow.js';
 import { AppSelect } from '../../shell/src/ui/select.jsx';
+import { withPostedComment } from '../../shell/src/comments/core/posted-comment.js';
 import { productPageUrl } from '../../shell/src/document/product-url.js';
 import { AgentButtonsContext, AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
@@ -25,7 +26,7 @@ import { composerAgents } from '../../shell/src/document/ai-answerer.js';
 import { composerDefault } from '../../shell/src/document/agent-choices.js';
 import { askOwnAgent, threadAskPick, useMyAgent } from '../../shell/src/document/my-agent.js';
 import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
-import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, clearNotifyTargetsCache, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
 import {
   createComment, getThreadSeen, listComments, listMentionableUsers, postNotifyHandoff,
   removeComment, resendNotifyHandoff, setApiTransport, setCommentResolved,
@@ -481,6 +482,8 @@ ${uiCss}
     try { return JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch (_) { return null; }
   };
   const writeSession = (session) => {
+    // Signed out or another session: no agent list cached for the last one.
+    if (!session || session.token !== (readSession() || {}).token) clearNotifyTargetsCache();
     try {
       if (session) localStorage.setItem(storageKey, JSON.stringify(session));
       else localStorage.removeItem(storageKey);
@@ -877,16 +880,21 @@ ${uiCss}
   }
 
   async function loadSurface(session) {
-    const comments = await listComments(session.slug, session.version);
+    // The two reads are independent: one round trip, not two.
+    const [comments, mentionsRead] = await Promise.all([
+      listComments(session.slug, session.version),
+      listMentionableUsers(session.slug).then((value) => ({ value }), (error) => ({ error })),
+    ]);
     let mentionable = [];
     let mentions = null;
     let signedIn = true;
-    try {
-      mentions = await listMentionableUsers(session.slug);
-      mentionable = Array.isArray(mentions && mentions.users) ? mentions.users : [];
-    } catch (error) {
+    if (mentionsRead.error) {
+      const error = mentionsRead.error;
       if (error.status === 401 || error.status === 403) signedIn = false;
       else throw error;
+    } else {
+      mentions = mentionsRead.value;
+      mentionable = Array.isArray(mentions && mentions.users) ? mentions.users : [];
     }
     return {
       ok: true,
@@ -929,8 +937,11 @@ ${uiCss}
       const session = await ensureSession();
       const { slug, version } = session;
       const body = (fields) => ({ slug, version, ...fields });
-      let handoff = null;
       let postedDraft = false;
+      // What this call posted, and the agent hand-off that follows it. The
+      // UI is answered as soon as the POST is (see `followUp` below).
+      let posted = null;
+      let handOff = null;
       const draft = readDraft();
       if (draft && draft.text && draft.anchor) {
         // Taken before posting, so two calls at once cannot post it twice.
@@ -945,10 +956,11 @@ ${uiCss}
           throw error;
         }
         postedDraft = message.type !== 'tdoc-feedback-submit';
+        posted = { made, parentId: null };
         emit('comment', { id: made && made.id, text: draft.text });
-        if (draft.sendToAgent && made && made.id) handoff = await sendToAgent(slug, made.id, draft.recipient);
+        if (draft.sendToAgent && made && made.id) handOff = () => sendToAgent(slug, made.id, draft.recipient);
         // One of the commenter's own agents: it answers in the thread.
-        else if (draft.askAgent && made && made.id) handoff = await askOwnAgent(slug, made.id, draft.askAgent);
+        else if (draft.askAgent && made && made.id) handOff = () => askOwnAgent(slug, made.id, draft.askAgent);
       }
       switch (message.type) {
         case 'tdoc-feedback-load':
@@ -958,10 +970,11 @@ ${uiCss}
           break;
         case 'tdoc-feedback-reply': {
           const made = await createComment(body({ text: message.text, parent_id: message.parentId }));
+          posted = { made, parentId: message.parentId };
           emit('comment', { id: made && made.id, text: message.text, parentId: message.parentId });
           const target = message.handoffCommentId || (made && made.id);
-          if (message.sendToAgent && target) handoff = await sendToAgent(slug, target, message.recipient);
-          else if (message.askAgent && made && made.id) handoff = await askOwnAgent(slug, made.id, message.askAgent);
+          if (message.sendToAgent && target) handOff = () => sendToAgent(slug, target, message.recipient);
+          else if (message.askAgent && made && made.id) handOff = () => askOwnAgent(slug, made.id, message.askAgent);
           break;
         }
         case 'tdoc-feedback-resolve':
@@ -983,8 +996,33 @@ ${uiCss}
         default:
           return { ok: false, error: 'Unknown feedback action' };
       }
-      const surface = await loadSurface(session);
-      return { ...surface, ...(handoff ? { handoff } : {}), ...(postedDraft ? { postedDraft: true } : {}) };
+      if (posted) {
+        // The comment is saved: answer now, so the composer closes and the
+        // comment shows from the POST's answer. The hand-off to an agent
+        // (three requests to Raft on the server) and the re-read of the
+        // comments and the @ list run behind it and arrive as `followUp`.
+        // A follow-up that fails leaves the posted comment shown; the feed's
+        // own refresh catches up.
+        const followUp = (async () => {
+          const sent = handOff ? await handOff() : null;
+          try {
+            const surface = await loadSurface(session);
+            return { ...surface, ...(sent ? { handoff: sent } : {}) };
+          } catch (error) {
+            // Signed out or moved space meanwhile: the same notice (and
+            // Connect / Reconnect) a failed action gets. Anything else
+            // leaves the posted comment shown; the feed's refresh catches up.
+            const refused = [401, 403, 409].includes(error && error.status);
+            if (!refused) return sent ? { ok: false, handoffOnly: sent } : null;
+            return {
+              ok: false, status: error.status, reconnect: error.status === 409,
+              error: String(error && error.message || error), ...(sent ? { handoffOnly: sent } : {}),
+            };
+          }
+        })();
+        return { ok: true, posted, followUp, handingOff: Boolean(handOff), ...(postedDraft ? { postedDraft: true } : {}) };
+      }
+      return await loadSurface(session);
     } catch (error) {
       const kept = Boolean(readDraft());
       const why = String(error && error.message || error);
@@ -1204,6 +1242,20 @@ ${uiCss}
     }, []);
 
     const apply = useCallback((result) => {
+      // Posted: the comment shows from the POST's answer now; the re-read
+      // (and an agent hand-off's word) lands when `followUp` does.
+      if (result?.ok && result.posted) {
+        const { made, parentId } = result.posted;
+        setSurface((prev) => (prev ? { ...prev, allComments: withPostedComment(prev.allComments, made, parentId) } : prev));
+        if (result.postedDraft) { setSelected(null); setAreaSel(null); setPicking(false); if (!result.handingOff) say('Comment posted'); }
+        result.followUp.then((next) => {
+          if (!next) return;
+          if (next.ok) { apply(next); return; }
+          if (next.handoffOnly) say(next.handoffOnly.message, !next.handoffOnly.ok);
+          if (next.status) setNotice({ status: next.status, reconnect: Boolean(next.reconnect), error: next.error });
+        });
+        return true;
+      }
       if (result?.ok) {
         setSurface(result);
         if (result.config) setSession((prev) => ({ ...(prev || {}), ...result.config, token: (prev && prev.token) || result.config.token }));
@@ -1262,7 +1314,9 @@ ${uiCss}
           const next = await ensureSession({ interactive: false });
           if (cancelled || !next) return;
           setSession(next);
-          const result = await call({ type: 'tdoc-feedback-load' });
+          const first = await call({ type: 'tdoc-feedback-load' });
+          // A held comment that posted on the way answers early: wait for the read.
+          const result = first?.posted ? await first.followUp : first;
           if (!cancelled && result?.ok) { setSurface(result); if (!hidden) setShown(true); }
         } catch (error) {
           if (cancelled || !(error && error.reconnect)) return;
@@ -1383,7 +1437,10 @@ ${uiCss}
     });
     const unreadComments = area.unread;
     const teamMember = Boolean(surface?.teamMember);
-    const agent = useNotifyTargets(slug, Boolean((owner || teamMember) && slug && session?.notify));
+    // The token is this person's session here: a new one (reconnect, another
+    // account) is another viewer to the agent-list cache.
+    const notifyViewer = session?.token || '';
+    const agent = useNotifyTargets(slug, Boolean((owner || teamMember) && slug && session?.notify), notifyViewer);
     const canSendToAgent = Boolean(agent.ready && agent.available && agent.reason !== 'no_agent_bound'
       && (agent.default || agent.candidates.length || agent.fallback));
     // Send to agent in the dock, as on the doc page. The owner always has it:
@@ -1967,6 +2024,7 @@ ${uiCss}
             onSent={() => load()}
             onTargetsChanged={agent.refresh}
             hostNotify={Boolean(session?.notify)}
+            viewer={notifyViewer}
           />
         ) : null}
       </AgentButtonsContext.Provider>

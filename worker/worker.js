@@ -4087,6 +4087,16 @@ async function stampOnboardingFor(env, accountId, step, extra) {
   const next = stampOnboarding(prev, step, at, extra);
   // Steps stamp once. Most calls (every My docs load, every agent pull,
   // every comment) find the step already there; KV writes are a daily quota.
+  if (JSON.stringify(next) === JSON.stringify(prev)) return next;
+  // A write stamps the record as it is at that moment, in the account's lane
+  // (serialKvOp), so two steps stamped at once (a comment and a tag from
+  // posts moments apart) both stay.
+  const { canonical } = await onboardingGroup(env, accountId);
+  return serialKvOp(env, `account-onboarding:${canonical}`, 'onboarding_stamp', { accountId, step, at, extra: extra || null });
+}
+async function stampOnboardingNow(env, { accountId, step, at, extra }) {
+  const prev = await loadOnboarding(env, accountId);
+  const next = stampOnboarding(prev, step, at, extra);
   if (JSON.stringify(next) !== JSON.stringify(prev)) await saveOnboarding(env, accountId, next);
   return next;
 }
@@ -14241,8 +14251,9 @@ async function redactCommentEmails(value, privacy) {
   return walk(value, '', false);
 }
 
-async function commentPrivacyJson(env, session, slug, body, init) {
-  const meta = slug ? await loadDocMeta(env, slug).catch(() => null) : null;
+async function commentPrivacyJson(env, session, slug, body, init, knownMeta = undefined) {
+  // A caller that has just read (or written) the doc's record passes it.
+  const meta = knownMeta !== undefined ? knownMeta : slug ? await loadDocMeta(env, slug).catch(() => null) : null;
   return json(await redactCommentEmails(body, await emailPrivacyFor(env, session, slug, meta)), init);
 }
 
@@ -15702,10 +15713,19 @@ async function recordContacts(env, actor, people, at) {
       && Date.parse(at) - (Date.parse(old.at) || 0) < CONTACTS_REFRESH_MS;
   };
   if (fresh.every(unchanged)) return;
+  // The write merges into the list as it is at that moment, in the key's
+  // lane (serialKvOp): a post right after this one adds to it, not over it.
+  try { await serialKvOp(env, key, 'contacts_merge', { actor, fresh, at }); } catch {}
+}
+async function mergeContacts(env, { actor, fresh, at }) {
+  const key = contactsKey(actor);
+  if (!key) return null;
+  const prev = await loadContacts(env, actor);
   const byLogin = new Map(prev.map((p) => [p.login, p]));
   for (const p of fresh) byLogin.set(p.login, { login: p.login, name: p.name || (byLogin.get(p.login) || {}).name || '', avatar_url: p.avatar_url || (byLogin.get(p.login) || {}).avatar_url || '', at });
   const next = [...byLogin.values()].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, CONTACTS_MAX);
-  try { await env.META.put(key, JSON.stringify(next)); } catch {}
+  await env.META.put(key, JSON.stringify(next));
+  return null;
 }
 function memberAvatar(key) {
   const k = String(key || '');
@@ -16075,11 +16095,16 @@ async function loadInbox(env, login) {
 // email (#772). Both run after the row is stored and never fail the write.
 // `origin` is the site the event happened on, for the links in an email.
 async function writeInboxEvent(env, who, ev, { ctx = null, origin = '' } = {}) {
-  const { key, inbox } = await loadInbox(env, who);
+  const key = inboxKey(who);
   if (!key) return null;
-  const next = applyInboxEvent(inbox, { id: `n_${Date.now()}_${rand(4)}`, ...ev, at: ev.at || new Date().toISOString() });
-  await env.META.put(key, JSON.stringify(next));
-  const row = next.items[0];
+  // The row goes in through one lane per recipient (serialKvOp): delivery
+  // runs after the response, so two posts naming the same person moments
+  // apart would otherwise read the same inbox and the second write would
+  // drop the first one's row.
+  const row = await serialKvOp(env, key, 'inbox_append', {
+    who, ev: { id: `n_${Date.now()}_${rand(4)}`, ...ev, at: ev.at || new Date().toISOString() },
+  });
+  if (!row) return null;
   const recipient = key.slice('inbox:'.length);
   const out = Promise.all([
     pushInboxRow(env, recipient, row).catch((error) => {
@@ -16091,6 +16116,66 @@ async function writeInboxEvent(env, who, ev, { ctx = null, origin = '' } = {}) {
   ]);
   if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(out); else await out;
   return row;
+}
+
+// ── Serialized KV read-modify-write ──────────────────────────────────────
+// Workers KV has no compare-and-set, so two writers of one key that read it
+// at the same moment lose one update. A key that more than one request may
+// update at once (an inbox) is updated through a lane: a CommentsStore
+// instance under a reserved name per key (no slug can take it), where the
+// updates for that key run one after another. KV reads and writes inside a
+// DO still interleave across requests (see CommentsStore), so the lane is an
+// explicit promise chain, not the DO's input gate. Without the DO binding the
+// update runs directly, as before.
+const SERIAL_STORE_PREFIX = '__tdoc-serial__';
+const serialLanes = new Map();
+const SERIAL_KV_OPS = {
+  // One inbox row in; the row as stored comes back (null: no inbox key).
+  async inbox_append(env, { who, ev }) {
+    const { key, inbox } = await loadInbox(env, who);
+    if (!key) return null;
+    const next = applyInboxEvent(inbox, ev);
+    await env.META.put(key, JSON.stringify(next));
+    return next.items[0];
+  },
+  contacts_merge: (env, args) => mergeContacts(env, args),
+  onboarding_stamp: (env, args) => stampOnboardingNow(env, args),
+};
+function runInLane(name, task) {
+  const tail = serialLanes.get(name) || Promise.resolve();
+  const run = tail.then(task);
+  const settled = run.then(() => {}, () => {});
+  serialLanes.set(name, settled);
+  settled.then(() => { if (serialLanes.get(name) === settled) serialLanes.delete(name); });
+  return run;
+}
+async function serialKvOp(env, lane, kind, args) {
+  const op = SERIAL_KV_OPS[kind];
+  if (!op) throw new Error(`unknown serial op ${kind}`);
+  if (!env || !env.COMMENTS) return op(env, args);
+  const name = `${SERIAL_STORE_PREFIX}:${lane}`;
+  let out = null;
+  try {
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(name));
+    const r = await stub.fetch('https://do/serial', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: name, op: { kind, args } }),
+    });
+    out = await r.json().catch(() => null);
+  } catch (error) {
+    out = { ok: false, error: (error && error.message) || String(error) };
+  }
+  if (out && out.ok) return out.result == null ? null : out.result;
+  // The lane ran the update and the update itself failed (a refused KV
+  // write): that is the caller's failure, as it was before lanes. Running it
+  // again here would be a retry nobody asked for.
+  if (out && out.error === 'serial_op_failed') throw new Error(`serial ${kind} failed`);
+  // The lane is unreachable, or its instance runs code that does not know
+  // this op yet (a deploy rolling out: an older CommentsStore answers
+  // `/serial` as a comments read). The update is still made, directly, as it
+  // was before lanes: an unserialized write beats a lost row or stamp.
+  console.error('[serial] lane unavailable, writing directly', JSON.stringify({ kind, error: (out && out.error) || 'no_answer' }));
+  return op(env, args);
 }
 
 async function deliverInbox(env, recipientLogin, ev, delivery = {}) {
@@ -18607,7 +18692,7 @@ async function handoffThreadIdsFor(env, slug, session) {
   return handoffThreadIds(list, keys);
 }
 
-async function mutateComments(env, slug, op) {
+async function mutateComments(env, slug, op, { ctx = null, meta: knownMeta = null } = {}) {
   let result;
   if (env.COMMENTS) {
     const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
@@ -18631,15 +18716,41 @@ async function mutateComments(env, slug, op) {
     result = clean;
   }
   if (result && result.status === 200) {
-    const meta = await loadDocMeta(env, slug);
     // Comment text is searchable, a wipe included: queue the doc for
-    // reindexing in its owner's store. Bounded; never fails the comment.
-    if (meta) await searchStoreOp(env, searchScopeOf(meta), { kind: 'comments', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
-    if (meta && validTeamId(meta.workspace_id)) {
-      await enqueueTeamBackup(env, { kind: 'comments', team: meta.workspace_id, slug });
-    }
+    // reindexing in its owner's store, and a team doc for its backup.
+    // Neither is the comment: with a request context they run after the
+    // response (afterResponse); bounded either way, never failing the write.
+    await afterResponse(ctx, (async () => {
+      const meta = knownMeta || await loadDocMeta(env, slug);
+      // The reindex is itself a queue (the owner's search store marks the
+      // doc pending and indexes on its alarm); the backup goes through
+      // BACKUP_QUEUE (enqueueTeamBackup, which logs its own failure). A
+      // reindex that was not queued is logged under one tag, so a run of
+      // them shows in Workers Logs (it was silent before as well).
+      if (meta) {
+        const queued = await searchStoreOp(env, searchScopeOf(meta), { kind: 'comments', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
+        // No search store without the DO binding: nothing was meant to queue.
+        if (!queued && env.COMMENTS) console.error('[comment-followup] search reindex not queued', JSON.stringify({ slug }));
+      }
+      if (meta && validTeamId(meta.workspace_id)) {
+        await enqueueTeamBackup(env, { kind: 'comments', team: meta.workspace_id, slug });
+      }
+    })(), 'comment-followup');
   }
   return result;
+}
+
+// Work a response does not wait for: what follows a saved comment (search
+// indexing, team backup, inbox rows, contacts, onboarding stamps). Under a
+// request context it runs past the response (ctx.waitUntil); without one (a
+// direct call, a test) it is awaited, so its effects are there on return.
+// Its failure is logged and never reaches the caller.
+async function afterResponse(ctx, promise, label = 'background') {
+  const guarded = Promise.resolve(promise).catch((error) => {
+    console.error(`[${label}] failed:`, error && error.message ? error.message : error);
+  });
+  if (ctx && typeof ctx.waitUntil === 'function') { ctx.waitUntil(guarded); return; }
+  await guarded;
 }
 
 // Read the comment list for `slug` from the DO (the source of truth). Returns
@@ -19158,6 +19269,22 @@ export class CommentsStore {
     // FULL-TEXT SEARCH: one store per owner scope (searchStoreHandle),
     // reached under reserved names no slug can take; any other instance
     // refuses the op.
+    // SERIALIZED KV UPDATES (serialKvOp): one lane per key, reached under
+    // reserved names no slug can take; any other instance refuses the op.
+    if (u.pathname === '/serial') {
+      const kind = op && op.kind;
+      if (typeof slug !== 'string' || !slug.startsWith(`${SERIAL_STORE_PREFIX}:`) || !Object.prototype.hasOwnProperty.call(SERIAL_KV_OPS, kind)) {
+        return Response.json({ ok: false, error: 'not_a_serial_lane' }, { status: 400 });
+      }
+      try {
+        const result = await runInLane(slug, () => SERIAL_KV_OPS[kind](this.env, op.args || {}));
+        return Response.json({ ok: true, result: result == null ? null : result });
+      } catch (error) {
+        console.error('[serial] op failed:', kind, error && error.message || String(error));
+        return Response.json({ ok: false, error: 'serial_op_failed' }, { status: 500 });
+      }
+    }
+
     if (u.pathname === '/search') {
       try { return Response.json(await searchStoreHandle(this, slug, op)); }
       catch (error) {
@@ -29084,8 +29211,14 @@ const tdocHandlers = {
       await logOnboardingEvent(env, accountId, action, doc ? { doc } : null);
       let record = null;
       if (accountId && step) {
-        record = await stampOnboardingFor(env, accountId, step,
-          step === 'waitlist' ? { started: new Date().toISOString() } : null);
+        // The event is logged above; a stamp that cannot be written now is
+        // not worth a 500 (the next event, or the server's own stamp, makes it).
+        try {
+          record = await stampOnboardingFor(env, accountId, step,
+            step === 'waitlist' ? { started: new Date().toISOString() } : null);
+        } catch (error) {
+          console.error('[onboarding] event stamp failed (non-fatal):', error && error.message ? error.message : String(error));
+        }
       }
       return json({ ok: true, record });
     }
@@ -29272,9 +29405,13 @@ const tdocHandlers = {
       if (anchorTooLarge(anchor)) return json({ error: 'anchor_too_large', limit: ANCHOR_MAX_BYTES }, { status: 413 });
       if (invalidProductAnchorUrl(anchor)) return json({ error: 'invalid_product_url' }, { status: 400 });
       const meta = await loadDocMeta(env, slug);
+      let metaNow = meta;
       const access = accessFromMeta(meta || {});
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
+      // The comments are read only for somebody who may comment here: a
+      // refused poster never touches the doc's Durable Object.
+      const priorList = await readComments(env, slug);
       // login carries the actor key (a handle, or email:<addr>); name is what
       // readers see, and for an email identity that is the local part only —
       // the address itself never renders in a thread.
@@ -29285,7 +29422,6 @@ const tdocHandlers = {
       // Resolve @mentions BEFORE the write: the delivered list is stamped onto
       // the event, so a chip on the card is exactly the set that was notified.
       // Named logins come from the text, never from the request body.
-      const priorList = await readComments(env, slug);
       const isDocOwner = isDocOwnerSession(env, s, meta);
       const outcome = classifyMentions(
         mentionCandidates(commentText).filter((login) => login !== actorKey(s)),
@@ -29323,82 +29459,100 @@ const tdocHandlers = {
         });
         if (patched.error) return json(patched, { status: 400 });
         await putDocMetaJson(env, slug, JSON.stringify(patched.meta));
+        metaNow = patched.meta;
       }
       // The same words twice within seconds is one comment: answer with the
       // one already there instead of writing a twin.
       const dup = duplicateComment(priorList, { author, text: commentText, anchor, parent_id, at: created });
-      if (dup) return commentPrivacyJson(env, s, slug, { ...dup, duplicate_of: dup.id, mention_outcome: outcome });
+      if (dup) {
+        // Answered in the shape a fresh post answers with: the thread's
+        // snapshot, or the reply with its thread. Never the stored record.
+        const folded = historyList(priorList);
+        const root = folded.find((c) => c.id === dup.id || (c.replies || []).some((r) => r && r.id === dup.id));
+        const reply = parent_id && root ? (root.replies || []).find((r) => r && r.id === dup.id) : null;
+        const shown = parent_id
+          ? { id: dup.id, parent_id: dup.parent_id || parent_id, thread_id: root ? root.id : undefined,
+            author: (reply || dup).author, text: (reply || dup).text, created: (reply || dup).created, version: V }
+          : (root && root.id === dup.id ? root : { id: dup.id, author: dup.author, text: dup.text, created: dup.created, anchor: dup.anchor || null });
+        return commentPrivacyJson(env, s, slug, { ...shown, duplicate_of: dup.id, mention_outcome: outcome }, undefined, metaNow);
+      }
       // Serialized through the per-slug DO (mutation logic lives once in
       // applyCommentOp). create + reply are both id-stamped here so the
       // response is deterministic regardless of where the write runs.
       const op = parent_id
         ? { kind: 'reply', slug, parent_id, reply_id: `r_${Date.now()}_${rand(4)}`, author, text: commentText, mentions, version: V, at: created }
         : { kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author, text: commentText, mentions, anchor: anchor || null, version: V, at: created };
-      const res = await mutateComments(env, slug, op);
-      if (res.status === 200) {
-        const title = (meta && meta.title) || slug;
-        const commentId = parent_id ? op.reply_id : op.id;
-        const threadId = parent_id ? (res.body && res.body.thread_id) : op.id;
-        // Whom this person tagged or answered: the next "@" offers them early.
-        try {
-          const parentA = parent_id ? recordAuthor(priorList, parent_id) : null;
-          await recordContacts(env, actorKey(s), [
-            ...mentions.map((login) => ({ login })),
-            ...(parentA && parentA.login ? [parentA] : []),
-          ], created);
-        } catch {}
-        if (mentions.length) {
-          await deliverInbox(env, null, {
-            kind: 'mention', slug, version: V, comment_id: commentId,
-            thread_id: threadId, target_id: commentId, mentions,
-            actor: author, preview: commentText, title, at: created,
-          }, { ctx, origin: url.origin });
-        }
-        if (!parent_id) {
-          const owner = positionalRecipient(ownerLogin, mentions);
-          if (owner) {
-            await deliverInbox(env, owner, {
-              kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
+      const res = await mutateComments(env, slug, op, { ctx, meta: metaNow });
+      // Everything below the write is about the comment, not the comment
+      // itself: whom it is delivered to (inbox rows, which then push and
+      // email), whom the writer talks to, their onboarding. None of it
+      // changes the answer, so the person is not kept waiting on it: it runs
+      // after the response (afterResponse). Every step still runs, in the
+      // same order, and none can fail the post.
+      if (res.status === 200) await afterResponse(ctx, (async () => {
+          const title = (meta && meta.title) || slug;
+          const commentId = parent_id ? op.reply_id : op.id;
+          const threadId = parent_id ? (res.body && res.body.thread_id) : op.id;
+          // Whom this person tagged or answered: the next "@" offers them early.
+          try {
+            const parentA = parent_id ? recordAuthor(priorList, parent_id) : null;
+            await recordContacts(env, actorKey(s), [
+              ...mentions.map((login) => ({ login })),
+              ...(parentA && parentA.login ? [parentA] : []),
+            ], created);
+          } catch {}
+          if (mentions.length) {
+            await deliverInbox(env, null, {
+              kind: 'mention', slug, version: V, comment_id: commentId,
+              thread_id: threadId, target_id: commentId, mentions,
               actor: author, preview: commentText, title, at: created,
             }, { ctx, origin: url.origin });
           }
-        } else {
-          const parentA = recordAuthor(priorList, parent_id);
-          const parentLogin = positionalRecipient(parentA && parentA.login, mentions);
-          if (parentLogin) {
-            await deliverInbox(env, parentLogin, {
-              kind: 'reply', slug, version: V, comment_id: op.reply_id,
-              thread_id: res.body && res.body.thread_id, target_id: parent_id,
-              actor: author, preview: commentText, title, at: created,
-            }, { ctx, origin: url.origin });
+          if (!parent_id) {
+            const owner = positionalRecipient(ownerLogin, mentions);
+            if (owner) {
+              await deliverInbox(env, owner, {
+                kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
+                actor: author, preview: commentText, title, at: created,
+              }, { ctx, origin: url.origin });
+            }
+          } else {
+            const parentA = recordAuthor(priorList, parent_id);
+            const parentLogin = positionalRecipient(parentA && parentA.login, mentions);
+            if (parentLogin) {
+              await deliverInbox(env, parentLogin, {
+                kind: 'reply', slug, version: V, comment_id: op.reply_id,
+                thread_id: res.body && res.body.thread_id, target_id: parent_id,
+                actor: author, preview: commentText, title, at: created,
+              }, { ctx, origin: url.origin });
+            }
           }
+        // The owner's own first comment, and the first person they tagged, are
+        // steps on their journey. Never fail the post for a stamp.
+        if (isDocOwner) {
+          try {
+            const accountId = await sessionAccountId(env, s);
+            // Only a comment on the journey's own doc moves the journey; a
+            // comment on any other doc of theirs says nothing about it.
+            const journey = await loadOnboarding(env, accountId);
+            // A reply counts. The seeded comment is a question -- "which claim
+            // would you defend least?" -- and its Reply button is the most
+            // obvious thing on the page, so the gesture the checklist asks for
+            // is very often a reply and not a new thread. Excluding replies left
+            // the doc's own corner row ticking while My docs stayed at 2 of 4
+            // and row 4 stayed locked, with no way to reach it.
+            if (!journey.first_doc || journey.first_doc === slug) await stampOnboardingFor(env, accountId, 'commented');
+            if (mentions.length) await stampOnboardingFor(env, accountId, 'tagged');
+          } catch {}
         }
-      }
-      // The owner's own first comment, and the first person they tagged, are
-      // steps on their journey. Never fail the post for a stamp.
-      if (res.status === 200 && isDocOwner) {
-        try {
-          const accountId = await sessionAccountId(env, s);
-          // Only a comment on the journey's own doc moves the journey; a
-          // comment on any other doc of theirs says nothing about it.
-          const journey = await loadOnboarding(env, accountId);
-          // A reply counts. The seeded comment is a question -- "which claim
-          // would you defend least?" -- and its Reply button is the most
-          // obvious thing on the page, so the gesture the checklist asks for
-          // is very often a reply and not a new thread. Excluding replies left
-          // the doc's own corner row ticking while My docs stayed at 2 of 4
-          // and row 4 stayed locked, with no way to reach it.
-          if (!journey.first_doc || journey.first_doc === slug) await stampOnboardingFor(env, accountId, 'commented');
-          if (mentions.length) await stampOnboardingFor(env, accountId, 'tagged');
-        } catch {}
-      }
+      })(), 'comment-followup');
       // The composer needs to know what became of each name: an invite is
       // worth telling the owner about (they still have to send the link), and
       // a blocked name would otherwise fail silently.
       const body_out = res.status === 200 && res.body && typeof res.body === 'object'
         ? { ...res.body, mention_outcome: outcome }
         : res.body;
-      return commentPrivacyJson(env, s, slug, body_out, { status: res.status });
+      return commentPrivacyJson(env, s, slug, body_out, { status: res.status }, metaNow);
     }
 
     // Re-anchor a comment, or edit its text. Appends an `anchor_changed` /

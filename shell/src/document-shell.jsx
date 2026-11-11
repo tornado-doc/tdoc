@@ -1222,7 +1222,8 @@ export function DocumentShell({ boot, config }) {
   // their own connections); the server lists only those. Send to agent shows
   // on a team doc once there is someone to send to.
   const notifyQuery = Boolean((config.isOwner || config.teamManage) && !config.isLanding && config.mode !== 'local');
-  const notifyTargets = useNotifyTargets(config.slug, notifyQuery);
+  const notifyViewer = (config.identity && (config.identity.account_id || config.identity.login)) || '';
+  const notifyTargets = useNotifyTargets(config.slug, notifyQuery, notifyViewer);
   const hasNotifyTargets = Boolean(
     notifyTargets.ready
     && notifyTargets.available
@@ -2553,6 +2554,7 @@ export function DocumentShell({ boot, config }) {
           onClose={() => setNotifyOpen(false)}
           onSent={async () => { await comments.refresh(); }}
           onTargetsChanged={notifyTargets.refresh}
+          viewer={notifyViewer}
         />
       ) : null}
 
