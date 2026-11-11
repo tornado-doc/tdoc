@@ -219,12 +219,23 @@
     if (title) out += '<meta property="og:title" content="' + title + '">\n';
     if (description) out += '<meta property="og:description" content="' + description + '">\n';
     if (image) out += '<meta property="og:image" content="' + image + '">\n';
+    // Size and alt when the caller knows them (the site pages' designed card),
+    // so a crawler need not fetch the image to lay out the card.
+    const imageW = Number(seo.image_width) || 0;
+    const imageH = Number(seo.image_height) || 0;
+    const imageAlt = esc(seo.image_alt || '');
+    if (image && imageW && imageH) {
+      out += '<meta property="og:image:width" content="' + imageW + '">\n';
+      out += '<meta property="og:image:height" content="' + imageH + '">\n';
+    }
+    if (image && imageAlt) out += '<meta property="og:image:alt" content="' + imageAlt + '">\n';
     // The generated/custom preview card is 1200x630 (summary_large_image);
     // the square logo fallback keeps summary.
     out += '<meta name="twitter:card" content="' + (image && seo.image_large ? 'summary_large_image' : 'summary') + '">\n';
     if (title) out += '<meta name="twitter:title" content="' + title + '">\n';
     if (description) out += '<meta name="twitter:description" content="' + description + '">\n';
     if (image) out += '<meta name="twitter:image" content="' + image + '">\n';
+    if (image && imageAlt) out += '<meta name="twitter:image:alt" content="' + imageAlt + '">\n';
     if (seo.jsonLd && typeof seo.jsonLd === 'object') out += jsonLdHtml(seo.jsonLd, d.nonceAttr);
     return out;
   }

@@ -152,6 +152,11 @@ async function seedDoc(env, slug, owner) {
       assert(remote.some((x) => x.url.endsWith('/docs/plan/comments.json')), 'comments missing');
       assert(remote.some((x) => x.url.endsWith('/docs/plan/manifest.json')), 'manifest missing');
       assert(!remote.some((x) => x.url.endsWith('/docs/plan/v1/index.html')), 'old version recopied');
+      // The comment record carries its author's account (display names); the
+      // customer's copy never does.
+      const copy = new TextDecoder().decode(remote.find((x) => x.url.endsWith('/docs/plan/comments.json')).init.body);
+      assert(copy.includes('Please clarify this.'), 'comment missing from the copy');
+      assert(!copy.includes('account_id') && !copy.includes('github_id'), `account ids leaked into the backup: ${copy}`);
     });
 
     await t('Trash keeps the backup copy; the purge 30 days later sends the tombstone', async () => {
