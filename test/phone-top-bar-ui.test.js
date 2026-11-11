@@ -67,10 +67,14 @@ const TEAMS = [
             await page.getByRole('menuitem', { name: /Switch space/ }).waitFor({ timeout: 5000 });
             // The local server publishes; tdoc.dev shares. Either is the doc's
             // way out, and both live in ⋯ on a phone. The modes head it.
-            for (const name of [/^(Share|Publish)/, /^(Versions|Version history)/, /Switch space/, /My account/, /Dark mode|Light mode/]) {
+            for (const name of [/^(Share|Publish)/, /Switch space/, /My account/, /Dark mode|Light mode/]) {
               const item = page.getByRole('menuitem', { name }).first();
               assert(await item.isVisible(), `${name} is in ⋯`);
             }
+            // Version history is offered only to a viewer who may list the
+            // history (config.historyVisible, which this fixture doesn't set);
+            // the old Versions / View changes fallback is gone (#1009).
+            assert.equal(await page.getByRole('menuitem', { name: /^(Versions|View changes|Version history)/ }).count(), 0, 'version rows in ⋯ for a viewer without history rights');
             assert.equal(await page.getByRole('menuitem', { name: /Ask AI|my agent|resolved/i }).count(), 0, 'Ask AI / my agent / resolved rows are back in ⋯');
             await page.getByRole('menuitem', { name: /Switch space/ }).click();
             const names = page.locator('.ui-menu-popup .tdoc-space-item-name');
