@@ -125,6 +125,17 @@ const BODY = '<!doctype html><title>Frame pick</title><h1>Quarterly plan</h1>'
         await composer.waitFor();
         const label = (await fb(p, '.tdoc-popup')).text;
         assert(/First paragraph/.test(label) && !/Document content/.test(label), `composer is for ${JSON.stringify(label)}`);
+        // A mouse pick leaves nothing over the composer: what is under its
+        // box at once is the composer, and a click there focuses it.
+        const hit = await p.evaluate(() => {
+          const root = document.getElementById('tdoc-feedback-root').shadowRoot;
+          const field = root.querySelector('.tdoc-popup textarea');
+          const r = field.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2, onTop: root.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === field, shield: !root.querySelector('.tdoc-fb-shield').hidden };
+        });
+        assert(hit.onTop && !hit.shield, `the composer is covered right after a mouse pick: ${JSON.stringify(hit)}`);
+        await p.mouse.click(hit.x, hit.y);
+        assert(await p.evaluate(() => document.getElementById('tdoc-feedback-root').shadowRoot.activeElement?.localName === 'textarea'), 'a click into the composer right after the pick did not reach it');
         assert((await docComposers(p)) === 0, 'the doc page opened its own composer too');
         await p.screenshot({ path: path.join(SHOTS, 'after-desktop-click.png') });
         await composer.locator('textarea').fill('Tighten this paragraph');

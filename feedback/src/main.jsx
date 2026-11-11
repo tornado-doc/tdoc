@@ -428,6 +428,8 @@ ${uiCss}
 
   // The click that follows a pick (see onPointerUp in FeedbackApp).
   let swallowClickUntil = 0;
+  // A touch pick's late mouse events and click (see the picking effect).
+  let touchPickUntil = 0;
   window.addEventListener('click', (event) => {
     if (Date.now() > swallowClickUntil || isOurs(event.composedPath()[0])) return;
     swallowClickUntil = 0;
@@ -1606,7 +1608,9 @@ ${uiCss}
         // is under it: in a frame (tdoc's doc, someone's embed), where our
         // click guard cannot reach, they start the frame's own thing (the
         // doc's composer under ours). The sheet stays, inert, until then.
-        const linger = swallowClickUntil - Date.now();
+        // Touch only: a mouse or pen sends nothing late, and a click into
+        // the composer right after a pick must never be taken.
+        const linger = touchPickUntil - Date.now();
         if (linger <= 0) { shield.hidden = true; return undefined; }
         shield.hidden = false;
         const stop = (event) => {
@@ -1795,6 +1799,7 @@ ${uiCss}
         // The sheet goes away under the composer before this press's click
         // is sent: that click must not land on the app.
         swallowClickUntil = Date.now() + 400;
+        touchPickUntil = event.pointerType === 'touch' ? swallowClickUntil : 0;
         gesture.up(event);
       });
       // A finger that scrolls a modal's body: the sheet is not inside it,
