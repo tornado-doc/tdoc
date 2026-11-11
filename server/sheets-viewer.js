@@ -1369,6 +1369,8 @@
     });
     if (!list.some(function (x) { return JSON.stringify(x.before) !== JSON.stringify(x.after); })) { relayoutTab(tab); return; }
     record({ tab: tab, undo: function () { list.forEach(function (x) { putAttrs(x.el, x.before); }); }, redo: function () { list.forEach(function (x) { putAttrs(x.el, x.after); }); } });
+    // Widths, wrap and heights change what every wrapped row measures.
+    tab.measured = new Map();
     afterChange(tab, tab.order[sel.r]);
   }
   // The width that shows a column's longest value (and its header) whole,
@@ -1429,6 +1431,8 @@
     var from = redo ? redoStack : undoStack, to = redo ? undoStack : redoStack;
     var op = from.pop();
     if (!op) return;
+    // Any change may come back (a width, a wrap, a cell's text): measure again.
+    if (op.tab) op.tab.measured = new Map();
     if (redo) op.redo(); else op.undo();
     to.push(op);
     afterChange(op.tab);
@@ -1669,6 +1673,7 @@
     var tab = cur(), trs = [];
     for (var i = ra; i <= rb; i++) trs.push(tab.data.rows[tab.order[i]].tr);
     snapshotOp(tab, function () { trs.forEach(function (tr) { tr.remove(); }); });
+    trs.forEach(function (tr) { tab.measured.delete(tr); });
     sel.r2 = sel.r = ra;
     afterChange(tab);
   }
