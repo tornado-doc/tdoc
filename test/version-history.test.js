@@ -131,6 +131,10 @@ const page = (sections) => `<!doctype html><html><head><title>Plan</title></head
     // The boot says the same: no list, no panel.
     const html = (await call(`/d/${slug}/v/5`, { cookie: stranger.cookie })).text;
     assert.match(html, /"historyVisible":false/);
+    // Still told it is an old version, with the way to the latest (the strip).
+    const older = (await call(`/d/${slug}/v/2`, { cookie: stranger.cookie })).text;
+    assert.match(older, /"historyVisible":false/);
+    assert.match(older, new RegExp(`"oldVersion":\\{"current":2,"latest":5,"latestUrl":"/d/${slug}/v/5"\\}`));
     assert.match((await call(`/d/${slug}/v/5`, { cookie: julie.cookie })).text, /"historyVisible":true/);
     const m = meta();
     m.access = { ...(m.access || {}), visibility: 'unlisted', history_visibility: 'public' };

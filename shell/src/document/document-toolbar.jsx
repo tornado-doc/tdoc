@@ -17,18 +17,9 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
+import { AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
 import { AskIcon } from '../ui/ask-icon.jsx';
 import { usePortalContainer } from '../ui/portal.js';
-
-// The label after a version number. "current" read as "latest" from an old
-// version (round-4 tester), so the two facts get their own words: where you
-// are, and which one is newest.
-function versionLabel(n, config) {
-  const latest = Math.max(...(config.versions || []).map((v) => Number(v.n) || 0), 0);
-  if (n === config.version) return n === latest ? ' · viewing · latest' : ' · viewing';
-  return n === latest ? ' · latest' : '';
-}
 
 // The bar names the document, and the document's name is its title. The slug
 // used to sit here because an agent-picked one reads like a name, but it is a
@@ -107,47 +98,28 @@ export function DocumentBreadcrumbs({ config, title, onRename }) {
   return <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />;
 }
 
-// "Edited 3m ago", muted, on the right: the version on screen. A click lists
-// the versions and View changes (it was the v1 chip beside the title).
-// With version history (flag versionHistory) and a viewer who may list it,
-// the same words open the history panel instead (`onHistory`).
-export function DocumentEdited({ config, onCompare, onHistory = null, historyOpen = false, disabled = false }) {
+// "Edited 3m ago", muted, on the right: when the version on screen was made.
+// For a viewer who may list the doc's history (config.historyVisible, the
+// shell passes `onHistory`) the words open the version history panel. For
+// anyone else they are plain text: the old menu (a lone "v6 · viewing ·
+// latest" and View changes) offered a history this viewer may not see. A
+// reader on an older /v/N link learns that, and the way to the latest, from
+// the old-version strip above the document.
+export function DocumentEdited({ config, onHistory = null, historyOpen = false, disabled = false }) {
   if (config.isLanding || config.mode === 'local') return null;
   const current = (config.versions || []).find((v) => Number(v.n) === Number(config.version)) || null;
-  const words = editedAgo(current?.created) || 'Version history';
+  const words = editedAgo(current?.created);
   if (onHistory) {
     return (
       <button id="tdoc-version-toggle" type="button" className="tdoc-edited" aria-expanded={historyOpen}
-        aria-label={`${words}. Version history`} title={disabled ? 'Save or discard your edits first' : 'Version history'}
+        aria-label={`${words || 'Edited'}. Version history`} title={disabled ? 'Save or discard your edits first' : 'Version history'}
         disabled={disabled} onClick={onHistory}>
-        {words}
+        {words || 'Version history'}
       </button>
     );
   }
-  return (
-    <AppMenu
-      align="end"
-      trigger={(
-        <button id="tdoc-version-toggle" type="button" className="tdoc-edited" title={`Version ${config.version}`}>
-          {words}
-        </button>
-      )}
-    >
-      {[...(config.versions || [])].reverse().map((version) => (
-        <AppMenuItem
-          key={version.n}
-          className={`tdoc-version-item${version.n === config.version ? ' current' : ''}`}
-          onClick={() => {
-            location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`;
-          }}
-        >
-          v{version.n}{versionLabel(version.n, config)}
-        </AppMenuItem>
-      ))}
-      <AppMenuSeparator />
-      <AppMenuItem onClick={onCompare}>View changes</AppMenuItem>
-    </AppMenu>
-  );
+  if (!words) return null;
+  return <span id="tdoc-version-toggle" className="tdoc-edited is-static">{words}</span>;
 }
 
 export function DocumentPrimaryAction({
@@ -252,9 +224,8 @@ export function DocumentOverflowActions({
   onPrint,
   onMoveDocument,
   onDelete,
-  onCompare,
-  // Version history (flag versionHistory): one row that opens the panel, in
-  // place of View changes and the Versions list.
+  // Version history: one row that opens the panel, for a viewer who may list
+  // the doc's history; nobody else gets a version row here.
   onHistory = null,
   // Read / Comment / Edit, at the top of ⋯ with the current one ticked
   // (it was a dropdown in the bar): { modes: [{ value, label, Icon }], value, onChange }.
@@ -289,11 +260,7 @@ export function DocumentOverflowActions({
         <AppMenuItem className="tdoc-action-menu-item" data-action="history" onClick={onHistory}>
           <History size={15} /> Version history
         </AppMenuItem>
-      ) : (
-        <AppMenuItem className="tdoc-action-menu-item" data-action="compare" onClick={onCompare}>
-          <History size={15} /> View changes
-        </AppMenuItem>
-      )}
+      ) : null}
       {config.mode === 'local' ? (
         <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="publish" onClick={onPublish}>
           <Upload size={15} /> Publish
@@ -303,30 +270,6 @@ export function DocumentOverflowActions({
           <Share2 size={15} /> Share
         </AppMenuItem>
       )}
-      {!onHistory && (config.versions || []).length > 1 ? (
-        <AppSubmenu
-          className="tdoc-action-menu-item tdoc-version-submenu-trigger"
-          popupClassName="tdoc-version-submenu"
-          trigger={(
-            <>
-              <History size={15} />
-              <span>Versions</span>
-              <span className="tdoc-version-submenu-current">v{config.version}</span>
-              <ChevronRight className="tdoc-submenu-chevron" size={14} />
-            </>
-          )}
-        >
-          {[...(config.versions || [])].reverse().map((version) => (
-            <AppMenuItem
-              key={version.n}
-              className={`tdoc-version-item${version.n === config.version ? ' current' : ''}`}
-              onClick={() => { location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`; }}
-            >
-              v{version.n}{versionLabel(version.n, config)}
-            </AppMenuItem>
-          ))}
-        </AppSubmenu>
-      ) : null}
       {config.viewerStar ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="star" onClick={onToggleStar}>
           <Star size={15} fill={starred ? 'currentColor' : 'none'} />

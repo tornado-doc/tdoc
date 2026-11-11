@@ -610,17 +610,11 @@ async function selectParagraph(frame, id = 'editable-paragraph') {
       for (const label of ['Publish', 'Download & copy', 'My docs', 'My account']) {
         assert(moreLabels.some((value) => value.trim() === label), `${label} missing from mobile More: ${moreLabels.join(', ')}`);
       }
-      assert(moreLabels.some((value) => /^Versionsv\d+$/.test(value.trim())), `version submenu missing from mobile More: ${moreLabels.join(', ')}`);
+      // The old Versions submenu and View changes are gone: version history is
+      // the panel, for a viewer who may list it (a published doc).
+      assert(!moreLabels.some((value) => /^Versions|^View changes$/.test(value.trim())), `old version menu in mobile More: ${moreLabels.join(', ')}`);
       assert(moreLabels.some((value) => /^(Dark|Light) mode$/.test(value.trim())), `theme missing from mobile More: ${moreLabels.join(', ')}`);
       await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-mobile-topbar.png'), fullPage: false });
-      await page.locator('.tdoc-version-submenu-trigger').click();
-      const versionPopup = page.locator('.tdoc-version-submenu');
-      await versionPopup.waitFor();
-      assert(/v2 · viewing/.test(await versionPopup.locator('.tdoc-version-item.current').textContent()),
-        'current version missing from mobile version submenu');
-      assert(await versionPopup.evaluate((popup) => getComputedStyle(popup).overflowY) === 'auto',
-        'mobile version submenu is not scrollable');
-      await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-mobile-version-submenu.png'), fullPage: false });
     });
     await test('the composer stays on screen when the keyboard shrinks the viewport', async () => {
       // The shell's chrome does not scroll, so the composer's coordinates are

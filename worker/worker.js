@@ -3560,8 +3560,8 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     ask: (oidc && oidc.ask && oidc.ask.available && !isLanding) ? { available: true, limit: oidc.ask.limit } : null,
     mode: 'published',
     versions: vlist,
-    // Version history (shell flag versionHistory): may this viewer list the
-    // doc's history (canListHistory), and restore a version (the browser
+    // Version history: may this viewer list the doc's history
+    // (canListHistory), and restore a version (the browser
     // save's own rule: owner or editor, where the version store exists).
     historyVisible: !!(oidc && oidc.historyVisible) && !isLanding,
     canRestore: !!versionWritesEnabled && (!!isOwner || !!(oidc && oidc.teamManage && !oidc.teamManage.guest)) && !isLanding
@@ -3590,7 +3590,11 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     && accessFromMeta(docMeta || {}).commenting !== 'off';
 
   let oldVersion = null;
-  const latestVersion = vlist.length ? Math.max(...vlist.map(v => Number(v.n) || 0)) : version;
+  // The latest comes from the doc's own versions, not the viewer's list: a
+  // viewer who may not list the history gets only the version on screen, and
+  // a shared /v/N link must still say a newer one exists (and not be editable).
+  // The number is not a secret: /api/doc/agent-status hands it to any reader.
+  const latestVersion = Math.max(Number(version) || 0, latestVersionNumber(docMeta), ...vlist.map(v => Number(v.n) || 0)) || version;
   cfg.canEdit = cfg.canEdit && Number(version) === Number(latestVersion);
   // AI suggestions (shell flag askEditV2): the owner or an editor, on the
   // latest version, where tdoc AI can run. Accepting saves a version as that
@@ -3607,7 +3611,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   if (!cfg.canSuggest) delete cfg.canSuggest;
   // "Open as a document" on a space: what the agent row says about it.
   if (docMeta && docMeta.created_from === 'feedback') cfg.feedbackSpace = true;
-  if (!isLanding && vlist.length > 1 && typeof version === 'number' && version < latestVersion) {
+  if (!isLanding && typeof version === 'number' && version < latestVersion) {
     oldVersion = {
       current: version,
       latest: latestVersion,
@@ -17539,7 +17543,7 @@ async function docWriterName(env, meta, writer) {
   return null;
 }
 
-// ---- Version history (shell flag versionHistory) ------------------------
+// ---- Version history ------------------------
 // Every save stays a version (/d/<slug>/v/<n>, storage unchanged). The history
 // panel lists them as rows: consecutive saves by the same person or agent,
 // each within HISTORY_GROUP_MS of the next, are one row ("who, when, what

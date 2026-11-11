@@ -19,14 +19,15 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e}`); fail++; }
 function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-// --- The predicate, mirrored from overlay.js bar-setup. ---
-// published mode + more than one version + current strictly older than latest.
-function shouldShowStrip(mode, version, versions) {
-  const isPublished = mode === 'published';
-  const vs = Array.isArray(versions) && versions.length ? versions.slice() : [{ n: version }];
-  vs.sort((a, b) => (a.n || 0) - (b.n || 0));
-  if (!(isPublished && vs.length > 1)) return false;
-  const latest = vs[vs.length - 1].n;
+// --- The predicate, mirrored from worker.js shellDocumentWorker. ---
+// published mode + current strictly older than the doc's latest. The latest
+// is the doc's own (meta.versions), not the viewer's list: a viewer who may
+// not list the history gets only the version on screen, and must still be
+// told a newer one exists.
+function shouldShowStrip(mode, version, versions, docVersions = versions) {
+  if (mode !== 'published') return false;
+  const vs = Array.isArray(versions) && versions.length ? versions : [{ n: version }];
+  const latest = Math.max(Number(version) || 0, ...(docVersions || []).map((v) => Number(v.n) || 0), ...vs.map((v) => Number(v.n) || 0));
   return typeof version === 'number' && version < latest;
 }
 
@@ -67,6 +68,11 @@ t('HIDE: versions array unsorted but v3 still recognized as latest', () => {
   assert(shouldShowStrip('published', 3, [{ n: 3 }, { n: 1 }, { n: 2 }]) === false);
 });
 
+t('SHOW: a viewer without history rights (list is only the version on screen) on v1 with v3 latest', () => {
+  assert(shouldShowStrip('published', 1, [{ n: 1 }], V) === true);
+  assert(shouldShowStrip('published', 3, [{ n: 3 }], V) === false);
+});
+
 t('link points at the latest version with encoded slug', () => {
   assert(latestUrl('my-doc', 3) === '/d/my-doc/v/3');
   assert(latestUrl('a b/c', 2) === '/d/a%20b%2Fc/v/2', 'slug must be URL-encoded');
@@ -79,15 +85,14 @@ t('link points at the latest version with encoded slug', () => {
 // `latestVersion` is taken as the last element — the mirror sorts internally,
 // so without this guard, deleting the real upstream sort would leave both the
 // mirror and the grep green while shipped code picks the wrong "latest".
-t('worker shellDocumentWorker still contains the published+multi-version guard', () => {
+t('worker shellDocumentWorker still derives the strip from the doc\'s own latest version', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
-  assert(src.includes('vlist.length > 1'),
+  assert(src.includes("if (!isLanding && typeof version === 'number' && version < latestVersion)"),
     'guard condition missing/changed — re-verify show/hide cases');
-  assert(src.includes('version < latestVersion'),
-    'non-latest comparison missing/changed');
-  // latestVersion must be robust to unsorted versions (Math.max over the list).
-  assert(/Math\.max\(\.\.\.vlist\.map/.test(src),
-    'latestVersion must be derived from the whole version list');
+  // latestVersion must be robust to unsorted versions (Math.max) and come from
+  // the doc's meta, not only the viewer's (possibly one-entry) list.
+  assert(/const latestVersion = Math\.max\(Number\(version\) \|\| 0, latestVersionNumber\(docMeta\), \.\.\.vlist\.map/.test(src),
+    'latestVersion must be derived from the doc\'s versions');
   const react = fs.readFileSync(path.join(__dirname, '..', 'shell/src/document-shell.jsx'), 'utf8');
   assert(react.includes('tdoc-oldver-strip'), 'strip markup missing from the React shell');
 
