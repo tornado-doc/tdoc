@@ -27,6 +27,7 @@ const OFFLINE = [
   'version-history.test.js', // history rows: same writer within 30 min grouped, paged, what changed cached, access, Restore
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
+  'no-async-wait-for-function.test.js', // browser tests never waitForFunction(async ...): Playwright does not await the predicate's value
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'block-lint.test.js',       // publish-time block check: loose text and non-house wrappers warned, never refused; linear on 8 MB sheets; house blocks baked
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
