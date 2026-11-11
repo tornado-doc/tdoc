@@ -4,11 +4,16 @@
 // doc holds, not what a search or filter shows right now. No DOM globals: an
 // offline test runs this on a small DOM.
 import { SHEET_SELECTOR, readSheetTable } from '../../../shared/sheet-markup.mjs';
+import { KEY, readFormats, excelFormat, isNumeric, isDateLike, toNumber, toDateParts } from '../../../shared/sheet-format.mjs';
+import { styleXlsx, colName } from '../../../shared/sheet-xlsx-style.mjs';
 
 export const CSV_MIME = 'text/csv';
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-// [{ name, columns: [{ name, type }], rows: [[text | string[]]] }]
+// [{ name, columns: [{ name, type }], rows: [[text | string[]]], formats,
+// merges }]: formats is Map(r * KEY + c → cell format) or null, merges
+// [{ r, c, rs, cs }] (shared/sheet-format.mjs). CSV writes values as the
+// document holds them; Excel keeps number formats, styles and merges.
 export function sheetsFromDocument(doc) {
   const tables = Array.prototype.filter.call(doc.querySelectorAll(SHEET_SELECTOR), (t) => !(t.closest && t.closest('[data-tdoc-provider]')));
   return tables.map((table, i) => {
@@ -17,6 +22,8 @@ export function sheetsFromDocument(doc) {
       name: sheet.name || `Sheet ${i + 1}`,
       columns: sheet.columns.map((c) => ({ name: c.name, type: c.type, width: c.width || 0 })),
       rows: sheet.rows.map((r) => r.cells),
+      formats: readFormats(sheet, table),
+      merges: sheet.merges || [],
     };
   });
 }
@@ -70,16 +77,56 @@ export function workbookNames(sheets) {
   });
 }
 
+// Days since Excel's epoch (1899-12-30) for an ISO date or date-time.
+function excelSerial(text) {
+  const p = toDateParts(text);
+  if (!p) return null;
+  if (p.timeOnly) return (p.h * 3600 + p.mi * 60 + p.s) / 86400;
+  const days = (Date.UTC(p.y, p.mo - 1, p.d) - Date.UTC(1899, 11, 30)) / 86400000;
+  return days + (p.h * 3600 + p.mi * 60 + p.s) / 86400;
+}
+
+// A cell's number format as Excel's: the value as a number (a date as its
+// serial) with the format's code, where the value reads as one.
+function formatCell(ws, ref, value, f) {
+  const n = f && f.num;
+  if (!n || n.kind === 'text') return;
+  const text = Array.isArray(value) ? '' : String(value == null ? '' : value);
+  let v = null;
+  if (isNumeric(n)) v = toNumber(text);
+  else if (isDateLike(n)) v = excelSerial(text);
+  if (v == null) return;
+  ws[ref] = { t: 'n', v, z: excelFormat(n) };
+}
+
 export function xlsxBytes(XLSX, sheets) {
   const book = XLSX.utils.book_new();
   const names = workbookNames(sheets);
+  const styled = [];
   sheets.forEach((sheet, i) => {
     const ws = XLSX.utils.aoa_to_sheet(sheetRows(sheet));
     // A column's saved width goes with it (Excel's own unit, from px).
     if (sheet.columns.some((c) => c.width)) ws['!cols'] = sheet.columns.map((c) => (c.width ? { wpx: c.width } : {}));
+    // Number formats on the cells (body rows start at Excel row 2), the
+    // rest of each format for styleXlsx below, and merged ranges.
+    const cells = new Map();
+    if (sheet.formats) sheet.formats.forEach((f, key) => {
+      const r = Math.floor(key / KEY), c = key % KEY;
+      if (r >= sheet.rows.length || c >= sheet.columns.length) return;
+      const ref = `${colName(c)}${r + 2}`;
+      formatCell(ws, ref, sheet.rows[r][c], f);
+      // A styled empty cell is written, so its fill and borders show.
+      if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+      cells.set(ref, f);
+    });
+    if (sheet.merges && sheet.merges.length) ws['!merges'] = sheet.merges.map((m) => ({ s: { r: m.r + 1, c: m.c }, e: { r: m.r + m.rs, c: m.c + m.cs - 1 } }));
+    styled.push({ cells });
     XLSX.utils.book_append_sheet(book, ws, names[i]);
   });
-  return new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'xlsx', compression: true }));
+  const bytes = new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'xlsx', compression: true }));
+  // Bold, italic, strikethrough, colours, fills, borders and alignment:
+  // SheetJS's community build does not write them; styleXlsx does.
+  try { return styleXlsx(XLSX, bytes, styled); } catch { return bytes; }
 }
 
 // The tab on screen: its name from the view in the page's #hash (the

@@ -27,6 +27,9 @@
 //
 // A line break inside a cell is a <br>: it survives any HTML tool, shows
 // as a break where no viewer runs, and reads back as "\n".
+//
+// A cell's own format (bold, colours, number format, borders) and merged
+// cells (rowspan / colspan) are shared/sheet-format.mjs's.
 
 export function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -94,9 +97,22 @@ export function tableHtml(sheet, { caption = false } = {}) {
     const pal = col.palette ? ` data-palette="${escapeHtml(col.palette)}"` : '';
     return `<th data-key="${escapeHtml(col.key || `c${i + 1}`)}" data-type="${escapeHtml(col.type || 'text')}"${pal}${colAttrs(col)}>${escapeHtml(col.name)}</th>`;
   }).join('');
+  // Merged ranges ({ r, c, rs, cs }) and each cell's attributes as markup
+  // (row.attrs[c], from shared/sheet-format.mjs formatAttrString): the
+  // writer's (import) to validate; covered cells are left out.
+  const covered = new Set(), spans = new Map();
+  (sheet.merges || []).forEach((m) => {
+    spans.set(m.r * 256 + m.c, m);
+    for (let r = m.r; r < m.r + m.rs; r++) for (let c = m.c; c < m.c + m.cs; c++) if (r !== m.r || c !== m.c) covered.add(r * 256 + c);
+  });
   const body = (sheet.rows || []).map((row, i) => {
     const id = row.id || `r${i + 1}`;
-    const cells = cols.map((col, c) => `<td>${cellHtml(col.type, row.cells[c])}</td>`).join('');
+    const cells = cols.map((col, c) => {
+      if (covered.size && covered.has(i * 256 + c)) return '';
+      const m = spans.size ? spans.get(i * 256 + c) : null;
+      const span = m ? (m.cs > 1 ? ` colspan="${m.cs}"` : '') + (m.rs > 1 ? ` rowspan="${m.rs}"` : '') : '';
+      return `<td${(row.attrs && row.attrs[c]) || ''}${span}>${cellHtml(col.type, row.cells[c])}</td>`;
+    }).join('');
     const ht = cleanSize(row.height, MIN_HEIGHT, MAX_HEIGHT);
     return `<tr data-row="${escapeHtml(id)}"${ht ? ` data-height="${ht}"` : ''}>${cells}</tr>`;
   }).join('\n');
@@ -305,19 +321,50 @@ export function readSheetTable(table, normalize) {
   }));
   const headRow = ths.length ? ths[0].parentElement : null;
   const rows = [];
-  ownRows(table, 'body').forEach((tr) => {
-    if (tr === headRow) return;
+  // Merged cells (rowspan / colspan, shared/sheet-format.mjs): a cell sits
+  // at the first column no merge above or beside it covers; a covered slot
+  // has no <td> (tds[c] null, read as empty). One query tells a sheet
+  // without merges, which keeps the plain positional read.
+  const merged = !!(table.querySelector && table.querySelector('td[colspan],td[rowspan],th[colspan],th[rowspan]'));
+  const merges = [];
+  const carry = merged ? new Array(columns.length).fill(0) : null;
+  const trs = ownRows(table, 'body').filter((tr) => tr !== headRow);
+  trs.forEach((tr, r) => {
     const tds = [];
     const cells = [];
-    for (let c = 0; c < columns.length; c++) {
-      const td = tr.cells[c] || null;
-      tds.push(td);
-      cells.push(readCell(td, columns[c].type));
+    if (!merged) {
+      for (let c = 0; c < columns.length; c++) {
+        const td = tr.cells[c] || null;
+        tds.push(td);
+        cells.push(readCell(td, columns[c].type));
+      }
+    } else {
+      let k = 0;
+      for (let c = 0; c < columns.length; c++) {
+        if (carry[c] > 0) { carry[c]--; tds.push(null); cells.push(readCell(null, columns[c].type)); continue; }
+        const td = tr.cells[k++] || null;
+        tds.push(td);
+        cells.push(readCell(td, columns[c].type));
+        if (!td) continue;
+        const cs = Math.min(spanOf(td.getAttribute('colspan')), columns.length - c);
+        const rs = Math.min(spanOf(td.getAttribute('rowspan')), trs.length - r);
+        if (cs > 1 || rs > 1) {
+          merges.push({ r, c, rs, cs });
+          for (let j = 0; j < cs; j++) carry[c + j] = rs - 1;
+          for (let j = 1; j < cs; j++) { tds.push(null); cells.push(readCell(null, columns[c + j].type)); }
+          c += cs - 1;
+        }
+      }
     }
     const height = tr.hasAttribute('data-height') ? cleanSize(tr.getAttribute('data-height'), MIN_HEIGHT, MAX_HEIGHT) : 0;
     rows.push({ id: tr.getAttribute('data-row') || '', tr, tds, cells, height });
   });
-  return { name: table.getAttribute('data-name') || '', columns, rows, table };
+  return { name: table.getAttribute('data-name') || '', columns, rows, table, merges };
+}
+// A rowspan / colspan: a whole number from 1 to 1000.
+function spanOf(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 1 ? Math.min(n, 1000) : 1;
 }
 
 // ---- writing one cell (DOM) ------------------------------------------------

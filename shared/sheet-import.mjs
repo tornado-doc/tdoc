@@ -9,6 +9,8 @@
 
 import { inferType } from './sheet-query.mjs';
 import { sheetDocumentHtml, parseDelimited, detectDelimiter } from './sheet-markup.mjs';
+import { fromExcelFormat, isNumeric, formatAttrString, mergeFormat } from './sheet-format.mjs';
+import { readXlsxStyles, colName } from './sheet-xlsx-style.mjs';
 
 export { parseDelimited, detectDelimiter };
 
@@ -136,6 +138,9 @@ export function sheetsFromWorkbook(XLSX, wb, { warnings = [] } = {}) {
     names.length = LIMITS.sheets;
   }
   const sheets = [];
+  // Cell styles (bold, colours, fills, borders, alignment): read from the
+  // workbook's own XML, as SheetJS keeps only fills (shared/sheet-xlsx-style.mjs).
+  const styles = wb.files ? readXlsxStyles(XLSX, wb) : new Map();
   for (const name of names) {
     const ws = wb.Sheets[name];
     if (!ws || !ws['!ref']) continue;
@@ -143,11 +148,83 @@ export function sheetsFromWorkbook(XLSX, wb, { warnings = [] } = {}) {
     const rowsN = range.e.r - range.s.r + 1, colsN = range.e.c - range.s.c + 1;
     if (rowsN * colsN > LIMITS.cells * 4) throw new SheetImportError(`"${name}" is too large to import (${rowsN.toLocaleString('en-US')} rows × ${colsN} columns).`, 'too_many_cells');
     isoDates(XLSX, ws);
-    const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: false });
+    const numFormats = numberFormats(XLSX, ws, range);
+    // Blank rows are left out, as before, except inside a merged range; each
+    // row kept remembers its row in the worksheet, for styles and merges.
+    const merges = (ws['!merges'] || []).filter((m) => m.e.r > m.s.r || m.e.c > m.s.c);
+    const inMerge = new Set();
+    merges.forEach((m) => { for (let r = m.s.r; r <= m.e.r; r++) inMerge.add(r); });
+    const all = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: true });
+    const grid = [], at = [];
+    all.forEach((row, k) => {
+      const r = range.s.r + k;
+      if (!inMerge.has(r) && (!Array.isArray(row) || row.every((v) => String(v == null ? '' : v) === ''))) return;
+      grid.push(row); at.push(r);
+    });
     const sheet = sheetFromGrid(name, grid, { warnings });
-    if (sheet) sheets.push(sheet);
+    if (!sheet) continue;
+    addFormats(sheet, at, range.s.c, styles.get(name), numFormats, merges);
+    sheets.push(sheet);
   }
   return sheets;
+}
+
+// Number formats tdoc shows (shared/sheet-format.mjs): such a cell keeps its
+// value as written in the file (1234.5, 0.25) and the format says how it
+// shows ($1,234.50, 25%), as in Excel and Google Sheets. Dates stay ISO, with
+// the format only where it is not ISO already. Map('A1' → format).
+function numberFormats(XLSX, ws, range) {
+  const out = new Map();
+  const rows = Array.isArray(ws['!data']) ? ws['!data'] : null;
+  const visit = (cell, ref) => {
+    if (!cell || cell.t !== 'n' || !cell.z) return;
+    const n = fromExcelFormat(cell.z);
+    if (!n || n.kind === 'text') return;
+    if (isNumeric(n)) { cell.w = String(Number(cell.v.toPrecision(15))); out.set(ref, n); }
+    else if (!(n.kind === 'date' || n.kind === 'datetime') || n.style !== 'iso') out.set(ref, n);
+  };
+  if (rows) rows.forEach((row, r) => { if (Array.isArray(row)) row.forEach((cell, c) => visit(cell, `${colName(c)}${r + 1}`)); });
+  else Object.keys(ws).forEach((ref) => { if (ref[0] !== '!') visit(ws[ref], ref); });
+  return out;
+}
+
+// The kept rows' formats and merges onto the sheet: row.attrs (markup, from
+// the validated format) and sheet.merges, by body row and column.
+function addFormats(sheet, at, c0, styled, nums, merges) {
+  const width = sheet.columns.length;
+  const bodyAt = at.slice(1);
+  if ((styled && styled.size) || nums.size) {
+    sheet.rows.forEach((row, i) => {
+      const r = bodyAt[i] + 1;
+      for (let c = 0; c < width; c++) {
+        const ref = `${colName(c0 + c)}${r}`;
+        const style = styled && styled.get(ref), num = nums.get(ref);
+        if (!style && !num) continue;
+        // Tags and checkboxes show their own way: a number format does not apply.
+        const type = sheet.columns[c].type;
+        const f = mergeFormat(style, { num: type === 'tags' || type === 'checkbox' ? null : num || null });
+        if (!f) continue;
+        (row.attrs || (row.attrs = []))[c] = formatAttrString(f);
+      }
+    });
+  }
+  if (merges.length) {
+    const rowOf = new Map();
+    bodyAt.forEach((r, i) => rowOf.set(r, i));
+    sheet.merges = [];
+    const taken = new Set();
+    merges.forEach((m) => {
+      const r = rowOf.get(m.s.r), c = m.s.c - c0;
+      if (r == null || c < 0 || c >= width) return;
+      let r1 = r;
+      for (let x = m.s.r; x <= m.e.r; x++) if (rowOf.has(x)) r1 = rowOf.get(x);
+      const c1 = Math.min(width - 1, m.e.c - c0);
+      if (r1 === r && c1 === c) return;
+      for (let y = r; y <= r1; y++) for (let x = c; x <= c1; x++) if (taken.has(y * 256 + x)) return;
+      for (let y = r; y <= r1; y++) for (let x = c; x <= c1; x++) taken.add(y * 256 + x);
+      sheet.merges.push({ r, c, rs: r1 - r + 1, cs: c1 - c + 1 });
+    });
+  }
 }
 
 // A date cell is a serial number with a date format. Write its text as ISO
@@ -196,7 +273,9 @@ export async function importSheetFile(file, { loadXlsx, title, kind: asKind } = 
       // sheetRows stops reading a worksheet past what an import may keep
       // (the header, the row limit, and one more to say it was over), and
       // dense storage keeps a big sheet's cells in arrays, not one object.
-      wb = XLSX.read(bytes, { type: 'array', cellDates: false, cellNF: true, sheetStubs: false, dense: true, sheetRows: LIMITS.rows + 2 });
+      // bookFiles keeps the workbook's XML for the cell styles SheetJS
+      // does not read (shared/sheet-xlsx-style.mjs).
+      wb = XLSX.read(bytes, { type: 'array', cellDates: false, cellNF: true, sheetStubs: false, dense: true, sheetRows: LIMITS.rows + 2, bookFiles: true });
     } catch (error) {
       throw new SheetImportError('This file could not be read as an Excel workbook. If it is password-protected, remove the password and try again.', 'unreadable');
     }
