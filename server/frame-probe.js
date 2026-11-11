@@ -1462,6 +1462,27 @@
     setDirty(true, true);
     reportDraft();
   });
+  // The slide controls (slides-edit.js) add, copy, move and delete whole
+  // slides; the same path again. A slide they add may carry an image slot,
+  // which is atomic like any image: marked here exactly as enableEditing
+  // marks the page, so the save cleans it the same way.
+  document.addEventListener('tdoc:slides-edit', function (event) {
+    if (interactionMode !== 'edit') return;
+    var added = event.detail && event.detail.added;
+    if (added && added.querySelectorAll) {
+      var nodes = Array.prototype.slice.call(added.querySelectorAll(ATOMIC));
+      if (added.matches && added.matches(ATOMIC)) nodes.unshift(added);
+      nodes.forEach(function (node) {
+        node.setAttribute('data-tdoc-editor-atomic', '');
+        if (!node.hasAttribute('data-tdoc-editor-original-editable')) {
+          node.setAttribute('data-tdoc-editor-original-editable', node.hasAttribute('contenteditable') ? node.getAttribute('contenteditable') : '__missing__');
+        }
+        node.setAttribute('contenteditable', 'false');
+      });
+    }
+    setDirty(true, true);
+    reportDraft();
+  });
   function markdownCtx() {
     return { root: findEditRoot(), atomicSelector: ATOMIC + ',[data-tdoc-editor-atomic]' };
   }
