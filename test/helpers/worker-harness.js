@@ -195,6 +195,7 @@ async function loadWorker({ previewRenderer = false } = {}) {
   const probeJs = require(path.join(root, 'server', 'frame-probe-source.js'))();
   src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);
   src = src.replace('/* __TDOC_NOTIFICATION_TEXT__ */', fs.readFileSync(path.join(root, 'shell', 'src', 'notification-text.js'), 'utf8').replace(/^export /gm, ''));
+  src = src.replace('/* __TDOC_DOC_TYPE__ */', () => fs.readFileSync(path.join(root, 'shared', 'doc-type.mjs'), 'utf8').replace(/^export /gm, ''));
   src = src.replace('/* __TDOC_PREVIEW_VALIDATOR__ */', fs.readFileSync(path.join(root, 'server', 'preview', 'validate-svg.js'), 'utf8'));
   src = src.replace('/* __TDOC_HTML_PARSER__ */', () => fs.readFileSync(path.join(root, 'server', 'html-parser', 'parse5.js'), 'utf8'));
   src = src.replace('/* __TDOC_VERSION_DIFF__ */', () => fs.readFileSync(path.join(root, 'server', 'version-diff.js'), 'utf8'));

@@ -21,6 +21,9 @@ function eq(a, b, m) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Er
 const SHEET = '<h1>Budget</h1><table data-tdoc-sheet data-name="Costs"><thead><tr><th data-key="a">Item</th></tr></thead><tbody><tr data-row="1"><td>Rent</td></tr></tbody></table>';
 const DECK = '<section class="slide" data-tdoc-slide><h1>Launch</h1></section><section class="slide" data-tdoc-slide><p>Two</p></section>';
 const PROSE = '<h1>Plan</h1><p>A sentence to comment on.</p>';
+// A prose doc that holds sheet tables (Julie's ji.market doc,
+// raftbench-runs-and-plan): a doc, not a sheet [the bug].
+const PROSE_WITH_SHEET = `<h1>Runs and plan</h1><p>What we ran, and what is next.</p>${SHEET.replace('<h1>Budget</h1>', '')}<h2>Next</h2><p>More prose.</p>`;
 
 (async () => {
   const src = fs.readFileSync(path.join(__dirname, '../shell/src/docs-hub/row-meta.js'), 'utf8');
@@ -106,7 +109,7 @@ const PROSE = '<h1>Plan</h1><p>A sentence to comment on.</p>';
     const env = makeEnv(mod.CommentsStore);
     const tok = await issue(worker, env, 'owner');
     const owner = await putSession(env, 'owner');
-    for (const [slug, html] of [['q-sheet', SHEET], ['q-deck', DECK], ['q-doc', PROSE], ['q-private', PROSE]]) {
+    for (const [slug, html] of [['q-sheet', SHEET], ['q-deck', DECK], ['q-doc', PROSE], ['q-private', PROSE], ['q-mixed', PROSE_WITH_SHEET]]) {
       const up = await call(env, '/api/upload', { method: 'POST', token: tok.token, body: { slug, version: 1, html } });
       assert(up.status === 200, `upload ${slug}: ${up.status} ${up.text}`);
     }
@@ -131,10 +134,13 @@ const PROSE = '<h1>Plan</h1><p>A sentence to comment on.</p>';
 
   const fixture = await seed();
 
-  await t('publishing stamps the type on the meta: sheet, slides, doc', async () => {
+  await t('publishing stamps the type on the meta, with the rule\'s version: sheet, slides, doc', async () => {
     const kinds = {};
-    for (const slug of ['q-sheet', 'q-deck', 'q-doc']) kinds[slug] = JSON.parse(await fixture.env.META.get(`meta:${slug}`)).preview.kind;
-    eq(kinds, { 'q-sheet': 'sheet', 'q-deck': 'slides', 'q-doc': 'doc' });
+    for (const slug of ['q-sheet', 'q-deck', 'q-doc', 'q-mixed']) {
+      const { preview } = JSON.parse(await fixture.env.META.get(`meta:${slug}`));
+      kinds[slug] = `${preview.kind}@${preview.kind_v}`;
+    }
+    eq(kinds, { 'q-sheet': 'sheet@2', 'q-deck': 'slides@2', 'q-doc': 'doc@2', 'q-mixed': 'doc@2' });
   });
 
   await t('rows carry doc_type and, on your own docs, the sharing state', async () => {
@@ -144,6 +150,7 @@ const PROSE = '<h1>Plan</h1><p>A sentence to comment on.</p>';
     eq(pick('q-deck'), ['slides', 'public', undefined]);
     eq(pick('q-doc'), ['doc', 'link', undefined]);
     eq(pick('q-private'), ['doc', 'private', undefined]);
+    eq(row(data.docs, 'q-mixed').doc_type, 'doc', 'prose holding a sheet table is a doc');
     // Pinning still learns the visibility from the same row.
     eq(row(data.docs, 'q-sheet').visibility, 'private');
   });
@@ -255,7 +262,69 @@ const PROSE = '<h1>Plan</h1><p>A sentence to comment on.</p>';
     eq(await env.META.get('meta:q-sheet'), metaBefore['q-sheet'], 'q-sheet meta changed');
     eq(await env.META.get('meta:q-deck'), metaBefore['q-deck'], 'q-deck meta changed');
     const cache = JSON.parse(await env.META.get('doc-types:owner'));
-    eq([cache.t['q-sheet'], cache.t['q-deck']], ['sheet', 'slides']);
+    eq([cache.t['q-sheet'], cache.t['q-deck']], [{ v: 2, kind: 'sheet' }, { v: 2, kind: 'slides' }]);
+  });
+
+  await t('old-rule (v1) types: "doc" and "slides" are trusted, a v1 "sheet" is ignored and detected again; GET never writes meta', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    const owner = await putSession(env, 'owner');
+    const docs = [
+      ['m-stamped', PROSE_WITH_SHEET], ['m-cached', PROSE_WITH_SHEET], ['m-sheet', SHEET],
+      ['m-v1-deck', DECK], ['m-v1-doc', PROSE], ['m-c-deck', DECK], ['m-c-doc', PROSE],
+    ];
+    for (const [slug, html] of docs) {
+      const up = await call(env, '/api/upload', { method: 'POST', token: tok.token, body: { slug, version: 1, html } });
+      assert(up.status === 200, `upload ${slug}: ${up.status} ${up.text}`);
+    }
+    // What v1 left behind: stamps without kind_v on the meta, and bare-string
+    // answers in the viewer's record.
+    const restamp = async (slug, kind) => {
+      const meta = JSON.parse(await env.META.get(`meta:${slug}`));
+      if (kind) meta.preview.kind = kind; else delete meta.preview.kind;
+      delete meta.preview.kind_v;
+      await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+    };
+    await restamp('m-stamped', 'sheet');
+    await restamp('m-v1-deck', 'slides');
+    await restamp('m-v1-doc', 'doc');
+    for (const slug of ['m-cached', 'm-c-deck', 'm-c-doc']) await restamp(slug, null);
+    await env.META.put('doc-types:owner', JSON.stringify({ t: { 'm-cached': 'sheet', 'm-stamped': 'sheet', 'm-c-deck': 'slides', 'm-c-doc': 'doc' }, f: {} }));
+    const metaBefore = await env.META.get('meta:m-stamped');
+    const writes = [];
+    const reads = [];
+    const put = env.META.put.bind(env.META);
+    const get = env.DOCS.get.bind(env.DOCS);
+    env.META.put = async (k, v, o) => { writes.push(k); return put(k, v, o); };
+    env.DOCS.get = async (k, o) => { reads.push(k); return get(k, o); };
+    try {
+      const waits = [];
+      const first = await me(env, owner, { waitUntil: (p) => waits.push(p) });
+      const types = (list, slugs) => slugs.map((slug) => row(list, slug).doc_type);
+      eq(types(first.docs, ['m-stamped', 'm-cached']), ['doc', 'doc'], 'an old "sheet" is not shown');
+      eq(row(first.docs, 'm-sheet').doc_type, 'sheet', 'a current stamp is');
+      eq(types(first.docs, ['m-v1-deck', 'm-v1-doc', 'm-c-deck', 'm-c-doc']), ['slides', 'doc', 'slides', 'doc'], 'old doc / slides are trusted at once');
+      await Promise.all(waits);
+      eq([...new Set(reads.map((k) => k.split('/')[1]))].sort(), ['m-cached', 'm-stamped'], 'only the old sheets are read again');
+      const cache = JSON.parse(await env.META.get('doc-types:owner'));
+      eq([cache.t['m-stamped'], cache.t['m-cached']], [{ v: 2, kind: 'doc' }, { v: 2, kind: 'doc' }], 'detected again');
+      eq([cache.t['m-c-deck'], cache.t['m-c-doc']], [{ v: 2, kind: 'slides' }, { v: 2, kind: 'doc' }], 'trusted answers kept');
+      const second = await me(env, owner, { waitUntil: (p) => waits.push(p) });
+      eq(types(second.docs, ['m-stamped', 'm-cached', 'm-c-deck', 'm-c-doc']), ['doc', 'doc', 'slides', 'doc']);
+    } finally {
+      env.META.put = put;
+      env.DOCS.get = get;
+    }
+    eq(writes.filter((k) => k.startsWith('meta:')), [], 'a hub load wrote doc meta');
+    eq(await env.META.get('meta:m-stamped'), metaBefore, 'meta changed on GET');
+    // The next publish stamps the meta itself, with this version.
+    const up = await call(env, '/api/upload', { method: 'POST', token: tok.token, body: { slug: 'm-stamped', version: 2, html: PROSE_WITH_SHEET } });
+    assert(up.status === 200, `republish: ${up.status} ${up.text}`);
+    const { preview } = JSON.parse(await env.META.get('meta:m-stamped'));
+    eq([preview.kind, preview.kind_v], ['doc', 2]);
+    // A cached answer of a future version is not trusted either.
+    await env.META.put('doc-types:owner', JSON.stringify({ t: { 'm-cached': { v: 3, kind: 'sheet' } }, f: {} }));
+    eq(row((await me(env, owner)).docs, 'm-cached').doc_type, 'doc');
   });
 
   await t('a doc whose version cannot be read is marked and left alone for a day', async () => {
@@ -288,18 +357,10 @@ const PROSE = '<h1>Plan</h1><p>A sentence to comment on.</p>';
   });
 
   await t('type detection is linear: 2 MB of hostile markup in well under 50 ms, and still right', async () => {
+    // The worker inlines shared/doc-type.mjs as code; it is tested here as is.
+    const { docTypeFromHtml, SHEET_ONLY_SKIP_SELECTOR, SHEET_ONLY_MEDIA_SELECTOR } = await import(path.join(__dirname, '../shared/doc-type.mjs'));
     const workerSrc = fs.readFileSync(path.join(__dirname, '../worker/worker.js'), 'utf8');
-    const grab = (header) => {
-      const at = workerSrc.indexOf(header);
-      assert(at >= 0, `missing ${header}`);
-      let j = workerSrc.indexOf('{', at), d = 0;
-      for (; j < workerSrc.length; j++) {
-        if (workerSrc[j] === '{') d++;
-        else if (workerSrc[j] === '}') { d--; if (d === 0) { j++; break; } }
-      }
-      return workerSrc.slice(at, j);
-    };
-    const docTypeFromHtml = new Function(`${grab('function htmlHasTagAttr(')}\n${grab('function docTypeFromHtml(')}\nreturn docTypeFromHtml;`)();
+    assert(workerSrc.includes('/* __TDOC_DOC_TYPE__ */') && !/function docTypeFromHtml\(/.test(workerSrc), 'the worker has its own copy of the rule');
     eq(docTypeFromHtml(SHEET), 'sheet');
     eq(docTypeFromHtml(DECK), 'slides');
     eq(docTypeFromHtml(PROSE), 'doc');
@@ -309,6 +370,25 @@ const PROSE = '<h1>Plan</h1><p>A sentence to comment on.</p>';
     eq(docTypeFromHtml('<html data-tdoc-slides><p>x</p>'), 'doc', 'data-tdoc-slides is not data-tdoc-slide');
     eq(docTypeFromHtml('<section xdata-tdoc-slide>'), 'doc', 'part of another name');
     eq(docTypeFromHtml('<section class="a" data-tdoc-slide="s1">'), 'slides');
+    // Sheet only when the doc is a pure sheet (the sheets viewer's sheet-only doc).
+    eq(docTypeFromHtml(PROSE_WITH_SHEET), 'doc', 'prose with embedded sheet tables');
+    eq(docTypeFromHtml(SHEET.replace('</table>', '</table><p>Notes below.</p>')), 'doc', 'prose after the table');
+    eq(docTypeFromHtml(SHEET + '<img src="x.png">'), 'doc', 'a picture is more than a sheet');
+    eq(docTypeFromHtml('<!doctype html><html><head><meta charset="utf-8"><title>Budget</title><style>p{}</style><script>if (a < b) go("<p>")</script></head>'
+      + '<body>\n<h1>Budget</h1>\n<p class="lede sheet-note">A note.</p><!-- prose? no -->' + SHEET.replace('<h1>Budget</h1>', '') + '&nbsp;<div data-tdoc-provider>chrome</div></body></html>'), 'sheet', 'a whole sheet document: title, note, tables');
+    eq(docTypeFromHtml('<h1>Two</h1>' + SHEET.replace('<h1>Budget</h1>', '').repeat(2)), 'sheet', 'several tables');
+    eq(docTypeFromHtml('<table data-tdoc-sheet><tr><td><table><tr><td>x</td></tr></table>y</td></tr></table><p>after</p>'), 'doc', 'nesting counted');
+    const { sheetDocumentHtml, blankSheetHtml } = await import(path.join(__dirname, '../shared/sheet-markup.mjs'));
+    eq(docTypeFromHtml(blankSheetHtml()), 'sheet', 'a new blank sheet');
+    eq(docTypeFromHtml(sheetDocumentHtml({ title: 'Import', note: 'From a CSV', sheets: [{ name: 'A', columns: [{ key: 'a', name: 'A' }], rows: [{ cells: ['1'] }] }] })), 'sheet', 'an imported sheet');
+    // Slides: any slide section makes a deck, prose around it or not.
+    eq(docTypeFromHtml('<h1>Talk</h1><p>Intro prose.</p>' + DECK + '<p>Closing prose.</p>'), 'slides', 'a doc with slide sections');
+    eq(docTypeFromHtml(DECK.replace('<p>Two</p>', SHEET)), 'slides', 'a deck whose slide holds a sheet');
+    // The viewer's selectors are built from the same rule.
+    eq(SHEET_ONLY_SKIP_SELECTOR, 'table[data-tdoc-sheet],[data-tdoc-provider],script,style,noscript,template,h1,caption,.sheet-note');
+    eq(SHEET_ONLY_MEDIA_SELECTOR, 'img,svg,video,canvas,iframe,figure');
+    const viewer = fs.readFileSync(path.join(__dirname, '../server/sheets-viewer.js'), 'utf8');
+    assert(viewer.includes('DocType.SHEET_ONLY_SKIP_SELECTOR') && viewer.includes('DocType.SHEET_ONLY_MEDIA_SELECTOR'), 'the viewer has its own sheet-only rule');
     const MB2 = 2 * 1024 * 1024;
     const fill = (unit) => unit.repeat(Math.ceil(MB2 / unit.length)).slice(0, MB2);
     const hostile = [
@@ -319,11 +399,32 @@ const PROSE = '<h1>Plan</h1><p>A sentence to comment on.</p>';
       fill('<table data-tdoc-sheetx'),
       '<table' + fill(' a') + ' data-tdoc-sheetx',
       fill('<a' + 'b'.repeat(60) + ' data-tdoc-slidez'),
+      // The sheet-only walk: tags, attributes, quotes, comments, raw text.
+      fill('<table data-tdoc-sheet>'),
+      '<h1 class="' + fill('sheet-note '),
+      '<table data-tdoc-sheet title="' + fill('<'),
+      fill('<script>'),
+      fill('<!--'),
+      '<table data-tdoc-sheet>' + fill('<td a=b c="d" e>'),
+      '<h1>' + fill('&nbsp;'),
+      // ...and with a sheet table, so the walk runs to the end.
+      '<table data-tdoc-sheet></table>' + fill('<div>'),
+      '<table data-tdoc-sheet></table>' + fill('<h1></h1>'),
+      '<table data-tdoc-sheet></table>' + fill('<div a=b c="d" e>'),
+      '<table data-tdoc-sheet></table>' + fill('<p class="x y sheet-notex">'),
+      '<table data-tdoc-sheet></table>' + fill('<script></script>'),
+      fill('<table data-tdoc-sheet></table>'),
+      '<table data-tdoc-sheet>' + fill('<table x>'),
     ];
+    // The best of three runs: the scan, not a JIT warm-up or a GC pause
+    // (test/sheets-size.test.js does the same); a quadratic one takes seconds.
     for (const html of hostile) {
-      const started = process.hrtime.bigint();
-      docTypeFromHtml(html);
-      const ms = Number(process.hrtime.bigint() - started) / 1e6;
+      let ms = Infinity;
+      for (let k = 0; k < 3; k++) {
+        const started = process.hrtime.bigint();
+        docTypeFromHtml(html);
+        ms = Math.min(ms, Number(process.hrtime.bigint() - started) / 1e6);
+      }
       assert(ms < 50, `${ms.toFixed(1)} ms on ${JSON.stringify(html.slice(0, 40))}…`);
     }
   });

@@ -1,6 +1,7 @@
 'use strict';
-// The sheets viewer as served at /sheets-viewer.js: the two shared pure
-// modules (shared/sheet-query.mjs, shared/sheet-markup.mjs) each wrapped as a
+// The sheets viewer as served at /sheets-viewer.js: the shared pure modules
+// (shared/sheet-query.mjs, shared/sheet-markup.mjs, shared/doc-type.mjs -- the
+// sheet-only rule My docs labels by) each wrapped as a
 // plain object (their `export`s become its properties), then the in-frame
 // viewer (server/sheets-viewer.js), all in one function scope. The probe
 // carries only server/sheets-loader.js, which fetches this file when a doc
@@ -25,6 +26,7 @@ function sheetsViewerSource() {
   return '(function () {\n'
     + moduleObject('SheetQuery', 'shared/sheet-query.mjs')
     + moduleObject('SheetMarkup', 'shared/sheet-markup.mjs')
+    + moduleObject('DocType', 'shared/doc-type.mjs')
     + fs.readFileSync(path.join(__dirname, 'sheets-viewer.js'), 'utf8')
     + '\n})();\n';
 }

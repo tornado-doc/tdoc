@@ -12942,67 +12942,37 @@ async function putAccountProfile(env, accountId, patch) {
   return next;
 }
 
-// What a doc is, for its row in My docs: a sheet (a <table data-tdoc-sheet>,
-// the sheets viewer's own test), slides (a [data-tdoc-slide] section, the
-// slides viewer's), or a doc. Stamped on meta.preview at every write, so the
-// list reads it off the meta it already holds -- never the HTML per row.
-//
-// One forward pass per attribute, linear in the HTML whatever it holds: each
-// hit of the attribute name is checked against the last '<' and '>' seen so
-// far (kept as the scan moves, never searched backwards), so a page of
-// hostile markup costs what a page of prose does. No regex over the
-// document: one that backtracked took 11 s on 256 KB.
-function htmlHasTagAttr(html, attr, tagOk) {
-  let lastLt = -1;
-  let lastGt = -1;
-  let pos = 0;
-  for (let hit = html.indexOf(attr); hit !== -1; hit = html.indexOf(attr, hit + attr.length)) {
-    for (; pos < hit; pos++) {
-      const c = html.charCodeAt(pos);
-      if (c === 60) lastLt = pos; // <
-      else if (c === 62) lastGt = pos; // >
-    }
-    // Inside a tag: a '<' with no '>' after it, and the name is a whole
-    // attribute -- whitespace before, and '=', whitespace, '/', '>' or the
-    // end after (so data-tdoc-slides is not data-tdoc-slide).
-    if (lastLt === -1 || lastGt > lastLt) continue;
-    const before = html.charCodeAt(hit - 1);
-    if (!(before === 32 || (before >= 9 && before <= 13))) continue;
-    const after = hit + attr.length < html.length ? html.charCodeAt(hit + attr.length) : -1;
-    if (!(after === -1 || after === 61 || after === 47 || after === 62 || after === 32 || (after >= 9 && after <= 13))) continue;
-    // The tag's name: letters, digits and '-' right after the '<', ended by
-    // whitespace (a name ended by anything else is not an opening tag).
-    let end = lastLt + 1;
-    const nameLimit = Math.min(hit, lastLt + 65);
-    while (end < nameLimit) {
-      const c = html.charCodeAt(end);
-      if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57 && end > lastLt + 1) || (c === 45 && end > lastLt + 1)) end++;
-      else break;
-    }
-    const sep = html.charCodeAt(end);
-    if (end === lastLt + 1 || end > lastLt + 64 || !(sep === 32 || (sep >= 9 && sep <= 13))) continue;
-    if (tagOk(html.slice(lastLt + 1, end).toLowerCase())) return true;
-  }
-  return false;
-}
-function docTypeFromHtml(html) {
-  const text = typeof html === 'string' ? html : '';
-  if (htmlHasTagAttr(text, 'data-tdoc-sheet', (tag) => tag === 'table')) return 'sheet';
-  if (htmlHasTagAttr(text, 'data-tdoc-slide', () => true)) return 'slides';
-  return 'doc';
-}
-// The type a publish stamped, or '' for a doc published before that.
+// What a doc is, for its row in My docs: a pure sheet, slides, or a doc
+// (shared/doc-type.mjs, inlined here as code by bin/tdoc-bundle: the sheets
+// viewer's sheet-only test is the same definition). Stamped on meta.preview at
+// every write with the rule's version (kind_v), so the list reads it off the
+// meta it already holds -- never the HTML per row. docTypeFromHtml,
+// htmlHasTagAttr and DOC_TYPE_VERSION come from there.
+/* __TDOC_DOC_TYPE__ */
+// The type a publish stamped, or '' for a doc published before that or
+// stamped by another version of the rule: those are detected again
+// (fillDocTypes). A v1 stamp (no kind_v) of "doc" or "slides" still holds --
+// v1 differed only in calling a prose doc holding a sheet table a sheet -- so
+// only a v1 "sheet" is detected again.
 function docTypeOfMeta(meta) {
-  const kind = meta && meta.preview && typeof meta.preview === 'object' ? meta.preview.kind : '';
-  return kind === 'sheet' || kind === 'slides' || kind === 'doc' ? kind : '';
+  const preview = meta && meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
+  if (!preview) return '';
+  return docTypeOfStamp(preview.kind_v === undefined ? 1 : preview.kind_v, preview.kind);
+}
+// A type stamped or cached by version v of the rule, if it holds under this one.
+function docTypeOfStamp(v, kind) {
+  if (kind !== 'sheet' && kind !== 'slides' && kind !== 'doc') return '';
+  if (Number(v) === DOC_TYPE_VERSION) return kind;
+  return Number(v) === 1 && kind !== 'sheet' ? kind : '';
 }
 
 function docPreviewFromHtml(html, { slug, version, title } = {}) {
   if (!SHELL || typeof SHELL.previewFromHtml !== 'function') {
-    return { excerpt: '', image: '', kind: docTypeFromHtml(html) };
+    return { excerpt: '', image: '', kind: docTypeFromHtml(html), kind_v: DOC_TYPE_VERSION };
   }
   const preview = SHELL.previewFromHtml(html, { slug, version, title, maxLen: 220, skipHeading: true });
   preview.kind = docTypeFromHtml(html);
+  preview.kind_v = DOC_TYPE_VERSION;
   // Images inside the document are not share cards. The publisher supplies a
   // card or the server makes one from these words below.
   preview.image = '';
@@ -13450,6 +13420,12 @@ async function fillMissingPreviewCards(env, slugs) {
 // could undo a sharing change made meanwhile. The next publish stamps the
 // meta itself, which wins. A doc that could not be read is left alone for a
 // day (so it neither blocks the others nor costs every load).
+//
+// Each answer is kept as { v, kind }, v the rule's DOC_TYPE_VERSION. v1
+// stored a bare string and called a prose doc holding a sheet table a sheet:
+// its "doc" and "slides" still hold and are kept; its "sheet", and an answer
+// of any other version, is dropped on read and the doc detected again,
+// exactly like a meta stamp (docTypeOfStamp).
 const DOC_TYPE_FILL_PER_LOAD = 6;
 const DOC_TYPE_SCAN_BYTES = 256 * 1024;
 const DOC_TYPE_CACHE_MAX = 2000;
@@ -13464,7 +13440,12 @@ function cleanDocTypeCache(raw) {
   try { parsed = JSON.parse(raw || 'null'); } catch {}
   const out = { t: {}, f: {} };
   if (!parsed || typeof parsed !== 'object') return out;
-  for (const [slug, type] of Object.entries(parsed.t || {})) if (isValidSlug(slug) && DOC_TYPES.has(type)) out.t[slug] = type;
+  for (const [slug, entry] of Object.entries(parsed.t || {})) {
+    if (!isValidSlug(slug) || !entry) continue;
+    const kind = typeof entry === 'string' ? docTypeOfStamp(1, entry)
+      : typeof entry === 'object' ? docTypeOfStamp(entry.v, entry.kind) : '';
+    if (DOC_TYPES.has(kind)) out.t[slug] = kind;
+  }
   for (const [slug, at] of Object.entries(parsed.f || {})) if (isValidSlug(slug) && Number.isFinite(Number(at))) out.f[slug] = Number(at);
   return out;
 }
@@ -13474,8 +13455,7 @@ async function loadDocTypeCache(env, session) {
   try { return cleanDocTypeCache(await env.META.get(key)); } catch { return { t: {}, f: {} }; }
 }
 function docTypeFillDue(meta, slug, cache, now = Date.now()) {
-  const preview = meta && meta.preview && typeof meta.preview === 'object' && !Array.isArray(meta.preview) ? meta.preview : null;
-  if (preview && typeof preview.kind === 'string') return false;
+  if (docTypeOfMeta(meta)) return false;
   if (cache.t[slug]) return false;
   return !(now - (cache.f[slug] || 0) < DOC_TYPE_RETRY_MS);
 }
@@ -13500,7 +13480,8 @@ async function fillDocTypes(env, session, rows) {
   for (const [slug, type] of Object.entries(found)) { cache.t[slug] = type; delete cache.f[slug]; }
   for (const [slug, at] of Object.entries(failed)) cache.f[slug] = at;
   const keep = (map) => Object.fromEntries(Object.entries(map).slice(-DOC_TYPE_CACHE_MAX));
-  await env.META.put(key, JSON.stringify({ t: keep(cache.t), f: keep(cache.f) }));
+  const t = Object.fromEntries(Object.entries(keep(cache.t)).map(([slug, kind]) => [slug, { v: DOC_TYPE_VERSION, kind }]));
+  await env.META.put(key, JSON.stringify({ t, f: keep(cache.f) }));
 }
 
 async function refreshDocPreview(env, slug, meta) {

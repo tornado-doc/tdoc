@@ -37,7 +37,9 @@ async function seed(env) {
       title, slug, created: ago(age + 2 * D), versions: [{ n: 1, created: ago(age + 2 * D) }, { n: 2, created: ago(age) }],
       hosted: { account_id: `acct-${owner}`, github_login: owner, owner_key: owner },
       access: { commenting: 'signed_in', history_visibility: 'owner', allowed_users: [], ...access },
-      preview: { excerpt: `About ${title.toLowerCase()}.`, kind },
+      // Stamped as a publish now stamps it: the kind with the rule's version
+      // (a stamp without kind_v is v1's, whose "sheet" is not trusted).
+      preview: { excerpt: `About ${title.toLowerCase()}.`, kind, kind_v: 2 },
     }));
     await env.DOCS.put(`docs/${slug}/v2/index.html`, `<!doctype html><html><body>${body}</body></html>`);
   };
