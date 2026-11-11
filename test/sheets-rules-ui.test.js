@@ -65,6 +65,10 @@ async function shot(page, name) {
   const RULED_VALID = [{ cols: ['c2'], kind: 'list', values: STATUS }];
   writeDoc('read', withRules(sheet(), 'Tasks', RULED_FORMAT, RULED_VALID));
   for (const slug of ['format', 'find', 'fill', 'phone']) writeDoc(slug, sheet());
+  // Markup from before column keys: a rule gets the keys written first.
+  writeDoc('keyless', sheet().replace(/ data-key="c\d+"/g, ''));
+  // A small sheet in a prose doc: on a phone, one card per row.
+  writeDoc('cards', withRules(`<!doctype html><html><head><meta charset="utf-8"><title>Cards</title></head><body><main><h1>Cards</h1><p>One.</p><p>Two.</p><p>Three.</p>${M.tableHtml({ name: 'Tasks', columns: COLUMNS, rows: tasks(8) })}</main></body></html>`, 'Tasks', [{ cols: ['c3'], when: 'gt', value: '50', fill: 'red' }]));
   writeDoc('valid', withRules(sheet(), 'Tasks', null, RULED_VALID));
   writeDoc('hostile', sheet().replace('<table data-tdoc-sheet data-name="Tasks"', `<table data-tdoc-sheet data-name="Tasks" data-format-rules='[{"cols":["c3"],"when":"gt","value":"1","fill":"red\\u0022;background:url(x)"},{"__proto__":{"x":1},"cols":["c1"],"when":"textContains","value":"task","fill":"blue"}]' data-validation='not json'`));
   writeDoc('big', withRules(M.sheetDocumentHtml({ title: 'Big', sheets: [{ name: 'Rows', columns: COLUMNS, rows: tasks(10000) }] }), 'Rows',
@@ -124,6 +128,7 @@ async function shot(page, name) {
       if (modifier) await p.keyboard.up(modifier);
     }
     const RED = 'rgb(253, 232, 231)';
+    const RED_RGB = RED;
 
     // ---- Read ---------------------------------------------------------------
     await test('Read mode: formats and dropdown chips render; no carets, marks, fill dot or Replace', async () => {
@@ -148,6 +153,9 @@ async function shot(page, name) {
       assert(r.chip && r.chipBg === 'rgb(238, 240, 243)', `a soft gray chip: ${JSON.stringify(r)}`);
       assert(!r.caret && !r.inv && !r.dot && !r.replace, `nothing else in Read: ${JSON.stringify(r)}`);
       assert(!r.styleAttr, 'no CSS in the document');
+      // Ctrl+H stays the browser's in Read mode.
+      const prevented = await frame.evaluate(() => { const e = new KeyboardEvent('keydown', { key: 'h', ctrlKey: true, bubbles: true, cancelable: true }); document.querySelector('.ts-grid').dispatchEvent(e); return e.defaultPrevented; });
+      assert(!prevented && !(await f.locator('.ts-find').count()), 'Ctrl+H not taken in Read');
       await shot(page, 'rules-read-desktop');
     });
 
@@ -161,8 +169,9 @@ async function shot(page, name) {
     await test('conditional formatting from the column menu: a rule colours cells, ⌘Z undoes, Save writes JSON only', async () => {
       const frame = await edit('format');
       const f = frameLoc();
-      await f.locator(cellSel(0, 2)).click();
+      await f.locator(cellSel(0, 0)).click();
       await shot(page, 'rules-edit-desktop');
+      // Task is selected; Points' menu opens the panel for Points.
       await f.getByRole('button', { name: 'Points column menu' }).click();
       await f.getByRole('menuitem', { name: 'Conditional formatting…' }).click();
       const side = f.locator('.ts-side');
@@ -202,6 +211,21 @@ async function shot(page, name) {
       const rules = R.parseFormatRules(attr[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
       assert(rules.length === 1 && rules[0].when === 'gt' && rules[0].value === '50' && rules[0].fill === 'red', JSON.stringify(rules));
       assert(!/ts-side|ts-fill|tdoc-sheet"|style="background/.test(html), 'nothing of the viewer saved');
+    });
+
+    await test('a table without column keys: adding a rule writes the keys first, in the same Undo step', async () => {
+      const frame = await edit('keyless');
+      const f = frameLoc();
+      await f.getByRole('button', { name: 'Status column menu' }).click();
+      await f.getByRole('menuitem', { name: 'Dropdown…' }).click();
+      await f.locator('.ts-side').getByRole('button', { name: 'Done', exact: true }).click();
+      const r = await frame.evaluate(() => ({ keys: [...document.querySelector('table[data-tdoc-sheet]').querySelectorAll('thead th')].map((th) => th.getAttribute('data-key')), rule: document.querySelector('table[data-tdoc-sheet]').getAttribute('data-validation') }));
+      assert(r.keys.join() === 'c1,c2,c3,c4,c5' && /"cols":\["c2"\]/.test(r.rule), JSON.stringify(r));
+      await f.locator('.ts-side').getByRole('button', { name: 'Close' }).click();
+      await f.locator(cellSel(3, 0)).click();
+      await page.keyboard.press(`${MOD}+z`);
+      await frame.waitForFunction(() => !document.querySelector('table[data-tdoc-sheet]').hasAttribute('data-validation') && !document.querySelector('table[data-tdoc-sheet] th').hasAttribute('data-key'));
+      await page.getByRole('button', { name: /Discard/ }).click().catch(() => {});
     });
 
     // ---- dropdowns -----------------------------------------------------------
@@ -247,6 +271,19 @@ async function shot(page, name) {
       const pop = f.locator('.ts-find');
       await pop.waitFor();
       assert(!(await pop.getByLabel('Regular expression').count()), 'no regular expressions yet');
+      // With a search hiding rows, the count says how many of its matches are hidden.
+      await page.keyboard.press('Escape');
+      await f.locator('.ts-search input').fill('Task 2');
+      await frame.waitForFunction(() => window.__tdocSheets.tabs()[0].shown === 11);
+      await f.locator(cellSel(0, 0)).click();
+      await page.keyboard.press(`${MOD}+Shift+h`);
+      await pop.getByRole('textbox', { name: 'Find' }).fill('task');
+      await frame.waitForFunction(() => /^30 matches \(incl\. 19 hidden\)$/.test(document.querySelector('.ts-find-st').textContent));
+      await page.keyboard.press('Escape');
+      await f.locator('.ts-search input').fill('');
+      await frame.waitForFunction(() => window.__tdocSheets.tabs()[0].shown === 30);
+      await f.locator(cellSel(0, 0)).click();
+      await page.keyboard.press(`${MOD}+Shift+h`);
       await pop.getByRole('textbox', { name: 'Find' }).fill('task 1');
       await pop.getByRole('textbox', { name: 'Replace with' }).fill('Job 1');
       await frame.waitForFunction(() => /11 matches/.test(document.querySelector('.ts-find-st').textContent));
@@ -275,9 +312,18 @@ async function shot(page, name) {
       assert(await td(frame, 'r30', 0) === 'Item 30', 'this tab');
       assert(await frame.evaluate(() => document.querySelectorAll('table[data-tdoc-sheet]')[1].querySelector('td').textContent) === 'Item one note', 'the other tab');
       await page.keyboard.press('Escape');
-      await f.locator(cellSel(0, 0)).click();
+      // Undo from the other tab: the tab on screen is drawn again too.
+      await f.getByRole('tab', { name: 'Notes' }).click();
+      await frame.waitForFunction(() => document.querySelector('.ts-row[data-i="0"] .ts-c[data-c="0"]').textContent === 'Item one note');
+      await f.locator(cellSel(1, 0)).click();
       await page.keyboard.press(`${MOD}+z`);
       await frame.waitForFunction(() => document.querySelectorAll('table[data-tdoc-sheet]')[1].querySelector('td').textContent === 'Task one note' && document.querySelector('tr[data-row="r30"]').cells[0].textContent === 'Task 30');
+      await frame.waitForFunction(() => document.querySelector('.ts-row[data-i="0"] .ts-c[data-c="0"]').textContent === 'Task one note');
+      await page.keyboard.press(`${MOD}+Shift+z`);
+      await frame.waitForFunction(() => document.querySelector('.ts-row[data-i="0"] .ts-c[data-c="0"]').textContent === 'Item one note');
+      await page.keyboard.press(`${MOD}+z`);
+      await frame.waitForFunction(() => document.querySelector('.ts-row[data-i="0"] .ts-c[data-c="0"]').textContent === 'Task one note');
+      await f.getByRole('tab', { name: 'Tasks' }).click();
       await save('find', 2);
       assert(/<td>Job 1<\/td>/.test(saved('find', 2)) && /<td>Job 10<\/td>/.test(saved('find', 2)) && /<td>Task 30<\/td>/.test(saved('find', 2)), 'v2 holds what was left');
     });
@@ -332,6 +378,13 @@ async function shot(page, name) {
       let frame = await open('read', { viewPage: p });
       assert(await frame.evaluate(() => getComputedStyle(document.querySelector('.ts-row[data-i="6"] .ts-c[data-c="2"]')).backgroundColor) === RED, 'formats on a phone');
       await shot(p, 'rules-read-phone');
+      // A small sheet in a prose doc reads as cards on a phone: formats too.
+      await p.goto(`${base}/d/cards/v/1`);
+      await frameLoc(p).locator('.ts-flat.is-cards .ts-card').first().waitFor({ timeout: 15000 });
+      const cframe = p.frames().find((x) => x.url().includes('/frame'));
+      const card = await cframe.evaluate(() => { const l = document.querySelector('.ts-card:nth-child(7) .ts-card-l[data-c="2"]'); return l && getComputedStyle(l).backgroundColor; });
+      assert(card === RED_RGB, `a card line takes its format: ${card}`);
+      await shot(p, 'rules-cards-phone');
       frame = await edit('phone', p);
       const f = frameLoc(p);
       await f.locator(cellSel(0, 1)).tap();

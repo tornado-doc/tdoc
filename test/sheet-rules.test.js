@@ -148,6 +148,45 @@ async function t(name, fn) {
     console.log(`    (10k rows × 4 rules: ${ms.toFixed(1)}ms)`);
     assert.ok(ms < 60, `${ms}ms`);
   });
+  await t('the reviewer\'s case: 100 rules × 50 columns × 10,000 rows, capped, then each edit in milliseconds', () => {
+    const cols = Array.from({ length: 50 }, (_, c) => ({ name: `C${c}`, type: c % 2 ? 'number' : 'text' }));
+    const rows = Array.from({ length: 10000 }, (_, r) => ({ cells: cols.map((_, c) => (c % 2 ? String((r * 7 + c) % 1000) : `v${(r + c) % 300} x`)) }));
+    const keys = cols.map((_, c) => `c${c + 1}`);
+    const rules = Array.from({ length: 100 }, (_, k) => ({ cols: keys, when: ['gt', 'lt', 'eq', 'textContains', 'empty'][k % 5], value: k % 5 === 3 ? `v${k}` : String(k * 9), fill: R.COLOR_NAMES[k % 9] })).map((x) => (x.when === 'empty' ? { cols: x.cols, when: 'empty', fill: x.fill } : x));
+    const shape = (idx) => ({ keys, types: idx.cols.map((c) => c.type), cols: idx.cols, size: idx.size });
+    let idx = Q.buildIndex({ columns: cols, rows });
+    let t0 = process.hrtime.bigint();
+    const first = R.evaluateFormats(rules, shape(idx), ctx);
+    const initial = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(first.skipped > 0, 'past the cap, rules are skipped and counted');
+    // One cell edited: the index is rebuilt (as the viewer does) and only
+    // that row is tested again.
+    rows[123].cells[1] = '999999';
+    idx = Q.buildIndex({ columns: cols, rows });
+    t0 = process.hrtime.bigint();
+    const next = R.evaluateFormats(rules, shape(idx), ctx, first);
+    const edit = Number(process.hrtime.bigint() - t0) / 1e6;
+    console.log(`    (100 rules × 50 columns × 10k rows: ${initial.toFixed(0)}ms first, ${edit.toFixed(1)}ms per edit, ${first.skipped} rule-columns skipped)`);
+    assert.ok(initial < 300, `first evaluation ${initial}ms`);
+    assert.ok(edit < 30, `an edit ${edit}ms`);
+    assert.equal(next.skipped, first.skipped);
+    const full = R.evaluateFormats(rules, shape(idx), ctx);
+    for (let c = 0; c < 50; c++) for (let r = 0; r < 10000; r += 1) if ((full[c] && full[c][r]) !== (next[c] && next[c][r]) && !(full[c][r] && next[c][r] && full[c][r].css === next[c][r].css)) throw new Error(`incremental differs at ${r},${c}`);
+    assert.equal(next[1][123] && next[1][123].css, full[1][123] && full[1][123].css);
+  });
+  await t('incremental evaluation matches a full one; new rules, columns or rows re-evaluate in full', () => {
+    const rules = [{ cols: ['c2'], when: 'gt', value: '40', fill: 'red' }, { cols: ['c4'], when: 'empty', fill: 'gray' }];
+    const first = R.evaluateFormats(rules, S, ctx);
+    const rows2 = sheet.rows.map((row) => ({ cells: row.cells.slice() }));
+    rows2[0].cells[1] = '99'; rows2[1].cells[3] = 'now filled';
+    const i2 = Q.buildIndex({ columns: sheet.columns, rows: rows2 });
+    const S2 = { keys: S.keys, types: S.types, cols: i2.cols, size: i2.size };
+    const inc = R.evaluateFormats(rules, S2, ctx, first), full = R.evaluateFormats(rules, S2, ctx);
+    const pick = (o) => o.map((col) => col && col.map((x) => x && x.fill));
+    assert.deepEqual(pick(inc), pick(full));
+    assert.deepEqual(pick(inc)[1], ['red', 'red', null, 'red']);
+    assert.deepEqual(pick(R.evaluateFormats([rules[0]], S2, ctx, first)), pick(R.evaluateFormats([rules[0]], S2, ctx)), 'other rules: a full run');
+  });
   await t('describing rules for the panel', () => {
     assert.equal(R.describeFormat({ when: 'gt', value: '5' }), 'Greater than 5');
     assert.equal(R.describeFormat({ when: 'empty' }), 'Is empty');
@@ -183,6 +222,19 @@ async function t(name, fn) {
     assert.deepEqual(R.fillSeries(['2026-01-15', '2026-02-15'], 3, {}, fillCtx), ['2026-03-15', '2026-04-15', '2026-05-15']);
     assert.deepEqual(R.fillSeries(['2025-12-31', '2026-01-31'], 1, {}, fillCtx), ['2026-02-28']);
     assert.deepEqual(R.fillSeries(['2026-03-02'], 1, { backward: true }, fillCtx), ['2026-03-01']);
+  });
+  await t('fill: leading zeros keep their width, big integers step exactly, month ends stay month ends', () => {
+    assert.deepEqual(R.fillSeries(['007'], 2, {}, fillCtx), ['008', '009']);
+    assert.deepEqual(R.fillSeries(['0098', '0099'], 2, {}, fillCtx), ['0100', '0101']);
+    assert.deepEqual(R.fillSeries(['001'], 1, { backward: true }, fillCtx), ['000']);
+    assert.deepEqual(R.fillSeries(['9007199254740993'], 2, {}, fillCtx), ['9007199254740994', '9007199254740995']);
+    assert.deepEqual(R.fillSeries(['12345678901234567890', '12345678901234567900'], 1, {}, fillCtx), ['12345678901234567910']);
+    assert.deepEqual(R.fillSeries(['9007199254740993', '9007199254740996', '9007199254741000'], 1, {}, fillCtx), ['9007199254740993'], 'uneven: copy');
+    assert.deepEqual(R.fillSeries(['9007199254740990.5'], 1, {}, fillCtx), ['9007199254740990.5'], 'unsafe float: copy');
+    assert.deepEqual(R.fillSeries(['1000000000000000'], 1, {}, fillCtx), ['1000000000000001'], 'a safe 16-digit integer steps');
+    assert.deepEqual(R.fillSeries(['2026-01-31', '2026-02-28'], 3, {}, fillCtx), ['2026-03-31', '2026-04-30', '2026-05-31']);
+    assert.deepEqual(R.fillSeries(['2026-04-30', '2026-06-30'], 1, {}, fillCtx), ['2026-08-31']);
+    assert.deepEqual(R.fillSeries(['2026-02-28', '2026-03-28'], 1, {}, fillCtx), ['2026-04-28']);
   });
   await t('fill: text, labels, mixed values and copy repeat the source', () => {
     assert.deepEqual(R.fillSeries(['a', 'b'], 5, {}, fillCtx), ['a', 'b', 'a', 'b', 'a']);

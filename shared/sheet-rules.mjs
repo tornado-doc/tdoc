@@ -150,16 +150,31 @@ export function rangeToCols(range, allKeys) {
 
 // ---- conditional formatting -------------------------------------------------------
 
+// The most cell tests one evaluation does (rules × their columns × rows).
+// Past it the remaining rules are skipped and counted (out.skipped), so a
+// sheet with hundreds of rules over many columns stays responsive.
+export const MAX_FORMAT_WORK = 20000000;
+
 // The formats of a sheet: for each column, a style per row (or null).
 //   sheet = { keys: [key per column], types: [type per column], cols: index.cols, size }
+//           (index.cols from sheet-query.mjs buildIndex: text, lower, num)
 //   ctx   = { parseNumber, parseDate, colors: TAG_COLORS }
+//   prev  = the last result for this tab, or nothing
 // A style is { fill, css }; css is what the viewer draws. The first rule
 // (in order) that matches a cell decides it. Greater / less / equal compare
 // numbers (dates in a date column); text is matched case-insensitively.
-export function evaluateFormats(rules, sheet, ctx) {
-  const out = new Array(sheet.keys.length).fill(null);
+//
+// With `prev` from the same rules, columns and row count, only the rows
+// whose text changed are tested again (an edit costs a compare per row of
+// the ruled columns, not a full evaluation).
+export function evaluateFormats(rules, sheet, ctx, prev) {
+  const ncols = sheet.keys.length, size = sheet.size;
+  const out = new Array(ncols).fill(null);
+  out.skipped = 0;
   if (!rules || !rules.length) return out;
   const colors = ctx.colors || {};
+  // Per column, its rules in order, each compiled once.
+  const byCol = new Array(ncols).fill(null);
   rules.forEach((rule) => {
     const tint = colors[rule.fill];
     if (!tint) return;
@@ -167,30 +182,83 @@ export function evaluateFormats(rules, sheet, ctx) {
     rule.cols.forEach((key) => {
       const c = sheet.keys.indexOf(key);
       if (c < 0) return;
-      const test = conditionTest(rule, sheet.cols[c], sheet.types[c], ctx);
-      if (!test) return;
-      const slot = out[c] || (out[c] = new Array(sheet.size).fill(null));
-      for (let r = 0; r < sheet.size; r++) if (!slot[r] && test(r)) slot[r] = style;
+      const t = compile(rule, sheet.types[c], ctx);
+      if (t) (byCol[c] || (byCol[c] = [])).push({ t, style });
     });
   });
+  const sig = JSON.stringify(rules) + '|' + sheet.keys.join(',') + '|' + sheet.types.join(',') + '|' + size;
+  out.state = { sig, texts: sheet.cols.map((col) => col.text) };
+  const cache = new Array(ncols).fill(null);
+  const nums = (c) => cache[c] || (cache[c] = numbers(sheet.cols[c], sheet.types[c], ctx, size));
+  let work = 0;
+  const reuse = prev && prev.state && prev.state.sig === sig;
+  for (let c = 0; c < ncols; c++) {
+    const list = byCol[c];
+    if (!list) continue;
+    const col = sheet.cols[c];
+    if (reuse && prev[c]) {
+      // Same rules, same shape: test again only the rows whose text changed.
+      const before = prev.state.texts[c], slot = prev[c].slice();
+      for (let r = 0; r < size; r++) {
+        if (before[r] === col.text[r]) continue;
+        slot[r] = null;
+        for (let k = 0; k < list.length && !slot[r]; k++) if (testRow(list[k].t, col, r, nums, c)) slot[r] = list[k].style;
+      }
+      out[c] = slot;
+      continue;
+    }
+    const slot = new Array(size).fill(null);
+    for (let k = 0; k < list.length; k++) {
+      if (work + size > MAX_FORMAT_WORK) { out.skipped++; continue; }
+      work += size;
+      runRule(list[k].t, list[k].style, col, slot, nums, c, size);
+    }
+    out[c] = slot;
+  }
+  if (reuse) out.skipped = prev.skipped || 0;
   return out;
 }
-function conditionTest(rule, col, type, ctx) {
-  const textAt = (r) => String(col.text[r] == null ? '' : col.text[r]).trim();
-  if (rule.when === 'empty') return (r) => textAt(r) === '';
+function compile(rule, type, ctx) {
+  if (rule.when === 'empty') return { op: 'empty' };
   if (rule.when === 'textContains') {
     const want = String(rule.value || '').trim().toLowerCase();
-    return want ? (r) => textAt(r).toLowerCase().indexOf(want) !== -1 : null;
+    return want ? { op: 'contains', want } : null;
   }
-  const date = type === 'date';
-  const a = date ? ctx.parseDate(rule.value) : ctx.parseNumber(rule.value);
-  if (a == null) return null;
-  const numAt = (r) => {
-    if (col.num && (type === 'number' || date)) { const v = col.num[r]; return v === v ? v : null; }
-    return ctx.parseNumber(col.text[r]);
-  };
-  const cmp = rule.when === 'gt' ? (v) => v > a : rule.when === 'lt' ? (v) => v < a : (v) => v === a;
-  return (r) => { const v = numAt(r); return v != null && cmp(v); };
+  const a = type === 'date' ? ctx.parseDate(rule.value) : ctx.parseNumber(rule.value);
+  return a == null ? null : { op: rule.when, a };
+}
+// A column's values as numbers (NaN where none), once per evaluation:
+// the index's own for number and date columns, parsed for the rest.
+function numbers(col, type, ctx, size) {
+  if (col.num && (type === 'number' || type === 'date')) return col.num;
+  const out = new Float64Array(size);
+  for (let r = 0; r < size; r++) { const v = ctx.parseNumber(col.text[r]); out[r] = v == null ? NaN : v; }
+  return out;
+}
+function isBlank(s) { return !s || !s.trim(); }
+// A text contains test on the lowercased text: the wanted text is trimmed and
+// non-empty, so an occurrence never reaches into the cell's outer spaces.
+function lowerAt(col, r) { return col.lower ? col.lower[r] : String(col.text[r] || '').toLowerCase(); }
+function testRow(t, col, r, nums, c) {
+  if (t.op === 'empty') return isBlank(col.text[r]);
+  if (t.op === 'contains') return lowerAt(col, r).indexOf(t.want) !== -1;
+  const v = nums(c)[r];
+  if (v !== v) return false;
+  return t.op === 'gt' ? v > t.a : t.op === 'lt' ? v < t.a : v === t.a;
+}
+// One rule over a whole column: a plain loop per condition.
+function runRule(t, style, col, slot, nums, c, size) {
+  if (t.op === 'empty') { for (let r = 0; r < size; r++) if (!slot[r] && isBlank(col.text[r])) slot[r] = style; return; }
+  if (t.op === 'contains') {
+    const want = t.want;
+    if (col.lower) { const low = col.lower; for (let r = 0; r < size; r++) if (!slot[r] && low[r].indexOf(want) !== -1) slot[r] = style; }
+    else for (let r = 0; r < size; r++) if (!slot[r] && lowerAt(col, r).indexOf(want) !== -1) slot[r] = style;
+    return;
+  }
+  const v = nums(c), a = t.a;
+  if (t.op === 'gt') { for (let r = 0; r < size; r++) if (!slot[r] && v[r] > a) slot[r] = style; }
+  else if (t.op === 'lt') { for (let r = 0; r < size; r++) if (!slot[r] && v[r] < a) slot[r] = style; }
+  else for (let r = 0; r < size; r++) if (!slot[r] && v[r] === a) slot[r] = style;
 }
 
 // One line for the rules list: "Greater than 100", "Dropdown: a, b".
@@ -227,12 +295,18 @@ export function checkValue(rule, value) {
 
 const DAY = 86400000;
 const PLAIN_NUMBER = /^-?\d+(?:\.\d+)?$/;
+const INTEGER = /^-?\d+$/;
 function decimals(s) { const m = /\.(\d+)/.exec(s); return m ? Math.min(10, m[1].length) : 0; }
+function intWidth(s) { return s.replace(/^-/, '').replace(/\..*$/, '').length; }
+function lastDay(y, mo) { return new Date(Date.UTC(y, mo + 1, 0)).getUTCDate(); }
 
 // The values a drag from `src` (the source cells in sheet order) fills into
 // `count` cells: after them, or with backward before them (nearest first).
-// Plain numbers and dates continue their step (one number or date: +1);
-// anything else, or copy, repeats the source.
+// Plain numbers and dates continue an even step (one number or date: +1);
+// numbers written with leading zeros keep their width ("007" → "008"),
+// integers past 2^53 step exactly; dates on the same day of the month, or
+// all on a month's last day, step by months. Anything else, an uneven
+// step, or copy, repeats the source.
 //   ctx = { parseDate, formatDate }
 export function fillSeries(src, count, { copy = false, backward = false } = {}, ctx = {}) {
   const n = src.length, out = [];
@@ -243,13 +317,30 @@ export function fillSeries(src, count, { copy = false, backward = false } = {}, 
   if (copy) return repeat();
   // Numbers.
   if (vals.every((v) => PLAIN_NUMBER.test(v))) {
+    const zeros = vals.some((v) => /^-?0\d/.test(v));
+    const width = zeros ? Math.max.apply(null, vals.map(intWidth)) : 0;
+    const pad = (str) => { if (!width) return str; const neg = str[0] === '-', body = neg ? str.slice(1) : str; const [i, f] = body.split('.'); return (neg ? '-' : '') + i.padStart(width, '0') + (f != null ? '.' + f : ''); };
+    if (vals.every((v) => INTEGER.test(v)) && vals.some((v) => !Number.isSafeInteger(Number(v)))) {
+      // Past 2^53: exact integer steps, or a copy where the step is not whole.
+      if (typeof BigInt !== 'function') return repeat();
+      const big = vals.map((v) => BigInt(v));
+      const span = n > 1 ? big[n - 1] - big[0] : 1n;
+      if (n > 1 && span % BigInt(n - 1) !== 0n) return repeat();
+      const step = n > 1 ? span / BigInt(n - 1) : 1n;
+      if (big.some((x, k) => k && x - big[k - 1] !== step)) return repeat();
+      for (let k = 0; k < count; k++) out.push(pad(String(big[n - 1] + BigInt(pos(k) - (n - 1)) * step)));
+      return out;
+    }
+    // A decimal past what a double holds exactly: copy, never a rounded series.
+    if (vals.some((v) => !INTEGER.test(v)) && vals.some((v) => intWidth(v) + decimals(v) > 15)) return repeat();
     const nums = vals.map(Number), dec = Math.max.apply(null, vals.map(decimals));
     const step = n > 1 ? (nums[n - 1] - nums[0]) / (n - 1) : 1;
     if (n > 2 && nums.some((x, k) => k && Math.abs(x - nums[k - 1] - step) > 1e-9 * Math.max(1, Math.abs(step)))) return repeat();
     for (let k = 0; k < count; k++) {
       let x = Number((nums[n - 1] + (pos(k) - (n - 1)) * step).toFixed(dec));
       if (Object.is(x, -0)) x = 0;
-      out.push(x.toFixed(dec));
+      if (!Number.isSafeInteger(Math.round(x)) || (dec && intWidth(String(Math.abs(Math.trunc(x)))) + dec > 15)) { out.length = 0; return repeat(); }
+      out.push(pad(x.toFixed(dec)));
     }
     return out;
   }
@@ -258,13 +349,15 @@ export function fillSeries(src, count, { copy = false, backward = false } = {}, 
     const ts = vals.map((v) => ctx.parseDate(v));
     const fmt = ctx.formatDate || ((t) => new Date(t).toISOString().slice(0, 10));
     const ds = ts.map((t) => new Date(t));
-    // The same day of the month, an even step in months: by months.
-    if (n > 1 && ds.every((d) => d.getUTCDate() === ds[0].getUTCDate())) {
+    // By months: every date on the same day of the month, or every one on
+    // its month's last day (Jan 31, Feb 28, Mar 31 …), an even step.
+    const ends = ds.every((d) => d.getUTCDate() === lastDay(d.getUTCFullYear(), d.getUTCMonth()));
+    if (n > 1 && (ends || ds.every((d) => d.getUTCDate() === ds[0].getUTCDate()))) {
       const mi = ds.map((d) => d.getUTCFullYear() * 12 + d.getUTCMonth()), step = mi[1] - mi[0];
       if (step && mi.every((m, k) => !k || m - mi[k - 1] === step)) {
         for (let k = 0; k < count; k++) {
           const m = mi[n - 1] + (pos(k) - (n - 1)) * step, y = Math.floor(m / 12), mo = ((m % 12) + 12) % 12;
-          out.push(fmt(Date.UTC(y, mo, Math.min(ds[0].getUTCDate(), new Date(Date.UTC(y, mo + 1, 0)).getUTCDate()))));
+          out.push(fmt(Date.UTC(y, mo, ends ? lastDay(y, mo) : Math.min(ds[0].getUTCDate(), lastDay(y, mo)))));
         }
         return out;
       }

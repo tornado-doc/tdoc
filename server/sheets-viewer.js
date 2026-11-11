@@ -913,11 +913,11 @@
       for (i = 0; i < n; i++) {
         r = tab.order[i];
         var t0 = cell(r, 0);
-        html += '<div class="ts-card" role="listitem"><p class="ts-card-t' + t0.cls + '" data-i="' + i + '" data-c="0">' + (t0.inner || '&nbsp;') + '</p>';
+        html += '<div class="ts-card" role="listitem"><p class="ts-card-t' + t0.cls + '" data-i="' + i + '" data-c="0"' + t0.style + '>' + (t0.inner || '&nbsp;') + '</p>';
         for (c = 1; c < cols.length; c++) {
           var x = cell(r, c);
           if (!x.inner) continue;
-          html += '<p class="ts-card-l' + x.cls + '" data-i="' + i + '" data-c="' + c + '"><span class="ts-card-k">' + esc(cols[c].name) + ':</span> ' + x.inner + '</p>';
+          html += '<p class="ts-card-l' + x.cls + '" data-i="' + i + '" data-c="' + c + '"' + x.style + '><span class="ts-card-k">' + esc(cols[c].name) + ':</span> ' + x.inner + '</p>';
         }
         html += '</div>';
       }
@@ -1618,6 +1618,8 @@
     // [sheet-rules] a Replace all over every tab touched several
     if (op.tabs) op.tabs.forEach(function (t) { if (t !== op.tab && book.tabs.indexOf(t) >= 0) readTab(t.table, t); });
     afterChange(op.tab);
+    // The tab on screen was among them (another than the op's own): draw it.
+    if (op.tabs && op.tab !== cur() && op.tabs.indexOf(cur()) >= 0) { runTab(cur()); renderBar(); layout(); renderHead(); renderBody(true); }
   }
   function afterChange(tab, keepSel) {
     var t = book.tabs.indexOf(tab);
@@ -2606,6 +2608,7 @@
     select: select, setCells: setCells, writeCells: writeCells, record: record, afterChange: afterChange, readTab: readTab,
     renderAll: renderAll, renderHead: renderHead, renderBody: renderBody, saveView: saveView,
     openPop: openPop, closePop: closePop, pop: function () { return pop; }, openMenu: openMenu, toast: toast, iconButton: iconButton, tagStyle: tagStyle,
+    ensureKeys: function (tab) { ensureKeys(headRow(tab)); },
     refLabel: refLabel, colKey: colKey, rowTop: rowTop, rowH: rowH, numW: numW, cellFromEvent: cellFromEvent,
   }) : null;
   // Mounted: the tables are hidden by the viewer's own style now, so the

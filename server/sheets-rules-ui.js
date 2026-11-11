@@ -120,7 +120,7 @@ var SheetRulesUI = (function () {
       tab.fmtRules = R.parseFormatRules(t.getAttribute(R.FORMAT_ATTR));
       tab.validRules = R.parseValidation(t.getAttribute(R.VALIDATION_ATTR));
       var keys = keysOf(tab);
-      tab.fmt = tab.fmtRules.length ? R.evaluateFormats(tab.fmtRules, { keys: keys, types: tab.index.cols.map(function (c) { return c.type; }), cols: tab.index.cols, size: tab.index.size }, numCtx) : null;
+      tab.fmt = tab.fmtRules.length ? R.evaluateFormats(tab.fmtRules, { keys: keys, types: tab.index.cols.map(function (c) { return c.type; }), cols: tab.index.cols, size: tab.index.size }, numCtx, tab.fmt) : null;
       tab.valid = tab.validRules.length ? R.validationByColumn(tab.validRules, keys) : null;
     }
     var CHIP = 'background:' + Q.TAG_COLORS.gray[0] + ';color:' + Q.TAG_COLORS.gray[1];
@@ -213,10 +213,19 @@ var SheetRulesUI = (function () {
       scopeTabs().forEach(function (tab) {
         var t = book.tabs.indexOf(tab), order = orderOf(tab), n = tab.data.columns.length;
         for (var i = 0; i < order.length && out.length < limit; i++) {
-          for (var c = 0; c < n; c++) if (f.test(cellText(tab, order[i], c))) { out.push({ t: t, i: i, c: c }); if (out.length >= limit) break; }
+          for (var c = 0; c < n; c++) if (tab.index.cols[c].type !== 'checkbox' && f.test(cellText(tab, order[i], c))) { out.push({ t: t, i: i, c: c }); if (out.length >= limit) break; }
         }
       });
       return out;
+    }
+    // Every match Replace all would touch: every row, the hidden ones too.
+    function countAll(f, limit) {
+      var n = 0;
+      scopeTabs().forEach(function (tab) {
+        var w = tab.data.columns.length;
+        for (var r = 0; r < tab.index.size && n < limit; r++) for (var c = 0; c < w; c++) if (tab.index.cols[c].type !== 'checkbox' && f.test(cellText(tab, r, c))) n++;
+      });
+      return n;
     }
     function openFind() {
       var editing = A.canEdit();
@@ -251,8 +260,11 @@ var SheetRulesUI = (function () {
           timer = setTimeout(function () {
             var f = finder();
             if (!f.ok) { say(''); return; }
-            var list = hits(f, 10000);
-            say(list.length ? (list.length >= 10000 ? '10,000+' : A.fmt(list.length)) + (list.length === 1 ? ' match' : ' matches') : 'No matches');
+            // The count is what Replace all changes; rows the search or a
+            // filter hides are said so (Find steps through the shown ones).
+            var shown = hits(f, 100000).length, all = countAll(f, 100000);
+            var num = function (x) { return x >= 100000 ? A.fmt(100000) + '+' : A.fmt(x); };
+            say(all ? num(all) + (all === 1 ? ' match' : ' matches') + (all > shown ? ' (incl. ' + num(all - shown) + ' hidden)' : '') : 'No matches');
           }, 120);
         };
         // The next (or previous) match after the active cell, across tabs.
@@ -320,7 +332,8 @@ var SheetRulesUI = (function () {
     }
     function key(e) {
       var k = (e.key || '').toLowerCase();
-      if ((e.metaKey && e.shiftKey && k === 'h') || (e.ctrlKey && !e.metaKey && k === 'h')) { openFind(); return true; }
+      // Edit mode only: in Read, Ctrl+H stays the browser's.
+      if (A.canEdit() && ((e.metaKey && e.shiftKey && k === 'h') || (e.ctrlKey && !e.metaKey && k === 'h'))) { openFind(); return true; }
       return false;
     }
 
@@ -350,6 +363,9 @@ var SheetRulesUI = (function () {
       }
       panel.kind = kind;
       panel.tab = A.cur();
+      // From a column's menu: that column is the one a new rule is for.
+      var s = A.sel();
+      if (c != null && (c < Math.min(s.c, s.c2) || c > Math.max(s.c, s.c2))) { s.c = s.c2 = c; s.touched = true; A.renderHead(); A.renderBody(true); }
       panel.draft = null;
       // From a column with no rule of its kind yet: straight to a new one.
       var tab = panel.tab, key = c != null ? A.colKey(tab, c) : null;
@@ -366,14 +382,36 @@ var SheetRulesUI = (function () {
       if (A.ui.grid) A.ui.grid.focus({ preventScroll: true });
     }
     function rulesOf(tab, kind) { return kind === 'format' ? tab.fmtRules : tab.validRules; }
+    // Rules name columns by data-key. Markup from before keys gets them now
+    // (in the same Undo step), and a positional '#n' becomes its column's
+    // key, in both kinds of rules.
     function setRules(tab, kind, list) {
+      var ths = tab.data.columns.map(function (col) { return col.th; });
+      var keysBefore = ths.map(function (th) { return th.getAttribute('data-key'); });
+      if (!keysBefore.some(function (k) { return !k; })) return putRules(tab, kind, list, null);
+      A.ensureKeys(tab);
+      var keysAfter = ths.map(function (th) { return th.getAttribute('data-key'); });
+      var map = function (rule) { return Object.assign({}, rule, { cols: rule.cols.map(function (key) { var m = /^#(\d+)$/.exec(key); return m && keysAfter[Number(m[1])] ? keysAfter[Number(m[1])] : key; }) }); };
+      list = list.map(map);
+      var other = kind === 'format' ? R.VALIDATION_ATTR : R.FORMAT_ATTR;
+      var otherBefore = tab.table.getAttribute(other);
+      var otherList = (kind === 'format' ? tab.validRules : tab.fmtRules).map(map);
+      var otherAfter = (kind === 'format' ? R.formatValidation(otherList) : R.formatFormatRules(otherList)) || null;
+      var set = function (el, name, v) { if (v == null) el.removeAttribute(name); else el.setAttribute(name, v); };
+      set(tab.table, other, otherAfter);
+      return putRules(tab, kind, list, function (back) {
+        ths.forEach(function (th, k) { set(th, 'data-key', back ? keysBefore[k] : keysAfter[k]); });
+        set(tab.table, other, back ? otherBefore : otherAfter);
+      });
+    }
+    function putRules(tab, kind, list, also) {
       var attr = kind === 'format' ? R.FORMAT_ATTR : R.VALIDATION_ATTR;
       var after = (kind === 'format' ? R.formatFormatRules(list) : R.formatValidation(list)) || null;
       var table = tab.table, before = table.getAttribute(attr);
       var put = function (v) { if (v == null) table.removeAttribute(attr); else table.setAttribute(attr, v); };
-      if (before === after) return;
+      if (before === after && !also) return;
       put(after);
-      A.record({ tab: tab, undo: function () { put(before); }, redo: function () { put(after); } });
+      A.record({ tab: tab, undo: function () { put(before); if (also) also(true); }, redo: function () { put(after); if (also) also(false); } });
       A.afterChange(tab);
     }
     function header() {
@@ -397,6 +435,7 @@ var SheetRulesUI = (function () {
       el.appendChild(bd);
       if (panel.draft) { (panel.kind === 'format' ? formatEditor : validEditor)(bd, tab); return; }
       var rules = rulesOf(tab, panel.kind), keys = keysOf(tab);
+      if (panel.kind === 'format' && tab.fmt && tab.fmt.skipped) bd.appendChild(h('p', 'ts-note', 'Some rules are not shown: this sheet has too many rules × columns × rows to colour them all.'));
       if (!rules.length) bd.appendChild(h('p', 'ts-note', panel.kind === 'format' ? 'Colour cells by their value: a rule per column, the first that matches wins.' : 'Offer a list of values: cells show them as chips to pick from.'));
       rules.forEach(function (rule, k) {
         var row = h('div', 'ts-rule'); row.tabIndex = 0; row.setAttribute('role', 'button');
@@ -430,7 +469,8 @@ var SheetRulesUI = (function () {
     // A new dropdown offers the column's own values (up to 12 of them).
     function newValidation(tab, cols) {
       var c = keysOf(tab).indexOf(cols[0]);
-      var vals = Q.distinctValues(tab.index, c, 12).map(function (v) { return v.value; }).filter(Boolean);
+      // Up to 13 (blank aside): more than 12 is not a list to offer.
+      var vals = Q.distinctValues(tab.index, c, 14).map(function (v) { return v.value; }).filter(Boolean).slice(0, 13);
       return { cols: cols, kind: 'list', values: vals.length && vals.length <= 12 ? vals : ['Option 1', 'Option 2'] };
     }
     function picker(label, items, value, onPick) {
@@ -612,8 +652,15 @@ var SheetRulesUI = (function () {
       box.style.width = (rx - lx) + 'px'; box.style.height = (bottom - top) + 'px';
     }
     function valueAt(tab, r, c) { var col = tab.index.cols[c]; return col.tags ? col.tags[r].join(', ') : col.text[r]; }
+    var MAX_FILL = 50000;
     function fill(tab, g, to, copy) {
       var order = tab.order, list = [], vertical = to.dir === 'down' || to.dir === 'up', back = to.dir === 'up' || to.dir === 'left';
+      // At most MAX_FILL cells in one drag (one Undo step, one re-read).
+      var across = vertical ? g.cb - g.ca + 1 : g.rb - g.ra + 1;
+      if (to.n * across > MAX_FILL) {
+        to = { dir: to.dir, n: Math.max(1, Math.floor(MAX_FILL / across)) };
+        A.toast('A fill covers at most ' + A.fmt(MAX_FILL) + ' cells: filled ' + A.fmt(to.n) + (vertical ? ' rows.' : ' columns.'));
+      }
       var put = function (r, c, v) { list.push({ r: r, c: c, value: tab.index.cols[c].type === 'tags' ? Q.splitTags(v) : v }); };
       if (vertical) {
         for (var c = g.ca; c <= g.cb; c++) {
