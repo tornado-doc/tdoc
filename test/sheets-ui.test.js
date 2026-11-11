@@ -1,5 +1,5 @@
 // Sheets in the browser, end to end against the local server:
-//   - a CSV and an .xlsx chosen from Create a doc, and a CSV dropped on My
+//   - a CSV and an .xlsx chosen from New › Sheet, and a CSV dropped on My
 //     docs, become sheet docs (multi-sheet workbook → tabs)
 //   - search with next/previous, a value filter, a tag filter, a range
 //     filter, multi-column sort, tabs, keyboard navigation; the view rides
@@ -488,10 +488,11 @@ async function shot(page, name, opts = {}) {
       assert(hand.headers === 'Item,Qty,Where' && hand.rows === '2 rows' && hand.tabs, JSON.stringify(hand));
     });
 
-    await test('import: a CSV chosen from Create a doc becomes a typed sheet doc', async () => {
+    await test('import: a CSV chosen from New › Sheet becomes a typed sheet doc', async () => {
       await page.goto(`${base}/`);
-      await page.getByRole('button', { name: 'Create a doc' }).click();
-      await page.getByRole('menuitem', { name: /Import a spreadsheet/ }).waitFor();
+      await page.getByRole('button', { name: 'New', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Sheet', exact: true }).click();
+      await page.getByRole('menuitem', { name: /Import CSV or Excel/ }).waitFor();
       await page.keyboard.press('Escape');
       await page.setInputFiles('[data-testid="sheet-import-input"]', importCsv);
       await page.waitForURL(/\/d\/[^/]+\/v\/\d+/, { timeout: 15000 });
@@ -526,7 +527,7 @@ async function shot(page, name, opts = {}) {
 
     await test('import: a CSV dropped on My docs asks "Import as sheet", then imports', async () => {
       await page.goto(`${base}/`);
-      await page.getByRole('button', { name: 'Create a doc' }).waitFor();
+      await page.getByRole('button', { name: 'New', exact: true }).waitFor();
       const text = fs.readFileSync(dropCsv, 'utf8');
       await page.evaluate((body) => {
         const dt = new DataTransfer();
@@ -548,7 +549,7 @@ async function shot(page, name, opts = {}) {
       await frameLoc().locator('.tdoc-sheet .ts-row').first().waitFor({ timeout: 15000 });
       // A file that is not a spreadsheet is refused with a message, no dialog.
       await page.goto(`${base}/`);
-      await page.getByRole('button', { name: 'Create a doc' }).waitFor();
+      await page.getByRole('button', { name: 'New', exact: true }).waitFor();
       await page.evaluate(() => {
         const dt = new DataTransfer();
         dt.items.add(new File(['%PDF'], 'notes.pdf', { type: 'application/pdf' }));
@@ -560,12 +561,13 @@ async function shot(page, name, opts = {}) {
 
     await test('New sheet: a blank sheet with typed columns opens straight into Edit mode', async () => {
       await page.goto(`${base}/`);
-      await page.getByRole('button', { name: 'Create a doc' }).click();
-      const item = page.getByRole('menuitem', { name: /New sheet/ });
+      await page.getByRole('button', { name: 'New', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Sheet', exact: true }).click();
+      const item = page.getByRole('menuitem', { name: /Blank sheet/ });
       await item.waitFor();
       const items = await page.getByRole('menuitem').allTextContents();
-      const at = items.findIndex((x) => /New sheet/.test(x));
-      assert(at >= 0 && /Import a spreadsheet/.test(items[at + 1] || ''), `New sheet sits next to Import: ${JSON.stringify(items)}`);
+      const at = items.findIndex((x) => /Blank sheet/.test(x));
+      assert(at >= 0 && /Import CSV or Excel/.test(items[at + 1] || ''), `Blank sheet sits next to Import: ${JSON.stringify(items)}`);
       await shot(page, 'hub-new-sheet-menu-desktop');
       await item.click();
       await page.waitForURL(/\/d\/[^/]+\/v\/1\?edit=1/, { timeout: 15000 });
@@ -594,10 +596,11 @@ async function shot(page, name, opts = {}) {
       await phone.addInitScript(() => { if (window === window.top) window.__TDOC_FLAGS__ = { sheets: true }; });
       const p2 = await phone.newPage();
       await p2.goto(`${base}/`);
-      await p2.getByRole('button', { name: 'Create a doc' }).tap();
-      await p2.getByRole('menuitem', { name: /New sheet/ }).waitFor();
+      await p2.getByRole('button', { name: 'New', exact: true }).tap();
+      await p2.getByRole('menuitem', { name: 'Sheet', exact: true }).tap();
+      await p2.getByRole('menuitem', { name: /Blank sheet/ }).waitFor();
       await shot(p2, 'hub-new-sheet-menu-phone');
-      await p2.getByRole('menuitem', { name: /New sheet/ }).tap();
+      await p2.getByRole('menuitem', { name: /Blank sheet/ }).tap();
       await p2.waitForURL(/\?edit=1/, { timeout: 15000 });
       await p2.frameLocator('iframe[aria-label="Document content"]').locator('.tdoc-sheet .ts-row').first().waitFor({ timeout: 15000 });
       await p2.waitForTimeout(400);

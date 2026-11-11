@@ -222,6 +222,7 @@ const BROWSER = [
   'slides-scale.test.js', // slide view scales cards once: cqw type the same in WebKit and Chromium, desktop and phone
   'slides-mode.test.js', // data-tdoc-slide decks present one slide at a time, fitted, and restore on exit
   'landing-sheets-ui.test.js', // the homepage's live sample sheet: viewer fetched only for it; search, tag filter, sort, comment composer on a cell, desktop + phone, nothing written
+  'create-menu-ui.test.js', // My docs New: type tiles (Doc · Sheet · Slides) then methods pushed in place, New folder in the menu, Blank deck edits + saves slide text, agent lines per type, keyboard, drop import; desktop + phone, sheets flag on/off
   'sheets-ui.test.js', // data-tdoc-sheet: grid, search/filter/sort/tags, view in #hash, cell comments, Edit + Save, CSV/XLSX import, CLI, 10k rows, phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization

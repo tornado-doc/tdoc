@@ -531,6 +531,32 @@ a.ui-menu-item:visited {
   max-width: 320px;
   white-space: normal;
 }
+/* "New", level 1: what you are making. Three tiles in a row, each the type's
+   mark over its name; level 2 (the methods, .mk-item rows) is pushed into the
+   same popup under a back row. One width for both levels, so the popup does
+   not jump sideways under the pointer when it swaps. */
+.ui-menu-popup.mk-types { box-sizing: border-box; width: 320px; max-width: calc(100vw - 16px); }
+.ui-menu-popup.mk-types .ui-menu-item.mk-item { max-width: none; }
+.mk-tiles { display: flex; gap: 4px; padding: 2px; }
+.ui-menu-item.mk-tile {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  padding: 12px 4px 10px; border-radius: 8px;
+  text-align: center; white-space: nowrap;
+}
+.mk-tile-mark {
+  width: 44px; height: 44px; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 11px;
+  background: var(--td-accent-tint, #e8eeff); color: var(--td-accent);
+}
+.mk-tile-mark svg { display: block; }
+.ui-menu-item.mk-tile[data-highlighted] .mk-tile-mark { background: var(--td-accent); color: #fff; }
+.mk-tile-label { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+.ui-menu-item.mk-back-row { font-weight: 600; }
+.ui-menu-item.mk-back-row > svg:first-child { color: #98989f; margin: 0 -3px 0 -2px; }
+.ui-menu-item.mk-back-row > svg + svg { color: var(--td-accent); }
+
 /* The agent cluster, wherever it appears. Each mark in a disc of its own,
    overlapped like a stack of avatars: the three are different KINDS of mark --
    a starburst, a knot, a filled square -- and dropped straight onto a row the

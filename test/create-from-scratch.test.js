@@ -180,10 +180,16 @@ t('a host that would refuse the create never offers the form', () => {
 
 t('the choice is a menu, and neither answer is a form', () => {
   assert(shellApi.includes("request('/api/doc/create'"), 'createDocument missing from the shell API');
-  assert(form.includes('Start from scratch') && form.includes('Build it with your agent'),
-    'both answers must exist');
-  // A modal to choose between two things is a room built for a sentence.
-  assert(/<AppMenu trigger=\{trigger\}>/.test(form) && form.includes('className="mk-item"'), 'the fork is a menu');
+  // New asks the type first (Doc · Sheet · Slides, as tiles), then the method.
+  for (const answer of ["label: 'Doc'", "label: 'Sheet'", "label: 'Slides'", "'Blank doc'", "'Blank sheet'", "'Blank deck'",
+    '"Import CSV or Excel"', '"Write it with your agent"', '"Build it with your agent"']) {
+    assert(form.includes(answer), `missing answer: ${answer}`);
+  }
+  assert(!form.includes("'Start from scratch'") && !form.includes('>Start from scratch<'), 'the old flat label is gone');
+  // A modal to choose between three things is a room built for a sentence.
+  assert(/<AppMenu\s+trigger=\{trigger\}/.test(form) && form.includes('className="mk-item"'), 'the fork is a menu');
+  assert(form.includes('className={`mk-tile mk-tile-${kind}`}') && form.includes('mk-pushed'),
+    'level 1 is tiles; level 2 is pushed into the same popup');
   // The two glyphs say who writes it: a pen on a page, and the agents' own
   // marks. Every symbol tried for the second was a drawing of "an AI wrote
   // this" -- a sparkle, a wand, a page with lines -- while the two things that
@@ -192,7 +198,7 @@ t('the choice is a menu, and neither answer is a form', () => {
   // weight, and neither is the sparkle every AI feature has worn since 2023 --
   // a symbol that says "a model was involved" and nothing about which of these
   // two answers you are picking.
-  assert(form.includes('<SquarePen size={17}') && form.includes('<MessageSquare size={17}'), 'a pair, not a cliché');
+  assert(form.includes('icon={SquarePen}') && form.includes('icon={MessageSquare}') && form.includes('<Icon size={17}'), 'a pair, not a cliché');
   assert(!form.includes('Sparkles'), 'no sparkle');
   // Which agents is a separate question, answered at the end of the row.
   assert(form.includes('<AgentMarks size={21} />'), 'the marks are a list of what it works with, so they sit where a list does');
@@ -210,7 +216,7 @@ t('the choice is a menu, and neither answer is a form', () => {
   // onboarding gate: somebody on their fifth doc should not be sent to a page
   // built to watch their first one arrive.
   assert(!form.includes("location.href = '/setup?step=doc'"), 'and it no longer leaves for the gate');
-  assert(form.includes('export function AgentRecipe()') && form.includes('docSubjectPrompt('), 'it composes the line in place');
+  assert(form.includes("export function AgentRecipe({ kind = 'doc' })") && form.includes('agentRecipeLine(kind,'), 'it composes the line in place');
 });
 
 t('the menu lives in the Docs Hub, and the line has one implementation', () => {
@@ -235,7 +241,24 @@ t('nothing on a document opens a second onboarding (#371)', () => {
   assert(!/onboarding-dialog\.jsx|onboarding-scene\.jsx/.test(shell), 'and the wizard is not imported for its parts');
   assert(!form.includes('createDocument'), 'the agent card must not create documents');
   // The hub's own card still respects the host capability.
-  assert(form.includes('canCreate ? ('), 'the recipe card must survive canCreate=false');
+  assert(/canCreate \? blank\('doc'/.test(form) && /canCreate && onNewDeck \? blank\('slides'/.test(form),
+    'the blank answers honour canCreate, and the agent answers survive canCreate=false');
+});
+
+t('the starter deck is three slides the viewer and the title reader both understand', async () => {
+  // Blank deck (New › Slides) writes this through the same create + first
+  // save as a blank sheet; create-menu-ui.test.js edits and saves it.
+  const deck = read('shared/slides-markup.mjs');
+  assert(deck.includes('export function blankDeckHtml('), 'blankDeckHtml missing');
+  assert((deck.match(/<section class="slide[^"]*" data-tdoc-slide/g) || []).length === 3, 'three data-tdoc-slide sections');
+  assert(deck.includes('container-type: inline-size') && deck.includes('aspect-ratio: 16/9') && deck.includes('@container (max-width: 640px)'),
+    'the slides.md frame: 16:9 cards sized from the card, released on a phone');
+  assert(!/position:\s*absolute/.test(deck.replace('.inner { position: absolute;', '')), 'nothing but .inner is absolutely placed');
+  assert(titleFromDocument(deck.replace('${title}', 'Untitled deck').replace('${title}', 'Untitled deck')) === 'Untitled deck',
+    'the cover heading is the first h1, so the deck is titled from it');
+  const blankDeck = read('shell/src/blank-deck.js');
+  assert(blankDeck.includes('createDocument(') && blankDeck.includes('saveDocumentVersion(') && blankDeck.includes("searchParams.set('edit', '1')"),
+    'created, saved as v1, and opened in Edit mode');
 });
 
 t('a hint steps aside for the caret, but not for the one we place', () => {
