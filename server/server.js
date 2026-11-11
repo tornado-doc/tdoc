@@ -1291,7 +1291,8 @@ function localDocsData() {
     const preview = meta.preview && typeof meta.preview === 'object' ? meta.preview : {};
     const excerpt = typeof preview.excerpt === 'string' ? preview.excerpt.slice(0, 220) : '';
     const image = typeof preview.image === 'string' && /^(?:https?:\/\/|\/)/i.test(preview.image) ? preview.image : '';
-    docs.push({ slug, title: meta.title || slug, latest, created, updated, owner: '', starred: false, folder: '', excerpt, image });
+    const docType = preview.kind === 'sheet' || preview.kind === 'slides' ? preview.kind : 'doc';
+    docs.push({ slug, title: meta.title || slug, latest, created, updated, owner: '', starred: false, folder: '', excerpt, image, doc_type: docType });
   }
   docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)) || a.title.localeCompare(b.title));
   return { docs, recent: [], starred: [], folders: [] };

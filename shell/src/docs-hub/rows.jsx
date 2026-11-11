@@ -1,12 +1,73 @@
 import React from 'react';
-import { Folder, MoreHorizontal, Star } from 'lucide-react';
+import { Bot, FileText, Folder, Globe, Link2, Lock, MessageSquare, MoreHorizontal, Presentation, Sheet, Star, UserRound, UsersRound } from 'lucide-react';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { isFeatureOn } from '../feature-flags.js';
+import { absoluteTime, activityText, docTypeLabel, docTypeOf, relativeTime, sharingText } from './row-meta.js';
 
 export const day = (iso) => (typeof iso === 'string' && iso.length >= 10 ? iso.slice(0, 10) : '');
 
 // The doc's own address: always its newest version, and the URL people copy.
 export const docHref = (doc) => `/d/${encodeURIComponent(doc.slug)}`;
+// The doc page's own Share dialog: ?share=1 opens it on arrival
+// (document-shell.jsx), for the owner's access panel or a reader's link.
+export const shareHref = (doc) => `${docHref(doc)}?share=1`;
+export const shareMenuItem = (doc) => ({
+  label: 'Share',
+  className: 'row-share',
+  onSelect: () => { location.assign(shareHref(doc)); },
+});
+
+// One part of a row's meta line: words, or { label, at } -- "visited 3h ago"
+// with the full stamp on hover. Empty parts drop out, so a missing date never
+// leaves a bare "visited".
+export function MetaParts({ parts }) {
+  const shown = parts.map((part) => {
+    if (!part) return null;
+    if (typeof part === 'string' || React.isValidElement(part)) return part;
+    const when = relativeTime(part.at);
+    if (!when) return part.fallback || null;
+    return (
+      <time dateTime={part.at} title={absoluteTime(part.at)}>{part.label ? `${part.label} ${when}` : when}</time>
+    );
+  }).filter(Boolean);
+  return shown.map((part, i) => <React.Fragment key={i}>{i ? ' · ' : null}{part}</React.Fragment>);
+}
+
+const TYPE_ICONS = { doc: FileText, sheet: Sheet, slides: Presentation };
+function DocTypeIcon({ doc }) {
+  const type = docTypeOf(doc);
+  const Icon = TYPE_ICONS[type];
+  const label = docTypeLabel(type);
+  return (
+    <span className={`doc-type is-${type}`} role="img" aria-label={label} title={label}>
+      <Icon size={15} aria-hidden="true" />
+    </span>
+  );
+}
+
+const SHARING_ICONS = { public: Globe, link: Link2, team: UsersRound, people: UserRound, private: Lock };
+function SharingState({ doc }) {
+  const text = sharingText(doc);
+  if (!text) return null;
+  const Icon = SHARING_ICONS[doc.sharing];
+  return (
+    <span className="doc-sharing" title={text.long} aria-label={text.long} data-sharing={doc.sharing}>
+      <Icon size={12} aria-hidden="true" />
+      <span aria-hidden="true">{text.short}</span>
+    </span>
+  );
+}
+
+function ActivityBadge({ doc }) {
+  const activity = activityText(doc);
+  if (!activity) return null;
+  return (
+    <a className="doc-activity" href={docHref(doc)} title={activity.label} aria-label={activity.label}>
+      {activity.comments ? <span><MessageSquare size={12} aria-hidden="true" />{activity.comments}</span> : null}
+      {activity.agent ? <span><Bot size={12} aria-hidden="true" />{activity.agent}</span> : null}
+    </a>
+  );
+}
 
 // Row-level "⋯" menu. Items: { label, icon?, tone?, className?, onSelect }.
 // Built on the shared AppMenu facade so every row gets outside-click and
@@ -53,7 +114,9 @@ export function StarButton({ doc, onToggle }) {
   );
 }
 
-// One document row for every tab. `meta` is the caller's one-line summary;
+// One document row for every tab. `meta` is the caller's one-line summary
+// (words, or MetaParts parts); the row adds what it is, who can open it and
+// what is unread on it from the doc itself.
 // `selection` (optional) adds the checkbox; `menuItems` (optional) adds "⋯".
 export function DocRow({
   doc,
@@ -101,11 +164,15 @@ export function DocRow({
       ) : null}
       <div className="doc-info">
         <div className="doc-title-line">
+          <DocTypeIcon doc={doc} />
           {path ? <span className="doc-path" title={path}>{path} ›</span> : null}
           <a className="doc-title" href={docHref(doc)}>{doc.title}</a>
+          <ActivityBadge doc={doc} />
         </div>
         {doc.excerpt ? <div className="doc-preview-excerpt">{doc.excerpt}</div> : null}
-        <div className="doc-meta">{meta}</div>
+        <div className="doc-meta">
+          <MetaParts parts={[...(Array.isArray(meta) ? meta : [meta]), sharingText(doc) ? <SharingState doc={doc} /> : null]} />
+        </div>
       </div>
       <div className="row-actions">
         {starrable ? <StarButton doc={doc} onToggle={onToggleStar} /> : null}
