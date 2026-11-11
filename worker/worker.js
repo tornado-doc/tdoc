@@ -26271,6 +26271,59 @@ const tdocHandlers = {
       return res.response;
     }
 
+    // ---- doc download as Markdown ----
+    // /d/<slug>/v/<n>/export.md: the document's own text as a .md file (no
+    // tdoc preamble, no comments), through the same conversion as
+    // `Accept: text/markdown` (SHELL.documentMarkdown is its rich mode).
+    // Same gate as reading the doc.
+    const markdownMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/export\.md$/);
+    if (markdownMatch && (method === 'GET' || method === 'HEAD')) {
+      const [, slug, vStr] = markdownMatch;
+      if (!isValidSlug(slug)) return text('invalid slug', { status: 400 });
+      if (!SHELL || !SHELL.documentMarkdown) return text('Markdown download unavailable', { status: 503 });
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
+      const headers = {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${slug}.md"`,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      };
+      const docKey = `docs/${slug}/v${vStr}/index.html`;
+      // HEAD answers from the object's metadata: no read, no conversion.
+      if (method === 'HEAD') {
+        const head = await env.DOCS.head(docKey);
+        if (!head) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
+        return new Response(null, { status: 200, headers });
+      }
+      const title = (gate.meta && typeof gate.meta.title === 'string' && gate.meta.title.trim()) || slug;
+      // A version's Markdown is the same for every reader who passed the
+      // gate, so it is converted once per version (content hash), title and
+      // build, and kept in the edge cache. The cache is read only after the
+      // gate above.
+      const frameKey = frameCacheKey(url.origin, slug, vStr, gate.meta, await frameBakeGeneration());
+      const cacheKey = frameKey ? `${frameKey.replace('/__frame-cache/', '/__markdown-cache/')}-${(await sha256Hex(title)).slice(0, 12)}` : null;
+      const cache = cacheKey ? edgeCache() : null;
+      if (cache) {
+        try {
+          const hit = await cache.match(cacheKey);
+          if (hit && hit.body) return new Response(hit.body, { status: 200, headers });
+        } catch {}
+      }
+      const obj = await env.DOCS.get(docKey);
+      if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
+      const md = SHELL.documentMarkdown(await obj.text(), {
+        title,
+        baseUrl: `${url.origin}/d/${encodeURIComponent(slug)}/v/${Number(vStr)}/`,
+        docUrl: `${url.origin}/d/${encodeURIComponent(slug)}/v/${Number(vStr)}`,
+      });
+      if (cache) {
+        const put = cache.put(cacheKey, new Response(md, { headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'public, max-age=31536000' } })).catch(() => {});
+        if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put); else await put;
+      }
+      return new Response(md, { status: 200, headers });
+    }
+
     // ---- doc export / fork ----
     // /export → forces a file download (Content-Disposition: attachment) unless
     //           ?download=0. Stamps overlay reader CSS (no bar/comments) so the

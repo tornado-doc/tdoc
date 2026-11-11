@@ -685,7 +685,7 @@
     // Parent on <html>, NOT <body>: a transformed body (see the hostile fixture)
     // becomes the containing block for absolute descendants, so viewport-derived
     // coordinates written to a body child render shifted/scaled. <html> keeps
-    // document coordinates honest, and body clones (copyDoc) never include the UI.
+    // document coordinates honest, and body clones (serializeDocument) never include the UI.
     document.documentElement.appendChild(hoverOutline); document.documentElement.appendChild(hoverPill);
     hoverPill.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); if (hoverEl) commentOnElement(hoverEl); });
   }
@@ -1256,58 +1256,6 @@
       });
     })) refreshTableLayout();
   }).observe(document.body, { childList:true, characterData:true, subtree:true });
-
-  // Doc → Markdown (verbatim port of overlay.js htmlToMarkdown 4176-4253). Runs
-  // in the frame (the only place with the doc DOM) on a tdoc:copyDoc request.
-  function htmlToMarkdown(root) {
-    function walk(node, ctx) {
-      if (node.nodeType === Node.TEXT_NODE) { var t = node.nodeValue; return ctx.inPre ? t : t.replace(/\s+/g, ' '); }
-      if (node.nodeType !== Node.ELEMENT_NODE) return '';
-      var tag = node.tagName.toLowerCase();
-      var kids = function () { return Array.prototype.map.call(node.childNodes, function (c) { return walk(c, ctx); }).join(''); };
-      switch (tag) {
-        case 'h1': return '\n\n# ' + kids().trim() + '\n\n';
-        case 'h2': return '\n\n## ' + kids().trim() + '\n\n';
-        case 'h3': return '\n\n### ' + kids().trim() + '\n\n';
-        case 'h4': return '\n\n#### ' + kids().trim() + '\n\n';
-        case 'h5': return '\n\n##### ' + kids().trim() + '\n\n';
-        case 'h6': return '\n\n###### ' + kids().trim() + '\n\n';
-        case 'p': return '\n\n' + kids().trim() + '\n\n';
-        case 'br': return '  \n';
-        case 'hr': return '\n\n---\n\n';
-        case 'strong': case 'b': return '**' + kids() + '**';
-        case 'em': case 'i': return '*' + kids() + '*';
-        case 'code': return ctx.inPre ? kids() : '`' + kids() + '`';
-        case 'pre': {
-          var c = { inPre: true };
-          var codeEl = node.querySelector('code');
-          var m = codeEl && codeEl.className && codeEl.className.match(/language-([\w-]+)/);
-          var lang = m ? m[1] : '';
-          var inner = Array.prototype.map.call(node.childNodes, function (n) { return walk(n, c); }).join('');
-          return '\n\n```' + lang + '\n' + inner.replace(/\n$/, '') + '\n```\n\n';
-        }
-        case 'blockquote': return '\n\n' + kids().trim().split('\n').map(function (l) { return '> ' + l; }).join('\n') + '\n\n';
-        case 'ul': { var items = Array.prototype.filter.call(node.children, function (c) { return c.tagName === 'LI'; }); return '\n\n' + items.map(function (li) { return '- ' + walk(li, ctx).trim(); }).join('\n') + '\n\n'; }
-        case 'ol': { var oi = Array.prototype.filter.call(node.children, function (c) { return c.tagName === 'LI'; }); return '\n\n' + oi.map(function (li, i) { return (i + 1) + '. ' + walk(li, ctx).trim(); }).join('\n') + '\n\n'; }
-        case 'li': return kids();
-        case 'a': { var href = node.getAttribute('href') || ''; var text = kids().trim(); return href ? '[' + text + '](' + href + ')' : text; }
-        case 'img': return '![' + (node.getAttribute('alt') || '') + '](' + (node.getAttribute('src') || '') + ')';
-        case 'svg': case 'canvas': case 'video': case 'iframe': return '\n\n[' + tag + ' embed]\n\n';
-        case 'figure': return '\n\n' + kids().trim() + '\n\n';
-        case 'figcaption': return '\n\n*' + kids().trim() + '*\n\n';
-        case 'table': {
-          var rows = Array.prototype.slice.call(node.querySelectorAll('tr'));
-          if (!rows.length) return '';
-          var cells = function (r) { return Array.prototype.map.call(r.children, function (c) { return walk(c, ctx).trim().replace(/\\/g, '\\\\').replace(/\|/g, '\\|'); }); };
-          var head = cells(rows[0]), body = rows.slice(1).map(cells);
-          return '\n\n| ' + head.join(' | ') + ' |\n| ' + head.map(function () { return '---'; }).join(' | ') + ' |\n' + body.map(function (r) { return '| ' + r.join(' | ') + ' |'; }).join('\n') + '\n\n';
-        }
-        case 'th': case 'td': case 'tr': return kids();
-        default: return kids();
-      }
-    }
-    return walk(root, { inPre: false }).replace(/\n{3,}/g, '\n\n').trim();
-  }
 
   // Only the tdoc reader design participates in the shell theme. Custom
   // designs keep their original palette, even if an old shell sends a theme.
@@ -2070,6 +2018,10 @@
         rereportPins();
       }
     }
+    // Download (Word, CSV, Excel): the document as it is, without tdoc's UI.
+    else if (d.type === 'tdoc:exportHtml') {
+      post({ type: 'tdoc:exportHtml', requestId: d.requestId, html: serializeDocument() });
+    }
     else if (d.type === 'tdoc:editSerialize') {
       post({ type: 'tdoc:editDocument', requestId: d.requestId, html: serializeDocument() });
     }
@@ -2090,11 +2042,6 @@
     else if (d.type === 'tdoc:focusAnchor') setActiveAnchor(d.id, !!d.scroll);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:scrollBy') { try { window.scrollBy(0, Number(d.deltaY) || 0); } catch (x) {} }
-    else if (d.type === 'tdoc:copyDoc') {
-      var clone = document.body.cloneNode(true);
-      Array.prototype.forEach.call(clone.querySelectorAll('script, style, noscript, .tdoc-hover-outline, .tdoc-comment-pill'), function (n) { n.remove(); });
-      post({ type: 'tdoc:docMarkdown', markdown: htmlToMarkdown(clone), requestId: d.requestId });
-    }
   });
 
 
@@ -2245,7 +2192,19 @@
     requestAnimationFrame(function () { ticking = false; reportScroll(); });
   }, { passive: true });
 
+  // What Download offers: a sheet doc (only sheet tables, a title and a
+  // note) downloads as CSV / Excel; a doc with prose, as Word and Markdown.
+  function docShape() {
+    var sheets = Array.prototype.filter.call(document.querySelectorAll('table[data-tdoc-sheet]'), function (t) { return !t.closest('[data-tdoc-provider]'); });
+    if (!sheets.length || !document.body) return { sheets: 0, sheetDoc: false };
+    var clone = document.body.cloneNode(true);
+    Array.prototype.forEach.call(clone.querySelectorAll('[data-tdoc-provider], table[data-tdoc-sheet], script, style, template, noscript, h1, .sheet-note'), function (n) { n.remove(); });
+    var prose = (clone.textContent || '').replace(/\s+/g, '');
+    var media = clone.querySelector('img, svg, canvas, video, iframe, table');
+    return { sheets: sheets.length, sheetDoc: !prose && !media };
+  }
   prepareDiagrams();
-  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, supportsTheme: supportsTheme, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null });
+  var shape = docShape();
+  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, supportsTheme: supportsTheme, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null, sheets: shape.sheets, sheetDoc: shape.sheetDoc });
   reportScroll(); // initial position so the shell can evaluate at-bottom for short docs
 })();

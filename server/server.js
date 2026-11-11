@@ -1964,6 +1964,32 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // Download as Markdown: the worker's /export.md, same conversion.
+  const markdownMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/export\.md$/);
+  if (markdownMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+    const [, rawSlug, vStr] = markdownMatch;
+    const slug = safeSlug(rawSlug);
+    if (!slug) return send(res, 400, 'invalid slug');
+    const file = path.join(ROOT, slug, `v${vStr}`, 'index.html');
+    if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr}`);
+    const meta = readJson(path.join(ROOT, slug, 'meta.json'), {});
+    // Links in the file point at this server as configured, never at
+    // whatever Host header the request carried.
+    const host = !HOST || HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST.includes(':') ? `[${HOST}]` : HOST;
+    const origin = `http://${host}:${PORT}`;
+    const md = SHELL.documentMarkdown(fs.readFileSync(file, 'utf8'), {
+      title: (typeof meta.title === 'string' && meta.title.trim()) || slug,
+      baseUrl: `${origin}/d/${slug}/v/${Number(vStr)}/`,
+      docUrl: `${origin}/d/${slug}/v/${Number(vStr)}`,
+    });
+    return send(res, 200, req.method === 'HEAD' ? '' : md, {
+      'Content-Type': 'text/markdown; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${slug}.md"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
+
   const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
   if (docMatch) {
     const [, rawSlug, vStr] = docMatch;
