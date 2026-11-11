@@ -481,13 +481,17 @@ function SheetStructure(api) {
   function columnItems(tab, c) {
     var items = [];
     if (c + 1 <= O.MAX_FREEZE) items.push({ label: frozenCount(tab) === c + 1 ? 'Unfreeze columns' : 'Freeze up to this column', onSelect: function () { setFreeze(tab, undefined, frozenCount(tab) === c + 1 ? 0 : c + 1); } });
-    if (!api.canEdit()) return items;
+    return items;
+  }
+  // Hide: Edit mode only, near the top of the column menu (beside Insert and
+  // Delete), so it is in view without scrolling the menu.
+  function hideItems(tab, c) {
+    if (!api.canEdit()) return [];
     var sel = api.sel, ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2);
     if (c < ca || c > cb) ca = cb = c;
     var many = cb > ca, label = Q.columnLetter(ca) + (many ? '–' + Q.columnLetter(cb) : '');
     var list = []; for (var j = ca; j <= cb; j++) list.push(j);
-    items.push('sep', { label: 'Hide ' + (many ? 'columns ' : 'column ') + label, onSelect: function () { setHidden(tab, 'c', list, true); } });
-    return items;
+    return [{ label: 'Hide ' + (many ? 'columns ' : 'column ') + label, onSelect: function () { setHidden(tab, 'c', list, true); } }];
   }
 
   // ---- tabs: reorder, delete with undo -------------------------------------------------------------
@@ -688,7 +692,7 @@ function SheetStructure(api) {
     frozenCount: frozenCount, frozenRows: frozenRows, frozenH: frozenH, frozenW: frozenW, frozenCls: frozenCls, frozenLeft: frozenLeft,
     shownCol: shownCol, shownHits: shownHits, hiddenRow: hiddenRow, unhiddenCount: unhiddenCount, emptyText: emptyText, cornerHtml: cornerHtml, afterHead: afterHead, afterBody: afterBody,
     flatSummary: flatSummary, flatToggle: flatToggle, flatClick: flatClick, expandTo: expandTo, onMode: onMode,
-    rowItems: rowItems, columnItems: columnItems, inheritGroup: inheritGroup, keepCollapsed: keepCollapsed, tabItems: tabItems, deleteTabWithUndo: deleteTabWithUndo, decorateTab: decorateTab,
+    rowItems: rowItems, columnItems: columnItems, hideItems: hideItems, inheritGroup: inheritGroup, keepCollapsed: keepCollapsed, tabItems: tabItems, deleteTabWithUndo: deleteTabWithUndo, decorateTab: decorateTab,
     wire: wire, onKey: onKey, viewState: viewState, fitViewState: fitViewState, applyViewState: applyViewState, describe: describe,
   };
 }

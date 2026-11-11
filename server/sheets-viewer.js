@@ -123,12 +123,13 @@
     '.ts-note{color:var(--ts-muted);font-size:12px}',
     // grid
     '.ts-grid{position:relative;width:max-content;max-width:100%;min-width:min(100%,360px);overflow:auto;border:1px solid var(--ts-line);border-radius:8px;background:#fff;outline:0;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}',
-    '.ts-grid:focus-visible{box-shadow:0 0 0 3px var(--ts-accent-tint)}',
+    // No ring around the whole grid: the active cell's ring shows where the
+    // keyboard is (Edit mode keeps one blue mark, the selection).
     '.ts-head{position:sticky;top:0;z-index:4;display:flex;height:' + HEAD_H + 'px;background:var(--ts-head);border-bottom:1px solid #d9d9df}',
     '.ts-corner{position:sticky;left:0;z-index:2;flex:none;background:var(--ts-head);border-right:1px solid var(--ts-line)}',
     '.ts-h{position:relative;flex:none;display:flex;align-items:center;gap:2px;padding:0 2px 0 8px;border-right:1px solid var(--ts-line);font-weight:600;min-width:0}',
     '.ts-h.is-first{position:sticky;z-index:2;background:var(--ts-head)}',
-    '.ts-h.is-sel{background:#e6ecfb}',
+    '.ts-h.is-sel{background:#ececf0}',
     '.ts-hname{flex:1;min-width:0;display:flex;align-items:center;gap:6px;height:100%;border:0;background:transparent;padding:0;text-align:left;font-weight:600}',
     '.ts-hname b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
     '.ts-glyph{flex:none;width:16px;color:#8a8a94;font-size:11px;font-weight:600;text-align:center}',
@@ -169,7 +170,7 @@
     '.ts-row{display:flex;height:' + ROW_H + 'px;background:#fff}',
     '.ts-row:hover{background:#fafafc}',
     '.ts-n{position:sticky;left:0;z-index:2;flex:none;display:flex;align-self:stretch;align-items:center;justify-content:flex-end;padding:0 8px;border-right:1px solid var(--ts-line);border-bottom:1px solid var(--ts-line);background:var(--ts-head);color:#8a8a94;font-size:11px;font-variant-numeric:tabular-nums}',
-    '.ts-n.is-sel{background:#e6ecfb;color:var(--ts-ink)}',
+    '.ts-n.is-sel{background:#ececf0;color:var(--ts-ink)}',
     '.ts-c{position:relative;flex:none;display:flex;align-items:center;gap:4px;padding:0 8px;border-right:1px solid var(--ts-line);border-bottom:1px solid var(--ts-line);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;background:inherit}',
     '.ts-c>span.ts-t{overflow:hidden;text-overflow:ellipsis}',
     // A line break shows: clipped, the cell keeps its first line in place
@@ -275,6 +276,9 @@
     '.ts-fx input{flex:1;min-width:0;border:0;outline:0;background:transparent;font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:inherit;-webkit-user-select:text;user-select:text}',
     '@media (max-width:640px){',
     '.ts-bar{gap:6px}.ts-search{flex:1 1 100%}.ts-count{margin-left:0}',
+    // The Edit-mode hint is about keys (Alt+Enter, paste a range): not on a
+    // phone, where it pushed the row count to a third line.
+    '.ts-bar>.ts-note{display:none}',
     '.ts-search{order:-2}.ts-bar>.ts-expand{order:-1}.ts-bar:has(>.ts-expand:not([hidden])) .ts-search{flex-basis:calc(100% - 40px)}',
     '.tdoc-sheet.is-expanded{padding-top:6px}.ts-xhead .ts-btn{padding:0 8px}.ts-xhead .ts-btn span{display:none}',
     '.ts-pop{left:0!important;right:0!important;top:auto!important;bottom:0!important;max-width:none;width:100%;max-height:70vh;border-radius:14px 14px 0 0;padding:10px 10px max(10px,env(safe-area-inset-bottom))}.ts-pop .ts-actions{margin-right:84px}',
@@ -289,6 +293,9 @@
     '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search:not(:focus-within):not(.has-q){flex:0 0 28px;padding:0 5px;border-color:transparent;cursor:pointer}',
     '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search:not(:focus-within):not(.has-q):hover{background:var(--ts-head)}',
     '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search:not(:focus-within):not(.has-q) input{flex:0 0 0;min-width:0;width:0;padding:0}',
+    // ...and only the icon: Find and replace and the match arrows wait for the
+    // box to open (they spilled over the Edit-mode hint beside it).
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search:not(:focus-within):not(.has-q)>:not(svg):not(input){display:none}',
     '.tdoc-sheet.is-compact:not(.is-expanded) .ts-count{order:1;margin-left:auto;font-size:12px}',
     '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-btn,.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-expand{order:2}',
     '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-btn{height:28px;padding:0 6px;border-color:transparent;background:transparent;color:var(--ts-muted)}',
@@ -609,10 +616,6 @@
     ui.bar.appendChild(search);
     ui.chips = h('div', 'ts-chips'); ui.bar.appendChild(ui.chips);
     ui.searchBox = search;
-    ui.comment = h('button', 'ts-btn'); ui.comment.type = 'button'; ui.comment.innerHTML = ICON.comment + '<span>Comment on sheet</span>'; ui.comment.setAttribute('aria-label', 'Comment on sheet'); ui.comment.title = 'Comment on sheet';
-    // The whole sheet is an ordinary table comment (no label of its own), so
-    // a new version reconciles it like any other table.
-    ui.comment.addEventListener('click', function (e) { e.stopPropagation(); commentOn(cur().table, ui.comment.getBoundingClientRect()); });
     ui.fx = h('label', 'ts-fx'); ui.fx.hidden = true; // fx: the formula bar
     ui.fx.innerHTML = '<i aria-hidden="true">fx</i>';
     ui.fx.title = 'Formula of the selected cell';
@@ -620,7 +623,9 @@
     ui.fx.appendChild(ui.fxInput); ui.bar.appendChild(ui.fx);
     ui.note = h('span', 'ts-note');
     ui.count = h('span', 'ts-count'); ui.count.setAttribute('aria-live', 'polite');
-    ui.bar.appendChild(ui.note); ui.bar.appendChild(ui.count); ui.bar.appendChild(ui.comment);
+    ui.bar.appendChild(ui.note); ui.bar.appendChild(ui.count);
+    // No "Comment on sheet" button: Comment mode (the top bar) is the one way
+    // in; a click on a cell, a column's menu or Alt+click on a header comments.
     // Full screen, at the toolbar's end. A doc that is only the sheet has
     // nothing else to hide, so it has no such button.
     ui.expand = iconButton(ICON.expand, 'Expand sheet to full screen', function () { setExpanded(true); });
@@ -744,7 +749,6 @@
     var total = S.unhiddenCount(tab), shown = tab.sorder.length;
     ui.count.textContent = shown === total ? fmt(total) + (total === 1 ? ' row' : ' rows') : fmt(shown) + ' of ' + fmt(total) + ' rows';
     var m2 = mode();
-    ui.comment.hidden = m2 !== 'comment';
     ui.addRow.hidden = !canEdit();
     ui.expand.hidden = expand.on || expand.sheetOnly || !canExpand();
     ui.xhead.hidden = !expand.on;
@@ -1573,12 +1577,24 @@
   // ---- column menu -----------------------------------------------------------------
   function columnMenu(c, anchor) {
     var tab = cur(), col = tab.data.columns[c], type = tab.index.cols[c].type;
-    var items = [
+    var items = [];
+    // Edit mode: the column's own changes come first (Insert, Hide, Delete),
+    // where a short menu in a doc frame shows them without scrolling.
+    if (canEdit()) {
+      // [structure] as many columns as are selected (one when this column is not).
+      var ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2), nc = c >= ca && c <= cb ? cb - ca + 1 : 1;
+      items.push({ label: nc > 1 ? 'Insert ' + nc + ' columns left' : 'Insert column left', onSelect: function () { insertColumn(nc > 1 ? ca : c, nc); } });
+      items.push({ label: nc > 1 ? 'Insert ' + nc + ' columns right' : 'Insert column right', onSelect: function () { insertColumn((nc > 1 ? cb : c) + 1, nc); } });
+      items = items.concat(S.hideItems(tab, c)); // [structure] hide
+      items.push({ label: 'Delete column', danger: true, disabled: tab.data.columns.length < 2, onSelect: function () { deleteColumn(c); } });
+      items.push({ label: 'Rename…', onSelect: function () { renameColumn(c); } });
+      items.push('sep');
+    }
+    items = items.concat([
       { label: 'Sort ascending', onSelect: function () { setQuery(Object.assign(Q.cloneQuery(tab.query), { sort: [{ col: c, dir: 'asc' }] })); } },
       { label: 'Sort descending', onSelect: function () { setQuery(Object.assign(Q.cloneQuery(tab.query), { sort: [{ col: c, dir: 'desc' }] })); } },
       { label: 'Filter…', onSelect: function () { openFilter(c, anchor); } },
-      { header: 'Summary row' },
-    ].concat(totalItems(c));
+    ]);
     // Wrap and alignment: anyone (a reader's own view; an editor's document).
     var wrapped = !!tab.wrap[c], al = tab.align[c] || (type === 'number' ? 'right' : type === 'checkbox' ? 'center' : 'left');
     if (type !== 'checkbox') {
@@ -1593,19 +1609,13 @@
     items.push({ label: 'Fit width to content', onSelect: function () { setLayout(tab, { cols: colChange(c, { width: fitWidth(tab, c) }) }); } });
     if (mode() === 'comment') items.push({ label: 'Comment on this column', onSelect: function () { commentOn(col.th, anchor.getBoundingClientRect(), 'Column ' + Q.columnLetter(c) + ' · ' + col.name); } });
     if (canEdit()) {
-      items.push('sep');
-      items.push({ label: 'Rename…', onSelect: function () { renameColumn(c); } });
       items.push({ header: 'Type' });
       Q.TYPES.forEach(function (t) { items.push({ label: TYPE_LABEL[t], checked: t === type, onSelect: function () { if (t !== type) setColumnType(c, t); } }); });
-      items.push('sep');
-      // [structure] as many columns as are selected (one when this column is not).
-      var ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2), nc = c >= ca && c <= cb ? cb - ca + 1 : 1;
-      items.push({ label: nc > 1 ? 'Insert ' + nc + ' columns left' : 'Insert column left', onSelect: function () { insertColumn(nc > 1 ? ca : c, nc); } });
-      items.push({ label: nc > 1 ? 'Insert ' + nc + ' columns right' : 'Insert column right', onSelect: function () { insertColumn((nc > 1 ? cb : c) + 1, nc); } });
-      items.push({ label: 'Delete column', danger: true, disabled: tab.data.columns.length < 2, onSelect: function () { deleteColumn(c); } });
       if (rulesExt) items = items.concat(rulesExt.menuItems(c)); // [sheet-rules]
     }
-    items = items.concat(S.columnItems(tab, c)); // [structure] hide, freeze
+    items.push({ header: 'Summary row' });
+    items = items.concat(totalItems(c));
+    items = items.concat(S.columnItems(tab, c)); // [structure] freeze
     openMenu(anchor, items, col.name + ' column');
   }
   function rowMenu(i, anchor) {
