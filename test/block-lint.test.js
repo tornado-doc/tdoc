@@ -61,7 +61,7 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     const r = lint(page(`<table data-tdoc-sheet data-name="T"><tr><td><div>cell div</div></td></tr><tr><td><table><tr><td>nested</td></tr></table></td></tr></table>
       <svg><text>t</text><foreignObject><div>fo</div></foreignObject></svg><pre><div>code</div></pre><!-- <div>c</div> -->
       <template><div>tpl</div></template><style>.x{}</style><textarea>t <div></textarea><p>after</p>`));
-    assert(r.warning === null, r.warning);
+    assert(r.loose_text === 0 && r.unknown_class_count === 0, r.warning);
     const after = lint(page('<table><tr><td>a</td></tr></table><div>stray</div>'));
     assert(after.loose_text === 1, 'scanning resumes after a skipped table');
   });
@@ -108,6 +108,45 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     assert(sheetMs < 400 && proseMs < 1500 && worst < 1500, `sheet ${sheetMs}ms, prose ${proseMs}ms, worst hostile ${worst}ms`);
   });
 
+  // A sheet table of n body rows (a <thead> header, or a <th> row in the body).
+  const sheetTable = (name, n, thead = true) => `<div class="tdoc-table-scroll"><table data-tdoc-sheet data-name="${name}">`
+    + (thead ? '<thead><tr><th data-key="c1">A</th><th data-key="c2">B</th></tr></thead><tbody>' : '<tr><th>A</th><th>B</th></tr>')
+    + Array.from({ length: n }, (_, i) => `<tr data-row="r${i + 1}"><td>a${i}</td><td>${i}</td></tr>`).join('') + (thead ? '</tbody>' : '') + '</table></div>';
+  const prose = '<h1>Supplier follow up</h1><p>Where each supplier stands.</p><h2>Next</h2><p>Call EGI first.</p>';
+
+  await t('a small sheet in a prose doc is told to be a plain table; a big one and a sheet doc are not', () => {
+    const r = lint(page(prose + sheetTable('CRM', 5) + sheetTable('Notes', 20, false) + sheetTable('Inventory', 21)));
+    assert(r.small_sheet_count === 2 && r.small_sheets.map((x) => `${x.name}:${x.rows}`).join(',') === 'CRM:5,Notes:20', JSON.stringify(r.small_sheets));
+    assert(r.warning === 'Block check (a warning only; the doc is published): Small table in a doc: use a plain <table>; keep sheets for data people filter or sort ("CRM" 5 rows, "Notes" 20 rows). Guide: tdoc://authoring/structure/sheets.md', r.warning);
+    assert(r.loose_text === 0 && r.unknown_class_count === 0, 'nothing else is flagged');
+    // A sheet doc: a title, a line on what it is, the sheet (any size).
+    const doc = lint(page('<h1>Tasks</h1><p class="sheet-note">Thirty tasks.</p><p>From the Q3 export.</p>' + sheetTable('Tasks', 3) + sheetTable('People', 2)));
+    assert(doc.warning === null && doc.small_sheet_count === 0, JSON.stringify(doc));
+    // Prose is three text blocks outside the sheets, or other doc content (a plain table, a figure).
+    assert(lint(page('<h1>T</h1><p>a</p><p>b</p>' + sheetTable('S', 4))).small_sheet_count === 0, 'two paragraphs is still a sheet doc');
+    assert(lint(page('<h1>T</h1><p>a</p><ul><li>b</li><li>c</li></ul>' + sheetTable('S', 4))).small_sheet_count === 1, 'three blocks is prose');
+    assert(lint(page('<h1>T</h1>' + sheetTable('S', 4) + '<table><tr><td>x</td></tr></table>')).small_sheet_count === 1, 'a plain table beside it is a doc');
+    assert(lint(page(prose + sheetTable('Big', 400))).warning === null, 'a 400-row sheet in a doc is fine');
+    assert(lint(page(prose + '<table><tr><td>a</td></tr></table>')).warning === null, 'a plain table is fine');
+  });
+
+  await t('the small-sheet line follows the block check, and its list is bounded', () => {
+    const r = lint(page(prose + '<div class="tile">11%</div>' + Array.from({ length: 9 }, (_, i) => sheetTable(`T${i}`, 2)).join('')));
+    const lines = r.warning.split('\n');
+    assert(/^Block check .*loose text/.test(lines[0]) && /^Fix: /.test(lines[1]) && /^Small table in a doc: .*"T4" 2 rows, …\)\. Guide: /.test(lines[2]), r.warning);
+    assert(r.small_sheet_count === 9 && r.small_sheets.length === 5, JSON.stringify(r.small_sheets));
+  });
+
+  await t('counting a sheet\'s rows stays linear: 60k-row sheets, header-only rows, rows without cells', () => {
+    const big = page(prose + sheetTable('Big', 60000));
+    const thOnly = page(prose + '<table data-tdoc-sheet>' + '<tr><th>x</th></tr>'.repeat(200000) + '</table>');
+    const bare = page(prose + '<table data-tdoc-sheet>' + '<tr>'.repeat(300000) + '</table><p>' + 'z'.repeat(1e6) + '</p>');
+    let r;
+    const times = [big, thOnly, bare].map((h) => ms(() => { r = lint(h); }));
+    assert(lint(thOnly).small_sheets[0].rows === 0, 'header rows are not body rows');
+    assert(Math.max(...times) < 400, `times ${times.map((x) => x.toFixed(0)).join(', ')}ms`);
+  });
+
   await t('reader.css styles every house block, and the guide shows each one\'s markup', () => {
     const css = read('server/reader.css');
     const section = css.match(/\/\* House blocks[\s\S]*?\/\* End house blocks\. \*\//);
@@ -139,6 +178,8 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     assert(/^Block check/.test(r.body.block_warning) && r.body.block_lint.loose_text > 0 && r.body.block_lint.unknown_class_count > 0, JSON.stringify(r.body));
     assert(await env.DOCS.head('docs/lint-old/v1/index.html'), 'the version is stored');
     const clean = await upload('lint-new', 1, read('test/fixtures/block-first/after.html'));
+    const small = await upload('lint-sheet', 1, page(prose + sheetTable('CRM', 5)));
+    assert(small.body.ok && /^Block check.*Small table in a doc/.test(small.body.block_warning) && small.body.block_lint.small_sheet_count === 1 && small.body.block_lint.small_sheets[0].rows === 5, JSON.stringify(small.body));
     assert(clean.body.ok && !('block_warning' in clean.body) && !('block_lint' in clean.body), JSON.stringify(clean.body));
   });
 

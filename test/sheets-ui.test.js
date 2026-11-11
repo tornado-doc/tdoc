@@ -93,6 +93,14 @@ async function shot(page, name, opts = {}) {
 ${M.tableHtml({ name: 'Runs', columns: [{ name: 'Run', type: 'text' }, { name: 'Tasks', type: 'number' }, { name: 'Product', type: 'tags' }], rows: Array.from({ length: 60 }, (_, k) => ({ id: `r${k + 1}`, cells: [`run ${k + 1}`, String((k * 7) % 23), [k % 2 ? 'Raft' : 'Claude Code']] })) })}
 ${M.tableHtml({ name: 'Notes', columns: [{ name: 'Note', type: 'text' }], rows: [{ id: 'r1', cells: ['first'] }, { id: 'r2', cells: ['second'] }] })}
 <h2>What next</h2><p>Three options, below.</p></main></body></html>`, 'Runs report');
+  // A status update with sheets in it (the ji.market shape): five suppliers,
+  // an 18-step plan and a 21-row inventory, as tabs.
+  writeDoc('brief', `<!doctype html><html><head><meta charset="utf-8"><title>Supplier follow up</title></head><body><main><h1>Supplier follow up</h1>
+<p>EGI and Potato are the two suppliers we are pricing first.</p>
+${M.tableHtml({ name: 'Suppliers', columns: [{ name: 'Supplier', type: 'text' }, { name: 'Status', type: 'tags' }], rows: ['EGI', 'Potato', 'Mighty', 'Via', 'Great Buy'].map((n, k) => ({ id: `r${k + 1}`, cells: [n, [k < 2 ? 'Active' : 'Paused']] })) })}
+${M.tableHtml({ name: 'Plan', columns: [{ name: 'Step', type: 'text' }], rows: Array.from({ length: 18 }, (_, k) => ({ id: `r${k + 1}`, cells: [`Step ${k + 1}`] })) })}
+${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { name: 'Qty', type: 'number' }], rows: Array.from({ length: 21 }, (_, k) => ({ id: `r${k + 1}`, cells: [`Item ${k + 1}`, String(k * 3)] })) })}
+<h2>Next</h2><p>Call EGI on Thursday.</p></main></body></html>`, 'Supplier follow up');
   // Agent-authored markup, no row ids, no thead (a <th> row in the body).
   writeDoc('handwritten', `<!doctype html><html><head><meta charset="utf-8"><title>Hand</title></head><body><main><h1>Inventory</h1>
 <table data-tdoc-sheet data-name="Stock"><tr><th>Item</th><th data-type="number">Qty</th><th data-type="tags">Where</th></tr>
@@ -874,6 +882,66 @@ ${M.tableHtml({ name: 'Notes', columns: [{ name: 'Note', type: 'text' }], rows: 
       await f.getByRole('button', { name: 'Close full screen (Esc)' }).tap();
       await frame.waitForFunction(() => !window.__tdocSheets.expanded().on);
       await phone.close();
+    });
+
+    await test('a small sheet in a prose doc is compact: as tall as its rows, one short row of controls, search behind its icon; a big one and a sheet doc are not', async () => {
+      const measure = (frame) => frame.evaluate(() => {
+        const r = (sel) => document.querySelector(sel).getBoundingClientRect();
+        const grid = document.querySelector('.ts-grid');
+        return { x: window.__tdocSheets.expanded(), grid: r('.ts-grid').height, scrolls: grid.scrollHeight > grid.clientHeight + 1, wide: grid.scrollWidth > grid.clientWidth, bar: r('.ts-bar').height, search: r('.ts-search').width, input: r('.ts-search input').width, expand: !document.querySelector('.ts-expand').hidden, overflow: document.documentElement.scrollWidth - innerWidth };
+      });
+      for (const [name, vp] of [['desktop', null], ['phone', { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]]) {
+        const ctx = vp ? await browser.newContext(vp) : context;
+        const p = vp ? await ctx.newPage() : page;
+        const frame = await open('brief', '', p);
+        const f = p.frameLocator('iframe[aria-label="Document content"]');
+        await f.locator('.tdoc-sheet').scrollIntoViewIfNeeded();
+        await p.waitForTimeout(150);
+        let m = await measure(frame);
+        assert(m.x.embed && !m.x.sheetOnly, `${name}: a prose doc's sheet is embedded: ${JSON.stringify(m.x)}`);
+        // Five rows: the header, five rows and the border, and no band below them.
+        assert(!m.scrolls && m.grid <= 34 + 5 * 32 + 2 + (m.wide ? 20 : 0) + 1, `${name}: the grid fits its rows: ${JSON.stringify(m)}`);
+        assert(m.bar <= 32 && m.search <= 30 && m.input < 1 && m.expand && m.overflow <= 1, `${name}: one short row, search is an icon, expand is there: ${JSON.stringify(m)}`);
+        await shot(p, `sheet-embed-${name}`);
+        // The icon opens the search; a query keeps it open; cleared, it folds back.
+        await f.locator('.ts-search').click();
+        await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('egi');
+        await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '1 of 5 rows');
+        await frame.evaluate(() => document.activeElement.blur());
+        m = await measure(frame);
+        assert(m.search > 150 && m.input > 60, `${name}: open with a query: ${JSON.stringify(m)}`);
+        await shot(p, `sheet-embed-search-${name}`);
+        await f.locator('.ts-search').click();
+        await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('');
+        await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '5 rows');
+        await frame.evaluate(() => document.activeElement.blur());
+        await frame.waitForFunction(() => document.querySelector('.ts-search').getBoundingClientRect().width <= 30);
+        // A longer small tab stops at fifteen rows and scrolls inside.
+        await f.getByRole('tab', { name: 'Plan' }).click();
+        await p.waitForTimeout(100);
+        m = await measure(frame);
+        assert(m.scrolls && m.grid <= 34 + 15 * 32 + 18 + 2 + 1 && m.grid >= 34 + 10 * 32 && m.search <= 30, `${name}: 18 rows stop at about 15: ${JSON.stringify(m)}`);
+        // Past 20 rows it is data to filter: the whole toolbar, as in a sheet doc.
+        await f.getByRole('tab', { name: 'Inventory' }).click();
+        await p.waitForTimeout(100);
+        m = await measure(frame);
+        assert(m.search > 200 && m.input > 100 && !(await frame.evaluate(() => document.querySelector('.tdoc-sheet').classList.contains('is-compact'))), `${name}: 21 rows get the full toolbar: ${JSON.stringify(m)}`);
+        await shot(p, `sheet-embed-21-${name}`);
+        // Full screen is there, with the whole toolbar.
+        await f.getByRole('tab', { name: 'Suppliers' }).click();
+        await f.getByRole('button', { name: 'Expand sheet to full screen' }).click();
+        await frame.waitForFunction(() => window.__tdocSheets.expanded().on);
+        await p.waitForTimeout(150);
+        m = await measure(frame);
+        assert(m.grid > 500 && m.search > 150, `${name}: full screen has the whole toolbar: ${JSON.stringify(m)}`);
+        await f.getByRole('button', { name: 'Close full screen (Esc)' }).click();
+        await frame.waitForFunction(() => !window.__tdocSheets.expanded().on);
+        // A sheet doc keeps the full toolbar and the tall grid.
+        const sheetFrame = await open('tracker', '', p);
+        m = await measure(sheetFrame);
+        assert(!m.x.embed && m.x.sheetOnly && m.search > 200 && m.input > 100 && m.scrolls && m.grid > 34 + 15 * 32 + 20, `${name}: a sheet doc is unchanged: ${JSON.stringify(m)}`);
+        if (vp) await ctx.close();
+      }
     });
 
     await test('the summary row: picked per column, follows the filters, rides in the #hash, is not an edit', async () => {

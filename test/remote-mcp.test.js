@@ -639,6 +639,8 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
         assert(/data-tdoc-slide/.test(text) === (kind === 'slides') && /Design rules/.test(text) === (kind === 'slides'), `${style}/${kind}: slide rules only for slides`);
         assert(/data-tdoc-sheet/.test(text) === (kind === 'sheets') && /data-row="r1"/.test(text) === (kind === 'sheets'), `${style}/${kind}: sheet markup only for sheets`);
         assert(g.structuredContent.kind === kind, `${style}/${kind}: kind echoed`);
+        // A table in a doc is a plain <table>; a sheet is for data people filter or sort.
+        assert(kind === 'slides' || /20 rows/.test(text) && /plain <table>/.test(text) && /sheet doc/.test(text), `${style}/${kind}: when a table is a sheet`);
       }
     }
     const fallback = await tool(julieConn.access_token, 'get_writing_guide', {});

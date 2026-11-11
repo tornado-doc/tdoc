@@ -29,6 +29,9 @@
   var SEL = M.SHEET_SELECTOR;
   var NARROW = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
   var ROW_H = 32, HEAD_H = 34, OVERSCAN = 6, MAX_COLUMNS = 200;
+  // A sheet of COMPACT_ROWS rows or fewer in a prose doc is a small table
+  // (server/block-lint.js warns about it): compact, at most EMBED_ROWS tall.
+  var COMPACT_ROWS = 20, EMBED_ROWS = 15;
   function numW() { return NARROW && NARROW.matches ? 36 : 48; }
   var hooks = window.__tdocElementHooks = window.__tdocElementHooks || {};
 
@@ -226,6 +229,19 @@
     '.ts-mi{min-height:44px}.ts-val{min-height:40px}',
     '.ts-n{padding:0 4px}',
     '}',
+    // A small sheet in a prose doc is one block among paragraphs: one short row
+    // of controls. Search is its icon until clicked (or holding a query), the
+    // count and buttons are small, and the grid is as tall as its rows.
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar{gap:4px;min-height:28px;margin:0 0 6px}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search{order:0;height:28px;flex:1 1 180px;max-width:300px}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search:not(:focus-within):not(.has-q){flex:0 0 28px;padding:0 5px;border-color:transparent;cursor:pointer}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search:not(:focus-within):not(.has-q):hover{background:var(--ts-head)}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-search:not(:focus-within):not(.has-q) input{flex:0 0 0;min-width:0;width:0;padding:0}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-count{order:1;margin-left:auto;font-size:12px}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-btn,.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-expand{order:2}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-btn{height:28px;padding:0 6px;border-color:transparent;background:transparent;color:var(--ts-muted)}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-btn:hover{background:var(--ts-head);color:var(--ts-ink)}',
+    '.tdoc-sheet.is-compact:not(.is-expanded) .ts-bar>.ts-btn span{display:none}',
   ].join('');
   document.head.appendChild(style);
 
@@ -344,7 +360,7 @@
   var ui = {};
   // Full screen: on, opened as the sheet's own page (alone: its tab, 1-based),
   // whether the doc is nothing but the sheet, and the doc path from the shell.
-  var expand = { on: false, alone: 0, sheetOnly: false, path: '', scroll: null, inert: [] };
+  var expand = { on: false, alone: 0, sheetOnly: false, embed: false, path: '', scroll: null, inert: [] };
   var sel = { r: 0, c: 0, r2: 0, c2: 0 };
   var config = { editing: false, received: false };
   var undoStack = [], redoStack = [];
@@ -373,7 +389,8 @@
     search.appendChild(ui.search); search.appendChild(ui.hits); search.appendChild(ui.prev); search.appendChild(ui.next);
     ui.bar.appendChild(search);
     ui.chips = h('div', 'ts-chips'); ui.bar.appendChild(ui.chips);
-    ui.comment = h('button', 'ts-btn'); ui.comment.type = 'button'; ui.comment.innerHTML = ICON.comment + '<span>Comment on sheet</span>';
+    ui.searchBox = search;
+    ui.comment = h('button', 'ts-btn'); ui.comment.type = 'button'; ui.comment.innerHTML = ICON.comment + '<span>Comment on sheet</span>'; ui.comment.setAttribute('aria-label', 'Comment on sheet'); ui.comment.title = 'Comment on sheet';
     // The whole sheet is an ordinary table comment (no label of its own), so
     // a new version reconciles it like any other table.
     ui.comment.addEventListener('click', function (e) { e.stopPropagation(); commentOn(cur().table, ui.comment.getBoundingClientRect()); });
@@ -415,6 +432,7 @@
     root.appendChild(ui.xhead); root.appendChild(ui.tabs); root.appendChild(ui.bar); root.appendChild(ui.offHidden); root.appendChild(ui.grid); root.appendChild(ui.offAbove); root.appendChild(ui.offBelow); root.appendChild(ui.addRow);
     host.parentNode.insertBefore(root, host);
     expand.sheetOnly = isSheetOnly();
+    expand.embed = !expand.sheetOnly && isProseDoc();
     wire();
     renderAll();
     post({ type: 'tdoc:sheetReady', tabs: book.tabs.map(function (t) { return t.name; }) });
@@ -460,6 +478,7 @@
   function renderBar() {
     var tab = cur();
     if (document.activeElement !== ui.search && ui.search.value !== tab.query.search) ui.search.value = tab.query.search;
+    ui.searchBox.classList.toggle('has-q', !!tab.query.search);
     var m = tab.matches;
     ui.hits.textContent = tab.query.search ? (m.total ? (tab.matchAt >= 0 ? (tab.matchAt + 1) + ' of ' : '') + fmt(m.total) + (m.capped ? '+' : '') : 'No matches') : '';
     ui.prev.hidden = ui.next.hidden = !m.total;
@@ -510,18 +529,25 @@
     if (f.min != null) return '≥ ' + show(f.min);
     return '≤ ' + show(f.max);
   }
-  // The grid is as tall as its rows, up to most of the frame's height, so a
-  // short sheet reads like a table and a long one scrolls inside its frame.
+  function compact() { return expand.embed && cur().index.size <= COMPACT_ROWS; }
+  // The grid is as tall as its rows, up to most of the frame's height (a small
+  // sheet in a prose doc, up to EMBED_ROWS rows), so a short sheet reads like a table and
+  // a long one scrolls inside its frame.
   function layout() {
     var tab = cur();
     var rowsH = Math.max(1, tab.order.length) * ROW_H;
     var room = Math.max(240, innerHeight - (NARROW && NARROW.matches ? 150 : 170));
-    var hgt = Math.min(HEAD_H + rowsH + footH() + 2 + (tab.totalW > ui.grid.clientWidth ? 14 : 0), room);
-    // Full screen, the grid takes whatever the window leaves it.
-    ui.grid.style.height = expand.on ? '' : hgt + 'px';
+    ui.root.classList.toggle('is-compact', compact());
+    if (compact()) room = Math.min(room, HEAD_H + EMBED_ROWS * ROW_H + footH() + 18);
     ui.body.style.height = (tab.order.length ? tab.order.length * ROW_H : 80) + 'px';
     ui.body.style.width = tab.totalW + 'px';
     ui.head.style.width = (tab.totalW + (canEdit() ? 40 : 0)) + 'px';
+    // Room for a horizontal scrollbar only where it takes room (none with
+    // overlay scrollbars): measured once the widths above are in.
+    var bar = ui.grid.offsetHeight ? Math.max(0, ui.grid.offsetHeight - ui.grid.clientHeight - 2) : (tab.totalW > ui.grid.clientWidth ? 14 : 0);
+    var hgt = Math.min(HEAD_H + rowsH + footH() + 2 + bar, room);
+    // Full screen, the grid takes whatever the window leaves it.
+    ui.grid.style.height = expand.on ? '' : hgt + 'px';
   }
   function renderHead() {
     var tab = cur(), W = numW();
@@ -1767,6 +1793,16 @@
     if (walker.nextNode()) return false;
     return !Array.prototype.some.call(document.body.querySelectorAll('img,svg,video,canvas,iframe,figure'), function (el) { return !el.closest(skip); });
   }
+  // A prose doc (as server/block-lint.js reads it): three or more text blocks
+  // outside the sheets, the title and the sheet note, or other doc content
+  // beside them (a plain table, a figure, an image). Its small sheets are compact.
+  function isProseDoc() {
+    var skip = SEL + ',[data-tdoc-provider],.sheet-note,caption';
+    var keep = function (el) { return !el.closest(skip); };
+    var blocks = Array.prototype.filter.call(document.body.querySelectorAll('p,li,blockquote,dd,h2,h3,h4,h5,h6'), function (el) { return keep(el) && el.textContent.trim(); });
+    if (blocks.length >= 3) return true;
+    return Array.prototype.some.call(document.body.querySelectorAll('table:not(' + SEL + '),figure,details,img,video,iframe'), keep);
+  }
   // The sheet's own page: this doc, this version, `?sheet=<tab>`, carrying
   // the view of the moment it is pressed.
   function linkHrefs() {
@@ -1872,7 +1908,7 @@
     tabs: function () { return book ? book.tabs.map(function (t) { return { name: t.name, rows: t.index.size, shown: t.order ? t.order.length : 0, query: Q.cloneQuery(t.query) }; }) : []; },
     active: function () { return book ? book.active : -1; },
     selection: function () { return Object.assign({}, sel); },
-    expanded: function () { return { on: expand.on, alone: expand.alone, sheetOnly: expand.sheetOnly }; },
+    expanded: function () { return { on: expand.on, alone: expand.alone, sheetOnly: expand.sheetOnly, embed: expand.embed }; },
   };
   // Mounted: the tables are hidden by the viewer's own style now, so the
   // frame's 200-row hold (#tdoc-sheets-pending) is no longer needed.

@@ -9,6 +9,52 @@ and first column. Without the viewer (an export, a feed reader) the same
 markup is a readable table. You edit a sheet the way you edit any doc: change
 the HTML and publish a new version.
 
+## Sheet or table
+
+A table in a prose doc is a plain `<table>` by default. Five suppliers, a plan
+of eight steps, a comparison of three options: the reader takes it in at a
+glance, and a spreadsheet grid around it (tabs, a search box, a frame) only
+pushes the prose apart.
+
+- **Plain `<table>`**: a reference table inside a report, plan or note. Up to
+  about 20 rows.
+- **`data-tdoc-sheet` in the doc**: data the reader will search, filter or
+  sort, usually more than about 20 rows (every run of a benchmark under its
+  write-up).
+- **A sheet doc of its own**: the deliverable itself is a list of records (a
+  CRM, an inventory, a tracker). Publish it as its own doc and link to it from
+  the prose doc in one line.
+
+Publish warns about a sheet of 20 rows or fewer in a prose doc: "Small table
+in a doc: use a plain <table>; keep sheets for data people filter or sort."
+
+Before, a status update with its five suppliers as a sheet:
+
+```html
+<p>EGI and Potato are the two suppliers we are pricing first.</p>
+<div class="tdoc-table-scroll">
+<table data-tdoc-sheet data-name="Suppliers">
+  <thead><tr><th data-key="c1">Supplier</th><th data-key="c2" data-type="tags">Status</th><th data-key="c3">Next action</th></tr></thead>
+  <tbody><tr data-row="r1"><td>EGI</td><td><span data-tag>Active</span></td><td>Confirm SKU prices and MOQ</td></tr> …</tbody>
+</table>
+</div>
+```
+
+After, a plain table, with the 21-item inventory as its own sheet doc:
+
+```html
+<p>EGI and Potato are the two suppliers we are pricing first.</p>
+<div class="tdoc-table-scroll">
+<table>
+  <thead><tr><th>Supplier</th><th>Status</th><th>Next action</th></tr></thead>
+  <tbody><tr><td>EGI</td><td>Active</td><td>Confirm SKU prices and MOQ</td></tr> …</tbody>
+</table>
+</div>
+<p>EGI's stock list: <a href="https://tdoc.dev/d/egi-inventory">EGI inventory (21 items)</a>.</p>
+```
+
+The rest of this guide is the sheet itself.
+
 ## The markup
 
 One `<table data-tdoc-sheet>` per tab. `data-name` is the tab's name. The

@@ -13,6 +13,13 @@
 // are skipped by jumping to their end. Work is capped (bytes and tags), and
 // a capped scan says so rather than guessing about the rest.
 //
+// It also counts the rows of each sheet (<table data-tdoc-sheet>) as it jumps
+// over it: in a prose doc, a sheet of 20 rows or fewer is a small reference
+// table the reader takes in at a glance, and reads better as a plain <table>
+// (authoring/structure/sheets.md, "Sheet or table"). A doc that is only its
+// sheets (a title and a line or two around them) is a sheet doc and is left
+// alone. Counting stops at the 21st row, so an 8 MB sheet costs no more.
+//
 // Shared by the worker (inlined by bin/tdoc-bundle at __TDOC_BLOCK_LINT__)
 // and Node tests (require).
 (function (root, factory) {
@@ -26,6 +33,11 @@
   var MAX_DEPTH_SEARCH = 64;
   var MAX_SAMPLES = 5;
   var MAX_CLASSES = 8;
+  // A sheet with at most this many body rows, in a prose doc, is a small table.
+  var SMALL_SHEET_ROWS = 20;
+  // Text blocks outside the sheets past which a doc is prose, not a sheet doc
+  // (the same rule as the viewer's compact embed, server/sheets-viewer.js).
+  var PROSE_BLOCKS = 3;
 
   // Classes a wrapper may carry: the content roots and the house blocks.
   var KNOWN = {
@@ -66,6 +78,10 @@
     audio: 1, canvas: 1, head: 1, xmp: 1, title: 1,
   };
   var RAW = { script: 1, style: 1, textarea: 1, xmp: 1, title: 1 };
+  // Outside the sheets: text blocks that make a doc prose, and content that
+  // makes it a doc on its own (a plain table, a figure, an image).
+  var PROSE_TEXT = { p: 1, li: 1, blockquote: 1, dd: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1 };
+  var DOC_CONTENT = { table: 1, figure: 1, details: 1, img: 1, video: 1, iframe: 1 };
   // Opening one of these closes an open <p> (HTML's implied end tag).
   var CLOSES_P = {
     address: 1, article: 1, aside: 1, blockquote: 1, details: 1, div: 1,
@@ -83,6 +99,8 @@
     return new RegExp('(?:^|\\s)' + name + '(?:\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s"\'=<>`]+)))?(?=[\\s/]|$)', 'i');
   }
   var CLASS_ATTR = attrRe('class');
+  var SHEET_ATTR = attrRe('data-tdoc-sheet');
+  var NAME_ATTR = attrRe('data-name');
   var ATOMIC_ATTR = attrRe('data-tdoc-(?:artifact|excalidraw)');
   function attr(attrs, re) {
     var m = re.exec(attrs);
@@ -118,6 +136,30 @@
     return html.length;
   }
 
+  // Body rows of the sheet between its open tag (from) and its end (to),
+  // counted up to `cap`: a <tr> holding a <td> (a header row holds only <th>).
+  // The next <td> is looked up once and kept until a row passes it, so each
+  // byte of the table is read a bounded number of times.
+  var TR = /<tr(?=[\s>])/ig, TD = /<td(?=[\s>])/ig;
+  function sheetRows(html, from, to, cap) {
+    var n = 0, td = null, tdAt = -1;
+    TR.lastIndex = from;
+    var tr = TR.exec(html);
+    while (tr && tr.index < to && n < cap) {
+      TR.lastIndex = tr.index + 3;
+      var next = TR.exec(html);
+      var rowEnd = next && next.index < to ? next.index : to;
+      if (tdAt !== Infinity && tdAt < tr.index) {
+        TD.lastIndex = tr.index + 3;
+        td = TD.exec(html);
+        tdAt = td && td.index < to ? td.index : Infinity;
+      }
+      if (tdAt < rowEnd) n++;
+      tr = next;
+    }
+    return n;
+  }
+
   function hasText(s) {
     return /[^\s\u00a0]/.test(s.replace(/&(?:nbsp|#160|#xa0|zwj|zwnj|#8203);/gi, ''));
   }
@@ -143,6 +185,7 @@
     var classes = {}, classOrder = [];
     var tags = 0;
     var pos = start;
+    var sheets = [], proseBlocks = 0, docContent = false;
 
     function top() { return stack.length ? stack[stack.length - 1] : null; }
     function popTo(name, stopAt) {
@@ -202,8 +245,15 @@
       if (CLOSES_P[name] && parent && parent.name === 'p') { stack.pop(); parent = top(); }
       if (name === 'li') { popTo('li', { ul: 1, ol: 1, menu: 1 }); parent = top(); }
       if (name === 'dt' || name === 'dd') { if (!popTo('dt', { dl: 1 })) popTo('dd', { dl: 1 }); parent = top(); }
+      var sheet = name === 'table' && attrs.indexOf('data-tdoc-sheet') !== -1 && attr(attrs, SHEET_ATTR) != null;
+      if (!sheet && DOC_CONTENT[name] && !(parent && parent.exempt)) docContent = true;
+      if (PROSE_TEXT[name] && !(parent && parent.exempt) && !/(?:^|\s)sheet-note(?:\s|$)/.test(attr(attrs, CLASS_ATTR) || '')) proseBlocks++;
       if (SKIP[name]) {
-        if (!/\/\s*$/.test(attrs)) { var after = skipEnd(html, name, pos); skipped += after - pos; pos = after; }
+        if (!/\/\s*$/.test(attrs)) {
+          var after = skipEnd(html, name, pos);
+          if (sheet) sheets.push({ name: attr(attrs, NAME_ATTR) || 'Sheet ' + (sheets.length + 1), rows: sheetRows(html, pos, after, SMALL_SHEET_ROWS + 1) });
+          skipped += after - pos; pos = after;
+        }
         continue;
       }
       if (VOID[name] || /\/\s*$/.test(attrs)) continue;
@@ -229,12 +279,16 @@
     var unknown = classOrder
       .map(function (k) { return { name: k, count: classes[k] }; })
       .sort(function (a, b) { return b.count - a.count; });
+    var prose = docContent || proseBlocks >= PROSE_BLOCKS;
+    var small = prose ? sheets.filter(function (x) { return x.rows <= SMALL_SHEET_ROWS; }) : [];
     var result = {
       loose_text: loose,
       loose_text_samples: samples,
       unknown_classes: unknown.slice(0, MAX_CLASSES),
       unknown_class_count: unknown.length,
       custom_design: custom,
+      small_sheets: small.slice(0, MAX_SAMPLES),
+      small_sheet_count: small.length,
       truncated: truncated,
       warning: null,
     };
@@ -244,8 +298,16 @@
 
   var FIX = 'Fix: put text in <p>/<li>/<h2-h4>, use the house blocks (tdoc-tiles, tdoc-cards, aside.note, details, figure, diagram-box), or make a custom component one block with data-tdoc-artifact. Guide: tdoc://authoring/structure/components.md';
 
+  var SMALL = 'Small table in a doc: use a plain <table>; keep sheets for data people filter or sort';
+  var SMALL_GUIDE = 'Guide: tdoc://authoring/structure/sheets.md';
+
   function format(r) {
-    if (!r.loose_text && !r.unknown_class_count) return null;
+    if (!r.loose_text && !r.unknown_class_count && !r.small_sheet_count) return null;
+    var head = 'Block check (a warning only; the doc is published): ';
+    var small = r.small_sheet_count ? SMALL + ' ('
+      + r.small_sheets.map(function (x) { return '"' + snippet(x.name) + '" ' + x.rows + (x.rows === 1 ? ' row' : ' rows'); }).join(', ')
+      + (r.small_sheet_count > r.small_sheets.length ? ', …' : '') + '). ' + SMALL_GUIDE : null;
+    if (!r.loose_text && !r.unknown_class_count) return head + small;
     var parts = [];
     if (r.loose_text) {
       parts.push(r.loose_text + ' loose text run' + (r.loose_text === 1 ? '' : 's') + ' outside p/li/h*/td ('
@@ -257,9 +319,10 @@
         + r.unknown_classes.map(function (c) { return '.' + c.name + (c.count > 1 ? ' ×' + c.count : ''); }).join(', ')
         + (r.unknown_class_count > r.unknown_classes.length ? ', …' : '') + ')');
     }
-    var lines = ['Block check (a warning only; the doc is published): ' + parts.join('; ') + (r.truncated ? ' (first part of the doc only)' : '') + '.'];
+    var lines = [head + parts.join('; ') + (r.truncated ? ' (first part of the doc only)' : '') + '.'];
     if (r.custom_design) lines.push('This doc is a custom design (--custom-template); a report reads better as a standard doc made of blocks.');
     lines.push(FIX);
+    if (small) lines.push(small);
     return lines.join('\n');
   }
 

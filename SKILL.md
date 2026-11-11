@@ -103,9 +103,15 @@ and the 1280px + 390px check before publishing.
 
 ### Sheets
 
-When the content is records people will search, filter or sort (a tracker,
-an inventory, a budget, a contact list, rows from a CSV or Excel file), write
-a sheet: one `<table data-tdoc-sheet data-name="Tab">` per tab, each
+A table in a prose doc is a plain `<table>` in `tdoc-table-scroll`: a small
+reference table read at a glance (a supplier shortlist, a plan, a comparison).
+Make it a sheet only when the reader needs to search, filter or sort it: more
+than about 20 rows, or a list they will filter. When the whole deliverable is a
+list of records (a tracker, an inventory, a budget, a contact list, rows from a
+CSV or Excel file), publish a sheet doc of its own and link to it from the
+prose. Publish warns about a sheet of 20 rows or fewer inside a prose doc.
+
+A sheet: one `<table data-tdoc-sheet data-name="Tab">` per tab, each
 `<th data-type="text|number|date|tags|checkbox|url">`, tag cells as
 `<span data-tag>` items, a `data-row="r1"` id on every body row and a
 `data-key="c1"` on every header (keep both when you edit; comments on a cell
@@ -114,8 +120,8 @@ spreadsheet grid with tabs, search, per-column filters and sort; without the
 viewer it is a plain table. For a file, `tdoc-new --slug <slug> --from-csv
 <file>` (or `--from-tsv`, `--from-xlsx`) writes the markup with column types
 inferred. **Before writing or editing a sheet, read
-`$SKILL_DIR/authoring/structure/sheets.md`**: the markup, the types, tag
-colours, row ids and the size limit.
+`$SKILL_DIR/authoring/structure/sheets.md`**: when to use one, the markup, the
+types, tag colours, row ids and the size limit.
 
 ### Existing documents and comment handoff
 
