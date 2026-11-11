@@ -285,10 +285,12 @@ ${figure('/d/finance-forecast', ' data-rows="5"', 'Finance forecast')}
       const text = await dialog.textContent();
       assert(/\/d\/q3-pipeline/.test(text) && /\/d\/finance-forecast/.test(text) && /styles included/.test(text), text);
       await shot(p, 'embed-allow-dialog');
+      // The frame reloads: wait for it to get there (the src changes before
+      // the frame has navigated, so a lookup right away can find nothing).
+      const reloaded = p.waitForEvent('framenavigated', { predicate: (f) => f.url().includes('tdoc_load='), timeout: 10000 });
       await p.locator('[data-action="confirm-allow-embeds"]').click();
-      await p.waitForFunction(() => document.querySelector('iframe[aria-label="Document content"]').src.includes('tdoc_load='), null, { timeout: 10000 });
+      const again = await reloaded;
       assert(attested && attested.slug === 'weekly-update', JSON.stringify(attested));
-      const again = p.frames().find((f) => f.url().includes('tdoc_load='));
       await again.waitForFunction(() => window.__tdocSheetEmbeds && window.__tdocSheetEmbeds.list().some((e) => e.state === 'live'), null, { timeout: 15000 });
       await held.close();
     });
