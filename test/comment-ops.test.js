@@ -42,6 +42,7 @@ vm.runInContext([
   region('legacyToEvents', 'compactComments'), // event-log helpers
   fn('reconcileAnchors'),
   fn('findCommentThread'),
+  fn('isPersonShape'), fn('markImportedAuthors'), // uploaded authors are flagged imported
   fn('applyCommentOp'),
 ].join('\n\n'), box);
 const apply = box.applyCommentOp;

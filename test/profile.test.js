@@ -218,8 +218,8 @@ async function seedPins(env, accountId, pins, extra = {}) {
     assert(response.status === 200, 'viewer profile available');
     assert(response.headers.get('Cache-Control') === 'private, no-store', 'private metadata is not cached');
     const data = await response.json();
-    assert(JSON.stringify(data) === JSON.stringify({ ok: true, profile: { handle: 'alice-public', suggested: 'alice-public' } }),
-      'returns only viewer handle and suggestion, never subject profile, pins or catalog');
+    assert(JSON.stringify(data) === JSON.stringify({ ok: true, profile: { handle: 'alice-public', suggested: 'alice-public', name: 'alice', display_name: '', provider_name: 'alice' } }),
+      'returns only the viewer\'s handle, suggestion and name, never subject profile, pins or catalog');
 
     const emailId = await seedEmailAccount(env, 'person@example.com');
     await seedPins(env, emailId, [], { handle: 'email-person' });
