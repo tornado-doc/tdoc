@@ -143,26 +143,8 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
       if (!menuLabels.includes(label)) throw new Error(`${label} missing from mobile More: ${menuLabels.join(', ')}`);
     }
     if (!menuLabels.some((label) => /^(Dark|Light) mode$/.test(label))) throw new Error(`theme missing from mobile More: ${menuLabels.join(', ')}`);
-    if (!menuLabels.some((label) => /^Versionsv\d+$/.test(label))) throw new Error(`version submenu missing from mobile More: ${menuLabels.join(', ')}`);
-    await page.click('.tdoc-version-submenu-trigger');
-    await page.waitForSelector('.tdoc-version-submenu');
-    const versionLayout = await page.$eval('.tdoc-version-submenu', (popup) => {
-      const rect = popup.getBoundingClientRect();
-      return {
-        top: rect.top,
-        bottom: rect.bottom,
-        innerHeight: window.innerHeight,
-        maxHeight: getComputedStyle(popup).maxHeight,
-        overflowY: getComputedStyle(popup).overflowY,
-      };
-    });
-    if (versionLayout.top < 0 || versionLayout.bottom > versionLayout.innerHeight + 1 || versionLayout.overflowY !== 'auto') {
-      throw new Error(`mobile version submenu does not fit/scroll: ${JSON.stringify(versionLayout)}`);
-    }
-    if (!versionLayout.maxHeight || versionLayout.maxHeight === 'none') throw new Error('version submenu has no max height');
-    const currentVersion = await page.textContent('.tdoc-version-submenu .tdoc-version-item.current');
-    if (!/v2 · viewing/.test(currentVersion)) throw new Error(`current version missing from submenu: ${currentVersion}`);
-    await page.keyboard.press('Escape');
+    // The old Versions submenu and View changes are gone (the history panel replaced them).
+    if (menuLabels.some((label) => /^Versions|^View changes$/.test(label))) throw new Error(`old version menu in mobile More: ${menuLabels.join(', ')}`);
     await page.click('.ui-menu-popup [data-action="publish"]');
     const actionHeight = await page.$eval('.ui-dialog-popup .actions button', (button) => button.getBoundingClientRect().height);
     if (actionHeight < 44) throw new Error(`modal action is ${actionHeight}px high`);
@@ -194,14 +176,15 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
 
   await t('Docs Hub Create a doc is a menu, and the agent answer composes its line', async () => {
     await page.click('.mk-btn');
-    // A modal to choose between two things is a room built for a sentence, so
-    // the fork is a menu. Only the answer that needs a subject typed into it
-    // gets a dialog.
-    await page.waitForSelector('.ui-menu-item.mk-item:has-text("Build it with your agent")');
-    await page.click('.ui-menu-item.mk-item:has-text("Build it with your agent")');
+    // A modal to choose between three things is a room built for a sentence,
+    // so the fork is a menu: the type, then the method. Only the answer that
+    // needs a subject typed into it gets a dialog.
+    await page.click('.ui-menu-item.mk-tile[data-kind="doc"]');
+    await page.waitForSelector('.ui-menu-item.mk-item:has-text("Write it with your agent")');
+    await page.click('.ui-menu-item.mk-item:has-text("Write it with your agent")');
     await page.waitForSelector('.ui-dialog-popup .mk-agent');
     const title = await page.textContent('.ui-dialog-title');
-    if (title !== 'Build it with your agent') throw new Error(`unexpected dialog title: ${title}`);
+    if (title !== 'Write it with your agent') throw new Error(`unexpected dialog title: ${title}`);
     // Copy is refused until the line is a line and not a placeholder.
     if (!await page.isDisabled('.mk-line button')) throw new Error('Copy offered an unfinished line');
     await page.fill('.mk-subject input', 'what our on-call rotation costs');

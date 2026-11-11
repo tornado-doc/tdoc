@@ -307,7 +307,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   // sandboxed frame (an https link or a line to copy).
   // The picker ends where the hero demo starts (its tabs are radios too).
   const pickStart = html.indexOf('<div class="pick" id="get-started">');
-  const pickEnd = [html.indexOf('<!-- tdoc demo'), html.indexOf('<div class="hd-show">')].filter((i) => i > pickStart).sort((a, b) => a - b)[0];
+  const pickEnd = [html.indexOf('<!-- tdoc demo'), html.indexOf('<div class="hd-show"')].filter((i) => i > pickStart).sort((a, b) => a - b)[0];
   const pick = html.slice(pickStart, pickEnd);
   assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
   const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));

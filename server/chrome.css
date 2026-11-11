@@ -1480,6 +1480,9 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
 .tdoc-bar .tdoc-edited:hover { background: #f0f1f4; color: #1a1a1a; }
 .tdoc-bar .tdoc-edited[aria-expanded="true"] { background: var(--td-surface, #f0f0ee); color: var(--td-ink, #1a1a1a); }
 .tdoc-bar .tdoc-edited:disabled { cursor: default; opacity: .6; }
+/* A viewer who may not list the history: when, in words, and nothing to open. */
+.tdoc-bar .tdoc-edited.is-static { display: inline-flex; align-items: center; cursor: default; }
+.tdoc-bar .tdoc-edited.is-static:hover { background: transparent; color: #8a8a8f; }
 /* A thread whose words are gone from this version, written on an older one. */
 .tdoc-margin-comment .tdoc-cc-earlier { margin: 0 0 4px; font-size: 12px; color: var(--td-muted, #6b6a66); }
 .tdoc-bar .tdoc-share-quiet { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #1a1a1a; font: 500 13.5px system-ui, -apple-system, sans-serif; cursor: pointer; }

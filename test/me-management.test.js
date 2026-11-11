@@ -53,11 +53,13 @@ t('Create a doc is a menu, and only the agent answer opens a dialog', () => {
   // A modal to choose between two things is a room built for a sentence. The
   // fork is a menu under the button that asked; only the answer that needs a
   // subject typed into it gets a dialog.
-  assert(/<CreateMenu\s/.test(docsHub) && /trigger=\{<button className="mk-btn"/.test(docsHub),
-    'the button is the menu trigger');
+  assert(/<CreateMenu\s/.test(docsHub) && docsHub.includes('trigger={<button className="mk-btn" type="button">New</button>}'),
+    'the button is the menu trigger, and it reads New');
+  assert(!docsHub.includes('className="new-folder-btn"') && docsHub.includes("onNewFolder={team"),
+    'New folder lives in the New menu, not beside the search');
   assert(docsHub.includes('create={hub.createDoc}') && docsHub.includes('canCreate={capabilities.create}'),
     'the blank doc is wired to the hub hook and its capability');
-  assert(docsHub.includes("modal?.type === 'create-agent'") && /<AgentRecipe \/>/.test(docsHub),
+  assert(docsHub.includes("modal?.type === 'create-agent'") && docsHub.includes('<AgentRecipe kind={modal.kind} />'),
     'and the agent answer is the only thing left in a dialog');
   assert(!docsHub.includes('CreateChoice') && !docsHub.includes("'create-help'"), 'the two-card dialog is gone');
 });

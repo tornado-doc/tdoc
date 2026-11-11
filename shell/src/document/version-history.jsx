@@ -11,7 +11,7 @@ import { copyText } from './model.js';
 import { getHistory, getHistorySummaries, restoreVersion } from './api.js';
 import './version-history.css';
 
-// Version history (flag versionHistory). Two layers: every save is still a
+// Version history. Two layers: every save is still a
 // version underneath (/d/<slug>/v/<n>), and the panel lists them as rows --
 // consecutive saves by one person or agent within 30 minutes, grouped on the
 // server (worker historyRows) -- saying who, when and what changed. A row
