@@ -70,6 +70,7 @@ const OFFLINE = [
   'agent-authorship.test.js',  // authorship at write time (upload, agent replies that mark applied) and answer-only locks from send to answer, per question, failing closed
   'comment-wipe-authorship.test.js', // the comment wipe and team move follow agent authorship; a successful wipe answers 200
   'comment-email-privacy.test.js', // email commenters: aliases for other readers, own/invited/team keep the address
+  'display-name.test.js',       // Settings -> Name: validation, gates, rate limit; chosen name beats re-login and shows on existing comments, @ list, roster, inbox; agents keep theirs
   'mcp-discovery.test.js',     // MCP findable: llms.txt Connect, markdown connect line, raw Link rel=mcp (bytes unchanged), server card + AI catalog, remoteMcp default on
   'agent-native.test.js',      // doc pages point agents at /raw + skill; /llms.txt; Bearer /raw for team/invited docs
   'me-management.test.js',    // /me remote SoT management UI guard
@@ -252,6 +253,7 @@ const BROWSER = [
   'team-comments-ui.test.js', // team-wide comments: filters, exact deep links, bounded pagination, phone layout
   'team-backup-ui.test.js', // customer-owned backup setup, health, resync/off, phone layout
   'delete-account-ui.test.js', // Settings → Delete account: danger card, type-to-confirm, blockers with links, server refusal in place, desktop + phone
+  'display-name-ui.test.js', // Settings → Profile → Name: field, Save gating, menu follows, refusal in place, empty goes back to the sign-in name, desktop + phone
   'team-billing-ui.test.js', // #48 Team plan card: free seats, upgrade, paid summary, portal, phone
   'landing-demo-agents-ui.test.js', // homepage demo: @agent → Claude (demo) handoff line to a reply, Ask AI demo answer, Send to agent; no write requests; desktop + phone
   'agent-mention-ui.test.js', // @ lists real agents above people; picking one hands the comment to it

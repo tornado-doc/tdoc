@@ -620,8 +620,16 @@ async function getSession(env, req) {
       session.linked_account_ids = group.ids.filter((id) => id !== group.canonical);
       session.linked_actor_keys = group.actor_keys;
     } catch {}
+    // The name this person chose (Settings -> Profile) wins over whatever the
+    // sign-in provider stamped on the session -- read fresh, not memoized, so
+    // their own pages show a change at once. Read beside the team list.
+    const [chosen, teamIds] = await Promise.all([
+      displayNameForGroup(env, group).catch(() => ''),
+      loadAccountTeamIds(env, session.account_id),
+    ]);
+    if (chosen) { session.provider_name = session.name || ''; session.name = chosen; }
+    session.team_ids = teamIds;
   }
-  if (session.account_id) session.team_ids = await loadAccountTeamIds(env, session.account_id);
   if (session.account_id) session.team_admin_ids = await loadAdminTeamIds(env, session.account_id, session.team_ids);
   // Signed in with an identity a deleted account had (stamped at sign-in):
   // that account's comments and invites are not this session's.
@@ -663,10 +671,12 @@ async function sessionFromHostedBearer(env, req) {
   // A workspace-scoped token sees only the teams it was given, and My docs
   // only if that was ticked too (see tokenScopeAllows).
   const teamIds = actor.scope ? allTeamIds.filter((id) => actor.scope.teams.includes(id)) : allTeamIds;
+  const chosenName = await displayNameForGroup(env, group).catch(() => '');
   return {
     id: null,
     login: actor.github_login || '',
     email: actor.email || '',
+    ...(chosenName ? { name: chosenName, provider_name: '' } : {}),
     account_id: group.canonical,
     linked_account_ids: group.ids.filter((id) => id !== group.canonical),
     linked_actor_keys: group.actor_keys,
@@ -7051,6 +7061,13 @@ function teamMemberFromSession(session, role) {
   };
 }
 
+// The roster as the members see it: each member's chosen name, else the
+// name they joined with.
+async function namedTeamDetail(env, team, accountId, origin) {
+  const detail = teamDetail(team, accountId, origin);
+  return { ...detail, members: await withMemberDisplayNames(env, detail.members) };
+}
+
 function normalizeTeamInvites(list) {
   if (!Array.isArray(list)) return null;
   const out = [];
@@ -8373,7 +8390,7 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
       ...publicRow(row),
       ...(isFeedbackSpace(row.meta) ? { kind: 'feedback', origin: row.meta.feedback.origin } : {}),
       team: team.id,
-      author: author ? author.name : ownerDisplay(row),
+      author: author ? (authorNames.get(author.account_id) || author.name) : ownerDisplay(row),
       former_member: !author,
       can_manage: isDocOwnerSession(env, session, row.meta),
       can_file: canFileTeamDoc(session, team, row.meta),
@@ -8407,6 +8424,13 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
   // tab. Listed here without counts — the catalog must not read comments per
   // row — and counted by /api/me/feedback when the tab is opened.
   const feedback = await feedbackSpacesFor(env, session, catalog.filter((row) => isFeedbackSpace(row.meta)), publicRow, false);
+  // A team doc's byline: its author's chosen name, else the roster's.
+  const authorIds = [...new Set(teamDocs.map((row) => {
+    const m = teamMember(teamById.get(row.meta.workspace_id), row.meta.hosted && row.meta.hosted.account_id);
+    return m && m.account_id;
+  }).filter(Boolean))].slice(0, DISPLAY_NAME_RESOLVE_MAX);
+  const authorNames = new Map((await Promise.all(authorIds.map(async (id) => [id, await accountDisplayName(env, id)])))
+    .filter(([, n]) => n));
 
   return {
     docs: mine.map((row) => ({ ...ownRow(row), folder: folderState.docs[row.slug] || '' })),
@@ -12417,6 +12441,173 @@ function suggestHandleFromEmail(email) {
   return normalizeGithubLogin(cleaned);
 }
 
+// ---- Display name (Settings -> Profile -> Name) -------------------------
+// The name a person chose for themselves, stored on their account profile
+// (`account-profile:<id>.display_name`). Sign-in never writes it: every
+// provider door stamps its own name on the session, and getSession lays the
+// chosen one over it, so signing in again with GitHub or Clerk cannot undo
+// the choice. Comment records, inbox rows and team rosters keep the name
+// they were written with as a snapshot; readers resolve the current one by
+// actor key (or account id) at read time and fall back to the snapshot.
+const DISPLAY_NAME_MAX = 60;
+// C0/C1 controls, and the invisible format characters that can reorder or
+// hide text around a name (bidi overrides and isolates, zero-width joiners,
+// BOM, soft hyphen, line/paragraph separators).
+const DISPLAY_NAME_STRIP_RE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufeff\ufff9-\ufffb]/g;
+function normalizeDisplayName(raw) {
+  if (typeof raw !== 'string') return { error: 'invalid_name', message: 'Enter a name.' };
+  let name = raw;
+  try { name = name.normalize('NFC'); } catch {}
+  name = name.replace(DISPLAY_NAME_STRIP_RE, '').replace(/\s+/g, ' ').trim();
+  if (!name) return { error: 'invalid_name', message: 'Enter a name.' };
+  if ([...name].length > DISPLAY_NAME_MAX) return { error: 'name_too_long', message: `Use ${DISPLAY_NAME_MAX} characters or fewer.` };
+  // Rendering escapes everywhere; markup in a name is still refused so it
+  // never reaches an email client, a notification or an agent prompt as
+  // something that looks like markup.
+  if (/[<>]/.test(name)) return { error: 'invalid_name', message: 'Names can’t contain < or >.' };
+  // An address as a name would print where tdoc deliberately shows no
+  // address (email-keyed commenters show their local part only).
+  if (/[^\s@]+@[^\s@]+\.[^\s@]+/.test(name)) return { error: 'invalid_name', message: 'Use a name, not an email address.' };
+  return { name };
+}
+
+function storedDisplayName(rec) {
+  if (!rec || typeof rec.display_name !== 'string') return '';
+  const n = normalizeDisplayName(rec.display_name);
+  return n.name || '';
+}
+
+// Per-isolate memo, short so another person's change shows up within about
+// half a minute (KV's own edge cache can add up to a minute more). The
+// account's own isolate clears its entries on save.
+const DISPLAY_NAME_CACHE = new WeakMap(); // env.META -> Map(key -> { v, t })
+const DISPLAY_NAME_CACHE_MS = 30 * 1000;
+const DISPLAY_NAME_CACHE_MAX = 2000;
+function displayNameMemo(env, key, load) {
+  let cache = DISPLAY_NAME_CACHE.get(env.META);
+  if (!cache) { cache = new Map(); DISPLAY_NAME_CACHE.set(env.META, cache); }
+  const now = Date.now();
+  const hit = cache.get(key);
+  if (hit && now - hit.t < DISPLAY_NAME_CACHE_MS) return hit.v;
+  const v = Promise.resolve().then(load).catch(() => '');
+  if (cache.size >= DISPLAY_NAME_CACHE_MAX) cache.clear();
+  cache.set(key, { v, t: now });
+  return v;
+}
+function forgetDisplayNames(env) { if (env && env.META) DISPLAY_NAME_CACHE.delete(env.META); }
+
+// The chosen name of an account group: the canonical account's, else any
+// member's (a merge keeps both profiles until the next write).
+async function displayNameForGroup(env, group) {
+  const ids = group && Array.isArray(group.ids) && group.ids.length ? group.ids : [];
+  const order = [group && group.canonical, ...ids].filter((id, i, a) => id && a.indexOf(id) === i);
+  for (const id of order.slice(0, 8)) {
+    const name = storedDisplayName(await accountProfile(env, id));
+    if (name) return name;
+  }
+  return '';
+}
+
+async function accountDisplayName(env, accountId) {
+  if (!accountId || !env || !env.META) return '';
+  return displayNameMemo(env, `a:${accountId}`, async () => {
+    const group = await accountGroup(env, accountId);
+    if (group.deleted_at || group.unavailable) return '';
+    return displayNameForGroup(env, group);
+  });
+}
+
+// An actor key (GitHub handle or email:<address>) -> its chosen name, or ''.
+async function actorChosenName(env, key) {
+  const k = normalizeActorKey(key);
+  if (!k || !env || !env.META) return '';
+  return displayNameMemo(env, `k:${k}`, async () => {
+    const accountId = k.startsWith('email:')
+      ? await accountIdByEmail(env, k.slice(6))
+      : (await lookupHostedAccount(env, k))?.account_id;
+    return accountId ? accountDisplayName(env, accountId) : '';
+  });
+}
+
+// Is this { login|key, name } object a person whose name may be replaced?
+// Agents, the system note, deleted users and aliases keep what they carry.
+function personNameKey(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v) || typeof v.name !== 'string') return null;
+  if (v.kind && v.kind !== 'human') return null;
+  if (v.handle || v.team_agent) return null;
+  const raw = typeof v.login === 'string' ? v.login : (typeof v.key === 'string' ? v.key : '');
+  if (!raw || raw.toLowerCase() === 'tdoc') return null;
+  return normalizeActorKey(raw);
+}
+
+const DISPLAY_NAME_RESOLVE_MAX = 60;
+// Replace the `name` of every person object in a payload (comments, replies,
+// events, inbox actors, rosters) with that person's chosen name, if any.
+// Returns the value unchanged when nobody in it has chosen one.
+async function withActorDisplayNames(env, value) {
+  if (!env || !env.META || value == null || typeof value !== 'object') return value;
+  const keys = new Set();
+  const collect = (v, depth) => {
+    if (v == null || typeof v !== 'object' || depth > 12) return;
+    if (Array.isArray(v)) { for (const x of v) collect(x, depth + 1); return; }
+    const k = personNameKey(v);
+    if (k) keys.add(k);
+    for (const [field, x] of Object.entries(v)) if (field !== 'anchor' && x && typeof x === 'object') collect(x, depth + 1);
+  };
+  collect(value, 0);
+  if (!keys.size) return value;
+  const names = new Map();
+  await Promise.all([...keys].slice(0, DISPLAY_NAME_RESOLVE_MAX).map(async (k) => {
+    const n = await actorChosenName(env, k);
+    if (n) names.set(k, n);
+  }));
+  if (!names.size) return value;
+  const walk = (v, depth) => {
+    if (v == null || typeof v !== 'object' || depth > 12) return v;
+    if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
+    const out = {};
+    for (const [field, x] of Object.entries(v)) out[field] = field === 'anchor' ? x : walk(x, depth + 1);
+    const k = personNameKey(v);
+    if (k && names.has(k)) out.name = names.get(k);
+    return out;
+  };
+  return walk(value, 0);
+}
+
+// Team rosters carry account ids: resolve by account, not by key.
+async function withMemberDisplayNames(env, members) {
+  if (!Array.isArray(members) || !members.length) return members;
+  const names = await Promise.all(members.map((m) => (m && m.account_id ? accountDisplayName(env, m.account_id) : '')));
+  return members.map((m, i) => (names[i] ? { ...m, name: names[i] } : m));
+}
+
+// What Settings shows: the name in use, the one chosen (if any), and the
+// sign-in provider's, which an empty save goes back to.
+function displayNameFields(session) {
+  const chosen = session && typeof session.provider_name === 'string' ? String(session.name || '') : '';
+  const provider = chosen
+    ? (session.provider_name || actorDisplayName({ ...session, name: '' }))
+    : actorDisplayName(session);
+  return { name: actorDisplayName(session), display_name: chosen, provider_name: provider };
+}
+
+const DISPLAY_NAME_RATE = 20; // saves per account per hour
+
+// Written on the canonical account and cleared on every member, so a merged
+// group never resurrects a name the person removed.
+async function setAccountDisplayName(env, group, name) {
+  const ids = [group.canonical, ...group.ids.filter((id) => id !== group.canonical)];
+  for (const id of ids) {
+    const prev = await accountProfile(env, id);
+    if (id === group.canonical && name) {
+      await putAccountProfile(env, id, { display_name: name, display_name_at: new Date().toISOString() });
+    } else if (prev && (prev.display_name || prev.display_name_at)) {
+      const { display_name: _n, display_name_at: _t, ...rest } = prev;
+      await env.META.put(`account-profile:${id}`, JSON.stringify({ ...rest, account_id: id }));
+    }
+  }
+}
+
 async function accountProfile(env, accountId) {
   if (!accountId || !env || !env.META) return null;
   try {
@@ -13778,6 +13969,12 @@ function collectEmails(value, out, key = '') {
 }
 
 async function redactCommentEmails(value, privacy) {
+  // Every comment-shaped payload that leaves the worker (the doc page, the
+  // feedback widget and space, team review, inbox, exports, agent reads)
+  // passes through here, so this is also where each person's name becomes
+  // the one they chose -- before addresses are aliased, while the actor key
+  // still names them. Existing comments keep their snapshot as the fallback.
+  value = await withActorDisplayNames(privacy && privacy.env, value);
   const present = [...collectEmails(value, new Set())];
   // A deleted account's address is nobody's to see any more, not even the
   // owner who invited it or a former teammate (the person's own session is
@@ -13955,13 +14152,13 @@ async function profileBootForSession(env, session) {
   if (!accountId) {
     const login = sessionLogin(session);
     const suggested = login || suggestHandleFromEmail(session && session.email) || null;
-    return { handle: null, suggested, pins: [] };
+    return { handle: null, suggested, pins: [], ...displayNameFields(session) };
   }
   const rec = await accountProfile(env, accountId);
   const claimed = normalizeGithubLogin(rec && rec.handle);
   const login = sessionLogin(session);
   const suggested = claimed || login || suggestHandleFromEmail(session && session.email) || null;
-  return { handle: claimed, suggested, pins: await accountProfilePins(env, accountId) };
+  return { handle: claimed, suggested, pins: await accountProfilePins(env, accountId), ...displayNameFields(session) };
 }
 
 // Claim / publish mint an account; bare sign-in does not (spectators stay
@@ -24790,7 +24987,49 @@ const tdocHandlers = {
         });
       }
       const { handle, suggested } = await profileBootForSession(env, s);
-      return json({ ok: true, profile: { handle, suggested } }, {
+      return json({ ok: true, profile: { handle, suggested, ...displayNameFields(s) } }, {
+        headers: { 'Cache-Control': 'private, no-store' },
+      });
+    }
+
+    // Settings -> Profile -> Name: the name shown on this person's comments,
+    // replies, team rosters, notifications and the account menu, in place of
+    // the one their sign-in provider sent. An empty name goes back to the
+    // provider's. Hosted only; a signed-in browser session from this origin,
+    // never a feedback-widget token (that door is scoped to one doc).
+    if (p === '/api/me/name' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_only' }, { status: 404 });
+      }
+      const s = await getSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin) || s.feedback) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const acct = await ensureSessionHostedAccount(env, s);
+      const accountId = acct && acct.account_id;
+      if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
+      const group = await accountGroup(env, accountId);
+      if (group.deleted_at || group.unavailable) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (await rateLimited(env, `display-name:${group.canonical}`, DISPLAY_NAME_RATE, 3600)) {
+        return json({ error: 'rate_limited', message: 'Too many name changes. Try again in an hour.' }, { status: 429, headers: { 'Retry-After': '3600' } });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const raw = body && body.name;
+      const clearing = raw == null || (typeof raw === 'string' && !raw.replace(DISPLAY_NAME_STRIP_RE, '').trim());
+      let chosen = '';
+      if (!clearing) {
+        const n = normalizeDisplayName(raw);
+        if (n.error) return json({ error: n.error, message: n.message }, { status: 400 });
+        chosen = n.name;
+      }
+      await setAccountDisplayName(env, group, chosen);
+      forgetDisplayNames(env);
+      const { provider_name } = displayNameFields(s);
+      return json({ ok: true, name: chosen || provider_name, display_name: chosen, provider_name }, {
         headers: { 'Cache-Control': 'private, no-store' },
       });
     }
@@ -27546,7 +27785,7 @@ const tdocHandlers = {
         });
       } catch {}
       if (s.bearer) return json({ ok: true, team: teamSummary(team, s.account_id), emailed });
-      return json({ ok: true, team: teamDetail(team, s.account_id, url.origin), emailed });
+      return json({ ok: true, team: await namedTeamDetail(env, team, s.account_id, url.origin), emailed });
     }
 
     if (p === '/api/team' && (method === 'GET' || method === 'PATCH')) {
@@ -27563,7 +27802,7 @@ const tdocHandlers = {
       const handled = await claimTeamHandle(env, team);
       if (method === 'GET') {
         if (handled) await saveTeam(env, team);
-        return json({ ok: true, team: teamDetail(team, s.account_id, url.origin) });
+        return json({ ok: true, team: await namedTeamDetail(env, team, s.account_id, url.origin) });
       }
       if (teamRole(team, s.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
       let added = [];
@@ -27587,7 +27826,7 @@ const tdocHandlers = {
           added, inviterName: actorDisplayName(s), inviterId: actorKey(s), team, origin: url.origin,
         });
       } catch {}
-      return json({ ok: true, team: teamDetail(team, s.account_id, url.origin), emailed });
+      return json({ ok: true, team: await namedTeamDetail(env, team, s.account_id, url.origin), emailed });
     }
 
     if (p === '/api/team/guests' && (method === 'GET' || method === 'POST')) {
@@ -28158,7 +28397,7 @@ const tdocHandlers = {
         await syncTeamSeats(env, team);
         if (self) return json({ ok: true, left: true });
       }
-      return json({ ok: true, team: teamDetail(team, s.account_id, url.origin) });
+      return json({ ok: true, team: await namedTeamDetail(env, team, s.account_id, url.origin) });
     }
 
     if (p === '/api/team/join' && method === 'POST') {
@@ -28734,7 +28973,7 @@ const tdocHandlers = {
       // An address this person is not entitled to is not offered at all: a
       // tag inserts the address into the comment text.
       const privacy = await emailPrivacyFor(env, s, slug, meta);
-      const users = (await mentionDirectory(env, s, meta, access, list)).filter((u) => {
+      const users = (await withActorDisplayNames(env, await mentionDirectory(env, s, meta, access, list))).filter((u) => {
         const m = String(u.login || '').match(EMAIL_KEY_RE);
         return !m || privacy.reveal.has(m[1].toLowerCase());
       });
