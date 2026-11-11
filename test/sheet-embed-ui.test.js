@@ -263,6 +263,27 @@ ${figure('/d/finance-forecast', ' data-rows="5"', 'Finance forecast')}
       await p.close();
     });
 
+    await test('a page with an unnamed version: links, and its owner gets "Allow sheet embeds on this page"', async () => {
+      const held = await newContext({ width: 1280, height: 900 });
+      let allowed = false;
+      await held.route('**/api/embed/sheet?*', (route) => allowed ? route.fallback() : route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'page_unattributed' }) }));
+      let attested = null;
+      await held.route('**/api/embed/attest', (route) => { attested = route.request().postDataJSON(); allowed = true; route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) }); });
+      const p = await held.newPage();
+      const frame = await openPage(p);
+      await frame.waitForFunction(() => window.__tdocSheetEmbeds && window.__tdocSheetEmbeds.list().length === 2 && window.__tdocSheetEmbeds.list().every((e) => e.state === 'fallback'), null, { timeout: 15000 });
+      await p.locator('.tdoc-bar #tdoc-more-btn').click();
+      const item = p.locator('[data-action="allow-embeds"]');
+      await item.waitFor({ timeout: 5000 });
+      await shot(p, 'embed-allow-menu');
+      await item.click();
+      await p.waitForFunction(() => document.querySelector('iframe[aria-label="Document content"]').src.includes('tdoc_load='), null, { timeout: 10000 });
+      assert(attested && attested.slug === 'weekly-update', JSON.stringify(attested));
+      const again = p.frames().find((f) => f.url().includes('tdoc_load='));
+      await again.waitForFunction(() => window.__tdocSheetEmbeds && window.__tdocSheetEmbeds.list().some((e) => e.state === 'live'), null, { timeout: 15000 });
+      await held.close();
+    });
+
     await test('flag off: the figure is its link, and no data is asked for', async () => {
       const off = await newContext({ width: 1280, height: 900 }, false);
       const p = await off.newPage();

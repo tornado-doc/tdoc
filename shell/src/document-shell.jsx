@@ -69,7 +69,7 @@ import { CommentDocVersionContext } from './document/comment-card.jsx';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
-import { createSheetEmbedHandler, embedFrameSrc } from './document/sheet-embed.js';
+import { allowSheetEmbeds, createSheetEmbedHandler, embedFrameSrc } from './document/sheet-embed.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
@@ -558,11 +558,24 @@ export function DocumentShell({ boot, config }) {
   const [docShape, setDocShape] = useState({ sheets: 0, sheetDoc: false });
   // The signed-out homepage remembers nothing about a visitor's view.
   const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity) });
+  const [embedsHeld, setEmbedsHeld] = useState(false);
   const pageRef = useRef(null);
   pageRef.current = { slug: config.slug, version: Number(config.version) || 0, latest: Math.max(...(config.versions || []).map((v) => Number(v.n) || 0), Number(config.version) || 0) };
   // Sheets embedded in the page (flag sheetEmbeds): the frame asks, this
   // fetches as the reader and answers on the request's own port.
-  const sheetEmbed = useMemo(() => createSheetEmbedHandler({ enabled: () => isFeatureOn('sheetEmbeds'), page: () => pageRef.current }), []);
+  const sheetEmbed = useMemo(() => createSheetEmbedHandler({
+    enabled: () => isFeatureOn('sheetEmbeds'),
+    page: () => pageRef.current,
+    onPageUnattributed: () => { if (config.isOwner) setEmbedsHeld(true); },
+  }), []);
+  const allowEmbeds = useCallback(async () => {
+    let ok = false;
+    try { ok = await allowSheetEmbeds(config.slug); } catch {}
+    if (!ok) { showToast('Sheet embeds could not be allowed. Try again.', true); return; }
+    setEmbedsHeld(false);
+    showToast('Sheet embeds allowed on this page');
+    if (bridge.frameRef.current) bridge.frameRef.current.src = embedFrameSrc(boot.frameSrc, true);
+  }, [boot.frameSrc, config.slug, showToast]);
   const bridge = useFrameBridge({
     ...sheetHandlers,
     'tdoc:sheetEmbed': sheetEmbed,
@@ -2278,6 +2291,7 @@ export function DocumentShell({ boot, config }) {
             onDelete={() => setDialog({ type: 'delete' })}
             onHistory={historyEnabled ? () => changeHistory(true) : null}
             mode={{ modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
+            onAllowEmbeds={embedsHeld ? allowEmbeds : null}
           />
         )}
         onThemeChange={(nextTheme) => {

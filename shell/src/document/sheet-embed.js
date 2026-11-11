@@ -50,7 +50,9 @@ function str(value, max) {
 // one shows each figure's link). The server embeds a sheet only if the
 // reader can read this page and the sheet, and every account that wrote the
 // page can read the sheet.
-export function createSheetEmbedHandler({ enabled, page, fetchImpl = (...args) => fetch(...args) } = {}) {
+// `onPageUnattributed`: the server held every embed back because a version
+// of this page names no writer (its owner may vouch: "Allow sheet embeds").
+export function createSheetEmbedHandler({ enabled, page, onPageUnattributed = null, fetchImpl = (...args) => fetch(...args) } = {}) {
   const answers = new Map();
 
   async function load(ref) {
@@ -99,6 +101,20 @@ export function createSheetEmbedHandler({ enabled, page, fetchImpl = (...args) =
     // another server's doc, not the one with that slug here).
     const ref = readEmbedRef((name) => attrs[name] ?? null, [location.host]);
     if (!ref) return reply({ ok: false, error: 'invalid_reference' });
-    reply(await load(ref));
+    const out = await load(ref);
+    if (!out.ok && out.error === 'page_unattributed' && onPageUnattributed) onPageUnattributed();
+    reply(out);
   };
+}
+
+// The owner vouches for this page's unnamed versions (worker
+// handleSheetEmbedAttest). Resolves true on success.
+export async function allowSheetEmbeds(slug, fetchImpl = (...args) => fetch(...args)) {
+  const res = await fetchImpl('/api/embed/attest', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+  });
+  return res.ok;
 }

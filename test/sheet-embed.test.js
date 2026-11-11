@@ -148,7 +148,7 @@ const root = path.join(__dirname, '..');
       access: { history_visibility: 'owner', commenting: 'signed_in', allowed_users: [], ...access },
       ...extra,
     }));
-    await env.DOCS.put(`docs/${slug}/v1/index.html`, '<!doctype html><html><body><h1>Page</h1><figure data-tdoc-embed="sheet" data-src="/d/s-private"><a href="/d/s-private">x</a></figure></body></html>');
+    for (const x of (versions || [{ n: 1 }])) await env.DOCS.put(`docs/${slug}/v${x.n}/index.html`, '<!doctype html><html><body><h1>Page</h1><figure data-tdoc-embed="sheet" data-src="/d/s-private"><a href="/d/s-private">x</a></figure></body></html>');
   }
   await seedPage('page-owner', owner, { visibility: 'public' });
   await seedPage('page-mallory', mallory, { visibility: 'public' });
@@ -263,12 +263,74 @@ const root = path.join(__dirname, '..');
     await env.META.put(`account-teams:${tom.account_id}`, JSON.stringify([TEAM]));
   });
 
+  const dup = async (slug, cookie) => {
+    const r = await worker.fetch(req('/api/doc/duplicate', { method: 'POST', cookie, headers: { Origin: 'https://tdoc.dev' }, body: { slug, version: (JSON.parse(await env.META.get(`meta:${slug}`)).versions || []).reduce((m, x) => Math.max(m, x.n), 0) } }), env, { waitUntil() {} });
+    const b = await r.json();
+    assert(r.status === 200 && b.slug, `duplicate ${slug}: ${r.status} ${JSON.stringify(b)}`);
+    return b.slug;
+  };
+
+  await t('a duplicate carries every writer of the page it copies', async () => {
+    // The owner duplicates a page a guest (no access to the sheet) wrote on.
+    const fromGuest = await dup('page-guest-edit', owner.cookie);
+    const m = JSON.parse(await env.META.get(`meta:${fromGuest}`));
+    assert(m.versions[0].inherited_writers.accounts.includes(gail.account_id), JSON.stringify(m.versions[0]));
+    refused(await embed('s-private', { cookie: owner.cookie, page: fromGuest }), 'copy of a guest-written page');
+    // A copy of a page that named nobody names nobody either.
+    const fromUnnamed = await dup('page-unnamed', owner.cookie);
+    const u = await embed('s-private', { cookie: owner.cookie, page: fromUnnamed });
+    assert(u.status === 409 && u.body.error === 'page_unattributed', u.text);
+    // A copy of the owner's own page works.
+    readable(await embed('s-private', { cookie: invited, page: await dup('page-owner', owner.cookie) }), 'copy of an owner-only page');
+  });
+
+  await t('a team agent\'s version counts its team as it was when it wrote', async () => {
+    const OTHER = 't_00000000000000bb';
+    // The page now lives in another workspace; the agent wrote for TEAM.
+    await seedPage('page-agent', tess, { visibility: 'public' }, { workspace_id: OTHER }, [v(1, { by_account: tess.account_id }), v(2, { team_agent: { id: 'ta1', name: 'Bot' }, by_team: TEAM })]);
+    readable(await embed('s-team-other', { cookie: member, page: 'page-agent' }), 'team agent of the sheet\'s team');
+    await seedPage('page-agent-other', tess, { visibility: 'public' }, { workspace_id: TEAM }, [v(1, { by_account: tess.account_id }), v(2, { team_agent: { id: 'ta2', name: 'Bot' }, by_team: OTHER })]);
+    refused(await embed('s-team-other', { cookie: member, page: 'page-agent-other' }), 'team agent of another team');
+    // Without by_team (written before it was recorded): named nobody.
+    await seedPage('page-agent-old', tess, { visibility: 'public' }, { workspace_id: TEAM }, [v(1, { team_agent: { id: 'ta3', name: 'Bot' } })]);
+    const old = await embed('s-team-other', { cookie: member, page: 'page-agent-old' });
+    assert(old.status === 409 && old.body.error === 'page_unattributed', old.text);
+  });
+
+  await t('the owner may vouch for a page\'s unnamed versions ("Allow sheet embeds")', async () => {
+    const attest = (slug, o) => worker.fetch(req('/api/embed/attest', { method: 'POST', body: { slug }, ...o }), env, {});
+    // Not the owner, a token, another site: refused.
+    assert([401, 403].includes((await attest('page-legacy', { cookie: stranger, headers: { Origin: 'https://tdoc.dev' } })).status), 'stranger');
+    assert((await attest('page-legacy', { cookie: mallory.cookie, headers: { Origin: 'https://tdoc.dev' } })).status === 403, 'another account');
+    assert((await attest('page-legacy', { token: owner.token, headers: { Origin: 'https://tdoc.dev' } })).status === 403, 'token');
+    assert((await attest('page-legacy', { cookie: owner.cookie, headers: { Origin: 'https://evil.example' } })).status === 403, 'cross-site');
+    const ok = await attest('page-legacy', { cookie: owner.cookie, headers: { Origin: 'https://tdoc.dev' } });
+    assert(ok.status === 200, `attest ${ok.status} ${await ok.text()}`);
+    readable(await embed('s-private', { cookie: invited, page: 'page-legacy' }), 'after the owner vouched');
+    // The owner vouches as a writer: a sheet the owner cannot read stays out.
+    refused(await embed('s-team-other', { cookie: member, page: 'page-legacy' }), 'owner without access to the sheet');
+    // A later version that names nobody is not covered.
+    const m = JSON.parse(await env.META.get('meta:page-legacy'));
+    m.versions.push({ n: 2, created });
+    await env.META.put('meta:page-legacy', JSON.stringify(m));
+    const later = await embed('s-private', { cookie: invited, page: 'page-legacy' });
+    assert(later.status === 409 && later.body.error === 'page_unattributed', later.text);
+    // The legacy `by` field is not used to name a writer.
+    await seedPage('page-by-only', owner, { visibility: 'public' }, {}, [v(1, { by: owner.account_id })]);
+    assert((await embed('s-private', { cookie: invited, page: 'page-by-only' })).body.error === 'page_unattributed', 'by alone names nobody');
+  });
+
   await t('every write path records the writer\'s account (by_account)', async () => {
     // Agent / CLI / MCP publish (all /api/upload).
     const up = await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'page-written', version: 1, html: '<!doctype html><html><body><h1>W</h1><p>x</p></body></html>', meta: { title: 'W', versions: [{ n: 1, by_account: gail.account_id }] } } }), env, { waitUntil() {} });
     assert(up.status === 200, `upload ${up.status} ${await up.text()}`);
     let m = JSON.parse(await env.META.get('meta:page-written'));
     assert(m.versions[0].by_account === owner.account_id, `upload: ${JSON.stringify(m.versions[0])}`);
+    // A client cannot claim a team, inherited writers or "names nobody".
+    const forged = await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'page-forged', version: 1, html: '<!doctype html><html><body><h1>F</h1><p>x</p></body></html>', meta: { title: 'F', versions: [{ n: 1, by_team: TEAM, inherited_writers: { accounts: [owner.account_id], teams: [] }, inherited_unattributed: true }] } } }), env, { waitUntil() {} });
+    assert(forged.status === 200, `forged ${forged.status}`);
+    const fv = JSON.parse(await env.META.get('meta:page-forged')).versions[0];
+    assert(!fv.by_team && !fv.inherited_writers && !fv.inherited_unattributed && fv.by_account === owner.account_id, JSON.stringify(fv));
     // A browser save.
     const save = await worker.fetch(req('/api/doc/versions', { method: 'POST', cookie: owner.cookie, headers: { Origin: 'https://tdoc.dev' }, body: { slug: 'page-written', baseVersion: 1, html: '<!doctype html><html><body><h1>W</h1><p>y</p></body></html>' } }), env, { waitUntil() {} });
     assert(save.status === 200, `save ${save.status} ${await save.text()}`);

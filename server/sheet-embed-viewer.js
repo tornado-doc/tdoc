@@ -180,6 +180,17 @@
     }
   }
   function onKey(ev) {
+    var arrows = { ArrowLeft: [-60, 0], ArrowRight: [60, 0], ArrowUp: [0, -34], ArrowDown: [0, 34] };
+    if (arrows[ev.key]) {
+      for (var k = 0; k < embeds.length; k++) {
+        if (ev.target !== embeds[k].host || !embeds[k].scroller) continue;
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        embeds[k].scroller.scrollBy(arrows[ev.key][0], arrows[ev.key][1]);
+        return;
+      }
+      return;
+    }
     if (ev.key !== 'Enter' && ev.key !== ' ') return;
     for (var i = 0; i < embeds.length; i++) {
       if (ev.target !== embeds[i].host) continue;
@@ -284,6 +295,10 @@
     var cols = Array.isArray(d.columns) ? d.columns.slice(0, R.EMBED_MAX_COLUMNS) : [];
     var palettes = cols.map(function (col) { return col.type === 'tags' ? Q.parsePalette(col.palette || '') : null; });
     var scroll = h('div', 'se-scroll');
+    // Not a tab stop of its own (browsers make a scroller focusable): the
+    // host is the card's one stop, and its arrow keys scroll this.
+    scroll.tabIndex = -1;
+    embed.scroller = scroll;
     var table = h('table');
     var thead = h('thead'), hr = h('tr');
     cols.forEach(function (col) {
