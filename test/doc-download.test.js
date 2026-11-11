@@ -108,6 +108,20 @@ function wellFormed(name, text) {
     assert(!md.includes('javascript:'), 'a javascript: link survived');
   });
 
+  await t('Markdown: an unclosed or misnested <code> never turns escaping off', async () => {
+    const a = SHELL.documentMarkdown('<p><code>&lt;img src=x onerror=alert(1)&gt;</p><p>[x](javascript:alert(2))</p>');
+    assert(a === '\\<img src=x onerror=alert(1)\\>\n\n\\[x\\](javascript:alert(2))\n', JSON.stringify(a));
+    const b = SHELL.documentMarkdown('<p><code><b>&lt;img src=x onerror=alert(1)&gt;</code></b></p>');
+    assert(b === '**\\<img src=x onerror=alert(1)\\>**\n', JSON.stringify(b));
+    for (const md of [a, b]) assert(!/(^|[^\\])<img/.test(md) && !/(^|[^\\])\[x\]\(javascript:/.test(md), md);
+    // A paired span is literal inside; the text after it is escaped again.
+    const c = SHELL.documentMarkdown('<p><code>a_b &lt;i&gt;</code> &lt;i&gt; <code>`x`</code></p>');
+    assert(c === '`a_b <i>` \\<i\\> `` `x` ``\n', JSON.stringify(c));
+    // Image alt text is escaped too.
+    const d = SHELL.documentMarkdown('<p><img src="https://e.com/i.png" alt="a](javascript:x) *b*"></p>');
+    assert(d === '![a\\](javascript:x) \\*b\\*](https://e.com/i.png)\n', JSON.stringify(d));
+  });
+
   await t('Markdown: linear time on hostile input (unclosed blocks, tags, declarations, marks; huge tables)', async () => {
     const cases = [
       ['2 MB of unclosed <svg>', '<p>x</p>' + '<svg>'.repeat(400000), 200],
@@ -293,7 +307,7 @@ function wellFormed(name, text) {
 
   await t('Word: image fetches carry no cookies except for this doc\'s files, and are capped', async () => {
     const src = fs.readFileSync(path.join(ROOT, 'shell', 'src', 'document', 'doc-download.js'), 'utf8');
-    assert(/credentials: mine \? 'same-origin' : 'omit'/.test(src) && src.includes('url.pathname.startsWith(own)') && src.includes("const own = `/d/${encodeURIComponent(slug)}/`"), 'credentials');
+    assert(/credentials: mine \? 'same-origin' : 'omit'/.test(src) && src.includes("redirect: 'error',") && src.includes('url.pathname.startsWith(own)') && src.includes("const own = `/d/${encodeURIComponent(slug)}/`"), 'credentials');
     assert(/IMAGE_LIMITS = Object\.freeze\(\{ count: 100, bytes: 50 \* 1024 \* 1024, each: 20 \* 1024 \* 1024, ms: 15_000 \}\)/.test(src), 'limits');
     assert(src.includes('response.body?.getReader()') && !src.includes('response.blob()') && src.includes('controller.abort()'), 'stream read with a cap and a timeout');
   });

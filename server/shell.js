@@ -411,13 +411,16 @@
       if (!words) { parts.push(seg); continue; }
       let open = top.code === 'b' ? '**' : top.code === 'i' ? '*' : '`';
       let close = open;
+      let body = words;
       if (top.code === 'c') {
+        // Inside a paired code span text is literal: the escapes come out.
+        body = words.replace(/\\([\\`*_[\]<>!&])/g, '$1');
         let longest = 0;
-        (words.match(/`+/g) || []).forEach(function (run) { if (run.length > longest) longest = run.length; });
+        (body.match(/`+/g) || []).forEach(function (run) { if (run.length > longest) longest = run.length; });
         open = close = '`'.repeat(longest + 1);
-        if (longest) { open += ' '; close = ' ' + close; }
+        if (longest || /^`|`$/.test(body)) { open += ' '; close = ' ' + close; }
       }
-      parts.push((/^\s/.test(seg) ? ' ' : '') + open + words + close + (/\s$/.test(seg) ? ' ' : ''));
+      parts.push((/^\s/.test(seg) ? ' ' : '') + open + body + close + (/\s$/.test(seg) ? ' ' : ''));
     }
     parts.push(str.slice(last));
     return parts.join('');
@@ -458,10 +461,10 @@
     let preLang = '';
     let item = null;
     let quote = 0;
-    let codeDepth = 0;
-    // Author text in the Markdown file: what would read as syntax is
-    // escaped (inside inline code it is literal, and the fence grows).
-    const literal = (t) => (!rich ? t : codeDepth ? t.replace(/[\u0001\u0002]/g, '') : mdEscape(t));
+    // Author text in the Markdown file: what would read as syntax is always
+    // escaped as it arrives. Only a code span whose open and close pair up
+    // takes the escapes back out (resolveMarks), where nothing is syntax.
+    const literal = (t) => (rich ? mdEscape(t) : t);
     const items = [];
     const lists = [];
     const base = rich && typeof o.baseUrl === 'string' ? o.baseUrl : '';
@@ -524,7 +527,6 @@
       // spaces inside an element move outside its marks.
       if (rich && /^(b|strong|i|em|code|kbd)$/.test(tag)) {
         const code = tag === 'b' || tag === 'strong' ? 'b' : tag === 'i' || tag === 'em' ? 'i' : 'c';
-        if (code === 'c') codeDepth = Math.max(0, codeDepth + (close ? -1 : 1));
         add((close ? '\u0002' : '\u0001') + code);
         continue;
       }

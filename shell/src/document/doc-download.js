@@ -152,7 +152,7 @@ export function imageLoader(slug, limits = IMAGE_LIMITS) {
       const response = await fetch(url.href, {
         credentials: mine ? 'same-origin' : 'omit',
         mode: local || url.origin === location.origin ? 'same-origin' : 'cors',
-        redirect: mine ? 'follow' : 'error',
+        redirect: 'error',
         signal: controller.signal,
       });
       if (!response.ok) return null;
