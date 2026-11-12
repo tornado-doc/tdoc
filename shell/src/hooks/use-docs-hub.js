@@ -225,7 +225,8 @@ export function useDocsHub({ boot, onUnauthorized }) {
     return true;
   }, [docs, recent, starred, notify, run]);
 
-  const saveFolder = useCallback(async ({ id, name }) => {
+  // `parent`: where a new folder goes (the folder on screen by default).
+  const saveFolder = useCallback(async ({ id, name, parent }) => {
     const trimmed = String(name || '').trim();
     if (!trimmed) return false;
     if (id) {
@@ -236,7 +237,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
       return true;
     }
     let created;
-    const ok = await run(async () => { created = (await createFolder(trimmed, folder)).folder; });
+    const ok = await run(async () => { created = (await createFolder(trimmed, parent ?? folder)).folder; });
     if (!ok) return false;
     setFolders((items) => [...items, { ...created, parent: created.parent || '' }]);
     return true;

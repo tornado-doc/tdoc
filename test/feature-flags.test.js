@@ -47,6 +47,15 @@ const assert = require('assert/strict');
     assert.ok(listed.some((flag) => flag.label === 'Doc thumbnails'));
   });
 
+  t('myDocsA (layout A) is a dev-mode flag, read by the hub', () => {
+    assert.equal(FLAGS.myDocsA.default, false);
+    assert.equal(isFeatureOn('myDocsA', null), false);
+    assert.equal(isFeatureOn('myDocsA', { on: true }), true);
+    assert.ok(devOnlyFlags().some((flag) => flag.name === 'myDocsA'));
+    const hub = require('fs').readFileSync(require.resolve('../shell/src/docs-hub.jsx'), 'utf8');
+    assert.ok(hub.includes("isFeatureOn('myDocsA')"), 'docs-hub.jsx reads the flag');
+  });
+
   t('grids and the profile read the flag, not dev mode directly', () => {
     const fs = require('fs');
     const rows = fs.readFileSync(require.resolve('../shell/src/docs-hub/rows.jsx'), 'utf8');

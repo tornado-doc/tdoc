@@ -34,7 +34,7 @@ export function MetaParts({ parts }) {
 }
 
 const TYPE_ICONS = { doc: FileText, sheet: Sheet, slides: Presentation };
-function DocTypeIcon({ doc }) {
+export function DocTypeIcon({ doc }) {
   const type = docTypeOf(doc);
   const Icon = TYPE_ICONS[type];
   const label = docTypeLabel(type);
@@ -46,7 +46,7 @@ function DocTypeIcon({ doc }) {
 }
 
 const SHARING_ICONS = { public: Globe, link: Link2, team: UsersRound, people: UserRound, private: Lock };
-function SharingState({ doc }) {
+export function SharingState({ doc }) {
   const text = sharingText(doc);
   if (!text) return null;
   const Icon = SHARING_ICONS[doc.sharing];
@@ -58,7 +58,7 @@ function SharingState({ doc }) {
   );
 }
 
-function ActivityBadge({ doc }) {
+export function ActivityBadge({ doc }) {
   const activity = activityText(doc);
   if (!activity) return null;
   return (
