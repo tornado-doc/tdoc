@@ -182,6 +182,12 @@ async function startServer(worker, env) {
         assert.equal(await agent.locator('.mda-need-reason').textContent(), 'An agent replied');
         assert.equal(await agent.getByRole('button', { name: /Mark done/ }).count(), 0, 'no done for an agent reply (read it in the doc)');
         assert.equal(await page.getByRole('tab', { name: /Needs you/ }).locator('.mda-chip-n').textContent(), '3');
+        // The card's unread: one blue circle with one number on the drawing's corner.
+        const unread = card(page, 'launch-deck').locator('.doc-activity');
+        assert.equal((await unread.textContent()).trim(), '1');
+        assert.equal(await unread.getAttribute('aria-label'), '1 agent reply');
+        assert.equal(await unread.locator('svg').count(), 0, 'no robot glyph');
+        assert.equal((await unread.boundingBox()).height, 20);
       });
 
       await t('1440: Mark done reads the bell rows on the server, and the card stays gone after a reload', async () => {
@@ -422,8 +428,27 @@ async function startServer(worker, env) {
           assert.ok(sizes.menu >= 44, `⋯ is ${sizes.menu}px`);
           assert.match(await card(p, 'budget-2027').locator('.doc-meta').textContent(), /^updated 1d ago · 1 person$/);
           assert.equal(await card(p, 'budget-2027').getByRole('img', { name: 'Sheet' }).count(), 1);
-          // Unread stays on the row; a starred doc keeps its star by the title.
-          assert.equal(await card(p, 'q4-plan').locator('.doc-activity').count(), 1);
+          // Unread: one blue circle with one number at the row's end, the
+          // breakdown in its label; no robot or bubble glyphs.
+          const badge = card(p, 'q4-plan').locator('.doc-activity');
+          assert.equal((await badge.textContent()).trim(), '2');
+          assert.equal(await badge.getAttribute('aria-label'), '2 new comments');
+          assert.equal((await card(p, 'launch-deck').locator('.doc-activity').textContent()).trim(), '1');
+          assert.equal(await card(p, 'launch-deck').locator('.doc-activity').getAttribute('aria-label'), '1 agent reply');
+          assert.equal(await p.locator('.doc-activity svg').count(), 0);
+          const [badgeBox, titleBox] = [await badge.boundingBox(), await card(p, 'q4-plan').locator('.doc-title').boundingBox()];
+          assert.ok(badgeBox.height === 20 && badgeBox.x > titleBox.x + titleBox.width, 'badge is a 20px circle after the title');
+          // A long title wraps to two lines before it is cut.
+          const wrap = await card(p, 'q4-plan').locator('.doc-title').evaluate((el) => {
+            const before = el.textContent;
+            el.textContent = 'A much longer title that goes on and on about the quarterly plan and its numbers, 第一轮原始记录';
+            const lh = parseFloat(getComputedStyle(el).lineHeight);
+            const lines = Math.round(el.getBoundingClientRect().height / lh);
+            el.textContent = before;
+            return { lines, clamp: getComputedStyle(el).webkitLineClamp };
+          });
+          assert.deepEqual(wrap, { lines: 2, clamp: '2' }, 'a long title wraps to two lines, then is cut');
+          // A starred doc keeps its star by the title.
           assert.equal(await card(p, 'launch-deck').getByRole('img', { name: 'Starred' }).count(), 1);
           // The row opens the doc from anywhere on it.
           await card(p, 'ideas').scrollIntoViewIfNeeded();

@@ -135,13 +135,13 @@ export function DocTableRow({ doc, meta, path, folderName = '', selection, starr
         <div className="doc-title-line">
           {path ? <span className="doc-path" title={path}>{path} ›</span> : null}
           <a className="doc-title" href={docHref(doc)} draggable={false}>{doc.title}</a>
-          <ActivityBadge doc={doc} />
         </div>
       </div>
       <span className="mda-cell mda-cell-folder">{folderName ? <><Folder size={14} aria-hidden="true" /><span>{folderName}</span></> : null}</span>
       <span className="mda-cell mda-cell-sharing">{doc.sharing ? <SharingState doc={doc} /> : null}</span>
       <span className="mda-cell doc-meta"><MetaParts parts={Array.isArray(meta) ? meta : [meta]} /></span>
       <div className="row-actions">
+        <ActivityBadge doc={doc} />
         {starrable ? <StarButton doc={doc} onToggle={onToggleStar} /> : null}
         <RowMenu label="More actions" items={menuItems} />
       </div>

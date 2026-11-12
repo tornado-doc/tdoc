@@ -1376,7 +1376,8 @@ export function DocsHub({ boot }) {
   useEffect(() => {
     if (!phoneA || !chipRows.current) return;
     for (const row of chipRows.current.querySelectorAll('.mda-scroll')) {
-      const on = [...row.querySelectorAll('.mda-chip.is-on')].pop();
+      // "All folders" is the default, not a choice to bring into sight.
+      const on = [...row.querySelectorAll('.mda-chip.is-on:not(.mda-everything)')].pop();
       if (!on) continue;
       const left = on.offsetLeft - row.offsetLeft;
       if (left < row.scrollLeft || left + on.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = Math.max(0, left - 16);

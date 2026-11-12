@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bot, Check, FileText, MessageSquare, Presentation, Sheet } from 'lucide-react';
+import { Check, FileText, MessageSquare, MessageSquareText, Presentation, Sheet } from 'lucide-react';
 import { AppButton } from '../ui/button.jsx';
 import { listNotifications, markNotificationsRead } from '../document/api.js';
 import { actorName, notificationAction, notificationTarget } from '../notification-text.js';
@@ -101,7 +101,7 @@ function NeedCard({ card, onDone }) {
       <a className="mda-need-link" href={card.href} aria-label={`${card.reason} on ${card.doc.title}`} />
       <div className="mda-need-top">
         {card.kind === 'agent' ? (
-          <span className="mda-who is-agent" title="Agent"><Bot size={14} aria-hidden="true" /></span>
+          <span className="mda-who is-agent" title="Agent reply"><MessageSquareText size={14} aria-hidden="true" /></span>
         ) : card.who ? (
           <span className="mda-who" title={card.who}>{initials(card.who)}</span>
         ) : (
@@ -137,7 +137,9 @@ export function NeedsYou({ cards, limit = 0, strip = false, onSeeAll, onDone, em
           {onSeeAll ? <button type="button" className="mda-text-link" onClick={onSeeAll}>See all {cards.length}</button> : null}
         </div>
       ) : null}
-      <div className={`mda-needs-grid${strip ? ' is-strip' : ''}`}>
+      {/* A strip snaps to a card; when the bell's rows arrive and a newer
+          card lands in front, a fresh strip starts at the newest. */}
+      <div key={strip ? shown.map((card) => card.key).join('|') : undefined} className={`mda-needs-grid${strip ? ' is-strip' : ''}`}>
         {shown.map((card) => <NeedCard key={card.key} card={card} onDone={onDone} />)}
       </div>
     </section>

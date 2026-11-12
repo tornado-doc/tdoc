@@ -72,7 +72,8 @@ const PROSE_WITH_SHEET = `<h1>Runs and plan</h1><p>What we ran, and what is next
     eq(m.activityText({}), null);
     eq(m.activityText({ activity: { comments: 0, agent: 0 } }), null);
     eq(m.activityText({ activity: { comments: 2 } }).label, '2 new comments');
-    eq(m.activityText({ activity: { comments: 1, agent: 1 } }).label, '1 new comment, 1 agent reply');
+    eq(m.activityText({ activity: { comments: 1, agent: 1 } }).label, '1 new comment · 1 agent reply');
+    eq(m.activityText({ activity: { comments: 1, agent: 2 } }).total, 3);
     eq(m.activityText({ activity: { agent: 3 } }).label, '3 agent replies');
   });
 
