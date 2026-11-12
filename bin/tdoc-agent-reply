@@ -188,7 +188,8 @@ post_reply() {
     local reason
     reason="$(printf '%s' "$body" | json_get reason)"
     case "$reason" in
-      already_answered) echo "[tdoc] not posted: an agent already has the last word on this comment; it waits for a person to reply." >&2 ;;
+      already_answered) echo "[tdoc] not posted: an agent already has the last word on this comment; it waits for a person to reply. (One follow-up is allowed only right after a --status partial reply.)" >&2 ;;
+      duplicate_reply)  echo "[tdoc] not posted: it repeats the last agent reply on this comment word for word." >&2 ;;
       comment_deleted)  echo "[tdoc] not posted: that comment was deleted." >&2 ;;
       *)                echo "[tdoc] not posted: ${reason:-skipped}" >&2 ;;
     esac
