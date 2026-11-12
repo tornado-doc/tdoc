@@ -9169,8 +9169,12 @@ function agentReplyGate(record, agentLogin, text) {
         // question the agent already answered is still the question.
         break;
       case 'anchor_changed':
-        // The agent's own re-anchor (bind_anchor_aid) is not a human turn.
-        if (e.by !== agentLogin) { theirTurn = true; run = 0; last = null; }
+        // Only a PERSON moving the anchor is a human turn. An agent's
+        // bind_anchor_aid re-anchor stamps by_kind:'agent' — without it, one
+        // agent's re-anchor read as a human turn to every OTHER agent's gate,
+        // and two agents could keep a thread alive by re-anchoring in turn.
+        // Events written before by_kind existed keep the old login check.
+        if (e.by_kind ? e.by_kind === 'human' : e.by !== agentLogin) { theirTurn = true; run = 0; last = null; }
         break;
       case 'reply_deleted':
       case 'reply_text_edited':
@@ -16190,7 +16194,7 @@ function applyCommentOp(list, op) {
       // session+env). The DO/applyCommentOp only serializes the write.
       const target = list.find(c => c.id === op.id);
       if (!target) return { status: 404, body: { error: 'not_found' } };
-      appendEvent(target, { kind: 'anchor_changed', at_version: op.version, at: now, reset_status: op.reset_status, anchor: op.anchor, by: op.actor && op.actor.login });
+      appendEvent(target, { kind: 'anchor_changed', at_version: op.version, at: now, reset_status: op.reset_status, anchor: op.anchor, by: op.actor && op.actor.login, by_kind: op.actor && op.actor.by_kind });
       return { status: 200, body: snapshotAt(target, op.version) };
     }
     case 'set_status': {
@@ -30502,7 +30506,7 @@ const tdocHandlers = {
       if (!canReadDoc(accessFromMeta(meta || {}), s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       const V = coerceBodyVersion(version, target.created_in || 1);
       const res = await mutateComments(env, slug, {
-        kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: actorKey(s) },
+        kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: actorKey(s), by_kind: 'human' },
       });
       return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
     }
@@ -31624,7 +31628,7 @@ const tdocHandlers = {
         const fallback = cur.anchor?.fallback;
         const label = cur.anchor?.label || 'svg';
         events.push({
-          kind: 'anchor_changed', at_version: V, at: now, by: agent.login, reset_status: false,
+          kind: 'anchor_changed', at_version: V, at: now, by: agent.login, by_kind: 'agent', reset_status: false,
           anchor: { kind: 'element', aid: bind_anchor_aid, selector: `[data-tdoc-aid="${bind_anchor_aid}"]`, label, ...(fallback ? { fallback } : {}) },
         });
       }
