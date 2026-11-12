@@ -7,6 +7,7 @@ import {
   clearDraftBody,
   draftBodyExpired,
   draftKey,
+  hasLocalDraftBody,
   htmlHash,
   legacyDraftKey,
   loadDraft,
@@ -15,6 +16,19 @@ import {
 
 function urlWantsEdit() {
   return new URLSearchParams(location.search).get('edit') === '1';
+}
+
+// ?edit=1 is a one-shot instruction for the page that was just created or
+// saved. Left in the address bar it turned every reload and every copied link
+// into Edit, so it is read once and then dropped (other params and the hash
+// stay).
+function dropEditParam() {
+  try {
+    const url = new URL(location.href);
+    if (!url.searchParams.has('edit')) return;
+    url.searchParams.delete('edit');
+    history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  } catch {}
 }
 
 function modeStorageKey(config) {
@@ -51,22 +65,25 @@ export function useDocumentEditor({
   const legacyKey = useMemo(() => legacyDraftKey(config), [config]);
   const publishedHtml = useRef(null);
   const consideringDraft = useRef(false);
-  // A doc created from scratch arrives at ?edit=1: it is blank, so dropping the
-  // author in read mode would show an empty page and hide the one control they
-  // need. `tdoc:ready` re-sends whatever mode is current, so the frame picks
-  // this up even though it is set before the iframe has loaded.
+  // A doc created from scratch (or just saved) arrives at ?edit=1: it is
+  // blank, so dropping the author in read mode would show an empty page and
+  // hide the one control they need. `tdoc:ready` re-sends whatever mode is
+  // current, so the frame picks this up even though it is set before the
+  // iframe has loaded.
+  //
+  // Opening a doc otherwise never starts in Edit from memory: a remembered
+  // Edit landed people who only wanted to read in the editor. The one
+  // exception is an unsaved draft — the frame offers it back only once it is
+  // editing, so a remembered Edit with a draft waiting still opens Edit.
   const [mode, setMode] = useState(() => {
-    const params = new URLSearchParams(location.search);
-    const wantsEdit = params.get('edit') === '1';
-    if (wantsEdit && config.canEdit) return 'edit';
-    // Every doc type (a sheet on its own page too) keeps the same top bar,
-    // with the mode switch and Save: a remembered Edit mode is Edit here.
+    if (urlWantsEdit() && config.canEdit) return 'edit';
     const stored = getStoredMode(config);
-    if (stored === 'edit' && config.canEdit) return 'edit';
+    if (stored === 'edit' && config.canEdit && hasLocalDraftBody(storeKey, legacyKey)) return 'edit';
     if (stored === 'comment' && (config.canComment || config.signInToComment)) return 'comment';
     if (stored === 'read') return 'read';
     return (config.canComment || config.signInToComment) ? 'comment' : 'read';
   });
+  useEffect(() => { dropEditParam(); }, []);
   const [dirty, setDirty] = useState(false);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);

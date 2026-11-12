@@ -136,6 +136,7 @@ const OFFLINE = [
   'oldver-strip.test.js',     // old-version banner predicate
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
   'mode-persistence.test.js', // mode preference persistence in localStorage
+  'mode-initial-behaviour.test.js', // stored Edit does not reopen Edit; ?edit=1 is one-shot
   'bar-overflow-trigger.test.js', // the ⋯ trigger is hidden where its menu would be empty
   'editor-save-hover.test.js', // #382 a button must never paint its background its own text colour
   'create-from-scratch.test.js', // #356 blank doc: slug derivation, both create routes, edit-on-arrival

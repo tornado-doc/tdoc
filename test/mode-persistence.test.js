@@ -34,20 +34,39 @@ t('storeMode is wrapped in try/catch for privacy mode', () => {
     'storeMode must catch localStorage throws in privacy mode');
 });
 
+const modeInit = editorHook.slice(
+  editorHook.indexOf('const [mode, setMode] = useState'),
+  editorHook.indexOf('const [dirty, setDirty]')
+);
+
 t('URL ?edit=1 takes precedence over stored mode', () => {
-  const modeInit = editorHook.slice(
-    editorHook.indexOf('const [mode, setMode] = useState'),
-    editorHook.indexOf('const [dirty, setDirty]')
-  );
-  const editUrlIndex = modeInit.indexOf("get('edit') === '1'");
+  const editUrlIndex = modeInit.indexOf('urlWantsEdit() && config.canEdit');
   const storedIndex = modeInit.indexOf('getStoredMode(config)');
   assert(editUrlIndex >= 0 && storedIndex >= 0, 'both URL check and stored check must exist');
   assert(editUrlIndex < storedIndex, '?edit=1 must be checked before stored mode');
 });
 
-t('stored edit mode requires canEdit permission', () => {
-  assert(/stored === 'edit' && config\.canEdit/.test(editorHook),
-    'stored edit mode must be gated on canEdit');
+t('a remembered Edit does not reopen Edit on its own', () => {
+  // Only an unsaved draft brings a remembered Edit back; otherwise the doc
+  // opens in Comment/Read like any other visit.
+  const editReturns = modeInit.match(/^.*return 'edit';.*$/gm) || [];
+  assert(editReturns.length === 2, `expected exactly two ways into Edit, got ${editReturns.length}`);
+  const storedEdit = editReturns.find((line) => line.includes("stored === 'edit'"));
+  assert(storedEdit, 'stored edit branch missing');
+  assert(/config\.canEdit/.test(storedEdit), 'stored edit mode must be gated on canEdit');
+  assert(/hasLocalDraftBody\(storeKey, legacyKey\)/.test(storedEdit),
+    'a remembered Edit must only reopen Edit when an unsaved draft is waiting');
+});
+
+t('?edit=1 is dropped from the address bar after it is read', () => {
+  const fnStart = editorHook.indexOf('function dropEditParam()');
+  assert(fnStart >= 0, 'dropEditParam helper missing');
+  const fn = editorHook.slice(fnStart, editorHook.indexOf('\n}\n', fnStart));
+  assert(fn.includes("searchParams.delete('edit')"), 'must remove only the edit param');
+  assert(/history\.replaceState\([^)]*url\.search\}\$\{url\.hash\}/.test(fn),
+    'replaceState must keep the other params and the hash');
+  assert(/useEffect\(\(\) => \{ dropEditParam\(\); \}, \[\]\)/.test(editorHook),
+    'dropEditParam must run once on mount, after the initial mode was read');
 });
 
 t('stored comment mode requires canComment permission', () => {
