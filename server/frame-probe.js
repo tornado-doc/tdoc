@@ -16,6 +16,7 @@
 //   shell → frame:
 //     { type:'tdoc:anchors',   comments:[...] }   // resolve → highlight → report pins
 //     { type:'tdoc:scrollTo',  docY }
+//     { type:'tdoc:footerInset', px }              // blank space after the doc for the shell footer
 //     { type:'tdoc:focusAnchor', id, scroll }      // activate and optionally reveal an anchor
 (function () {
   'use strict';
@@ -2166,6 +2167,7 @@
     else if (d.type === 'tdoc:focusAnchor') setActiveAnchor(d.id, !!d.scroll);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:scrollBy') { try { window.scrollBy(0, Number(d.deltaY) || 0); } catch (x) {} }
+    else if (d.type === 'tdoc:footerInset') setFooterInset(d.px);
   });
 
 
@@ -2303,6 +2305,30 @@
     else if (d.type === 'tdoc:fbScroll') { try { window.scrollBy(fbNum(d.dx), fbNum(d.dy)); } catch (x) {} }
     else if (d.type === 'tdoc:fbClear') { if (HL) CSS.highlights.delete('tdoc-pending'); }
   });
+
+  // --- footer inset --------------------------------------------------------
+  // The shell's footer is fixed over the frame's bottom edge and reveals only
+  // at full scroll. A doc that sets its own padding (custom designs, wide
+  // tables) ends flush with the frame, so the footer would cover its last
+  // lines. Reserve the footer's height after everything the author renders,
+  // whatever their CSS: a block after <body> (html::after), not a child of
+  // body, so a flex/grid body cannot lay it out sideways. The height never
+  // depends on whether the footer shows, so revealing it cannot move the
+  // scroll position (no show/hide loop). 0 (full-bleed sheet) removes it.
+  var footerInsetStyle = null;
+  function setFooterInset(px) {
+    var h = Math.max(0, Math.min(400, Math.round(Number(px) || 0)));
+    if (!footerInsetStyle) {
+      footerInsetStyle = document.createElement('style');
+      footerInsetStyle.id = 'tdoc-provider-footer-inset';
+      footerInsetStyle.setAttribute('data-tdoc-provider', '');
+      (document.head || document.documentElement).appendChild(footerInsetStyle);
+    }
+    var css = h ? '@media screen{html::after{content:""!important;display:block!important;height:' + h + 'px!important;margin:0!important;padding:0!important;border:0!important;background:none!important;pointer-events:none!important;}}' : '';
+    if (footerInsetStyle.textContent === css) return;
+    footerInsetStyle.textContent = css;
+    reportScroll();
+  }
 
   // --- scroll sync ---------------------------------------------------------
   // innerH (frame viewport height) lets the shell tell when the doc is scrolled

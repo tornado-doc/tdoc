@@ -140,6 +140,16 @@ export function draftBodyExpired(record, now = Date.now()) {
   return stamped > 0 && now - stamped > DRAFT_MAX_AGE_MS;
 }
 
+// Synchronous peek for the first render: is there an unexpired draft body in
+// localStorage (where every keystroke lands first)? IndexedDB is not consulted.
+export function hasLocalDraftBody(key, fallbackKey, now = Date.now()) {
+  return [key, fallbackKey].some((k) => {
+    if (!k) return false;
+    const record = readLocalRecord(k);
+    return Boolean(record?.bodyHtml) && !draftBodyExpired(record, now);
+  });
+}
+
 export async function loadDraft(key, fallbackKey) {
   const current = await readRecord(key);
   if (current) return current;
