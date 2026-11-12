@@ -103,7 +103,8 @@ const OFFLINE = [
   'avatar-route.test.js',      // /avatar: widget faces from the tdoc origin; allowlist, no open proxy, 404 fallback, CORP; widget URLs
   'cli-mcp-parity.test.js',     // AGENTS.md: every MCP tool maps to an HTTP route and a CLI command (or a stated exception)
 
-  'pull-acks-handoff.test.js',  // agent pulling comments marks the handoff received
+  'pull-acks-handoff.test.js',  // agent pulling comments marks only ITS handoffs received
+  'handoff-timestamps.test.js', // send/deliver/ack/reply/publish clocks on a handoff, resend-safe
   'local-agent.test.js',        // local CLI agents (tdoc-daemon): queued provider, pending index, KV write budget
   'team-agent.test.js',         // team agents: admin adds, members call, one team's reach, survives the adder, revoke
   'daemon-cli.test.js',         // bin/tdoc-daemon once-mode end to end against a stub worker + fake claude

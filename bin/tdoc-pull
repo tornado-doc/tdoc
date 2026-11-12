@@ -63,9 +63,16 @@ mkdir -p "$(dirname "$OUT")"
 # and denied the owner their own comments — and private is what FIRST-DOC.md
 # publishes every new user's first doc as. See #278.
 TOKEN="$(json_file_get "$CONFIG_FILE" upload_token)"
+# Under the local agent daemon TDOC_AGENT names which agent is pulling
+# (local/<device>/<cli>); the worker acks only the handoffs addressed to it.
 if [ -n "$TOKEN" ]; then
-  REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 \
-    -H "Authorization: Bearer $TOKEN" "$BASE/api/comments?slug=$SLUG&version=all")"
+  if [ -n "${TDOC_AGENT:-}" ]; then
+    REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 \
+      -H "Authorization: Bearer $TOKEN" -H "X-Tdoc-Agent: $TDOC_AGENT" "$BASE/api/comments?slug=$SLUG&version=all")"
+  else
+    REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 \
+      -H "Authorization: Bearer $TOKEN" "$BASE/api/comments?slug=$SLUG&version=all")"
+  fi
 else
   REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 "$BASE/api/comments?slug=$SLUG&version=all")"
 fi
