@@ -28,12 +28,12 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (e) { failed++; console.log(`  ✗ ${name}\n    ${e.message}`); } };
   try {
     const shell = await (await fetch(`${base}/me`)).text();
-    // These cases are the one-column layout's (a phone's, or the oldMyDocs
-    // rollback on a wide screen): pinned so the 1280 cases keep covering it.
-    // Layout A's own cases pass { old: false }; my-docs-a-ui.test.js has the rest.
+    // These cases are the one-column layout's (everybody's while myDocsA is
+    // a dev-mode flag, and a phone's). Layout A's own cases pass
+    // { old: false }, which pins the flag on; my-docs-a-ui.test.js has the rest.
     const open = async (width, query, { old = true } = {}) => {
       const page = await browser.newPage({ viewport: { width, height: 800 } });
-      if (old) await page.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), oldMyDocs: true }; });
+      if (!old) await page.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), myDocsA: true }; });
       await page.route(`${base}/me*`, (r) => r.fulfill({ contentType: 'text/html', body: withBoot(shell, (boot) => ({ ...boot, capabilities: { ...boot.capabilities, folders: true }, teams: TEAMS, docs: [PERSONAL, NESTED_PERSONAL], folders: PERSONAL_FOLDERS, recent: [PERSONAL, TEAM_DOC], starred: [PERSONAL, TEAM_DOC], team_docs: [TEAM_DOC, NESTED_TEAM], team_folders: { tm_befreed: TEAM_FOLDERS } })) }));
       await page.route('**/api/me/connectors', (r) => r.fulfill({ json: {
         targets: [], available: [{ id: 'raft', ready: true }, { id: 'local', ready: true }, { id: 'webhook', ready: true }],

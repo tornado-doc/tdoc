@@ -677,11 +677,11 @@ export function DocsHub({ boot }) {
     setLayoutState(next);
     try { localStorage.setItem(CATALOG_LAYOUT_KEY, next); } catch { /* preference only */ }
   };
-  // Layout A on a wide screen unless the rollback flag is on; phones keep
-  // the one-column layout until their own redesign.
-  const [oldMyDocs] = useState(() => isFeatureOn('oldMyDocs'));
+  // Layout A on a wide screen where the myDocsA flag is on (dev mode, PR
+  // previews); phones keep the one-column layout until their own redesign.
+  const [myDocsA] = useState(() => isFeatureOn('myDocsA'));
   const wide = useMediaQuery(WIDE_QUERY);
-  const layoutA = !oldMyDocs && wide;
+  const layoutA = myDocsA && wide;
   const [cardLayout, setCardLayoutState] = useState(() => {
     try { return localStorage.getItem(MY_DOCS_LAYOUT_KEY) === 'list' ? 'list' : 'grid'; } catch { return 'grid'; }
   });

@@ -2,8 +2,8 @@
 // counts, folders, Comments / Trash), Needs you from the bell's unread rows
 // and unread agent replies, cards by default with a remembered list view,
 // a doc dragged onto a folder moves there, and Settings as its own page with
-// its sections. The rollback flag (oldMyDocs) and a phone keep the
-// one-column layout. Real worker routes (in-process harness) behind a local
+// its sections. Layout A is behind the myDocsA flag (on in dev mode): with
+// it off, and on a phone, My docs keeps the one-column layout. Real worker routes (in-process harness) behind a local
 // HTTP server, real built shell runtime, real Chromium.
 //
 // TDOC_SHOTS_DIR=<dir> also writes screenshots (1440, 1280, dark, phone).
@@ -118,7 +118,7 @@ async function startServer(worker, env) {
   const env = makeEnv(mod.CommentsStore);
   await seed(env);
   const { server, base } = await startServer(worker, env);
-  const open = async (viewport, { flags = null, dark = false } = {}) => {
+  const open = async (viewport, { flags = { myDocsA: true }, dark = false } = {}) => {
     const context = await browser.newContext({
       viewport,
       ...(viewport.width < 600 ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}),
@@ -428,8 +428,8 @@ async function startServer(worker, env) {
       } finally { await ctx.close(); }
     });
 
-    await t('oldMyDocs pinned on: the one-column layout with its tabs, on a wide screen', async () => {
-      const { context: ctx, page: p, errors: errs } = await open({ width: 1440, height: 900 }, { flags: { oldMyDocs: true } });
+    await t('myDocsA off (everybody outside dev mode): the one-column layout with its tabs, on a wide screen', async () => {
+      const { context: ctx, page: p, errors: errs } = await open({ width: 1440, height: 900 }, { flags: null });
       try {
         await p.goto(`${base}/me`);
         await p.locator('.tabs').waitFor();
@@ -440,7 +440,7 @@ async function startServer(worker, env) {
       } finally { await ctx.close(); }
     });
 
-    await t('phone 390: the one-column layout as before (tabs, rows), no sidebar', async () => {
+    await t('phone 390, flag on: the one-column layout as before (tabs, rows), no sidebar', async () => {
       const { context: ctx, page: p, errors: errs } = await open({ width: 390, height: 844 });
       try {
         await p.goto(`${base}/me`);

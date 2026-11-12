@@ -73,14 +73,12 @@ export const FLAGS = Object.freeze({
   // view applied, the comment count, Open), read under the SHEET's access
   // for the person reading (shell/src/document/sheet-embed.js, worker
   // /api/embed/sheet). Off: the figure is its fallback link, as in an export.
-  // My docs before the redesign (one column, Docs / Recent / Starred /
-  // Comments / Trash / Settings tabs) on wide screens. The new layout (left
-  // sidebar with types and folders, Needs you, card grid, Settings as its own
-  // page) is approved by Julie (2026-11-12) and ships to everybody; pin this
-  // flag on to roll it back. Phones keep the one-column layout either way
-  // until the phone redesign lands. A `rollback` flag is an off switch, not
-  // a preview: dev mode does not turn it on and does not list it.
-  oldMyDocs: Object.freeze({ label: 'Old My docs layout', owner: 'julie', added: '2026-11-12', default: false, rollback: true }),
+  // My docs layout A on wide screens (>= 900px): left sidebar with types
+  // and folders, Needs you, card grid / list table, Settings as its own page.
+  // Approved by Julie (2026-11-12) to ship behind dev mode first; on in PR
+  // previews. Phones keep the one-column layout either way until the phone
+  // redesign lands.
+  myDocsA: Object.freeze({ label: 'New My docs layout (desktop)', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
   sheetEmbeds: Object.freeze({ label: 'Sheets embedded in pages (live, by reference)', owner: 'julie', added: '2026-11-11', default: false, preview: true }),
 });
 
@@ -100,13 +98,12 @@ export function isFeatureOn(name, devMode = readDevMode()) {
   // A page (tests, a support link) may pin a flag either way before boot.
   const pinned = typeof window !== 'undefined' && window.__TDOC_FLAGS__ ? window.__TDOC_FLAGS__[name] : undefined;
   if (typeof pinned === 'boolean') return pinned;
-  if (flag.rollback === true) return flag.default === true;
   return flag.default === true || Boolean(devMode && devMode.on) || (flag.preview === true && isPreviewHost());
 }
 
 // The flags dev mode adds over what everybody else sees.
 export function devOnlyFlags() {
   return Object.entries(FLAGS)
-    .filter(([, flag]) => flag.default !== true && flag.rollback !== true)
+    .filter(([, flag]) => flag.default !== true)
     .map(([name, flag]) => ({ name, label: flag.label }));
 }

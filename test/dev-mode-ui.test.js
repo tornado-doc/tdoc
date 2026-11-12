@@ -197,9 +197,9 @@ async function startServer(worker, env) {
         const context = await newContext(JULIE);
         await context.route('**/thumbs/*.png', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: THUMB }));
         const page = await context.newPage();
-        // This is the one-column grid's DocRow card (a phone's, or the
-        // oldMyDocs rollback); the wide layout's card is checked at the end.
-        await page.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), oldMyDocs: true }; });
+        // This is the one-column grid's DocRow card: myDocsA (on in dev mode)
+        // is pinned off here; layout A's card is checked at the end.
+        await page.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), myDocsA: false }; });
         const errors = [];
         page.on('pageerror', (e) => errors.push(e.message));
         const call = (p, body) => page.evaluate(async ([p, body]) => (await fetch(p, {
@@ -269,7 +269,7 @@ async function startServer(worker, env) {
         assert.equal(await card('julie-notes').locator('.doc-card-preview img').getAttribute('src'), '/thumbs/julie-notes.png');
         await gridShot('grid-devmode-on');
         if (!phone) {
-          // Layout A's card shows the same picture in dev mode.
+          // Layout A's card (myDocsA, on in dev mode) shows the same picture.
           const wide = await context.newPage();
           await wide.goto(`${base}/me`);
           const img = wide.locator('.mda-card[data-slug="julie-notes"] .mda-th-img');
