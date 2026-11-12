@@ -197,6 +197,9 @@ async function startServer(worker, env) {
         const context = await newContext(JULIE);
         await context.route('**/thumbs/*.png', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: THUMB }));
         const page = await context.newPage();
+        // This is the one-column grid's DocRow card (a phone's, or the
+        // oldMyDocs rollback); the wide layout's card is checked at the end.
+        await page.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), oldMyDocs: true }; });
         const errors = [];
         page.on('pageerror', (e) => errors.push(e.message));
         const call = (p, body) => page.evaluate(async ([p, body]) => (await fetch(p, {
@@ -265,6 +268,15 @@ async function startServer(worker, env) {
         assert.equal(await page.locator('.doc-list.is-grid .is-text-card').count(), 0);
         assert.equal(await card('julie-notes').locator('.doc-card-preview img').getAttribute('src'), '/thumbs/julie-notes.png');
         await gridShot('grid-devmode-on');
+        if (!phone) {
+          // Layout A's card shows the same picture in dev mode.
+          const wide = await context.newPage();
+          await wide.goto(`${base}/me`);
+          const img = wide.locator('.mda-card[data-slug="julie-notes"] .mda-th-img');
+          await img.waitFor();
+          assert.equal(await img.getAttribute('src'), '/thumbs/julie-notes.png');
+          await wide.close();
+        }
         await thumbs();
         await page.goto(`${base}/@julie`);
         await page.locator('.profile-pick-card').first().waitFor();

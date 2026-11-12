@@ -10,6 +10,7 @@ import {
   LogOut,
   Moon,
   MoreHorizontal,
+  Settings,
   Sun,
   TerminalSquare,
   UserRound,
@@ -257,6 +258,9 @@ export function TopBar({
                     <UserRound size={15} /> {publicProfileLabel}
                   </AppMenuItem>
                 ) : null}
+                <AppMenuLinkItem className="tdoc-action-menu-item" href="/me?view=settings">
+                  <Settings size={15} /> Settings
+                </AppMenuLinkItem>
                 <AppMenuLinkItem className="tdoc-action-menu-item" href="/me?view=settings#agents">
                   <TerminalSquare size={15} /> Agents
                 </AppMenuLinkItem>
@@ -296,6 +300,7 @@ export function TopBar({
             ) : activeProfile || onClaimProfile ? (
               <AppMenuItem onClick={openPublicProfile}>{publicProfileLabel}</AppMenuItem>
             ) : null}
+            <AppMenuLinkItem href="/me?view=settings">Settings</AppMenuLinkItem>
             <AppMenuLinkItem href="/me?view=settings#agents">Agents</AppMenuLinkItem>
             {devMode ? (
               <AppMenuItem className="tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} closeOnClick={!devMode.on || exitArmed} onClick={toggleDevMode}>

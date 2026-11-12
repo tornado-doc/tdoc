@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Folder, LayoutGrid, List, Search, UsersRound, X } from 'lucide-react';
+import { Check, ChevronRight, Folder, LayoutGrid, List, Plus, Search, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppButton } from './ui/button.jsx';
@@ -32,6 +32,11 @@ import {
   updateFolderAccess,
 } from './document/api.js';
 import { TrashPane } from './docs-hub/trash.jsx';
+import { DocCollection } from './docs-hub/doc-cards.jsx';
+import { DOC_TYPES, MyDocsSidebar } from './docs-hub/my-docs-sidebar.jsx';
+import { NeedsYou, needsCards, useNeedsInbox } from './docs-hub/needs-you.jsx';
+import { SettingsPage } from './docs-hub/settings-page.jsx';
+import { docTypeOf } from './docs-hub/row-meta.js';
 import { rememberTrashed } from './recent-trash.js';
 import {
   LeaveTeamDialog,
@@ -49,9 +54,39 @@ import { isFeatureOn } from './feature-flags.js';
 import { markShareAfterNav } from './profile-posters.js';
 import { AgentTip } from './agent-tip-card.jsx';
 import './docs-hub.css';
+import './docs-hub/my-docs-a.css';
 
-const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['trash', 'Trash'], ['settings', 'Settings']];
+const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['trash', 'Trash'], ['settings', 'Settings'], ['needs', 'Needs you']];
+// The one-column layout's tabs; Needs you is the wide layout's alone.
+const OLD_TABS = VIEWS.filter(([id]) => id !== 'needs');
 const CATALOG_LAYOUT_KEY = 'tdoc.catalogLayout';
+// Wide layout (A): grid or list, remembered apart from the phone's choice.
+const MY_DOCS_LAYOUT_KEY = 'tdoc.myDocsLayout';
+const SCOPES = [['needs', 'Needs you'], ['recent', 'Recent'], ['starred', 'Starred'], ['docs', 'All docs']];
+const WIDE_QUERY = '(min-width: 900px)';
+
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() => (typeof matchMedia === 'function' ? matchMedia(query).matches : true));
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return undefined;
+    const list = matchMedia(query);
+    const change = () => setMatches(list.matches);
+    change();
+    list.addEventListener('change', change);
+    return () => list.removeEventListener('change', change);
+  }, [query]);
+  return matches;
+}
+
+// A folder and every folder under it.
+function folderSubtree(id, folders) {
+  const tree = new Set([id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const item of folders) if (tree.has(item.parent) && !tree.has(item.id)) { tree.add(item.id); grew = true; }
+  }
+  return tree;
+}
 
 // A profile lists only Public docs, and pinning one makes it Public. Say so
 // every time the doc is not Public yet (an unknown visibility counts as not).
@@ -642,6 +677,24 @@ export function DocsHub({ boot }) {
     setLayoutState(next);
     try { localStorage.setItem(CATALOG_LAYOUT_KEY, next); } catch { /* preference only */ }
   };
+  // Layout A on a wide screen unless the rollback flag is on; phones keep
+  // the one-column layout until their own redesign.
+  const [oldMyDocs] = useState(() => isFeatureOn('oldMyDocs'));
+  const wide = useMediaQuery(WIDE_QUERY);
+  const layoutA = !oldMyDocs && wide;
+  const [cardLayout, setCardLayoutState] = useState(() => {
+    try { return localStorage.getItem(MY_DOCS_LAYOUT_KEY) === 'list' ? 'list' : 'grid'; } catch { return 'grid'; }
+  });
+  const setCardLayout = (next) => {
+    setCardLayoutState(next);
+    try { localStorage.setItem(MY_DOCS_LAYOUT_KEY, next); } catch { /* preference only */ }
+  };
+  const [docType, setDocType] = useState(() => {
+    const asked = new URLSearchParams(location.search).get('type');
+    return DOC_TYPES.some((type) => type.id === asked) ? asked : '';
+  });
+  const needsInbox = useNeedsInbox(layoutA && Boolean(boot.identity));
+  useEffect(() => { if (!layoutA && view === 'needs') setView('docs'); }, [layoutA, view]);
   const [space, setSpace] = useState(() => {
     const initial = new URLSearchParams(location.search).get('team') || '';
     return (boot.teams || []).some((team) => team.id === initial) ? initial : '';
@@ -740,23 +793,29 @@ export function DocsHub({ boot }) {
   };
 
   useEffect(() => {
+    // The wide layout filters every list by folder and type, so they stay in
+    // the address on any list view; the one-column layout only on Docs.
+    const listView = layoutA ? ['docs', 'recent', 'starred', 'needs'].includes(view) : view === 'docs';
+    const typePart = layoutA && listView && docType ? `type=${docType}` : '';
     if (space) {
-      const folderPart = view === 'docs' && teamFolder ? `&folder=${encodeURIComponent(teamFolder)}` : '';
+      const folderPart = listView && teamFolder ? `&folder=${encodeURIComponent(teamFolder)}` : '';
       const viewPart = view === 'docs' ? '' : `&view=${encodeURIComponent(view)}`;
-      history.replaceState(null, '', `?team=${encodeURIComponent(space)}${folderPart}${viewPart}`);
+      history.replaceState(null, '', `?team=${encodeURIComponent(space)}${folderPart}${viewPart}${typePart ? `&${typePart}` : ''}${view === 'settings' ? location.hash : ''}`);
     } else {
-      const query = view === 'docs'
-        ? (hub.folder ? `?folder=${encodeURIComponent(hub.folder)}` : '')
-        : `?view=${encodeURIComponent(view)}`;
-      history.replaceState(null, '', `${location.pathname}${query}`);
+      const parts = [
+        view === 'docs' ? '' : `view=${encodeURIComponent(view)}`,
+        listView && hub.folder ? `folder=${encodeURIComponent(hub.folder)}` : '',
+        typePart,
+      ].filter(Boolean);
+      history.replaceState(null, '', `${location.pathname}${parts.length ? `?${parts.join('&')}` : ''}${view === 'settings' ? location.hash : ''}`);
     }
-  }, [space, teamFolder, view, hub.folder]);
+  }, [space, teamFolder, view, hub.folder, docType, layoutA]);
 
   const setSpaceFolders = (update) => setTeamFolders((all) => ({ ...all, [team.id]: update(all[team.id] || []) }));
   const teamRun = (operation, success) => operation
     .then((result) => { if (success) hub.notify(success); return result || true; })
     .catch((error) => { teamFailed(error); return false; });
-  const saveTeamFolder = ({ id, name }) => {
+  const saveTeamFolder = ({ id, name, parent }) => {
     const trimmed = String(name || '').trim();
     if (!trimmed || !team) return Promise.resolve(false);
     if (id) {
@@ -764,7 +823,7 @@ export function DocsHub({ boot }) {
         setSpaceFolders((list) => list.map((item) => (item.id === folder.id ? { ...item, ...folder } : item)));
       }));
     }
-    return teamRun(createFolder(trimmed, teamFolder, team.id).then(({ folder }) => {
+    return teamRun(createFolder(trimmed, parent ?? teamFolder, team.id).then(({ folder }) => {
       setSpaceFolders((list) => [...list, { ...folder, parent: folder.parent || '' }]);
     }));
   };
@@ -1054,8 +1113,286 @@ export function DocsHub({ boot }) {
   const selectedDocs = hub.docs.filter((doc) => hub.selected.has(doc.slug));
   const movableToTeam = selectedDocs.filter((doc) => doc.mine).map((doc) => doc.slug);
 
+  // "Finish setting up": one card, in either layout, on personal Docs only.
+  const checklist = onboardingChecklistShown({ view, docCount: hub.docs.length }) ? <OnboardingChecklist record={boot.onboarding} docs={hub.docs} /> : null;
+
+  // ---- Layout A (wide screens): sidebar, Needs you, grid / list ----
+  // Every list view (Needs you, Recent, Starred, All docs) is filtered by the
+  // sidebar's folder and type; Comments, Trash and Settings are their own.
+  const spaceDocs = team ? allTeamDocs : hub.docs;
+  const spaceFolderList = team ? spaceFolders : hub.folders;
+  const spaceFolderById = team ? teamFolderById : hub.folderById;
+  const activeFolder = team ? teamFolder : hub.folder;
+  const spaceFolderCounts = team ? teamFolderCounts : hub.folderCounts;
+  const listViewA = ['docs', 'recent', 'starred', 'needs'].includes(view);
+  const searchingA = Boolean(hub.query.trim());
+  const folderScope = activeFolder && !searchingA ? folderSubtree(activeFolder, spaceFolderList) : null;
+  const pathForA = (doc) => folderPathLabel(doc.folder, spaceFolderById);
+  const catalogSlugs = new Set(spaceDocs.map((doc) => doc.slug));
+  const allTeamSlugs = new Set(teamDocs.map((doc) => doc.slug));
+  const inSpaceA = (slug) => (team ? catalogSlugs.has(slug) || teamFeedback.some((doc) => doc.slug === slug) : !allTeamSlugs.has(slug));
+  const needCardsAll = layoutA ? needsCards({ inbox: needsInbox.items, docs: [...spaceDocs, ...scopedRecent, ...scopedStarred], inSpace: inSpaceA }) : [];
+  const inFolderA = (doc) => !folderScope || folderScope.has(doc.folder || '');
+  const needCardsShown = needCardsAll.filter((card) => inFolderA(card.doc) && (!docType || docTypeOf(card.doc) === docType));
+  const scopeItems = view === 'recent' ? scopedRecent : view === 'starred' ? scopedStarred : view === 'needs' ? [] : spaceDocs;
+  const baseItemsA = scopeItems
+    .filter(inFolderA)
+    .filter((doc) => matchesCatalogQuery(doc, pathForA(doc), hub.query));
+  const typeCountsA = { doc: 0, sheet: 0, slides: 0 };
+  for (const doc of view === 'needs' ? needCardsAll.filter((card) => inFolderA(card.doc)).map((card) => card.doc) : baseItemsA) typeCountsA[docTypeOf(doc)] += 1;
+  const itemsA = baseItemsA.filter((doc) => !docType || docTypeOf(doc) === docType);
+  const shownItemsA = view === 'docs' ? sortCatalogDocs(itemsA, hub.sort) : itemsA;
+  const scopeCount = { needs: needCardsAll.length, recent: scopedRecent.length, starred: scopedStarred.length, docs: spaceDocs.length };
+  const selectableA = !team && view === 'docs' && cardLayout === 'list';
+  const allSelectedA = selectableA && shownItemsA.length > 0 && shownItemsA.every((doc) => hub.selected.has(doc.slug));
+  const canFileA = (doc) => (team ? Boolean(allTeamDocs.find((row) => row.slug === doc.slug)?.can_file) : capabilities.folders && catalogSlugs.has(doc.slug));
+  const dragSlugsA = (doc) => (hub.selected.has(doc.slug) ? [...hub.selected] : [doc.slug]);
+  const moveDroppedA = (slugs, destination) => {
+    const movable = slugs.filter((slug) => canFileA({ slug }));
+    if (!movable.length) { hub.notify('Only docs in this space can move to its folders', true); return; }
+    if (team) moveTeamDocs(movable, destination);
+    else hub.moveDocs(movable, destination);
+  };
+  const pickFolderA = (id) => {
+    if (team) setTeamFolder(id);
+    else hub.setFolder(id);
+    if (!listViewA) setView('docs');
+  };
+  const doneNeed = (card) => {
+    // The bell rows go read; the row badge's comment count goes with them.
+    needsInbox.markRead(card.ids).catch(() => hub.notify('Could not mark it done', true));
+    const clear = (list) => list.map((doc) => (doc.slug === card.slug && doc.activity ? { ...doc, activity: { ...doc.activity, comments: 0 } } : doc));
+    hub.setDocs(clear);
+    setTeamDocs(clear);
+  };
+  const rowPropsA = (doc) => {
+    const own = ownerLabel(doc, viewer);
+    const inCatalog = catalogSlugs.has(doc.slug);
+    const meta = view === 'recent' ? [own, { label: 'visited', at: doc.at }]
+      : view === 'starred' ? [own, { label: 'starred', at: doc.at }]
+        : team ? [`by ${doc.mine ? 'me' : doc.author || 'unknown'}${doc.former_member ? ' (former member)' : ''}`, { label: 'updated', at: doc.updated }]
+          : [own === 'me' ? null : own, doc.updated && doc.updated !== doc.created ? { label: 'updated', at: doc.updated } : { label: 'published', at: doc.created }];
+    const menuItems = team
+      ? (inCatalog ? teamDocMenu(allTeamDocs.find((row) => row.slug === doc.slug) || doc) : [shareMenuItem(doc)])
+      : (inCatalog ? docMenu([doc.slug], hub.docs.find((row) => row.slug === doc.slug) || doc) : [shareMenuItem(doc)]);
+    return {
+      meta,
+      path: searchingA ? pathForA(doc) : '',
+      folderName: doc.folder ? spaceFolderById.get(doc.folder)?.name || '' : '',
+      selection: selectableA ? { checked: hub.selected.has(doc.slug), onChange: () => hub.toggleSelected(doc.slug) } : undefined,
+      starrable: team ? false : capabilities.star,
+      onToggleStar: hub.toggleStar,
+      menuItems,
+      dragSlugs: canFileA(doc) ? dragSlugsA : undefined,
+      data: { created: doc.created, updated: doc.updated, folder: doc.folder },
+    };
+  };
+  const emptyA = () => {
+    if (searchingA) return titleEmpty(true);
+    const kind = DOC_TYPES.find((type) => type.id === docType);
+    const what = kind ? kind.label.toLowerCase() : 'docs';
+    const where = activeFolder ? ` in ${spaceFolderById.get(activeFolder)?.name || 'this folder'}` : '';
+    if (view === 'recent') return `No ${what}${where} opened lately. Docs you open in ${team ? team.name : 'My docs'} show up here.`;
+    if (view === 'starred') return `No starred ${what}${where}. Star docs in ${team ? team.name : 'My docs'} to find them here.`;
+    if (activeFolder && !kind) return `${spaceFolderById.get(activeFolder)?.name || 'This folder'} is empty. Drag a doc onto the folder to move it here.`;
+    if (team && !kind) return `No docs in ${team.name} yet. Create one, or move one here from My docs.`;
+    return `No ${what}${where} yet.`;
+  };
+  const newMenuA = (
+    <CreateMenu
+      create={hub.createDoc}
+      team={team ? team.id : ''}
+      canCreate={capabilities.create}
+      onAgent={openAgentRecipe}
+      onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
+      onImport={sheetsOn ? () => sheetPicker.current?.click() : null}
+      onNewSheet={sheetsOn ? newSheet : null}
+      onNewDeck={newDeck}
+      onNewFolder={team
+        ? () => setModal({ type: 'new-team-folder' })
+        : capabilities.folders ? () => setModal({ type: 'new-folder' }) : null}
+      trigger={<AppButton variant="primary" className="mda-new"><Plus size={17} aria-hidden="true" />New</AppButton>}
+    />
+  );
+  const mainA = !layoutA ? null : !team && view === 'settings' ? (
+    <main className="mda-settings-wrap">
+      <SettingsPage
+        identity={identity}
+        profile={boot.profile}
+        teams={teams}
+        invites={(boot.team_invites || []).length ? <TeamInviteBanner invites={boot.team_invites} /> : null}
+        onNameSaved={(saved) => setIdentity((prev) => (prev ? { ...prev, name: saved.name } : prev))}
+        onBack={() => setView('docs')}
+        onNewTeam={() => setModal({ type: 'new-team' })}
+      />
+    </main>
+  ) : (
+    <div className="mda">
+      <MyDocsSidebar
+        allCount={spaceDocs.length}
+        everythingActive={listViewA && !activeFolder}
+        onEverything={() => pickFolderA('')}
+        onDropTop={(slugs) => moveDroppedA(slugs, '')}
+        types={DOC_TYPES}
+        typeCounts={typeCountsA}
+        type={docType}
+        onType={(next) => { setDocType(next); if (!listViewA) setView('docs'); }}
+        folders={spaceFolderList}
+        folder={listViewA ? activeFolder : ''}
+        folderCounts={spaceFolderCounts}
+        onFolder={pickFolderA}
+        onDropFolder={(slugs, item) => moveDroppedA(slugs, item.id)}
+        folderMenu={team ? teamFolderMenu : folderMenu}
+        onNewFolder={team || capabilities.folders ? () => setModal({ type: team ? 'new-team-folder' : 'new-folder', top: true }) : null}
+        view={view}
+        onView={(next) => { setView(next); }}
+        settingsLabel={team ? 'Team settings' : 'Settings'}
+      />
+      <main className="mda-main">
+        <div className="mda-main-in">
+          {(boot.team_invites || []).length ? <TeamInviteBanner invites={boot.team_invites} /> : null}
+          <div className="page-hd mda-hd">
+            <span className={`mda-space-mark${team ? ' is-team' : ''}`} aria-hidden="true">{String(team ? team.name : (identity?.name || identity?.login || 'M')).slice(0, 1).toUpperCase()}</span>
+            <h1>{team ? team.name : 'My docs'}</h1>
+            <div className="page-hd-actions">
+              {listViewA && view !== 'needs' ? <CatalogLayoutToggle layout={cardLayout} onLayout={setCardLayout} /> : null}
+              {newMenuA}
+            </div>
+          </div>
+          {listViewA ? (
+            <>
+              {team ? null : checklist}
+              {team && view === 'docs' && !activeFolder ? <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p> : null}
+              {view !== 'needs' && !searchingA ? (
+                <NeedsYou cards={needCardsShown} limit={4} onSeeAll={() => setView('needs')} onDone={doneNeed} />
+              ) : null}
+              <div className="mda-filters">
+                <div className="mda-chips" role="tablist" aria-label={`${team ? team.name : 'My docs'} views`}>
+                  {SCOPES.map(([id, label]) => (
+                    <button key={id} type="button" role="tab" aria-selected={view === id} className={`mda-chip${view === id ? ' is-on' : ''}${id === 'needs' ? ' is-needs' : ''}`} onClick={() => setView(id)}>
+                      {label}
+                      {id === 'needs' ? (scopeCount.needs ? <span className="mda-chip-n">{scopeCount.needs}</span> : null) : <span className="mda-chip-n">{scopeCount[id]}</span>}
+                    </button>
+                  ))}
+                </div>
+                <div className="mda-tools">
+                  <label className="search-field mda-search">
+                    <Search size={15} />
+                    <input
+                      type="search"
+                      value={hub.query}
+                      onChange={(event) => hub.setQuery(event.target.value)}
+                      placeholder="Search all docs · try title:roadmap"
+                      aria-label="Search docs"
+                      aria-description="Searches every folder. Narrow a term with title, slug, preview, or path followed by a colon."
+                    />
+                  </label>
+                  {view === 'docs' ? (
+                    <AppSelect
+                      plain
+                      className="toolbar-select mda-sort"
+                      ariaLabel="Sort docs"
+                      value={hub.sort}
+                      onChange={hub.setSort}
+                      options={[
+                        { value: 'updated', label: 'Last updated' },
+                        { value: 'created', label: 'Created' },
+                        { value: 'title', label: 'Title' },
+                      ]}
+                    />
+                  ) : null}
+                </div>
+              </div>
+              {activeFolder && !searchingA ? (
+                <nav className="crumbs mda-crumbs" aria-label="Folder path">
+                  <button className="crumb-root" type="button" onClick={() => pickFolderA('')}>{team ? team.name : 'My docs'}</button>
+                  {(team ? teamPath : hub.path).map((item) => (
+                    <React.Fragment key={item.id}>
+                      <ChevronRight className="sep" size={14} />
+                      <button className="crumb-root cur" type="button" onClick={() => pickFolderA(item.id)}>{item.name}</button>
+                    </React.Fragment>
+                  ))}
+                </nav>
+              ) : null}
+              {view === 'needs' ? (
+                <NeedsYou
+                  cards={needCardsShown}
+                  onDone={doneNeed}
+                  empty={<p className="empty mda-empty">You’re all caught up. New comments, @mentions and agent replies show up here.</p>}
+                />
+              ) : (
+                <section className="pane mda-pane" id={team ? 'pane-team' : view === 'docs' ? 'pane-mine' : `pane-${view}`}>
+                  {selectableA && hub.selected.size ? (
+                    <div className="batch-bar">
+                      <label className="select-all">
+                        <input type="checkbox" checked={allSelectedA} onChange={(event) => hub.setSelected(event.target.checked ? new Set(shownItemsA.map((doc) => doc.slug)) : new Set())} />
+                        {' '}
+                        <span>{`${hub.selected.size} selected`}</span>
+                      </label>
+                      <span className="batch-actions">
+                        {teams.length && movableToTeam.length ? (
+                          <button type="button" className="batch-move batch-move-team is-visible" onClick={() => setModal({ type: 'move-team', slugs: movableToTeam, skipped: hub.selected.size - movableToTeam.length })}>Move to team</button>
+                        ) : null}
+                        {capabilities.folders ? <button type="button" className="batch-move is-visible" onClick={() => setModal({ type: 'move', slugs: [...hub.selected] })}>Move to folder</button> : null}
+                        {capabilities.delete ? <button type="button" className="batch-delete is-visible" onClick={() => setModal({ type: 'delete-docs', slugs: [...hub.selected] })}>Delete selected</button> : null}
+                      </span>
+                    </div>
+                  ) : null}
+                  <DocCollection
+                    docs={shownItemsA}
+                    layout={cardLayout}
+                    selecting={hub.selected.size > 0}
+                    rowProps={rowPropsA}
+                    empty={emptyA()}
+                  />
+                  {view === 'docs' ? (
+                    <TextSearchResults
+                      search={textSearch}
+                      exclude={new Set(shownItemsA.map((doc) => doc.slug))}
+                      pathFor={textResultPath}
+                    />
+                  ) : null}
+                </section>
+              )}
+            </>
+          ) : view === 'comments' ? (
+            team ? (
+              <>
+                {teamFeedback.length ? (
+                  <section className="pane tm-feedback-pane" id="pane-team-feedback" aria-label="Feedback spaces">
+                    <FeedbackList key={team.id} team={team} spaces={teamFeedback} teams={teams} />
+                  </section>
+                ) : null}
+                <TeamCommentsPane team={team} />
+              </>
+            ) : (
+              <section className="pane" id="pane-feedback">
+                <FeedbackList spaces={Array.isArray(boot.feedback) ? boot.feedback : []} teams={teams} />
+              </section>
+            )
+          ) : view === 'trash' ? (
+            <TrashPane
+              team={team}
+              notify={hub.notify}
+              onChanged={() => refreshCatalog().catch(teamFailed)}
+              onFailed={teamFailed}
+            />
+          ) : view === 'settings' && team ? (
+            <TeamSettingsPane
+              team={team}
+              onChanged={(next) => setTeams((list) => list.map((item) => (
+                item.id === next.id ? { ...item, name: next.name, role: next.role, member_count: next.member_count } : item
+              )))}
+              onLeave={(current, me) => setModal({ type: 'leave-team', team: current, me })}
+            />
+          ) : null}
+        </div>
+      </main>
+    </div>
+  );
+
   return (
-    <div className="tdoc-app docs-hub">
+    <div className={`tdoc-app docs-hub${layoutA ? ' is-wide-a' : ''}`}>
       <TopBar
         identity={identity}
         profile={boot.profile || null}
@@ -1066,6 +1403,7 @@ export function DocsHub({ boot }) {
         onSpace={pickSpace}
         onNewTeam={() => setModal({ type: 'new-team' })}
       />
+      {layoutA ? mainA : (
       <main className="wrap">
         {(boot.team_invites || []).length ? (
           <TeamInviteBanner invites={boot.team_invites} />
@@ -1095,7 +1433,7 @@ export function DocsHub({ boot }) {
           ) : null}
         </div>
         <div className="tabs" role="tablist" aria-label={`${team ? team.name : 'My docs'} views`}>
-          {VIEWS.map(([id, label]) => (
+          {OLD_TABS.map(([id, label]) => (
             <button key={id} type="button" className={`tab${view === id ? ' is-active' : ''}`} role="tab" aria-selected={view === id} onClick={() => { setTeamFolder(''); setView(id); }}>
               {label}
             </button>
@@ -1182,7 +1520,7 @@ export function DocsHub({ boot }) {
         ) : (
         <>
 
-        {onboardingChecklistShown({ view, docCount: hub.docs.length }) ? <OnboardingChecklist record={boot.onboarding} docs={hub.docs} /> : null}
+        {checklist}
         {view === 'docs' ? (
           <section className="pane" id="pane-mine">
             <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort} />
@@ -1284,6 +1622,7 @@ export function DocsHub({ boot }) {
         </>
         )}
       </main>
+      )}
 
       {modal?.type === 'new-team' ? (
         <NewTeamDialog
@@ -1381,7 +1720,7 @@ export function DocsHub({ boot }) {
       ) : null}
       {modal?.type === 'new-folder' ? (
         <NameDialog title="New folder" confirmLabel="Create" initialName="" onClose={closeModal}
-          onSave={(name) => closeIf(hub.saveFolder({ name }))} />
+          onSave={(name) => closeIf(hub.saveFolder({ name, ...(modal.top ? { parent: '' } : {}) }))} />
       ) : null}
       {modal?.type === 'rename-folder' ? (
         <NameDialog title="Rename folder" confirmLabel="Save" initialName={modal.folder.name} onClose={closeModal}
@@ -1408,7 +1747,7 @@ export function DocsHub({ boot }) {
       ) : null}
       {modal?.type === 'new-team-folder' ? (
         <NameDialog title="New folder" confirmLabel="Create" initialName="" onClose={closeModal}
-          onSave={(name) => closeIf(saveTeamFolder({ name }))} />
+          onSave={(name) => closeIf(saveTeamFolder({ name, ...(modal.top ? { parent: '' } : {}) }))} />
       ) : null}
       {modal?.type === 'share-team-folder' && team ? (
         <FolderShareDialog

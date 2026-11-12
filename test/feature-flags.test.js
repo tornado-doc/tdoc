@@ -43,8 +43,18 @@ const assert = require('assert/strict');
 
   t('the menu lists the default-off flags by label', () => {
     const listed = devOnlyFlags();
-    assert.deepEqual(listed.map((flag) => flag.name), Object.keys(FLAGS).filter((name) => FLAGS[name].default !== true));
+    assert.deepEqual(listed.map((flag) => flag.name), Object.keys(FLAGS).filter((name) => FLAGS[name].default !== true && FLAGS[name].rollback !== true));
     assert.ok(listed.some((flag) => flag.label === 'Doc thumbnails'));
+  });
+
+  t('oldMyDocs is a rollback switch: off by default, dev mode neither turns it on nor lists it', () => {
+    assert.equal(FLAGS.oldMyDocs.default, false);
+    assert.equal(FLAGS.oldMyDocs.rollback, true);
+    assert.equal(isFeatureOn('oldMyDocs', null), false);
+    assert.equal(isFeatureOn('oldMyDocs', { on: true }), false, 'dev mode must not bring the old layout back');
+    assert.ok(!devOnlyFlags().some((flag) => flag.name === 'oldMyDocs'));
+    const hub = require('fs').readFileSync(require.resolve('../shell/src/docs-hub.jsx'), 'utf8');
+    assert.ok(hub.includes("isFeatureOn('oldMyDocs')"), 'docs-hub.jsx reads the flag');
   });
 
   t('grids and the profile read the flag, not dev mode directly', () => {

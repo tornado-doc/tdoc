@@ -138,10 +138,15 @@ async function startServer(worker, env) {
         assert.equal(await row(page, 'budget-2027').getByRole('img', { name: 'Sheet' }).count(), 1);
         assert.equal(await row(page, 'launch-deck').getByRole('img', { name: 'Slides' }).count(), 1);
         assert.equal(await row(page, 'q4-plan').getByRole('img', { name: 'Doc' }).count(), 1);
-        // The icon sits on the title line and stays inside the row.
+        // The icon sits on the title line and stays inside the row; on a
+        // wide screen's card (layout A) it leads the meta line under the title.
         const icon = await row(page, 'budget-2027').locator('.doc-type').boundingBox();
         const title = await row(page, 'budget-2027').locator('.doc-title').boundingBox();
-        assert.ok(icon && title && icon.x + icon.width <= title.x + 1, 'type icon is not before the title');
+        if (await row(page, 'budget-2027').evaluate((el) => el.classList.contains('mda-card'))) {
+          assert.ok(icon && title && icon.y >= title.y + title.height - 1 && icon.x <= title.x + 1, 'type icon does not lead the line under the title');
+        } else {
+          assert.ok(icon && title && icon.x + icon.width <= title.x + 1, 'type icon is not before the title');
+        }
       });
 
       await t(`${label}: sharing state on your own rows`, async () => {
@@ -182,7 +187,8 @@ async function startServer(worker, env) {
       });
 
       await t(`${label}: ⋯ Share opens the doc page's Share dialog`, async () => {
-        await page.getByRole('tab', { name: 'Docs' }).click();
+        await page.getByRole('tab', { name: /^(Docs|All docs)/ }).click();
+        await row(page, 'q4-plan').hover();
         await row(page, 'q4-plan').getByRole('button', { name: 'More actions' }).click();
         await page.getByRole('menuitem').first().waitFor();
         await shot(page, 'row-menu');
@@ -222,7 +228,7 @@ async function startServer(worker, env) {
           assert.equal(await p.locator('.onb-card, .onb-chip').count(), 0, `setup card on ${tab}`);
         }
         await p.goto(`${base}/me?view=trash`);
-        await p.locator('.tabs').waitFor();
+        await p.locator('#pane-trash').waitFor();
         await p.waitForTimeout(200);
         assert.equal(await p.locator('.onb-card, .onb-chip').count(), 0, 'setup card on a direct Trash link');
         await shot(p, 'newbie-trash');

@@ -54,7 +54,7 @@ export function BrowserAlertsPrompt({ notifications }) {
 // The two channels as one settings group: label left, switch right, no
 // explanations -- "Browser" and "Email" under "Notifications" say it. The
 // only extra word is a browser block, which the switch cannot undo.
-function NotificationSettings({ notifications }) {
+export function NotificationSettings({ notifications }) {
   const { on, permission } = notifications.browserAlerts || {};
   const email = notifications.emailAlerts;
   const showBrowser = permission !== 'unsupported';
