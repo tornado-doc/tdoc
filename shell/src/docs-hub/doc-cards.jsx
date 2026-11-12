@@ -1,5 +1,5 @@
 import React from 'react';
-import { Folder } from 'lucide-react';
+import { Folder, Star } from 'lucide-react';
 import { isFeatureOn } from '../feature-flags.js';
 import { docTypeOf } from './row-meta.js';
 import { ActivityBadge, DocTypeIcon, MetaParts, RowMenu, SharingState, StarButton, docHref } from './rows.jsx';
@@ -135,13 +135,13 @@ export function DocTableRow({ doc, meta, path, folderName = '', selection, starr
         <div className="doc-title-line">
           {path ? <span className="doc-path" title={path}>{path} ›</span> : null}
           <a className="doc-title" href={docHref(doc)} draggable={false}>{doc.title}</a>
-          <ActivityBadge doc={doc} />
         </div>
       </div>
       <span className="mda-cell mda-cell-folder">{folderName ? <><Folder size={14} aria-hidden="true" /><span>{folderName}</span></> : null}</span>
       <span className="mda-cell mda-cell-sharing">{doc.sharing ? <SharingState doc={doc} /> : null}</span>
       <span className="mda-cell doc-meta"><MetaParts parts={Array.isArray(meta) ? meta : [meta]} /></span>
       <div className="row-actions">
+        <ActivityBadge doc={doc} />
         {starrable ? <StarButton doc={doc} onToggle={onToggleStar} /> : null}
         <RowMenu label="More actions" items={menuItems} />
       </div>
@@ -149,9 +149,52 @@ export function DocTableRow({ doc, meta, path, folderName = '', selection, starr
   );
 }
 
-// The grid or the table, with the table's column heads.
+// One row on a phone (layout A below 900px): the type in a tile, the title,
+// one meta line (when, who can open it), unread, ⋯. The whole row opens the
+// doc; the star moves into ⋯ (a starred doc keeps a small star after its
+// title) so the row keeps one tap target on the right.
+export function DocPhoneRow({ doc, meta, path, selection, starrable = true, onToggleStar, menuItems = [], data = {} }) {
+  const dataAttrs = Object.fromEntries(Object.entries(data).map(([key, value]) => [`data-${key}`, value]));
+  const items = starrable && onToggleStar
+    ? [{ label: doc.starred ? 'Unstar' : 'Star', className: 'row-star', onSelect: () => onToggleStar(doc.slug, !doc.starred) }, ...menuItems]
+    : menuItems;
+  const parts = [path ? `in ${path}` : null, ...(Array.isArray(meta) ? meta : [meta]), doc.sharing ? <SharingState doc={doc} /> : null];
+  return (
+    <div className={`doc-row mda-prow${doc.starred ? ' is-starred' : ''}${selection?.checked ? ' is-selected' : ''}`} data-slug={doc.slug} data-title={doc.title} {...dataAttrs}>
+      {selection ? (
+        <label className="row-check">
+          <input type="checkbox" checked={selection.checked} onChange={selection.onChange} aria-label={`Select ${doc.title}`} />
+        </label>
+      ) : null}
+      <span className="mda-prow-ic"><DocTypeIcon doc={doc} /></span>
+      <div className="doc-info">
+        <div className="doc-title-line">
+          <a className="doc-title" href={docHref(doc)}>{doc.title}</a>
+          {doc.starred ? <Star className="mda-prow-star" size={14} fill="currentColor" role="img" aria-label="Starred" /> : null}
+        </div>
+        <div className="doc-meta"><MetaParts parts={parts} /></div>
+      </div>
+      <ActivityBadge doc={doc} />
+      <div className="row-actions">
+        <RowMenu label="More actions" items={items} />
+      </div>
+    </div>
+  );
+}
+
+// The grid, the table with its column heads, or the phone's rows.
 export function DocCollection({ docs, layout, rowProps, empty = null, selecting = false }) {
   if (!docs.length) return empty ? <p className="empty">{empty}</p> : null;
+  if (layout === 'phone') {
+    return (
+      <div className={`doc-list mda-plist${selecting ? ' is-selecting' : ''}`}>
+        {docs.map((doc) => {
+          const { folderName, dragSlugs, ...props } = rowProps(doc);
+          return <DocPhoneRow key={doc.slug} doc={doc} {...props} />;
+        })}
+      </div>
+    );
+  }
   if (layout === 'list') {
     return (
       <div className={`doc-list mda-table${selecting ? ' is-selecting' : ''}`}>

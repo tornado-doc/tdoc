@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Bell, Bot, KeyRound, Plus, ShieldAlert, Sparkles, UserRound, UsersRound } from 'lucide-react';
+import { ArrowLeft, Bell, Bot, ChevronRight, KeyRound, Plus, ShieldAlert, Sparkles, UserRound, UsersRound } from 'lucide-react';
 import { AppButton } from '../ui/button.jsx';
 import { AppSwitch } from '../ui/switch.jsx';
 import { ConnectorsBody } from '../connectors-page.jsx';
@@ -97,21 +97,27 @@ const SECTIONS = [
   { id: 'delete-account', label: 'Danger zone', icon: ShieldAlert, danger: true, flag: 'deleteAccount' },
 ];
 
-export function SettingsPage({ identity, profile, teams = [], invites = null, onNameSaved, onBack, onNewTeam }) {
+// `compact` (a phone): a full-screen list of the sections; a section opens
+// on its own page with a way back to the list. Wide: the list on the left,
+// every section in one scroll on the right.
+export function SettingsPage({ identity, profile, teams = [], invites = null, onNameSaved, onBack, onNewTeam, compact = false }) {
   const name = identity?.name || identity?.email || identity?.login || 'Your account';
   const [devMode] = useState(readDevMode);
   const sections = SECTIONS.filter((section) => (!section.devOnly || devMode) && (!section.flag || isFeatureOn(section.flag)));
-  const [active, setActive] = useState(() => {
+  const sectionOfHash = () => {
     const hash = typeof location !== 'undefined' ? location.hash.slice(1) : '';
-    if (hash === 'agent-access') return 'agents';
-    return sections.some((section) => section.id === hash) ? hash : 'profile';
-  });
+    if (hash === 'agent-access' || hash === 'agents-computers') return 'agents';
+    return sections.some((section) => section.id === hash) ? hash : '';
+  };
+  const [active, setActive] = useState(() => sectionOfHash() || 'profile');
+  // On a phone, the section open on its own page ('' = the list).
+  const [open, setOpen] = useState(() => (compact ? sectionOfHash() : ''));
 
   // The section nearest the top is the one the list marks; a click on the
   // list holds its choice while the page scrolls there.
   const heldUntil = useRef(0);
   useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') return undefined;
+    if (compact || typeof IntersectionObserver === 'undefined') return undefined;
     const seen = new Map();
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) seen.set(entry.target.id, entry.isIntersecting ? entry.boundingClientRect.top : null);
@@ -124,7 +130,7 @@ export function SettingsPage({ identity, profile, teams = [], invites = null, on
       if (el) observer.observe(el);
     }
     return () => observer.disconnect();
-  }, [sections.length]);
+  }, [sections.length, compact]);
 
   // Arriving at #agents (the account menu's Agents) scrolls to it once the
   // cards have drawn.
@@ -137,12 +143,72 @@ export function SettingsPage({ identity, profile, teams = [], invites = null, on
 
   const go = (event, id) => {
     event.preventDefault();
+    history.replaceState(null, '', `${location.pathname}${location.search}#${id}`);
+    if (compact) {
+      setOpen(id);
+      window.scrollTo(0, 0);
+      return;
+    }
     heldUntil.current = Date.now() + 1200;
     setActive(id);
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    history.replaceState(null, '', `${location.pathname}${location.search}#${id}`);
   };
+  const backToList = () => {
+    setOpen('');
+    history.replaceState(null, '', `${location.pathname}${location.search}`);
+    window.scrollTo(0, 0);
+  };
+
+  const cards = {
+    profile: <ProfileSettingsCard name={name} profile={profile} onNameSaved={onNameSaved} />,
+    'sign-in-methods': <SignInMethodsCard />,
+    agents: (
+      <div className="mds-group" id="agents-computers">
+        <section className="tm-settings-card" id="agents">
+          <div className="tm-settings-head"><div><h2>Agents &amp; computers</h2><p>Connect Raft, Claude Code, Codex, or a webhook for this workspace.</p></div></div>
+          <ConnectorsBody returnTo="/me?view=settings#agents" />
+        </section>
+        <section className="tm-settings-card" id="agent-access">
+          <div className="tm-settings-head"><div><h2>Agent access</h2><p>Computers and agents that can act as you, and which workspaces each one can reach.</p></div></div>
+          <DevicesBody />
+        </section>
+        <ConnectAiAppsSection className="tm-settings-card" />
+      </div>
+    ),
+    teams: <TeamsCard teams={teams} invites={invites} onNewTeam={onNewTeam} />,
+    notifications: <NotificationsCard />,
+    preview: <FeaturePreviewCard devMode={devMode} />,
+    'delete-account': <DeleteAccountCard />,
+  };
+
+  if (compact) {
+    const current = sections.find((section) => section.id === open);
+    return (
+      <div className={`mds mds-compact${current ? ' is-section' : ''}`}>
+        {current ? (
+          <>
+            <button type="button" className="mds-back" onClick={backToList}><ArrowLeft size={18} aria-hidden="true" />Settings</button>
+            <section className="tm-settings mds-body" aria-label={current.label}>{cards[current.id]}</section>
+          </>
+        ) : (
+          <>
+            <button type="button" className="mds-back" onClick={onBack}><ArrowLeft size={18} aria-hidden="true" />My docs</button>
+            <h1 className="mds-title">Settings</h1>
+            <nav className="mds-list" aria-label="Settings sections">
+              {sections.map(({ id, label, icon: Icon, danger }) => (
+                <a key={id} href={`#${id}`} className={`mds-list-item${danger ? ' is-danger' : ''}`} onClick={(event) => go(event, id)}>
+                  <span className="mds-row-ic" aria-hidden="true"><Icon size={18} /></span>
+                  <span className="mds-list-label">{label}</span>
+                  <ChevronRight className="mds-list-chev" size={18} aria-hidden="true" />
+                </a>
+              ))}
+            </nav>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="mds">
@@ -156,23 +222,7 @@ export function SettingsPage({ identity, profile, teams = [], invites = null, on
         ))}
       </nav>
       <section className="tm-settings mds-body" aria-label="Personal workspace settings">
-        <ProfileSettingsCard name={name} profile={profile} onNameSaved={onNameSaved} />
-        <SignInMethodsCard />
-        <div className="mds-group" id="agents-computers">
-          <section className="tm-settings-card" id="agents">
-            <div className="tm-settings-head"><div><h2>Agents &amp; computers</h2><p>Connect Raft, Claude Code, Codex, or a webhook for this workspace.</p></div></div>
-            <ConnectorsBody returnTo="/me?view=settings#agents" />
-          </section>
-          <section className="tm-settings-card" id="agent-access">
-            <div className="tm-settings-head"><div><h2>Agent access</h2><p>Computers and agents that can act as you, and which workspaces each one can reach.</p></div></div>
-            <DevicesBody />
-          </section>
-          <ConnectAiAppsSection className="tm-settings-card" />
-        </div>
-        <TeamsCard teams={teams} invites={invites} onNewTeam={onNewTeam} />
-        <NotificationsCard />
-        {devMode ? <FeaturePreviewCard devMode={devMode} /> : null}
-        {isFeatureOn('deleteAccount') ? <DeleteAccountCard /> : null}
+        {sections.map(({ id }) => <React.Fragment key={id}>{cards[id]}</React.Fragment>)}
       </section>
     </div>
   );
