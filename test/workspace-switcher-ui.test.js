@@ -28,8 +28,12 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (e) { failed++; console.log(`  ✗ ${name}\n    ${e.message}`); } };
   try {
     const shell = await (await fetch(`${base}/me`)).text();
-    const open = async (width, query) => {
+    // These cases are the one-column layout's (everybody's while myDocsA is
+    // a dev-mode flag, and a phone's). Layout A's own cases pass
+    // { old: false }, which pins the flag on; my-docs-a-ui.test.js has the rest.
+    const open = async (width, query, { old = true } = {}) => {
       const page = await browser.newPage({ viewport: { width, height: 800 } });
+      if (!old) await page.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), myDocsA: true }; });
       await page.route(`${base}/me*`, (r) => r.fulfill({ contentType: 'text/html', body: withBoot(shell, (boot) => ({ ...boot, capabilities: { ...boot.capabilities, folders: true }, teams: TEAMS, docs: [PERSONAL, NESTED_PERSONAL], folders: PERSONAL_FOLDERS, recent: [PERSONAL, TEAM_DOC], starred: [PERSONAL, TEAM_DOC], team_docs: [TEAM_DOC, NESTED_TEAM], team_folders: { tm_befreed: TEAM_FOLDERS } })) }));
       await page.route('**/api/me/connectors', (r) => r.fulfill({ json: {
         targets: [], available: [{ id: 'raft', ready: true }, { id: 'local', ready: true }, { id: 'webhook', ready: true }],
@@ -95,6 +99,39 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       assert.equal(await page.getByRole('tab', { name: 'Recent' }).getAttribute('aria-selected'), 'true');
       await page.getByRole('link', { name: 'Team plan' }).waitFor();
       assert.equal(await page.getByRole('link', { name: 'Personal plan' }).count(), 0);
+      await page.close();
+    });
+    await t('layout A: Recent follows the workspace; search reaches every folder with paths; team settings keep the sidebar', async () => {
+      const page = await open(1280, '', { old: false });
+      await page.locator('.mda-side').waitFor();
+      await page.getByRole('tab', { name: /Recent/ }).click();
+      await page.getByRole('link', { name: 'Personal plan' }).waitFor();
+      assert.equal(await page.getByRole('link', { name: 'Team plan' }).count(), 0);
+      await page.locator('.tdoc-space-trigger').click();
+      await page.getByRole('menuitem', { name: 'BeFreed' }).click();
+      await page.getByRole('heading', { name: 'BeFreed' }).waitFor();
+      assert.match(page.url(), /team=tm_befreed.*view=recent/);
+      assert.equal(await page.getByRole('tab', { name: /Recent/ }).getAttribute('aria-selected'), 'true');
+      await page.getByRole('link', { name: 'Team plan' }).waitFor();
+      assert.equal(await page.getByRole('link', { name: 'Personal plan' }).count(), 0);
+      // Team folders in the sidebar, nested under their parent.
+      assert.deepEqual(await page.locator('.mda-folder').evaluateAll((rows) => rows.map((r) => `${r.dataset.depth}:${r.textContent.replace(/\d+$/, '').trim()}`)), ['0:Strategy', '1:Launch']);
+      const search = page.getByRole('searchbox', { name: 'Search docs' });
+      await page.getByRole('tab', { name: /All docs/ }).click();
+      await search.fill('preview:tiger');
+      await page.getByRole('link', { name: 'Launch brief' }).waitFor();
+      assert.match(await page.locator('.mda .doc-path').textContent(), /Strategy.*Launch/);
+      await search.fill('');
+      await page.getByRole('tab', { name: 'Team settings' }).click();
+      await page.getByRole('heading', { name: 'Members' }).waitFor();
+      assert.equal(await page.locator('.mda-side').count(), 1);
+      await page.getByRole('button', { name: /^Everything/ }).click();
+      await page.locator('.tdoc-space-trigger').click();
+      await page.getByRole('menuitem', { name: 'My docs' }).click();
+      await page.getByRole('heading', { name: 'My docs' }).waitFor();
+      await search.fill('path:2027');
+      await page.getByRole('link', { name: 'Revenue plan' }).waitFor();
+      assert.match(await page.locator('.mda .doc-path').textContent(), /Research.*2027/);
       await page.close();
     });
     await t('grid/list preview switch is shared, complete, and remembered', async () => {

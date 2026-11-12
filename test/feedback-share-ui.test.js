@@ -272,7 +272,8 @@ async function startServer(worker, env) {
             assert.equal(await row.locator('a.doc-info').getAttribute('href'), `/d/${w.slug}`);
             assert.equal(await page.locator('#pane-team-comments').count(), 1, 'the team comment stream is still there');
             // Not among the team's documents, as in My docs.
-            await page.getByRole('tab', { name: 'Docs' }).click();
+            // The Docs tab, or Everything in the wide layout's sidebar.
+            await page.getByRole('tab', { name: 'Docs', exact: true }).or(page.getByRole('button', { name: /^Everything/ })).click();
             await page.locator('.tm-loc').waitFor();
             assert.equal(await page.locator(`a[href^="/d/${w.slug}"]`).count(), 0, 'the space is listed among the team docs');
             await page.getByRole('tab', { name: 'Comments' }).click();

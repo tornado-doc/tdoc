@@ -9110,8 +9110,21 @@ function historyList(list) {
 // picks it up again): the comment now points at different text, so it is no
 // longer the same place.
 //
-// Returns { allowed, reason }. Reasons are stable strings the CLI prints.
-function agentReplyGate(record, agentLogin) {
+// One follow-up (Julie, 2026-11): an agent that said `partial` ("looking for
+// photos, will send options") may post ONE more reply on the same turn ("here
+// are the options"). Only after `partial` — answered / applied / question (or
+// no status) is a finished word — and only one: two agent replies in a row
+// with no human turn between shuts the gate whatever the second one said. A
+// follow-up identical to the agent's last reply (trimmed, whitespace
+// collapsed) is refused as `duplicate_reply`; `text` is optional, a caller
+// with nothing to post yet (handoff filter, Ask before the model runs) skips
+// that check. A human deleting the partial reply still means "dealt with":
+// no follow-up.
+//
+// Returns { allowed, reason }. Reasons are stable strings the CLI prints:
+// first_reply, human_replied_since, followup_after_partial (allowed);
+// already_answered, duplicate_reply, comment_deleted, parent_not_found.
+function agentReplyGate(record, agentLogin, text) {
   if (!record) return { allowed: false, reason: 'parent_not_found' };
   ensureEventLog(record);
   // Same ordering the fold uses — by version, ties broken by append order —
@@ -9126,6 +9139,8 @@ function agentReplyGate(record, agentLogin) {
   let answered = false;   // this agent has spoken at least once
   let theirTurn = true;   // a human has moved since it last did
   let deleted = false;
+  let run = 0;            // agent replies in a row since the last human turn
+  let last = null;        // the agent side's latest reply: { id, status, text }
   for (const e of ordered) {
     if (!e) continue;
     switch (e.kind) {
@@ -9141,8 +9156,12 @@ function agentReplyGate(record, agentLogin) {
         if (isAgentAuthor(e.reply.author)) {
           answered = true;
           theirTurn = false;
+          run += 1;
+          last = { id: e.reply.id, status: e.reply.agent_status || null, text: e.reply.text };
         } else {
           theirTurn = true;
+          run = 0;
+          last = null;
         }
         break;
       case 'text_edited':
@@ -9151,13 +9170,18 @@ function agentReplyGate(record, agentLogin) {
         break;
       case 'anchor_changed':
         // The agent's own re-anchor (bind_anchor_aid) is not a human turn.
-        if (e.by !== agentLogin) theirTurn = true;
+        if (e.by !== agentLogin) { theirTurn = true; run = 0; last = null; }
         break;
       case 'reply_deleted':
       case 'reply_text_edited':
         // A human removing or rewriting the agent's answer keeps the gate SHUT.
         // It is the clearest "I have dealt with this" there is, not a request
-        // to hear the same thing again.
+        // to hear the same thing again. Deleting a `partial` reply also takes
+        // away its follow-up; a rewrite is what a duplicate is compared to.
+        if (last && e.reply_id === last.id) {
+          if (e.kind === 'reply_deleted') last = { ...last, status: null };
+          else if (typeof e.text === 'string') last = { ...last, text: e.text };
+        }
         break;
       default:
         break;
@@ -9166,7 +9190,10 @@ function agentReplyGate(record, agentLogin) {
   if (deleted) return { allowed: false, reason: 'comment_deleted' };
   if (!answered) return { allowed: true, reason: 'first_reply' };
   if (theirTurn) return { allowed: true, reason: 'human_replied_since' };
-  return { allowed: false, reason: 'already_answered' };
+  if (run !== 1 || !last || last.status !== 'partial') return { allowed: false, reason: 'already_answered' };
+  const norm = (t) => (typeof t === 'string' ? t.trim().replace(/\s+/g, ' ') : '');
+  if (norm(text) && norm(text) === norm(last.text)) return { allowed: false, reason: 'duplicate_reply' };
+  return { allowed: true, reason: 'followup_after_partial' };
 }
 
 // The version the person last asked on: the comment's own, or a later human
@@ -20296,7 +20323,7 @@ async function askedComment(env, slug, session, meta, commentId) {
 // One answer, posted under the comment that asked. agentReplyGate keeps it
 // to one answer per human turn, as for every agent reply.
 async function postThreadAnswer(env, slug, { thread, parentId, agent, text, version, uniqueKey = null }) {
-  const gate = agentReplyGate(thread.root, agent.login);
+  const gate = agentReplyGate(thread.root, agent.login, text);
   if (!gate.allowed) return { skipped: true, reason: gate.reason };
   const V = coerceBodyVersion(version, thread.root.created_in || 1);
   const now = new Date().toISOString();
@@ -25321,7 +25348,12 @@ const MCP_TOOLS = {
       }, { raftAgent: args.raft_agent });
       if (!r.ok || !r.data) return mcpApiError(r);
       if (r.data.skipped) {
-        return mcpToolResult('Not posted: the last word on this thread is already an agent\'s. Wait for the person to reply.', { ok: true, skipped: true, reason: r.data.reason || null });
+        const why = r.data.reason === 'duplicate_reply'
+          ? 'Not posted: it repeats the agent\'s last reply on this thread word for word.'
+          : r.data.reason === 'comment_deleted'
+            ? 'Not posted: that comment was deleted.'
+            : 'Not posted: the last word on this thread is already an agent\'s. Wait for the person to reply. (After a partial reply an agent may post one follow-up; after any other status, or once that follow-up is posted, the next word is the person\'s.)';
+        return mcpToolResult(why, { ok: true, skipped: true, reason: r.data.reason || null });
       }
       const verdict = r.data.verdict || r.data.agent_status || args.status || null;
       const note = r.data.downgraded_from === 'applied' ? ' (recorded as answered: no version was published after the comment, so the doc did not change)' : '';
@@ -30956,7 +30988,8 @@ const tdocHandlers = {
       }
       // Threads whose last word is already an agent's are the person's turn:
       // handing them off again only made the agent answer itself. Drop them
-      // here, whatever the client sent.
+      // here, whatever the client sent. (A thread whose agent said `partial`
+      // still has its one follow-up, so it is not dropped.)
       let skipped = [];
       try {
         const list = await readComments(env, slug);
@@ -31558,9 +31591,11 @@ const tdocHandlers = {
       // in the same place; the log remembers what the fold forgot. `force`
       // exists for the caller that means it — nothing in /tdoc edit sets it.
       // No override: when the last word on a thread is an agent's, nothing an
-      // agent sends lands until a person speaks. `force` used to skip this,
-      // and agents used it to answer themselves; it is now ignored.
-      const gate = agentReplyGate(parent, agent.login);
+      // agent sends lands until a person speaks — except ONE follow-up after
+      // a `partial` reply, never a word-for-word repeat (see agentReplyGate).
+      // `force` used to skip this, and agents used it to answer themselves;
+      // it is now ignored.
+      const gate = agentReplyGate(parent, agent.login, replyText);
       if (!gate.allowed) {
         return json({
           ok: true, skipped: true, reason: gate.reason,

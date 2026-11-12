@@ -233,7 +233,8 @@ async function startServer(worker, env) {
       page.on('pageerror', (e) => errors.push(e.message));
       try {
         await page.goto(`${base}/me`);
-        const folderRow = page.locator(`.folder-row[data-folder-id="${fid}"]`);
+        // The folder row in one column, the sidebar folder on a wide screen.
+        const folderRow = page.locator(`.folder-row[data-folder-id="${fid}"], .mda-folder[data-folder-id="${fid}"]`);
         await folderRow.waitFor();
         await folderRow.getByRole('button', { name: 'Folder actions' }).click();
         await page.getByRole('menuitem', { name: 'Delete folder' }).click();
@@ -246,7 +247,8 @@ async function startServer(worker, env) {
         const entry = page.locator(`.trash-row[data-folder-id="${fid}"]`);
         await entry.waitFor();
         assert.match(await entry.textContent(), /Folder · 1 doc/);
-        await page.getByRole('tab', { name: 'Docs' }).click();
+        // Back to the docs: the Docs tab, or Everything in the wide sidebar.
+        await page.getByRole('tab', { name: 'Docs', exact: true }).or(page.getByRole('button', { name: /^Everything/ })).click();
         await toast.getByRole('button', { name: 'Undo' }).click();
         await folderRow.waitFor();
         assert.ok(!JSON.parse(await env.META.get('meta:q4-roadmap')).trashed_at, 'Undo left the doc in Trash');

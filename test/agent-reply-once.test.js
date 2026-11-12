@@ -214,6 +214,89 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(g.allowed === true && g.reason === 'first_reply', JSON.stringify(g));
   });
 
+  // ---- one follow-up after `partial` (Julie, 2026-11) ----------------------
+  const agentSaid = (id, text, status, by = bot) => ({
+    kind: 'reply_added', at_version: 1, at: '2026-01-02T00:00:00Z',
+    reply: { id, author: by, text, ...(status ? { agent_status: status } : {}) },
+  });
+  const humanSaid = (id, text) => ({ kind: 'reply_added', at_version: 1, at: '2026-01-03T00:00:00Z', reply: { id, author: human, text } });
+
+  await t('follow-up: the first agent reply is allowed', async () => {
+    const g = gate(thread(), 'claude', 'Looking for photos.');
+    assert(g.allowed === true && g.reason === 'first_reply', JSON.stringify(g));
+  });
+
+  await t('follow-up: none after answered / applied / question / no status', async () => {
+    for (const st of ['answered', 'applied', 'question', null]) {
+      const g = gate(thread(agentSaid('r1', 'Done.', st)), 'claude', 'One more thing.');
+      assert(g.allowed === false && g.reason === 'already_answered', `${st}: ${JSON.stringify(g)}`);
+    }
+  });
+
+  await t('follow-up: one is allowed after partial', async () => {
+    const g = gate(thread(agentSaid('r1', 'Looking for photos, will send options.', 'partial')), 'claude', 'Here are the options.');
+    assert(g.allowed === true && g.reason === 'followup_after_partial', JSON.stringify(g));
+  });
+
+  await t('follow-up: any agent may take it (agents are one side), but only one', async () => {
+    const other = { kind: 'agent', login: 'codex', name: 'Codex' };
+    const g1 = gate(thread(agentSaid('r1', 'Working on it.', 'partial')), 'codex', 'Done now.');
+    assert(g1.allowed === true && g1.reason === 'followup_after_partial', JSON.stringify(g1));
+    const g2 = gate(thread(agentSaid('r1', 'Working on it.', 'partial'), agentSaid('r2', 'Still going.', 'partial', other)), 'claude', 'Done now.');
+    assert(g2.allowed === false && g2.reason === 'already_answered', JSON.stringify(g2));
+  });
+
+  await t('follow-up: a second follow-up is blocked, even after another partial', async () => {
+    const g = gate(thread(
+      agentSaid('r1', 'Looking for photos.', 'partial'),
+      agentSaid('r2', 'Found some, still sorting.', 'partial'),
+    ), 'claude', 'Here they are.');
+    assert(g.allowed === false && g.reason === 'already_answered', JSON.stringify(g));
+  });
+
+  await t('follow-up: identical text (trimmed, whitespace collapsed) is a duplicate', async () => {
+    const g = gate(thread(agentSaid('r1', 'Looking for  photos,\nwill send options.', 'partial')), 'claude', '  Looking for photos, will send options. ');
+    assert(g.allowed === false && g.reason === 'duplicate_reply', JSON.stringify(g));
+  });
+
+  await t('follow-up: none once a human deleted the partial reply', async () => {
+    const g = gate(thread(
+      agentSaid('r1', 'Looking for photos.', 'partial'),
+      { kind: 'reply_deleted', at_version: 1, at: '2026-01-03T00:00:00Z', reply_id: 'r1', by: 'reader' },
+    ), 'claude', 'Here they are.');
+    assert(g.allowed === false && g.reason === 'already_answered', JSON.stringify(g));
+  });
+
+  await t('follow-up: a human reply re-opens the gate and resets the count', async () => {
+    const g = gate(thread(
+      agentSaid('r1', 'Looking for photos.', 'partial'),
+      agentSaid('r2', 'Here they are.', 'answered'),
+      humanSaid('r3', 'Can you find a darker one?'),
+    ), 'claude', 'Here is a darker one.');
+    assert(g.allowed === true && g.reason === 'human_replied_since', JSON.stringify(g));
+    const g2 = gate(thread(
+      agentSaid('r1', 'Looking for photos.', 'partial'),
+      agentSaid('r2', 'Here they are.', 'answered'),
+      humanSaid('r3', 'Can you find a darker one?'),
+      agentSaid('r4', 'Searching for darker ones.', 'partial'),
+    ), 'claude', 'Here is a darker one.');
+    assert(g2.allowed === true && g2.reason === 'followup_after_partial', JSON.stringify(g2));
+  });
+
+  await t('follow-up: through the route — partial, then one follow-up, then shut', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const a = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Looking for photos, will send options.', status: 'partial', agent_login: 'claude' })).json();
+    assert(a.id && !a.skipped, `partial refused: ${JSON.stringify(a)}`);
+    const dup = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Looking for photos, will send options.', status: 'answered', agent_login: 'claude' })).json();
+    assert(dup.skipped === true && dup.reason === 'duplicate_reply', JSON.stringify(dup));
+    const b = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Here are the options.', status: 'answered', agent_login: 'claude' })).json();
+    assert(b.id && !b.skipped, `follow-up refused: ${JSON.stringify(b)}`);
+    const c = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'And it is live now.', status: 'answered', agent_login: 'claude' })).json();
+    assert(c.skipped === true && c.reason === 'already_answered', JSON.stringify(c));
+    const [after] = await listComments(env, slug);
+    assert(after.replies.length === 2, `expected 2 replies, got ${after.replies.length}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

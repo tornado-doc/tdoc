@@ -104,9 +104,9 @@ import { DEMO_AGENT, DEMO_AGENT_CHOICES, DEMO_REWRITES, createDemoBackend } from
 const COMMENT_SIGNIN_DRAFT_MAX_AGE_MS = 60 * 60 * 1000;
 const commentSignInDraftKey = (config) => `tdoc-comment-signin-draft:${config.slug}:v${config.version}`;
 
-function DocumentFooter({ visible }) {
+function DocumentFooter({ visible, footerRef }) {
   return (
-    <footer className={`tdoc-footer${visible ? ' tdoc-footer-show' : ''}`}>
+    <footer ref={footerRef} className={`tdoc-footer${visible ? ' tdoc-footer-show' : ''}`}>
       <div className="tdoc-footer-row">
         <a href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noreferrer">
           github.com/tornado-doc/tdoc
@@ -630,6 +630,7 @@ export function DocumentShell({ boot, config }) {
       setTheme(nextTheme);
       if (message.supportsTheme === true) bridge.send({ type: 'tdoc:theme', theme: nextTheme });
       bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding, areaSelect: !config.isLanding && isFeatureOn('feedbackAreaSelect') });
+      sendFooterInsetRef.current();
       comments.refresh();
       suggestRef.current?.frameHandlers['tdoc:ready']();
     },
@@ -702,6 +703,29 @@ export function DocumentShell({ boot, config }) {
       else location.href = href;
     },
   });
+
+  // The footer is fixed over the frame's bottom edge and reveals at full
+  // scroll. Ask the frame to leave that much blank space after the document
+  // (frame-probe.js tdoc:footerInset), so the footer never covers the last
+  // lines of a doc that sets its own padding. Constant while reading, so the
+  // footer showing cannot change the doc height; none in full-bleed mode,
+  // where the footer stays hidden.
+  const footerRef = useRef(null);
+  const fullBleed = bridge.layout.fullBleed;
+  const sendFooterInset = () => {
+    const el = footerRef.current;
+    bridge.send({ type: 'tdoc:footerInset', px: !el || fullBleed ? 0 : Math.ceil(el.offsetHeight) });
+  };
+  const sendFooterInsetRef = useRef(sendFooterInset);
+  sendFooterInsetRef.current = sendFooterInset;
+  useEffect(() => { sendFooterInsetRef.current(); }, [fullBleed]);
+  useEffect(() => {
+    const el = footerRef.current;
+    if (!el || typeof ResizeObserver !== 'function') return undefined;
+    const observer = new ResizeObserver(() => sendFooterInsetRef.current());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // The scripted Edit's run in the frame (frame-probe.js tdoc:demoRewrite):
   // resolves once the paragraph is rewritten, false if it isn't on the page.
@@ -2443,7 +2467,7 @@ export function DocumentShell({ boot, config }) {
         src={frameSrc}
       />
 
-      <DocumentFooter visible={bridge.layout.footerVisible && !bridge.layout.fullBleed} />
+      <DocumentFooter footerRef={footerRef} visible={bridge.layout.footerVisible && !bridge.layout.fullBleed} />
 
       {!narrow && commentFilterControl && !comparing && !historyOpen && !sidePanelOpen && !bridge.layout.fullBleed ? (
         <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.max(8, Math.min(pinLeft - 4, window.innerWidth - 336)) }}>
