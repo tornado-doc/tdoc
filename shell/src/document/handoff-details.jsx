@@ -21,11 +21,21 @@ function eventTime(value) {
 function history(comment) {
   const events = [];
   if (comment.handoff_at) events.push(['Sent', comment.handoff_at]);
-  if (comment.handoff_delivery?.status === 'delivered') events.push(['Delivered', comment.handoff_delivery.at || comment.handoff_at]);
+  // first_at is when the provider FIRST took it; `at` is the last (re)send.
+  if (comment.handoff_delivery?.status === 'delivered') {
+    events.push(['Delivered', comment.handoff_delivery.first_at || comment.handoff_delivery.at || comment.handoff_at]);
+  }
   if (comment.handoff_acked_at) events.push(['On it', comment.handoff_acked_at]);
+  if (comment.handoff_first_version_at) events.push(['Published a version', comment.handoff_first_version_at]);
   const reply = latestAgentReply(comment);
-  if (reply) events.push([compactHandoffText(comment, 'replied') || 'Agent replied', reply.created]);
-  return events;
+  if (reply) events.push([compactHandoffText(comment, 'replied') || 'Agent replied', comment.handoff_first_reply_at || reply.created]);
+  // The stamps are facts with their own clocks; sort by them rather than by
+  // the order they happened to be recorded in, so a resend or a late ack
+  // cannot reshuffle the story.
+  return events
+    .map(([event, at]) => [event, at, Date.parse(at || '')])
+    .sort((a, b) => (Number.isFinite(a[2]) ? a[2] : Infinity) - (Number.isFinite(b[2]) ? b[2] : Infinity))
+    .map(([event, at]) => [event, at]);
 }
 
 export function HandoffDetailsPanel({

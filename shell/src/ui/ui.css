@@ -1232,6 +1232,8 @@ a.ui-menu-item:visited {
 }
 .ui-btn.ui-btn-m { height: 32px; min-height: 32px; padding: 0 14px; font-size: 13px; }
 .ui-btn.ui-btn-s { height: 28px; min-height: 28px; padding: 0 10px; font-size: 12px; }
+/* l: the one big action on a phone page (My docs' New), 44px to the thumb. */
+.ui-btn.ui-btn-l { height: 44px; min-height: 44px; padding: 0 18px; font-size: 15px; border-radius: 10px; }
 .ui-btn.ui-btn-primary { background: var(--td-accent, #1652f0); border-color: var(--td-accent, #1652f0); color: #fff; }
 .ui-btn.ui-btn-primary:hover:not(:disabled) { background: var(--td-accent-hover, #1146c8); border-color: var(--td-accent-hover, #1146c8); color: #fff; }
 .ui-btn.ui-btn-secondary { background: var(--td-ground, #fff); color: var(--td-ink, #1a1a1a); border-color: var(--td-line, #e8e7e3); }

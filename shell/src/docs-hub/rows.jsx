@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, FileText, Folder, Globe, Link2, Lock, MessageSquare, MoreHorizontal, Presentation, Sheet, Star, UserRound, UsersRound } from 'lucide-react';
+import { FileText, Folder, Globe, Link2, Lock, MoreHorizontal, Presentation, Sheet, Star, UserRound, UsersRound } from 'lucide-react';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { isFeatureOn } from '../feature-flags.js';
 import { absoluteTime, activityText, docTypeLabel, docTypeOf, relativeTime, sharingText } from './row-meta.js';
@@ -58,13 +58,15 @@ export function SharingState({ doc }) {
   );
 }
 
+// Unread on a doc: one blue circle with one number (comments, replies,
+// @mentions and agent replies together) at the end of a row or on a card's
+// corner; the label breaks it down.
 export function ActivityBadge({ doc }) {
   const activity = activityText(doc);
   if (!activity) return null;
   return (
     <a className="doc-activity" href={docHref(doc)} title={activity.label} aria-label={activity.label}>
-      {activity.comments ? <span><MessageSquare size={12} aria-hidden="true" />{activity.comments}</span> : null}
-      {activity.agent ? <span><Bot size={12} aria-hidden="true" />{activity.agent}</span> : null}
+      {activity.total > 99 ? '99+' : activity.total}
     </a>
   );
 }
@@ -167,7 +169,6 @@ export function DocRow({
           <DocTypeIcon doc={doc} />
           {path ? <span className="doc-path" title={path}>{path} ›</span> : null}
           <a className="doc-title" href={docHref(doc)}>{doc.title}</a>
-          <ActivityBadge doc={doc} />
         </div>
         {doc.excerpt ? <div className="doc-preview-excerpt">{doc.excerpt}</div> : null}
         <div className="doc-meta">
@@ -175,6 +176,7 @@ export function DocRow({
         </div>
       </div>
       <div className="row-actions">
+        <ActivityBadge doc={doc} />
         {starrable ? <StarButton doc={doc} onToggle={onToggleStar} /> : null}
         <RowMenu label="More actions" items={menuItems} />
       </div>

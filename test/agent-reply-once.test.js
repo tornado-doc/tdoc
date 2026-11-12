@@ -209,6 +209,39 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(g.allowed === true && g.reason === 'human_replied_since', JSON.stringify(g));
   });
 
+  await t('an agent’s own re-anchor does NOT re-open it for another agent', async () => {
+    // bind_anchor_aid stamps by_kind:'agent'. Before the stamp existed, one
+    // agent's re-anchor read as a human turn to every other agent's gate, and
+    // two agents could keep a thread alive by re-anchoring in turn.
+    const g = gate(thread(answered, {
+      kind: 'anchor_changed', at_version: 1, at: '2026-01-03T00:00:00Z', by: 'claude', by_kind: 'agent',
+      anchor: { kind: 'element', aid: 'aid-1' }, reset_status: false,
+    }), 'codex');
+    assert(g.allowed === false && g.reason === 'already_answered', JSON.stringify(g));
+  });
+
+  await t('a human re-anchor stamped by_kind still re-opens it', async () => {
+    const g = gate(thread(answered, {
+      kind: 'anchor_changed', at_version: 1, at: '2026-01-03T00:00:00Z', by: 'reader', by_kind: 'human',
+      anchor: { kind: 'text', text: 'somewhere else' }, reset_status: true,
+    }), 'claude');
+    assert(g.allowed === true && g.reason === 'human_replied_since', JSON.stringify(g));
+  });
+
+  await t('through the route — an agent re-anchor does not invite a second agent', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const a = await (await reply(worker, env, slug, token, {
+      parent_id: commentId, text: 'Rewrote it and re-anchored.', status: 'applied', applied_in: 1,
+      agent_login: 'claude', bind_anchor_aid: 'aid-123',
+    })).json();
+    assert(a.id && !a.skipped, `first reply refused: ${JSON.stringify(a)}`);
+    const b = await (await reply(worker, env, slug, token, {
+      parent_id: commentId, text: 'Codex checked too.', status: 'applied', applied_in: 1, agent_login: 'codex',
+    })).json();
+    assert(b.skipped === true && b.reason === 'already_answered',
+      `the re-anchor re-opened the gate for another agent: ${JSON.stringify(b)}`);
+  });
+
   await t('an unanswered comment is always open, edited or not', async () => {
     const g = gate(thread({ kind: 'text_edited', at_version: 1, at: '2026-01-03T00:00:00Z', text: 'clearer', by: 'reader' }), 'claude');
     assert(g.allowed === true && g.reason === 'first_reply', JSON.stringify(g));

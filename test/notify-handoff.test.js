@@ -41,7 +41,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     }), env, {});
     const comment = await posted.json();
     assert(posted.status === 200, `comment ${posted.status}`);
-    return { env, token: tok.token, reader, slug, commentId: comment.id };
+    return { env, token: tok.token, accountId: tok.account_id, reader, slug, commentId: comment.id };
   }
 
   const target = { provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', agent_name: 'xiaocc' };
@@ -557,8 +557,13 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   // "the agent died" and "the agent is thinking" are the same picture.
   const ack = (env, token, body) => worker.fetch(req('/api/notify/ack', { method: 'POST', token, body }), env, {});
 
+  // Ack is scoped to the handoff's recipient: the account's own agent list
+  // is what says this token may say "on it" for it.
+  const linkTarget = (env, accountId) => env.META.put(`account-notify:${accountId}`, JSON.stringify([target]));
+
   await t('an agent acks a handoff and the comment reports when work started', async () => {
-    const { env, token, slug, commentId } = await seed();
+    const { env, token, accountId, slug, commentId } = await seed();
+    await linkTarget(env, accountId);
     const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
     const before = Date.now();
     const r = await ack(env, token, { slug, handoff_id: h.handoff_id });
@@ -570,7 +575,8 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   });
 
   await t('re-acking does not move the clock forward', async () => {
-    const { env, token, slug, commentId } = await seed();
+    const { env, token, accountId, slug, commentId } = await seed();
+    await linkTarget(env, accountId);
     const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
     const first = await (await ack(env, token, { slug, handoff_id: h.handoff_id })).json();
     const second = await (await ack(env, token, { slug, handoff_id: h.handoff_id })).json();

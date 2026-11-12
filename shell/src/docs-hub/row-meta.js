@@ -72,7 +72,7 @@ export function activityText(doc) {
   const parts = [];
   if (comments) parts.push(`${comments} new ${comments === 1 ? 'comment' : 'comments'}`);
   if (agent) parts.push(`${agent} agent ${agent === 1 ? 'reply' : 'replies'}`);
-  return { comments, agent, label: parts.join(', ') };
+  return { comments, agent, total: comments + agent, label: parts.join(' · ') };
 }
 
 // "Finish setting up" belongs to the start: on the Docs tab only, and only
