@@ -603,7 +603,7 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       assert(at >= 0 && /Import CSV or Excel/.test(items[at + 1] || ''), `Blank sheet sits next to Import: ${JSON.stringify(items)}`);
       await shot(page, 'hub-new-sheet-menu-desktop');
       await item.click();
-      await page.waitForURL(/\/d\/[^/]+\/v\/1\?edit=1/, { timeout: 15000 });
+      await page.waitForURL(/\/d\/[^/]+\/v\/1(?:[?#]|$)/, { timeout: 15000 });
       await frameLoc().locator('.tdoc-sheet .ts-row').first().waitFor({ timeout: 15000 });
       const frame = docFrame();
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'edit');
@@ -633,7 +633,7 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await p2.getByRole('menuitem', { name: /Blank sheet/ }).waitFor();
       await shot(p2, 'hub-new-sheet-menu-phone');
       await p2.getByRole('menuitem', { name: /Blank sheet/ }).tap();
-      await p2.waitForURL(/\?edit=1/, { timeout: 15000 });
+      await p2.waitForURL(/\/d\/[^/]+\/v\/1(?:[?#]|$)/, { timeout: 15000 });
       await p2.frameLocator('iframe[aria-label="Document content"]').locator('.tdoc-sheet .ts-row').first().waitFor({ timeout: 15000 });
       await p2.waitForTimeout(400);
       await shot(p2, 'new-sheet-edit-phone');

@@ -324,14 +324,24 @@ async function startServer(worker, env) {
       await t(`${tag}: Blank doc opens a new doc in edit mode`, async () => {
         const popup = await open('Doc');
         await press(popup.getByRole('menuitem', { name: /Blank doc/ }));
-        await page.waitForURL(/\/d\/[^/]+\/v\/1\?edit=1/, { timeout: 15000 });
+        await page.waitForURL(/\/d\/[^/]+\/v\/1(?:[?#]|$)/, { timeout: 15000 });
+        // Opens in Edit, and ?edit=1 is gone from the address bar so a reload
+        // or a copied link opens the doc normally.
+        const doc = () => page.frames().find((f) => f.url().includes('/frame'));
+        await page.waitForFunction(() => !new URLSearchParams(location.search).has('edit'), null, { timeout: 15000 });
+        await page.waitForFunction(() => [...document.querySelectorAll('iframe')].length > 0);
+        await page.frameLocator('iframe[aria-label="Document content"]').locator('body').waitFor({ timeout: 15000 });
+        await doc().waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'edit');
+        await page.reload();
+        await page.frameLocator('iframe[aria-label="Document content"]').locator('body').waitFor({ timeout: 15000 });
+        await doc().waitForFunction(() => document.documentElement.hasAttribute('data-tdoc-interaction-mode') && document.documentElement.getAttribute('data-tdoc-interaction-mode') !== 'edit', null, { timeout: 15000 });
       });
 
       await t(`${tag}: Blank deck opens three slides in edit mode, and slide text edits and saves`, async () => {
         await page.goto(`${base}/me`);
         const popup = await open('Slides');
         await press(popup.getByRole('menuitem', { name: /Blank deck/ }));
-        await page.waitForURL(/\/d\/[^/]+\/v\/1\?edit=1/, { timeout: 15000 });
+        await page.waitForURL(/\/d\/[^/]+\/v\/1(?:[?#]|$)/, { timeout: 15000 });
         const slug = new URL(page.url()).pathname.split('/')[2];
         const frame = page.frameLocator('iframe[aria-label="Document content"]');
         await frame.locator('[data-tdoc-slide]').first().waitFor({ timeout: 15000 });
