@@ -230,17 +230,16 @@
 .mda-phone .mda-sec-hd h2 { font-size: 15px; color: var(--td-ink); }
 .mda-phone .mda-text-link { font-size: 15px; padding: 6px 0; }
 .mda-phone .mda-needs-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-.mda-phone .mda-needs-grid.is-strip { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: min(82%, 320px); overflow-x: auto; margin: 0 -16px; padding: 2px 16px 6px; scroll-snap-type: x mandatory; scroll-padding: 0 16px; scrollbar-width: none; }
+.mda-phone .mda-needs-grid.is-strip { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: min(81%, 340px); overflow-x: auto; margin: 0 -16px; padding: 2px 16px 6px; scroll-snap-type: x mandatory; scroll-padding: 0 16px; scrollbar-width: none; }
 .mda-phone .mda-needs-grid.is-strip::-webkit-scrollbar { display: none; }
-.mda-phone .mda-need { gap: 8px; padding: 14px 14px 12px; scroll-snap-align: start; }
-.mda-phone .mda-who { width: 28px; height: 28px; font-size: 12px; }
-.mda-phone .mda-need-top { align-items: flex-start; }
-.mda-phone .mda-need-reason { font-size: 15px; line-height: 1.35; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.mda-phone .mda-need-when { line-height: 1.45; }
-.mda-phone .mda-need-when { font-size: 14px; }
-.mda-phone .mda-need-quote { font-size: 15px; line-height: 1.45; }
-.mda-phone .mda-need-doc { font-size: 14px; padding-right: 44px; }
-.mda-phone .mda-need .mda-need-done { right: 2px; bottom: 2px; }
+.mda-phone .mda-need { gap: 5px; padding: 10px 12px 8px; scroll-snap-align: start; }
+.mda-phone .mda-who { width: 24px; height: 24px; font-size: 11px; }
+.mda-phone .mda-need-top { align-items: center; }
+.mda-phone .mda-need-reason { font-size: 15px; line-height: 1.3; }
+.mda-phone .mda-need-when { font-size: 12px; line-height: 1.3; }
+.mda-phone .mda-need-quote { display: block; -webkit-line-clamp: unset; font-size: 13px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mda-phone .mda-need-doc { font-size: 13px; padding-right: 36px; }
+.mda-phone .mda-need .mda-need-done { right: 4px; bottom: 2px; }
 
 /* Folder path, with the open folder's ⋯ at its end. */
 .mda-phone .mda-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: 0 0 6px; font-size: 15px; }
