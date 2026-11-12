@@ -299,6 +299,42 @@ const SLUG = 'hostile-body-css';
       if (!shownAtBottom) throw new Error('footer should reveal at the doc bottom');
     });
 
+    // A doc with its own layout (no bottom padding, last element flush with the
+    // end of body) must not have its last line covered by the revealed footer.
+    for (const width of [1400, 390]) {
+      await t(`revealed footer does not cover the last element of a flush-bottom doc (${width}px)`, async () => {
+        await page.setViewportSize({ width, height: 600 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        await page.waitForTimeout(300);
+        const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+        await frame.evaluate(() => {
+          document.documentElement.style.cssText += ';margin:0!important;padding:0!important';
+          document.body.style.cssText += ';margin:0!important;padding:0!important;transform:none';
+          const last = document.createElement('p');
+          last.id = 'test-last-line';
+          last.style.cssText = 'margin:0;padding:0;height:40px;background:#c00;color:#fff';
+          last.textContent = 'Last line of a custom-padding doc';
+          document.body.appendChild(last);
+          window.scrollTo(0, document.documentElement.scrollHeight);
+        });
+        await page.waitForTimeout(400);
+        const frameEl = await frame.frameElement();
+        const frameBox = await frameEl.boundingBox();
+        const lastBottom = await frame.evaluate(() => document.getElementById('test-last-line').getBoundingClientRect().bottom);
+        const footer = await page.evaluate(() => {
+          const f = document.querySelector('.tdoc-footer');
+          return { shown: f.classList.contains('tdoc-footer-show'), top: f.getBoundingClientRect().top, height: f.offsetHeight };
+        });
+        if (!footer.shown) throw new Error('footer should reveal at the doc bottom');
+        // Footer's transition may still be settling: its resting top is viewport bottom - height.
+        const footerTop = Math.min(footer.top, page.viewportSize().height - footer.height);
+        const lastBottomInPage = frameBox.y + lastBottom;
+        if (lastBottomInPage > footerTop + 1) {
+          throw new Error(`footer (top ${footerTop}) covers the doc's last element (bottom ${lastBottomInPage})`);
+        }
+      });
+    }
+
     await t('Publish button opens the publish modal', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
