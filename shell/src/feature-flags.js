@@ -73,12 +73,13 @@ export const FLAGS = Object.freeze({
   // view applied, the comment count, Open), read under the SHEET's access
   // for the person reading (shell/src/document/sheet-embed.js, worker
   // /api/embed/sheet). Off: the figure is its fallback link, as in an export.
-  // My docs layout A on wide screens (>= 900px): left sidebar with types
-  // and folders, Needs you, card grid / list table, Settings as its own page.
+  // My docs layout A. Wide screens (>= 900px): left sidebar with types and
+  // folders, Needs you, card grid / list table, Settings as its own page.
+  // Phones: one column of rows, Needs you as a strip to swipe, views and
+  // type / folder filters as chip rows, Settings as a list of sections.
   // Approved by Julie (2026-11-12) to ship behind dev mode first; on in PR
-  // previews. Phones keep the one-column layout either way until the phone
-  // redesign lands.
-  myDocsA: Object.freeze({ label: 'New My docs layout (desktop)', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
+  // previews. Off, every width keeps the old one-column layout.
+  myDocsA: Object.freeze({ label: 'New My docs layout', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
   sheetEmbeds: Object.freeze({ label: 'Sheets embedded in pages (live, by reference)', owner: 'julie', added: '2026-11-11', default: false, preview: true }),
 });
 

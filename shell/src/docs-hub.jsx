@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Folder, LayoutGrid, List, Plus, Search, UsersRound, X } from 'lucide-react';
+import { Check, ChevronRight, Folder, FolderOpen, FolderPlus, Inbox, LayoutGrid, List, MessageSquareText, Plus, Search, Settings, Trash2, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppButton } from './ui/button.jsx';
@@ -8,7 +8,7 @@ import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu, agentRecipeFor } from './create-from-scratch.jsx';
 import { createBlankDeck } from './blank-deck.js';
 import { SheetDropHint, SheetFilePicker, SheetImportDialog, createBlankSheet, isSheetFileName, sheetErrorText, useSheetFileDrop } from './sheet-import.jsx';
-import { DocList, DocRow, FolderRow, day, shareMenuItem } from './docs-hub/rows.jsx';
+import { DocList, DocRow, FolderRow, RowMenu, day, shareMenuItem } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { onboardingChecklistShown } from './docs-hub/row-meta.js';
 import { ConnectorsBody } from './connectors-page.jsx';
@@ -33,7 +33,7 @@ import {
 } from './document/api.js';
 import { TrashPane } from './docs-hub/trash.jsx';
 import { DocCollection } from './docs-hub/doc-cards.jsx';
-import { DOC_TYPES, MyDocsSidebar } from './docs-hub/my-docs-sidebar.jsx';
+import { DOC_TYPES, MyDocsSidebar, folderTree } from './docs-hub/my-docs-sidebar.jsx';
 import { NeedsYou, needsCards, useNeedsInbox } from './docs-hub/needs-you.jsx';
 import { SettingsPage } from './docs-hub/settings-page.jsx';
 import { docTypeOf } from './docs-hub/row-meta.js';
@@ -63,6 +63,7 @@ const CATALOG_LAYOUT_KEY = 'tdoc.catalogLayout';
 // Wide layout (A): grid or list, remembered apart from the phone's choice.
 const MY_DOCS_LAYOUT_KEY = 'tdoc.myDocsLayout';
 const SCOPES = [['needs', 'Needs you'], ['recent', 'Recent'], ['starred', 'Starred'], ['docs', 'All docs']];
+const PHONE_SCOPES = [['docs', 'All docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['needs', 'Needs you']];
 const WIDE_QUERY = '(min-width: 900px)';
 
 function useMediaQuery(query) {
@@ -677,11 +678,19 @@ export function DocsHub({ boot }) {
     setLayoutState(next);
     try { localStorage.setItem(CATALOG_LAYOUT_KEY, next); } catch { /* preference only */ }
   };
-  // Layout A on a wide screen where the myDocsA flag is on (dev mode, PR
-  // previews); phones keep the one-column layout until their own redesign.
+  // Layout A where the myDocsA flag is on (dev mode, PR previews): the
+  // sidebar and cards on a wide screen, one column of rows with chip rows for
+  // the views, types and folders on a phone (phoneA). Flag off, every width
+  // keeps the old one-column layout.
   const [myDocsA] = useState(() => isFeatureOn('myDocsA'));
   const wide = useMediaQuery(WIDE_QUERY);
-  const layoutA = myDocsA && wide;
+  const layoutA = myDocsA;
+  const phoneA = layoutA && !wide;
+  // A phone has no list table to select in: Select turns on the checkboxes.
+  const [phoneSelecting, setPhoneSelecting] = useState(false);
+  // The chip rows scroll sideways: keep the chips that are on in sight (a
+  // folder chosen from a link, a filter set before the row was scrolled).
+  const chipRows = useRef(null);
   const [cardLayout, setCardLayoutState] = useState(() => {
     try { return localStorage.getItem(MY_DOCS_LAYOUT_KEY) === 'list' ? 'list' : 'grid'; } catch { return 'grid'; }
   });
@@ -1143,7 +1152,7 @@ export function DocsHub({ boot }) {
   const itemsA = baseItemsA.filter((doc) => !docType || docTypeOf(doc) === docType);
   const shownItemsA = view === 'docs' ? sortCatalogDocs(itemsA, hub.sort) : itemsA;
   const scopeCount = { needs: needCardsAll.length, recent: scopedRecent.length, starred: scopedStarred.length, docs: spaceDocs.length };
-  const selectableA = !team && view === 'docs' && cardLayout === 'list';
+  const selectableA = !team && view === 'docs' && (phoneA ? phoneSelecting : cardLayout === 'list');
   const allSelectedA = selectableA && shownItemsA.length > 0 && shownItemsA.every((doc) => hub.selected.has(doc.slug));
   const canFileA = (doc) => (team ? Boolean(allTeamDocs.find((row) => row.slug === doc.slug)?.can_file) : capabilities.folders && catalogSlugs.has(doc.slug));
   const dragSlugsA = (doc) => (hub.selected.has(doc.slug) ? [...hub.selected] : [doc.slug]);
@@ -1211,12 +1220,143 @@ export function DocsHub({ boot }) {
       onNewFolder={team
         ? () => setModal({ type: 'new-team-folder' })
         : capabilities.folders ? () => setModal({ type: 'new-folder' }) : null}
-      trigger={<AppButton variant="primary" className="mda-new"><Plus size={17} aria-hidden="true" />New</AppButton>}
+      trigger={<AppButton variant="primary" size={phoneA ? 'l' : 'm'} className="mda-new"><Plus size={phoneA ? 20 : 17} aria-hidden="true" />New</AppButton>}
     />
   );
-  const mainA = !layoutA ? null : !team && view === 'settings' ? (
+  // The parts both widths share: the list (cards, table or phone rows), the
+  // Needs you view, and the views of their own (Comments, Trash, team
+  // settings). Only the frame around them differs.
+  const batchBarA = selectableA && hub.selected.size ? (
+    <div className="batch-bar">
+      <label className="select-all">
+        <input type="checkbox" checked={allSelectedA} onChange={(event) => hub.setSelected(event.target.checked ? new Set(shownItemsA.map((doc) => doc.slug)) : new Set())} />
+        {' '}
+        <span>{`${hub.selected.size} selected`}</span>
+      </label>
+      <span className="batch-actions">
+        {teams.length && movableToTeam.length ? (
+          <button type="button" className="batch-move batch-move-team is-visible" onClick={() => setModal({ type: 'move-team', slugs: movableToTeam, skipped: hub.selected.size - movableToTeam.length })}>Move to team</button>
+        ) : null}
+        {capabilities.folders ? <button type="button" className="batch-move is-visible" onClick={() => setModal({ type: 'move', slugs: [...hub.selected] })}>Move to folder</button> : null}
+        {capabilities.delete ? <button type="button" className="batch-delete is-visible" onClick={() => setModal({ type: 'delete-docs', slugs: [...hub.selected] })}>Delete selected</button> : null}
+      </span>
+    </div>
+  ) : null;
+  const listPaneA = (
+    <section className="pane mda-pane" id={team ? 'pane-team' : view === 'docs' ? 'pane-mine' : `pane-${view}`}>
+      {batchBarA}
+      <DocCollection
+        docs={shownItemsA}
+        layout={phoneA ? 'phone' : cardLayout}
+        selecting={hub.selected.size > 0}
+        rowProps={rowPropsA}
+        empty={emptyA()}
+      />
+      {view === 'docs' ? (
+        <TextSearchResults
+          search={textSearch}
+          exclude={new Set(shownItemsA.map((doc) => doc.slug))}
+          pathFor={textResultPath}
+        />
+      ) : null}
+    </section>
+  );
+  const needsViewA = (
+    <NeedsYou
+      cards={needCardsShown}
+      onDone={doneNeed}
+      empty={<p className="empty mda-empty">You’re all caught up. New comments, @mentions and agent replies show up here.</p>}
+    />
+  );
+  const ownViewA = view === 'comments' ? (
+    team ? (
+      <>
+        {teamFeedback.length ? (
+          <section className="pane tm-feedback-pane" id="pane-team-feedback" aria-label="Feedback spaces">
+            <FeedbackList key={team.id} team={team} spaces={teamFeedback} teams={teams} />
+          </section>
+        ) : null}
+        <TeamCommentsPane team={team} />
+      </>
+    ) : (
+      <section className="pane" id="pane-feedback">
+        <FeedbackList spaces={Array.isArray(boot.feedback) ? boot.feedback : []} teams={teams} />
+      </section>
+    )
+  ) : view === 'trash' ? (
+    <TrashPane
+      team={team}
+      notify={hub.notify}
+      onChanged={() => refreshCatalog().catch(teamFailed)}
+      onFailed={teamFailed}
+    />
+  ) : view === 'settings' && team ? (
+    <TeamSettingsPane
+      team={team}
+      onChanged={(next) => setTeams((list) => list.map((item) => (
+        item.id === next.id ? { ...item, name: next.name, role: next.role, member_count: next.member_count } : item
+      )))}
+      onLeave={(current, me) => setModal({ type: 'leave-team', team: current, me })}
+    />
+  ) : null;
+  const searchA = (className) => (
+    <label className={`search-field mda-search${className ? ` ${className}` : ''}`}>
+      <Search size={phoneA ? 18 : 15} />
+      <input
+        type="search"
+        value={hub.query}
+        onChange={(event) => hub.setQuery(event.target.value)}
+        placeholder={phoneA ? 'Search docs, sheets, slides' : 'Search all docs · try title:roadmap'}
+        aria-label="Search docs"
+        aria-description="Searches every folder. Narrow a term with title, slug, preview, or path followed by a colon."
+      />
+    </label>
+  );
+  const sortA = view === 'docs' ? (
+    <AppSelect
+      plain
+      className="toolbar-select mda-sort"
+      ariaLabel="Sort docs"
+      value={hub.sort}
+      onChange={hub.setSort}
+      options={[
+        { value: 'updated', label: 'Last updated' },
+        { value: 'created', label: 'Created' },
+        { value: 'title', label: 'Title' },
+      ]}
+    />
+  ) : null;
+  const crumbsA = (menu) => (activeFolder && !searchingA ? (
+    <nav className="crumbs mda-crumbs" aria-label="Folder path">
+      <button className="crumb-root" type="button" onClick={() => pickFolderA('')}>{team ? team.name : 'My docs'}</button>
+      {(team ? teamPath : hub.path).map((item) => (
+        <React.Fragment key={item.id}>
+          <ChevronRight className="sep" size={14} />
+          <button className="crumb-root cur" type="button" onClick={() => pickFolderA(item.id)}>{item.name}</button>
+        </React.Fragment>
+      ))}
+      {menu}
+    </nav>
+  ) : null);
+  const headerA = (actions) => (
+    <div className="page-hd mda-hd">
+      <span className={`mda-space-mark${team ? ' is-team' : ''}`} aria-hidden="true">{String(team ? team.name : (identity?.name || identity?.login || 'M')).slice(0, 1).toUpperCase()}</span>
+      <h1>{team ? team.name : 'My docs'}</h1>
+      <div className="page-hd-actions">{actions}</div>
+    </div>
+  );
+  // A phone leads with All docs, the view it opens on, so the chip that is
+  // on is never scrolled out of sight; Needs you has its strip above.
+  const scopeChips = (phoneA ? PHONE_SCOPES : SCOPES).map(([id, label]) => (
+    <button key={id} type="button" role="tab" aria-selected={view === id} className={`mda-chip${view === id ? ' is-on' : ''}${id === 'needs' ? ' is-needs' : ''}`} onClick={() => setView(id)}>
+      {label}
+      {id === 'needs' ? (scopeCount.needs ? <span className="mda-chip-n">{scopeCount.needs}</span> : null) : <span className="mda-chip-n">{scopeCount[id]}</span>}
+    </button>
+  ));
+  const settingsPageA = (
     <main className="mda-settings-wrap">
       <SettingsPage
+        compact={phoneA}
         identity={identity}
         profile={boot.profile}
         teams={teams}
@@ -1226,7 +1366,100 @@ export function DocsHub({ boot }) {
         onNewTeam={() => setModal({ type: 'new-team' })}
       />
     </main>
-  ) : (
+  );
+
+  // ---- Layout A on a phone: one column. Title and New; search; Needs you
+  // as a strip of cards to swipe; the views (with Comments, Trash, Settings)
+  // and the type and folder filters as two chip rows that scroll sideways;
+  // then one row per doc: type, title, one meta line, unread, ⋯.
+  const phoneFolders = folderTree(spaceFolderList);
+  useEffect(() => {
+    if (!phoneA || !chipRows.current) return;
+    for (const row of chipRows.current.querySelectorAll('.mda-scroll')) {
+      const on = [...row.querySelectorAll('.mda-chip.is-on')].pop();
+      if (!on) continue;
+      const left = on.offsetLeft - row.offsetLeft;
+      if (left < row.scrollLeft || left + on.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = Math.max(0, left - 16);
+    }
+  }, [phoneA, view, docType, activeFolder]);
+  const newFolderA = team || capabilities.folders ? () => setModal({ type: team ? 'new-team-folder' : 'new-folder', top: true }) : null;
+  const activeFolderItem = activeFolder ? spaceFolderById.get(activeFolder) : null;
+  const activeFolderMenu = activeFolderItem ? (team ? teamFolderMenu : folderMenu)(activeFolderItem) : [];
+  const phoneMainA = !phoneA ? null : !team && view === 'settings' ? settingsPageA : (
+    <div className="mda mda-phone">
+      <main className="mda-main">
+        <div className="mda-main-in" ref={chipRows}>
+          {(boot.team_invites || []).length ? <TeamInviteBanner invites={boot.team_invites} /> : null}
+          {headerA(newMenuA)}
+          {listViewA ? (
+            <>
+              {team ? null : checklist}
+              {searchA('mda-psearch')}
+              {view !== 'needs' && !searchingA ? (
+                <NeedsYou cards={needCardsShown} limit={6} strip onSeeAll={() => setView('needs')} onDone={doneNeed} />
+              ) : null}
+            </>
+          ) : null}
+          <div className="mda-pviews mda-scroll" role="tablist" aria-label={`${team ? team.name : 'My docs'} views`}>
+            {scopeChips}
+            <span className="mda-chip-sep" aria-hidden="true" />
+            {[['comments', 'Comments', MessageSquareText], ['trash', 'Trash', Trash2], ['settings', team ? 'Team settings' : 'Settings', Settings]].map(([id, label, Icon]) => (
+              <button key={id} type="button" role="tab" aria-selected={view === id} className={`mda-chip mda-view-${id}${view === id ? ' is-on' : ''}`} onClick={() => setView(id)}>
+                <Icon size={16} aria-hidden="true" />{label}
+              </button>
+            ))}
+          </div>
+          {listViewA ? (
+            <>
+              <div className="mda-pfilters mda-scroll" role="group" aria-label="Filter by type and folder">
+                {DOC_TYPES.map(({ id, label, icon: Icon }) => (
+                  <button key={id} type="button" className={`mda-chip mda-type${docType === id ? ' is-on' : ''}`} data-type={id} aria-pressed={docType === id} aria-label={`${label} (${typeCountsA[id] || 0})`} onClick={() => setDocType(docType === id ? '' : id)}>
+                    <Icon size={16} aria-hidden="true" />{label}<span className="mda-chip-n">{typeCountsA[id] || 0}</span>
+                  </button>
+                ))}
+                <span className="mda-chip-sep" aria-hidden="true" />
+                <button type="button" className={`mda-chip mda-everything${!activeFolder ? ' is-on' : ''}`} aria-pressed={!activeFolder} onClick={() => pickFolderA('')}>
+                  <Inbox size={16} aria-hidden="true" />All folders
+                </button>
+                {phoneFolders.map(({ folder: item }) => (
+                  <button key={item.id} type="button" className={`mda-chip mda-folder${activeFolder === item.id ? ' is-on' : ''}`} data-folder-id={item.id} aria-pressed={activeFolder === item.id} onClick={() => pickFolderA(activeFolder === item.id ? '' : item.id)}>
+                    {activeFolder === item.id ? <FolderOpen size={16} aria-hidden="true" /> : <Folder size={16} aria-hidden="true" />}
+                    {item.name}
+                    <span className="mda-chip-n">{spaceFolderCounts[item.id]?.docs ?? 0}</span>
+                  </button>
+                ))}
+                {newFolderA ? (
+                  <button type="button" className="mda-chip mda-new-folder" aria-label="New folder" title="New folder" onClick={newFolderA}>
+                    <FolderPlus size={16} aria-hidden="true" />
+                  </button>
+                ) : null}
+              </div>
+              {team && view === 'docs' && !activeFolder ? <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p> : null}
+              {view === 'needs' ? needsViewA : (
+                <>
+                  {crumbsA(activeFolderMenu.length ? <span className="row-actions"><RowMenu label="Folder actions" items={activeFolderMenu} /></span> : null)}
+                  {view === 'docs' && shownItemsA.length ? (
+                    <div className="mda-plist-hd">
+                      <span className="mda-plist-n">{shownItemsA.length === 1 ? '1 doc' : `${shownItemsA.length} docs`}</span>
+                      {sortA}
+                      {!team && (capabilities.folders || capabilities.delete || teams.length) ? (
+                        <AppButton variant="quiet" size="l" className="mda-select-toggle" aria-pressed={phoneSelecting} onClick={() => { if (phoneSelecting) hub.setSelected(new Set()); setPhoneSelecting(!phoneSelecting); }}>
+                          {phoneSelecting ? 'Done' : 'Select'}
+                        </AppButton>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {listPaneA}
+                </>
+              )}
+            </>
+          ) : ownViewA}
+        </div>
+      </main>
+    </div>
+  );
+
+  const mainA = !layoutA || phoneA ? null : !team && view === 'settings' ? settingsPageA : (
     <div className="mda">
       <MyDocsSidebar
         allCount={spaceDocs.length}
@@ -1243,7 +1476,7 @@ export function DocsHub({ boot }) {
         onFolder={pickFolderA}
         onDropFolder={(slugs, item) => moveDroppedA(slugs, item.id)}
         folderMenu={team ? teamFolderMenu : folderMenu}
-        onNewFolder={team || capabilities.folders ? () => setModal({ type: team ? 'new-team-folder' : 'new-folder', top: true }) : null}
+        onNewFolder={newFolderA}
         view={view}
         onView={(next) => { setView(next); }}
         settingsLabel={team ? 'Team settings' : 'Settings'}
@@ -1251,14 +1484,12 @@ export function DocsHub({ boot }) {
       <main className="mda-main">
         <div className="mda-main-in">
           {(boot.team_invites || []).length ? <TeamInviteBanner invites={boot.team_invites} /> : null}
-          <div className="page-hd mda-hd">
-            <span className={`mda-space-mark${team ? ' is-team' : ''}`} aria-hidden="true">{String(team ? team.name : (identity?.name || identity?.login || 'M')).slice(0, 1).toUpperCase()}</span>
-            <h1>{team ? team.name : 'My docs'}</h1>
-            <div className="page-hd-actions">
+          {headerA(
+            <>
               {listViewA && view !== 'needs' ? <CatalogLayoutToggle layout={cardLayout} onLayout={setCardLayout} /> : null}
               {newMenuA}
-            </div>
-          </div>
+            </>,
+          )}
           {listViewA ? (
             <>
               {team ? null : checklist}
@@ -1268,131 +1499,24 @@ export function DocsHub({ boot }) {
               ) : null}
               <div className="mda-filters">
                 <div className="mda-chips" role="tablist" aria-label={`${team ? team.name : 'My docs'} views`}>
-                  {SCOPES.map(([id, label]) => (
-                    <button key={id} type="button" role="tab" aria-selected={view === id} className={`mda-chip${view === id ? ' is-on' : ''}${id === 'needs' ? ' is-needs' : ''}`} onClick={() => setView(id)}>
-                      {label}
-                      {id === 'needs' ? (scopeCount.needs ? <span className="mda-chip-n">{scopeCount.needs}</span> : null) : <span className="mda-chip-n">{scopeCount[id]}</span>}
-                    </button>
-                  ))}
+                  {scopeChips}
                 </div>
                 <div className="mda-tools">
-                  <label className="search-field mda-search">
-                    <Search size={15} />
-                    <input
-                      type="search"
-                      value={hub.query}
-                      onChange={(event) => hub.setQuery(event.target.value)}
-                      placeholder="Search all docs · try title:roadmap"
-                      aria-label="Search docs"
-                      aria-description="Searches every folder. Narrow a term with title, slug, preview, or path followed by a colon."
-                    />
-                  </label>
-                  {view === 'docs' ? (
-                    <AppSelect
-                      plain
-                      className="toolbar-select mda-sort"
-                      ariaLabel="Sort docs"
-                      value={hub.sort}
-                      onChange={hub.setSort}
-                      options={[
-                        { value: 'updated', label: 'Last updated' },
-                        { value: 'created', label: 'Created' },
-                        { value: 'title', label: 'Title' },
-                      ]}
-                    />
-                  ) : null}
+                  {searchA('')}
+                  {sortA}
                 </div>
               </div>
-              {activeFolder && !searchingA ? (
-                <nav className="crumbs mda-crumbs" aria-label="Folder path">
-                  <button className="crumb-root" type="button" onClick={() => pickFolderA('')}>{team ? team.name : 'My docs'}</button>
-                  {(team ? teamPath : hub.path).map((item) => (
-                    <React.Fragment key={item.id}>
-                      <ChevronRight className="sep" size={14} />
-                      <button className="crumb-root cur" type="button" onClick={() => pickFolderA(item.id)}>{item.name}</button>
-                    </React.Fragment>
-                  ))}
-                </nav>
-              ) : null}
-              {view === 'needs' ? (
-                <NeedsYou
-                  cards={needCardsShown}
-                  onDone={doneNeed}
-                  empty={<p className="empty mda-empty">You’re all caught up. New comments, @mentions and agent replies show up here.</p>}
-                />
-              ) : (
-                <section className="pane mda-pane" id={team ? 'pane-team' : view === 'docs' ? 'pane-mine' : `pane-${view}`}>
-                  {selectableA && hub.selected.size ? (
-                    <div className="batch-bar">
-                      <label className="select-all">
-                        <input type="checkbox" checked={allSelectedA} onChange={(event) => hub.setSelected(event.target.checked ? new Set(shownItemsA.map((doc) => doc.slug)) : new Set())} />
-                        {' '}
-                        <span>{`${hub.selected.size} selected`}</span>
-                      </label>
-                      <span className="batch-actions">
-                        {teams.length && movableToTeam.length ? (
-                          <button type="button" className="batch-move batch-move-team is-visible" onClick={() => setModal({ type: 'move-team', slugs: movableToTeam, skipped: hub.selected.size - movableToTeam.length })}>Move to team</button>
-                        ) : null}
-                        {capabilities.folders ? <button type="button" className="batch-move is-visible" onClick={() => setModal({ type: 'move', slugs: [...hub.selected] })}>Move to folder</button> : null}
-                        {capabilities.delete ? <button type="button" className="batch-delete is-visible" onClick={() => setModal({ type: 'delete-docs', slugs: [...hub.selected] })}>Delete selected</button> : null}
-                      </span>
-                    </div>
-                  ) : null}
-                  <DocCollection
-                    docs={shownItemsA}
-                    layout={cardLayout}
-                    selecting={hub.selected.size > 0}
-                    rowProps={rowPropsA}
-                    empty={emptyA()}
-                  />
-                  {view === 'docs' ? (
-                    <TextSearchResults
-                      search={textSearch}
-                      exclude={new Set(shownItemsA.map((doc) => doc.slug))}
-                      pathFor={textResultPath}
-                    />
-                  ) : null}
-                </section>
-              )}
+              {crumbsA(null)}
+              {view === 'needs' ? needsViewA : listPaneA}
             </>
-          ) : view === 'comments' ? (
-            team ? (
-              <>
-                {teamFeedback.length ? (
-                  <section className="pane tm-feedback-pane" id="pane-team-feedback" aria-label="Feedback spaces">
-                    <FeedbackList key={team.id} team={team} spaces={teamFeedback} teams={teams} />
-                  </section>
-                ) : null}
-                <TeamCommentsPane team={team} />
-              </>
-            ) : (
-              <section className="pane" id="pane-feedback">
-                <FeedbackList spaces={Array.isArray(boot.feedback) ? boot.feedback : []} teams={teams} />
-              </section>
-            )
-          ) : view === 'trash' ? (
-            <TrashPane
-              team={team}
-              notify={hub.notify}
-              onChanged={() => refreshCatalog().catch(teamFailed)}
-              onFailed={teamFailed}
-            />
-          ) : view === 'settings' && team ? (
-            <TeamSettingsPane
-              team={team}
-              onChanged={(next) => setTeams((list) => list.map((item) => (
-                item.id === next.id ? { ...item, name: next.name, role: next.role, member_count: next.member_count } : item
-              )))}
-              onLeave={(current, me) => setModal({ type: 'leave-team', team: current, me })}
-            />
-          ) : null}
+          ) : ownViewA}
         </div>
       </main>
     </div>
   );
 
   return (
-    <div className={`tdoc-app docs-hub${layoutA ? ' is-wide-a' : ''}`}>
+    <div className={`tdoc-app docs-hub${layoutA ? (phoneA ? ' is-phone-a' : ' is-wide-a') : ''}`}>
       <TopBar
         identity={identity}
         profile={boot.profile || null}
@@ -1403,7 +1527,7 @@ export function DocsHub({ boot }) {
         onSpace={pickSpace}
         onNewTeam={() => setModal({ type: 'new-team' })}
       />
-      {layoutA ? mainA : (
+      {phoneA ? phoneMainA : layoutA ? mainA : (
       <main className="wrap">
         {(boot.team_invites || []).length ? (
           <TeamInviteBanner invites={boot.team_invites} />

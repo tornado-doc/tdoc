@@ -226,7 +226,7 @@ const BROWSER = [
   'profile-picks-ui.test.js', // /@handle owner removes picks: card control + Undo, every pin in the picker, errors shown
   'full-text-search-ui.test.js', // My docs search: text results from /api/search, English + Chinese, marked passages, doc markup shown as text
   'trash-ui.test.js',          // Delete → Trash with Undo, link gone, Trash tab Restore / Delete forever, folders, desktop + phone
-  'my-docs-a-ui.test.js',      // My docs layout A (wide screens): sidebar types + folders with counts, Needs you from the bell + agent replies (Mark done), grid default / list remembered, drag a card onto a folder, New folder + rename, Settings page sections from the account menu; flag off (the default outside dev mode) and phone keep one column; 1440 / 1280 / dark / 390
+  'my-docs-a-ui.test.js',      // My docs layout A (wide screens): sidebar types + folders with counts, Needs you from the bell + agent replies (Mark done), grid default / list remembered, drag a card onto a folder, New folder + rename, Settings page sections from the account menu; phone (390 / 430): rows, Needs you strip, view / type / folder chip rows, ⋯ with Star, Select, Settings section list; flag off (the default outside dev mode) keeps one column at every width; 1440 / 1280 / 390 / 430, light + dark
   'me-rows-ui.test.js',        // My docs rows: type icon + label, sharing, unread badge, Recent/Starred relative dates, ⋯ Share opens the doc's Share dialog, checklist only on Docs below 3 docs; desktop + phone
   'agent-view-ui.test.js', // doc text for agents: no visible space without JS, removed once the app starts
   'layout-preflight.test.js', // development-only Raft geometry audit

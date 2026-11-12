@@ -124,8 +124,9 @@ function NeedCard({ card, onDone }) {
   );
 }
 
-// `limit`: the strip on top of the list shows four; the Needs you view all.
-export function NeedsYou({ cards, limit = 0, onSeeAll, onDone, empty = null }) {
+// `limit`: the strip on top of the list shows four (six on a phone, where
+// `strip` lays them out as one row to swipe); the Needs you view all.
+export function NeedsYou({ cards, limit = 0, strip = false, onSeeAll, onDone, empty = null }) {
   const shown = useMemo(() => (limit ? cards.slice(0, limit) : cards), [cards, limit]);
   if (!cards.length) return empty;
   return (
@@ -136,7 +137,7 @@ export function NeedsYou({ cards, limit = 0, onSeeAll, onDone, empty = null }) {
           {onSeeAll ? <button type="button" className="mda-text-link" onClick={onSeeAll}>See all {cards.length}</button> : null}
         </div>
       ) : null}
-      <div className="mda-needs-grid">
+      <div className={`mda-needs-grid${strip ? ' is-strip' : ''}`}>
         {shown.map((card) => <NeedCard key={card.key} card={card} onDone={onDone} />)}
       </div>
     </section>

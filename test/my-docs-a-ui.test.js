@@ -2,11 +2,14 @@
 // counts, folders, Comments / Trash), Needs you from the bell's unread rows
 // and unread agent replies, cards by default with a remembered list view,
 // a doc dragged onto a folder moves there, and Settings as its own page with
-// its sections. Layout A is behind the myDocsA flag (on in dev mode): with
-// it off, and on a phone, My docs keeps the one-column layout. Real worker routes (in-process harness) behind a local
-// HTTP server, real built shell runtime, real Chromium.
+// its sections. On a phone (390, 430): one column of rows, Needs you as a
+// strip to swipe, the views and the type / folder filters as chip rows, ⋯
+// with Star, Select for batch actions, Settings as a list of sections. Layout
+// A is behind the myDocsA flag (on in dev mode): with it off, My docs keeps
+// the one-column layout at every width. Real worker routes (in-process
+// harness) behind a local HTTP server, real built shell runtime, real Chromium.
 //
-// TDOC_SHOTS_DIR=<dir> also writes screenshots (1440, 1280, dark, phone).
+// TDOC_SHOTS_DIR=<dir> also writes screenshots (1440, 1280, dark, 390, 430).
 const assert = require('assert/strict');
 const http = require('http');
 const fs = require('fs');
@@ -389,6 +392,244 @@ async function startServer(worker, env) {
       } finally { await dark.context.close(); }
     });
 
+    // ---- Layout A on a phone (390 = iPhone 14/15, 430 = the Pro Max) ----
+    // State from the wide tests above: budget-2027's bell row is done,
+    // q4-plan is in Planning, Essays exists, Ideas is starred.
+    for (const width of [390, 430]) {
+      await t(`phone ${width}, flag on: one column of rows, readable sizes, nothing sideways`, async () => {
+        const { context: ctx, page: p, errors: errs } = await open({ width, height: 844 });
+        try {
+          await p.goto(`${base}/me`);
+          await card(p, 'q4-plan').waitFor();
+          await p.locator('.mda-need').first().waitFor();
+          assert.equal(await p.locator('.mda-phone').count(), 1);
+          assert.equal(await p.locator('.mda-side, .tabs, .mda-grid, .mda-table').count(), 0, 'no sidebar, old tabs, cards or table on a phone');
+          assert.equal(await p.locator('.mda-plist .mda-prow').count(), 6);
+          assert.equal(await p.locator('.mda h1').textContent(), 'My docs');
+          const overflow = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+          assert.ok(overflow <= 0, `page scrolls sideways by ${overflow}px`);
+          const sizes = await card(p, 'budget-2027').evaluate((row) => ({
+            height: row.getBoundingClientRect().height,
+            title: parseFloat(getComputedStyle(row.querySelector('.doc-title')).fontSize),
+            meta: parseFloat(getComputedStyle(row.querySelector('.doc-meta')).fontSize),
+            metaLines: Math.round(row.querySelector('.doc-meta').getBoundingClientRect().height / parseFloat(getComputedStyle(row.querySelector('.doc-meta')).lineHeight)),
+            menu: row.querySelector('.row-menu-btn').getBoundingClientRect().height,
+          }));
+          assert.ok(sizes.height >= 64, `row is ${sizes.height}px tall`);
+          assert.ok(sizes.title >= 16, `title is ${sizes.title}px`);
+          assert.ok(sizes.meta >= 14, `meta is ${sizes.meta}px`);
+          assert.equal(sizes.metaLines, 1, 'one meta line');
+          assert.ok(sizes.menu >= 44, `⋯ is ${sizes.menu}px`);
+          assert.match(await card(p, 'budget-2027').locator('.doc-meta').textContent(), /^updated 1d ago · 1 person$/);
+          assert.equal(await card(p, 'budget-2027').getByRole('img', { name: 'Sheet' }).count(), 1);
+          // Unread stays on the row; a starred doc keeps its star by the title.
+          assert.equal(await card(p, 'q4-plan').locator('.doc-activity').count(), 1);
+          assert.equal(await card(p, 'launch-deck').getByRole('img', { name: 'Starred' }).count(), 1);
+          // The row opens the doc from anywhere on it.
+          await card(p, 'ideas').scrollIntoViewIfNeeded();
+          const box = await card(p, 'ideas').boundingBox();
+          const hit = await p.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('a')?.getAttribute('href'), [box.x + box.width * 0.6, box.y + box.height - 8]);
+          assert.equal(hit, '/d/ideas');
+          const body = await p.locator('.mda-psearch input').evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+          assert.ok(body >= 16, `search is ${body}px (iOS zooms under 16)`);
+          const newBtn = await p.locator('.mda-new').boundingBox();
+          assert.ok(newBtn.height >= 44, `New is ${newBtn.height}px tall`);
+          await shot(p, `a-phone-${width}`);
+          await shot(p, `a-phone-${width}-full`, true);
+          assert.deepEqual(errs, []);
+        } finally { await ctx.close(); }
+      });
+
+      await t(`phone ${width}, flag on: Needs you is a strip of cards to swipe, See all opens the view`, async () => {
+        const { context: ctx, page: p, errors: errs } = await open({ width, height: 844 });
+        try {
+          await p.goto(`${base}/me`);
+          const strip = p.locator('.mda-needs-grid.is-strip');
+          await strip.locator('.mda-need').first().waitFor();
+          assert.deepEqual(await strip.locator('.mda-need').evaluateAll((cards) => cards.map((c) => c.dataset.slug)), ['q4-plan', 'launch-deck']);
+          const layout = await strip.evaluate((el) => {
+            const tops = [...el.querySelectorAll('.mda-need')].map((c) => Math.round(c.getBoundingClientRect().top));
+            return { oneRow: new Set(tops).size === 1, scrolls: el.scrollWidth > el.clientWidth, overflowX: getComputedStyle(el).overflowX, snap: getComputedStyle(el).scrollSnapType };
+          });
+          assert.ok(layout.oneRow, 'cards sit in one row');
+          assert.ok(layout.scrolls && layout.overflowX === 'auto', 'the strip scrolls sideways');
+          assert.match(layout.snap, /x/);
+          const reason = await strip.locator('.mda-need-reason').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+          assert.ok(reason >= 15, `card text is ${reason}px`);
+          await strip.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+          await shot(p, `a-phone-${width}-needs-swiped`);
+          await p.getByRole('button', { name: 'See all 2' }).click();
+          assert.equal(await p.getByRole('tab', { name: /Needs you/ }).getAttribute('aria-selected'), 'true');
+          await p.locator('.mda-needs .mda-need').first().waitFor();
+          assert.equal(await p.locator('.mda-needs-grid.is-strip').count(), 0, 'the view lists them, one per line');
+          assert.match(p.url(), /view=needs/);
+          await shot(p, `a-phone-${width}-needs`);
+          assert.deepEqual(errs, []);
+        } finally { await ctx.close(); }
+      });
+
+      await t(`phone ${width}, flag on: type chips and folder chips filter the list`, async () => {
+        const { context: ctx, page: p, errors: errs } = await open({ width, height: 844 });
+        try {
+          await p.goto(`${base}/me`);
+          await card(p, 'q4-plan').waitFor();
+          const filters = p.getByRole('group', { name: 'Filter by type and folder' });
+          const scrolls = await filters.evaluate((el) => getComputedStyle(el).overflowX === 'auto' && getComputedStyle(el).flexWrap === 'nowrap');
+          assert.ok(scrolls, 'the chip row scrolls sideways');
+          const sheets = filters.getByRole('button', { name: 'Sheets (2)' });
+          await sheets.click();
+          assert.equal(await sheets.getAttribute('aria-pressed'), 'true');
+          assert.deepEqual(await shownSlugs(p), ['budget-2027', 'hiring-plan']);
+          assert.match(p.url(), /type=sheet/);
+          await shot(p, `a-phone-${width}-type-sheets`);
+          await sheets.click();
+          assert.equal((await shownSlugs(p)).length, 6);
+          const planning = filters.locator(`.mda-folder[data-folder-id="${FOLDER}"]`);
+          assert.equal(await planning.locator('.mda-chip-n').textContent(), '2');
+          await planning.click();
+          assert.equal(await planning.getAttribute('aria-pressed'), 'true');
+          assert.deepEqual(await shownSlugs(p), ['ideas', 'q4-plan']);
+          assert.match(p.url(), new RegExp(`folder=${FOLDER}`));
+          await p.reload();
+          await card(p, 'ideas').waitFor();
+          const inSight = await filters.locator(`.mda-folder[data-folder-id="${FOLDER}"]`).evaluate((chip) => {
+            const r = chip.getBoundingClientRect();
+            return r.left >= 0 && r.right <= innerWidth;
+          });
+          assert.ok(inSight, 'the chosen folder chip is scrolled into sight');
+          // The open folder's path, with its ⋯ (Share, Rename, Delete).
+          const crumbs = p.getByRole('navigation', { name: 'Folder path' });
+          await crumbs.getByRole('button', { name: 'Planning' }).waitFor();
+          await crumbs.getByRole('button', { name: 'Folder actions' }).click();
+          await p.getByRole('menuitem').first().waitFor();
+          const folderItems = await p.getByRole('menuitem').allTextContents();
+          for (const want of ['Share', 'Rename', 'Delete folder']) assert.ok(folderItems.includes(want), `folder menu: ${folderItems.join(', ')}`);
+          await p.keyboard.press('Escape');
+          // Type and folder together.
+          await filters.getByRole('button', { name: /^Docs/ }).click();
+          assert.deepEqual(await shownSlugs(p), ['ideas', 'q4-plan']);
+          await filters.getByRole('button', { name: /^Slides/ }).click();
+          assert.deepEqual(await shownSlugs(p), []);
+          await p.locator('.mda-phone .empty').getByText('No slides in Planning yet.').waitFor();
+          await shot(p, `a-phone-${width}-folder`);
+          await filters.getByRole('button', { name: /^Slides/ }).click();
+          await filters.getByRole('button', { name: 'All folders' }).click();
+          assert.equal((await shownSlugs(p)).length, 6);
+          assert.equal(await filters.getByRole('button', { name: 'New folder' }).count(), 1);
+          assert.deepEqual(errs, []);
+        } finally { await ctx.close(); }
+      });
+
+      await t(`phone ${width}, flag on: ⋯ on a row (Star first), Select for batch actions, New by type, the other views`, async () => {
+        const { context: ctx, page: p, errors: errs } = await open({ width, height: 844 });
+        try {
+          await p.goto(`${base}/me`);
+          await card(p, 'budget-2027').waitFor();
+          await card(p, 'budget-2027').getByRole('button', { name: 'More actions' }).click();
+          await p.getByRole('menuitem').first().waitFor();
+          const items = await p.getByRole('menuitem').allTextContents();
+          assert.equal(items[0], 'Star');
+          for (const want of ['Share', 'Rename', 'Move to folder', 'Delete']) assert.ok(items.includes(want), `menu: ${items.join(', ')}`);
+          await shot(p, `a-phone-${width}-row-menu`);
+          const star = p.waitForRequest((req) => req.url().includes('/api/star') && req.method() === 'POST');
+          await p.getByRole('menuitem', { name: 'Star' }).click();
+          await star;
+          await card(p, 'budget-2027').getByRole('img', { name: 'Starred' }).waitFor();
+          await card(p, 'budget-2027').getByRole('button', { name: 'More actions' }).click();
+          await p.getByRole('menuitem', { name: 'Unstar' }).click();
+          await card(p, 'budget-2027').getByRole('img', { name: 'Starred' }).waitFor({ state: 'detached' });
+          // Select: checkboxes on the rows, the batch bar once one is ticked.
+          assert.equal(await p.locator('.mda-prow .row-check').count(), 0);
+          await p.getByRole('button', { name: 'Select' }).click();
+          await card(p, 'ideas').getByRole('checkbox', { name: 'Select Ideas' }).check();
+          await p.locator('.batch-bar').getByText('1 selected').waitFor();
+          await p.locator('.batch-bar .batch-delete').waitFor();
+          await shot(p, `a-phone-${width}-select`);
+          await p.getByRole('button', { name: 'Done', exact: true }).click();
+          assert.equal(await p.locator('.mda-prow .row-check, .batch-bar').count(), 0);
+          // New: the type tiles.
+          await p.locator('.mda-new').click();
+          await p.locator('.mk-tile[data-kind="doc"]').waitFor();
+          await shot(p, `a-phone-${width}-new`);
+          await p.keyboard.press('Escape');
+          // Recent, Comments, Trash: chips in the same scrolling row.
+          const views = p.getByRole('tablist', { name: 'My docs views' });
+          await views.getByRole('tab', { name: /Recent/ }).click();
+          await card(p, 'bobs-doc').waitFor();
+          assert.match(await card(p, 'bobs-doc').locator('.doc-meta').textContent(), /^bob · visited 5h ago/);
+          await views.getByRole('tab', { name: 'Trash' }).click();
+          await p.locator('#pane-trash').waitFor();
+          assert.match(p.url(), /view=trash/);
+          await views.getByRole('tab', { name: 'Comments' }).click();
+          await p.locator('#pane-feedback').waitFor();
+          await views.getByRole('tab', { name: /All docs/ }).click();
+          await card(p, 'q4-plan').waitFor();
+          // Search: the same filter as on a wide screen, the folder in the meta line.
+          await p.locator('.mda-psearch input').fill('ideas');
+          assert.deepEqual(await shownSlugs(p), ['ideas']);
+          assert.match(await card(p, 'ideas').locator('.doc-meta').textContent(), /^in Planning · /);
+          assert.equal(await p.locator('.mda-needs-grid').count(), 0, 'Needs you steps aside while searching');
+          assert.deepEqual(errs, []);
+        } finally { await ctx.close(); }
+      });
+
+      await t(`phone ${width}, flag on: Settings from the account menu is a full-screen list of sections`, async () => {
+        const { context: ctx, page: p, errors: errs } = await open({ width, height: 844 });
+        try {
+          await p.goto(`${base}/me`);
+          await card(p, 'q4-plan').waitFor();
+          await p.getByRole('button', { name: 'More actions' }).first().click();
+          await p.getByRole('menuitem', { name: 'My account' }).click();
+          await p.getByRole('menuitem', { name: 'Settings' }).click();
+          await p.waitForURL(/\/me\?view=settings/);
+          const nav = p.getByRole('navigation', { name: 'Settings sections' });
+          await nav.waitFor();
+          assert.equal(await p.locator('.mda-phone, .mds-nav').count(), 0, 'no My docs chrome, no side list');
+          const names = (await nav.locator('.mds-list-item').allTextContents()).map((s) => s.trim());
+          assert.deepEqual(names, ['Profile', 'Sign-in methods', 'Agents & computers', 'Teams', 'Notifications', 'Danger zone']);
+          const row = await nav.locator('.mds-list-item').first().evaluate((el) => ({ h: el.getBoundingClientRect().height, f: parseFloat(getComputedStyle(el).fontSize) }));
+          assert.ok(row.h >= 56 && row.f >= 16, `section row ${row.h}px, ${row.f}px text`);
+          const overflow = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+          assert.ok(overflow <= 0, `settings scroll sideways by ${overflow}px`);
+          await shot(p, `a-phone-${width}-settings`);
+          await nav.getByRole('link', { name: 'Teams' }).click();
+          await p.locator('.mds-body #teams').waitFor();
+          assert.equal(await p.locator('.mds-body #profile, .mds-body #notifications').count(), 0, 'one section at a time');
+          assert.match(p.url(), /#teams$/);
+          await shot(p, `a-phone-${width}-settings-teams`);
+          await p.getByRole('button', { name: 'Settings', exact: true }).click();
+          await nav.waitFor();
+          await nav.getByRole('link', { name: 'Profile' }).click();
+          await p.locator('.mds-body #profile').waitFor();
+          await shot(p, `a-phone-${width}-settings-profile`);
+          await p.getByRole('button', { name: 'Settings', exact: true }).click();
+          await p.getByRole('button', { name: 'My docs', exact: true }).click();
+          await card(p, 'q4-plan').waitFor();
+          assert.ok(!p.url().includes('view=settings'));
+          // The account menu's Agents opens that section directly.
+          await p.goto(`${base}/me?view=settings#agents`);
+          await p.locator('.mds-body #agents').waitFor();
+          assert.equal(await p.locator('.mds-list').count(), 0);
+          assert.deepEqual(errs, []);
+        } finally { await ctx.close(); }
+      });
+
+      await t(`phone ${width}, flag on: dark mode`, async () => {
+        const dark = await open({ width, height: 844 }, { dark: true });
+        try {
+          await dark.page.goto(`${base}/me`);
+          await card(dark.page, 'q4-plan').waitFor();
+          await dark.page.locator('.mda-need').first().waitFor();
+          assert.equal(await dark.page.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')), 'dark');
+          await shot(dark.page, `a-phone-${width}-dark`);
+          await dark.page.goto(`${base}/me?view=settings`);
+          await dark.page.locator('.mds-list').waitFor();
+          await shot(dark.page, `a-phone-${width}-settings-dark`);
+          assert.deepEqual(dark.errors, []);
+        } finally { await dark.context.close(); }
+      });
+    }
+
     await t('team space: the same layout, its own folders, drag into a team folder, Team settings in the sidebar', async () => {
       const api = async (url, body) => {
         const response = await worker.fetch(new Request(`https://tdoc.dev${url}`, {
@@ -440,26 +681,37 @@ async function startServer(worker, env) {
       } finally { await ctx.close(); }
     });
 
-    await t('phone 390, flag on: the one-column layout as before (tabs, rows), no sidebar', async () => {
-      const { context: ctx, page: p, errors: errs } = await open({ width: 390, height: 844 });
-      try {
-        await p.goto(`${base}/me`);
-        await p.locator('.tabs').waitFor();
-        await p.locator('.doc-row[data-slug="budget-2027"]').waitFor();
-        assert.equal(await p.locator('.mda, .mda-side').count(), 0);
-        const overflow = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-        assert.ok(overflow <= 0, `phone page scrolls sideways by ${overflow}px`);
-        await shot(p, 'phone-390-docs');
-        await p.goto(`${base}/me?view=needs`);
-        await p.locator('.tabs').waitFor();
-        await p.waitForFunction(() => !location.search.includes('view=needs'));
-        assert.equal(await p.getByRole('tab', { name: 'Docs' }).getAttribute('aria-selected'), 'true', 'Needs you falls back to Docs on a phone');
-        await p.goto(`${base}/me?view=settings`);
-        await p.locator('.tm-settings').waitFor();
-        await shot(p, 'phone-390-settings');
-        assert.deepEqual(errs, []);
-      } finally { await ctx.close(); }
-    });
+    // Flag off (everybody outside dev mode): a phone keeps today's layout.
+    for (const width of [390, 430]) {
+      await t(`phone ${width}, flag off: the one-column layout as before (tabs, folders as rows, select all)`, async () => {
+        const { context: ctx, page: p, errors: errs } = await open({ width, height: 844 }, { flags: null });
+        try {
+          await p.goto(`${base}/me`);
+          await p.locator('.tabs').waitFor();
+          await p.locator('.doc-row[data-slug="budget-2027"]').waitFor();
+          assert.equal(await p.locator('.mda, .mda-side, .mda-phone, .mda-prow, .mda-needs').count(), 0);
+          assert.equal(await p.locator('.docs-hub.is-phone-a, .docs-hub.is-wide-a').count(), 0, 'no layout A class on the page');
+          assert.deepEqual((await p.getByRole('tab').allTextContents()).map((s) => s.trim()), ['Docs', 'Recent', 'Starred', 'Comments', 'Trash', 'Settings']);
+          await p.locator('main.wrap .page-hd .mk-btn').getByText('New').waitFor();
+          await p.getByRole('button', { name: 'Grid view' }).waitFor();
+          await p.locator('.batch-bar .select-all').getByText('Select all').waitFor();
+          assert.ok(await p.locator('#folder-rows .folder-row').count() >= 2, 'folders are rows at the top of Docs');
+          assert.equal(await p.locator('.doc-list .doc-row .star-btn').count() > 0, true, 'rows keep their star button');
+          const overflow = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+          assert.ok(overflow <= 0, `phone page scrolls sideways by ${overflow}px`);
+          await shot(p, `old-phone-${width}-docs`);
+          await p.goto(`${base}/me?view=needs`);
+          await p.locator('.tabs').waitFor();
+          await p.waitForFunction(() => !location.search.includes('view=needs'));
+          assert.equal(await p.getByRole('tab', { name: 'Docs' }).getAttribute('aria-selected'), 'true', 'Needs you falls back to Docs');
+          await p.goto(`${base}/me?view=settings`);
+          await p.locator('.tm-settings').waitFor();
+          assert.equal(await p.locator('.mds, .mds-list').count(), 0, 'the old Settings tab, not the Settings page');
+          await shot(p, `old-phone-${width}-settings`);
+          assert.deepEqual(errs, []);
+        } finally { await ctx.close(); }
+      });
+    }
   } finally {
     server.close();
     await browser.close();
