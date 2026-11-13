@@ -245,5 +245,34 @@ t('a reply box answers an agent only for the viewer\'s own agent: not tdoc AI, n
   assert(box.agentForThread(thread([reply('r', claude)]), choices, 'other') === null, 'a box answering someone else');
 });
 
+t('Send to agent is one state for every surface: ready, connect, or disabled with the reason', () => {
+  const editable = [{ ...local('juliesmac', 'claude'), can_edit: true }];
+  const answerOnly = [{ ...local('bobmac', 'codex'), can_edit: false }];
+  const ready = box.sendToAgentState({ canSendToAgent: true, choices: [...answerOnly, ...editable] });
+  assert(ready.kind === 'ready' && ready.choices.length === 1 && ready.choices[0].can_edit, JSON.stringify(ready));
+  const connect = box.sendToAgentState({ canSendToAgent: false, choices: answerOnly, connectPrompt: 'prompt', setupHref: '/me?view=settings#agents' });
+  assert(connect.kind === 'connect' && connect.href === '/me?view=settings#agents', JSON.stringify(connect));
+  const denied = box.sendToAgentState({ canSendToAgent: false, choices: editable, disabledReason: 'Only the doc author or a team admin can send comments to an agent' });
+  assert(denied.kind === 'disabled' && /doc author/.test(denied.reason), JSON.stringify(denied));
+  assert(box.sendToAgentState({ canSendToAgent: true, choices: answerOnly }).kind === 'disabled', 'answer-only agents are not send targets');
+  for (const p of ['shell/src/document-shell.jsx', 'shell/src/feedback-space.jsx', 'feedback/src/main.jsx']) {
+    assert(/sendToAgentState\(/.test(read(p)), `${p} does not use the shared Send to agent state`);
+  }
+  const ask = read('shell/src/document/agent-ask.jsx');
+  const composer = read('shell/src/document/comment-composer.jsx');
+  const card = read('shell/src/document/comment-card.jsx');
+  assert(/export function SendToAgentToggle/.test(ask), 'the shared control is missing');
+  assert(/<SendToAgentToggle/.test(composer) && /<SendToAgentToggle/.test(card), 'a composer forked the control');
+});
+
+t('notify target reasons become the control\'s hover text', () => {
+  assert(box.notifyHandoffReasonText('no_agent_bound') === null, 'no_agent_bound is the connect state, not a reason');
+  assert(/workspace admin/.test(box.notifyHandoffReasonText('team_admin_only')));
+  assert(/always-on agent/.test(box.notifyHandoffReasonText('no_team_daemon')));
+  assert(/team has no agent/.test(box.notifyHandoffReasonText('no_team_agent')));
+  assert(/did not write this doc/.test(box.notifyHandoffReasonText('team_agent_not_writer')));
+  assert(box.notifyHandoffReasonText('something_new') === 'No agent can take comments here yet.');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

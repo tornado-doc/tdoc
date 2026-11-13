@@ -32,7 +32,7 @@ const MENU_MAX_HEIGHT = 240;
 // that may edit and agents that may only answer, each row saying which.
 // `preselected` is composerDefault of them. `ai` carries tdoc AI's free answers left and who is
 // answering where.
-export const AgentMentionContext = createContext({ choices: [], disabledChoices: [], guestAction: null, preselected: null, ai: null });
+export const AgentMentionContext = createContext({ choices: [], disabledChoices: [], guestAction: null, preselected: null, ai: null, sendToAgent: null });
 
 // The composers' @agent buttons. The document page has none -- @ in the text
 // is the one way to hand a comment to an agent -- the feedback overlay keeps

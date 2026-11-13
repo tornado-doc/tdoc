@@ -21,10 +21,10 @@ import { isNarrowViewport } from '../../shell/src/comments/core/narrow.js';
 import { AppSelect } from '../../shell/src/ui/select.jsx';
 import { withPostedComment } from '../../shell/src/comments/core/posted-comment.js';
 import { productPageUrl } from '../../shell/src/document/product-url.js';
-import { AgentButtonsContext, AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
+import { AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
 import { composerAgents } from '../../shell/src/document/ai-answerer.js';
-import { composerDefault } from '../../shell/src/document/agent-choices.js';
+import { composerDefault, notifyHandoffReasonText, sendToAgentState } from '../../shell/src/document/agent-choices.js';
 import { askOwnAgent, threadAskPick, useMyAgent } from '../../shell/src/document/my-agent.js';
 import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, clearNotifyTargetsCache, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
@@ -1612,6 +1612,24 @@ ${uiCss}
       // page has none on tdoc.
       mine: session?.own_agent && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: myAgent.state.team_agents || [], tdoc_ai: false } : null,
     }), [canSendToAgent, agent, session?.own_agent, myAgent.state]);
+    // The same Send to agent judgment as the doc page (agent-choices.js): the
+    // widget used to hide the control when nobody was linked or the viewer
+    // could not send; now it always shows, connects, or says why.
+    const sendToAgentSetupHref = (owner || teamMember) && session?.notify && agent.ready && agent.reason === 'no_agent_bound'
+      ? `${base}/me/agents?tab=send` : null;
+    const sendToAgentConnectPrompt = sendToAgentSetupHref ? CONNECT_AGENT_PROMPT : null;
+    const sendToAgentDisabledReason = canSendToAgent ? null
+      : !(owner || teamMember) ? 'Only the space owner or a team member can send comments to an agent'
+        : !session?.notify ? 'Notify is not available on this host yet.'
+          : !agent.ready ? 'Finding your agents…'
+            : notifyHandoffReasonText(agent.reason) || 'No agent can take comments here yet.';
+    const sendToAgent = useMemo(() => sendToAgentState({
+      canSendToAgent,
+      choices: agentChoices,
+      disabledReason: sendToAgentDisabledReason,
+      connectPrompt: sendToAgentConnectPrompt,
+      setupHref: sendToAgentSetupHref,
+    }), [canSendToAgent, agentChoices, sendToAgentDisabledReason, sendToAgentConnectPrompt, sendToAgentSetupHref]);
     // The default is an agent that may edit (the owner's, the team's); an
     // own agent is picked from the @ list, as on a doc page.
     const agentMentions = useMemo(() => ({
@@ -1621,7 +1639,12 @@ ${uiCss}
       ai: null, privateAskSupported: false, teamAskSupported: Boolean(session?.own_agent),
       ownAskSupported: Boolean(session?.own_agent),
       fixesTheApp: true,
-    }), [agentChoices, session?.own_agent]);
+      canSendToAgent,
+      sendToAgentDisabledReason,
+      connectAgentPrompt: sendToAgentConnectPrompt,
+      agentSetupHref: sendToAgentSetupHref,
+      sendToAgent,
+    }), [agentChoices, session?.own_agent, canSendToAgent, sendToAgentDisabledReason, sendToAgentConnectPrompt, sendToAgentSetupHref, sendToAgent]);
 
     useEffect(() => {
       const api = {
@@ -2049,7 +2072,9 @@ ${uiCss}
       mentionable,
       productLinkOrigin: location.origin,
       canSendToAgent,
-      agentSetupHref: agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null,
+      agentSetupHref: sendToAgentSetupHref,
+      sendToAgentDisabledReason,
+      connectAgentPrompt: sendToAgentConnectPrompt,
       onReply: (parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: threadAskPick(opts), handoffCommentId: opts.handoffCommentId }),
       onReact: (id, emoji) => mutate({ type: 'tdoc-feedback-react', id, emoji }),
       onDelete: (id) => mutate({ type: 'tdoc-feedback-delete', id }, false),
@@ -2153,7 +2178,6 @@ ${uiCss}
 
     return (
       <AgentMentionContext.Provider value={agentMentions}>
-      <AgentButtonsContext.Provider value={!canSendToAgent && !agentChoices.length}>
         {(picking || reanchorId) && !selected ? (
           <div className="tdoc-fb-banner" role="status">
             {bannerText}
@@ -2197,8 +2221,9 @@ ${uiCss}
             } }}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}
-            connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
-            agentSetupHref={agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null}
+            connectAgentPrompt={sendToAgentConnectPrompt}
+            agentSetupHref={sendToAgentSetupHref}
+            sendToAgentDisabledReason={sendToAgentDisabledReason}
             onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); }}
             onSubmit={async (text, opts = {}) => {
               const anchor = pageSel ? pageContext()
@@ -2312,7 +2337,6 @@ ${uiCss}
             viewer={notifyViewer}
           />
         ) : null}
-      </AgentButtonsContext.Provider>
       </AgentMentionContext.Provider>
     );
   }

@@ -380,3 +380,27 @@ export function taggedAgentSpan(text, choices) {
   }
   return best ? { target: best, start: at, end: at + bestLength } : null;
 }
+
+// The one Send to agent control both composers show. `choices` is the
+// composer's @ list; only rows that may edit are send targets. The state is
+// decided once here so the doc page and the feedback widget cannot drift:
+//   ready    - at least one agent may take the comment
+//   connect  - this viewer could send, but nobody is linked yet
+//   disabled - this viewer cannot hand comments to an agent (say why)
+export function sendToAgentState({ canSendToAgent = false, choices = [], disabledReason = null, connectPrompt = null, setupHref = null } = {}) {
+  const editable = (Array.isArray(choices) ? choices : []).filter((t) => t && t.can_edit);
+  if (canSendToAgent && editable.length) return { kind: 'ready', choices: editable };
+  if (connectPrompt || setupHref) return { kind: 'connect', prompt: connectPrompt, href: setupHref, reason: disabledReason };
+  return { kind: 'disabled', reason: disabledReason || 'No agent can take comments here yet.' };
+}
+
+// Why the server would not hand this doc's comments to an agent, in the
+// words the control's tooltip uses. null where the answer is "connect one".
+export function notifyHandoffReasonText(reason) {
+  if (reason === 'team_admin_only') return 'Only a workspace admin can send this team doc to an agent.';
+  if (reason === 'no_team_daemon') return 'Set up an always-on agent before sending comments to an agent.';
+  if (reason === 'no_team_agent') return 'This team has no agent yet.';
+  if (reason === 'team_agent_not_writer') return 'The team agent did not write this doc, so it cannot take these comments.';
+  if (reason === 'no_agent_bound') return null;
+  return reason ? 'No agent can take comments here yet.' : null;
+}

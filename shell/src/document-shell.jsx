@@ -80,7 +80,7 @@ import { openAppLink, sendToAppLink } from './document/send-to-app.js';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, HandoffSendTransport, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
-import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, byRelevance, composerDefault, orderedAgentChoices, orderedAskAiChoices, sameTarget, taggedAgentSpan, targetKey } from './document/agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, byRelevance, composerDefault, notifyHandoffReasonText, orderedAgentChoices, orderedAskAiChoices, sameTarget, sendToAgentState, taggedAgentSpan, targetKey } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { AskAiPanel, DemoRewriteBar, DemoRewriteCta } from './document/ask-ai-panel.jsx';
@@ -1553,6 +1553,23 @@ export function DocumentShell({ boot, config }) {
       } catch (error) { setGuestInviteStatus(error.message || 'Could not send request.'); }
     },
   } : null;
+  // The one Send to agent judgment both composers share (agent-choices.js):
+  // ready with the agents that may edit, connect when this viewer could send
+  // but nobody is linked, disabled with the reason when they cannot.
+  const sendToAgentSetupHref = notifyQuery && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound'
+    ? '/me?view=settings#agents' : null;
+  const sendToAgentConnectPrompt = sendToAgentSetupHref ? CONNECT_AGENT_PROMPT : null;
+  const sendToAgentDisabledReason = canSendToAgent ? null
+    : !notifyQuery ? 'Only the doc author or a team admin can send comments to an agent'
+      : !notifyTargets.ready ? 'Finding your agents…'
+        : notifyHandoffReasonText(notifyTargets.reason) || 'No agent can take comments here yet.';
+  const sendToAgent = useMemo(() => sendToAgentState({
+    canSendToAgent,
+    choices: agentChoices,
+    disabledReason: sendToAgentDisabledReason,
+    connectPrompt: sendToAgentConnectPrompt,
+    setupHref: sendToAgentSetupHref,
+  }), [canSendToAgent, agentChoices, sendToAgentDisabledReason, sendToAgentConnectPrompt, sendToAgentSetupHref]);
   // What @ offers (agentChoices) and what tdoc AI has left / who is
   // answering where, for the composers and the cards.
   const agentMentions = useMemo(() => ({
@@ -1569,7 +1586,13 @@ export function DocumentShell({ boot, config }) {
     suggestsFor: suggestOn ? handsBackSuggestions : null,
     // "Open as a document" on a feedback space: only the wording.
     fixesTheApp: Boolean(config.feedbackSpace),
-  }), [suggestOn, canSendToAgent, agentChoices, composerPick, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
+    // The Send to agent control's one judgment (SendToAgentToggle).
+    canSendToAgent,
+    sendToAgentDisabledReason,
+    connectAgentPrompt: sendToAgentConnectPrompt,
+    agentSetupHref: sendToAgentSetupHref,
+    sendToAgent,
+  }), [suggestOn, canSendToAgent, agentChoices, composerPick, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction, sendToAgentDisabledReason, sendToAgentConnectPrompt, sendToAgentSetupHref, sendToAgent]);
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
     setNotifyAvoid(avoid);
@@ -2214,13 +2237,9 @@ export function DocumentShell({ boot, config }) {
       mentionable={mentionable}
       demo={!!config.demoComments}
       canSendToAgent={canSendToAgent}
-      agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
-      sendToAgentDisabledReason={
-        notifyTargets.reason === 'no_agent_bound'
-          ? 'No agent is following this doc yet'
-          : null
-      }
-      connectAgentPrompt={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
+      agentSetupHref={sendToAgentSetupHref}
+      sendToAgentDisabledReason={sendToAgentDisabledReason}
+      connectAgentPrompt={sendToAgentConnectPrompt}
       privateAsk={privateAskView && !privateAskView.parentId ? privateAskView : null}
       onMakePublic={makePublic}
       onSubmit={postComment}
@@ -2516,7 +2535,7 @@ export function DocumentShell({ boot, config }) {
           openCommentId={openCommentId}
           expandReplies={deepReply}
           canSendToAgent={canSendToAgent}
-          agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
+          agentSetupHref={sendToAgentSetupHref}
           onOpenChange={(open) => { setDrawerOpen(open); if (open) setHandoffDetailsOpen(false); }}
           hideFab={handoffDetailsOpen || editor.mode === 'read' || demoBar}
           askAi={unifiedEntry ? askAiPanel(drawerOpen && drawerTab === 'ask') : null}
@@ -2558,7 +2577,7 @@ export function DocumentShell({ boot, config }) {
           cardPosition={cardPosition}
           expandReplies={deepReply}
           canSendToAgent={canSendToAgent}
-          agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
+          agentSetupHref={sendToAgentSetupHref}
           onOpenComment={(id) => {
             focusComment(id);
           }}

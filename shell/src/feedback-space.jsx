@@ -6,9 +6,9 @@ import { AppButton } from './ui/button.jsx';
 import { ShareDialog } from './document/document-dialogs.jsx';
 import { OwnerAccessDialog } from './document/owner-access-dialog.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
-import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { composerAgents } from './document/ai-answerer.js';
-import { composerDefault } from './document/agent-choices.js';
+import { composerDefault, notifyHandoffReasonText, sendToAgentState } from './document/agent-choices.js';
 import { askOwnAgent, threadAskPick, useMyAgent } from './document/my-agent.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { CommentPanel } from './comments/panel/comment-panel.jsx';
@@ -74,12 +74,31 @@ export function FeedbackSpace({ boot }) {
     notifyTargets: notify,
     mine: !isOwner && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: myAgent.state.team_agents || [], tdoc_ai: false } : null,
   }), [canSendToAgent, notify.default, notify.candidates, notify.fallback, isOwner, myAgent.state]);
+  // The same Send to agent judgment as the doc page and the widget.
+  const sendToAgentSetupHref = isOwner && notify.ready && notify.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null;
+  const sendToAgentConnectPrompt = sendToAgentSetupHref ? CONNECT_AGENT_PROMPT : null;
+  const sendToAgentDisabledReason = canSendToAgent ? null
+    : !isOwner ? 'Only the space owner or a team admin can send comments to an agent'
+      : !notify.ready ? 'Finding your agents…'
+        : notifyHandoffReasonText(notify.reason) || 'No agent can take comments here yet.';
+  const sendToAgent = useMemo(() => sendToAgentState({
+    canSendToAgent,
+    choices: agentChoices,
+    disabledReason: sendToAgentDisabledReason,
+    connectPrompt: sendToAgentConnectPrompt,
+    setupHref: sendToAgentSetupHref,
+  }), [canSendToAgent, agentChoices, sendToAgentDisabledReason, sendToAgentConnectPrompt, sendToAgentSetupHref]);
   const agentMentions = useMemo(() => ({
     choices: agentChoices,
     preselected: canSendToAgent ? composerDefault(agentChoices, { orTop: true }) : null,
     privateAskSupported: false,
     fixesTheApp: true,
-  }), [agentChoices, canSendToAgent]);
+    canSendToAgent,
+    sendToAgentDisabledReason,
+    connectAgentPrompt: sendToAgentConnectPrompt,
+    agentSetupHref: sendToAgentSetupHref,
+    sendToAgent,
+  }), [agentChoices, canSendToAgent, sendToAgentDisabledReason, sendToAgentConnectPrompt, sendToAgentSetupHref, sendToAgent]);
 
   // Which threads this tab shows: the same area the doc page and the widget
   // use, so a card being typed in stays put the same way everywhere.
