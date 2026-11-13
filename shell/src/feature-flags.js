@@ -80,6 +80,14 @@ export const FLAGS = Object.freeze({
   // Approved by Julie (2026-11-12) to ship behind dev mode first; on in PR
   // previews. Off, every width keeps the old one-column layout.
   myDocsA: Object.freeze({ label: 'New My docs layout', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
+  // The progress line on a comment handed to an agent: "Delivered · Reading
+  // the doc · Suggested 3 edits · Published v3 · Working · 4 min", from what
+  // tdoc records (comments/core/handoff-progress.js), plus the agent's own
+  // one-line status when it posts one (report_progress, a dev-mode MCP tool
+  // while this is). Off: Delivered -> On it -> replied, as before. Like
+  // feedbackAreaSelect the widget reads it from its session (worker
+  // FEEDBACK_WIDGET_DEV_FLAGS).
+  agentProgress: Object.freeze({ label: 'Agent progress line on comments', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
   sheetEmbeds: Object.freeze({ label: 'Sheets embedded in pages (live, by reference)', owner: 'julie', added: '2026-11-11', default: false, preview: true }),
 });
 

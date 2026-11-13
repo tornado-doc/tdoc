@@ -2044,6 +2044,8 @@ ${uiCss}
     };
     const cardProps = {
       currentUser: surface?.currentUser || 'anon',
+      // The agent progress line, read for this widget's session (flagOn).
+      progressLine: flagOn('agentProgress', session),
       handoffViewer,
       isOwner: owner,
       mentionable,

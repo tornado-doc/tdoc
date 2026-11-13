@@ -659,6 +659,9 @@ export const CommentDocVersionContext = createContext(null);
 export function CommentCard({
   comment,
   currentUser,
+  // The agent progress line (flag agentProgress); undefined reads the flag
+  // on tdoc's own origin, the feedback widget passes its session's answer.
+  progressLine,
   handoffViewer = currentUser,
   isOwner = false,
   mentionable = [],
@@ -897,7 +900,7 @@ export function CommentCard({
           </span>
         ) : null}
         {demo || canSeeHandoff(comment, handoffViewer, isOwner) ? (
-          <HandoffStatusChips comment={comment} onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff} />
+          <HandoffStatusChips comment={comment} progressLine={progressLine} onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff} />
         ) : null}
         {unread ? (onMarkRead && !onSeen
           ? <button type="button" className="tdoc-thread-mark-read" aria-label="Mark as read" title="Mark as read" onClick={() => onMarkRead(comment)}><span className="tdoc-thread-unread-dot" aria-hidden="true" /></button>
