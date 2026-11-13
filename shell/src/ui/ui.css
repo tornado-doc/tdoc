@@ -648,6 +648,22 @@ a.ui-menu-item:visited {
 
 .mk-foot { margin: -2px 0 0; color: var(--td-ink-soft, #6b6b73); font-size: 13px; line-height: 1.5; }
 
+/* Write with your agent (flag writeWithAgent): pick one of your agents and
+   Send, above the copy line. */
+.mk-send { display: flex; flex-direction: column; gap: 8px; }
+.mk-send-row { display: flex; align-items: center; gap: 8px; }
+.mk-send-row .mk-send-agent { flex: 1 1 auto; min-width: 0; }
+.mk-send-one {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--td-ink); font-weight: 600; font-size: 14px;
+}
+.mk-send-none {
+  align-items: flex-start; padding: 12px 13px;
+  border: 1px solid var(--td-line); border-radius: 14px; background: var(--td-surface-2);
+}
+.mk-send-none p { margin: 0; color: var(--td-ink); font-size: 13px; line-height: 1.5; }
+.mk-or { margin: 4px 0 -4px; color: var(--td-ink-soft, #6b6b73); font-size: 12px; font-weight: 600; }
+
 /* The recipe step, one click in from its card. */
 .tdoc-modal button.mk-back {
   display: inline-flex;

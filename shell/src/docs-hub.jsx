@@ -1816,7 +1816,7 @@ export function DocsHub({ boot }) {
           onClose={closeModal}
           actions={<AppButton onClick={closeModal}>Close</AppButton>}
         >
-          <AgentRecipe kind={modal.kind} />
+          <AgentRecipe kind={modal.kind} send={isFeatureOn('writeWithAgent') && !team} />
         </HubDialog>
       ) : null}
       {sheetsOn ? <SheetFilePicker ref={sheetPicker} onFile={(file) => setModal({ type: 'import-sheet', file, start: true })} /> : null}

@@ -88,6 +88,12 @@ export const FLAGS = Object.freeze({
   // feedbackAreaSelect the widget reads it from its session (worker
   // FEEDBACK_WIDGET_DEV_FLAGS).
   agentProgress: Object.freeze({ label: 'Agent progress line on comments', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
+  // New › Write it with your agent sends the sentence straight to one of the
+  // person's own agents tdoc can push to (Raft, webhook, the tdoc app): a
+  // private doc is made, the request handed to that agent, and the doc opens
+  // with the progress line (agentProgress) until it publishes. Off: the copy
+  // line only, as before. Server: /api/write-with-agent.
+  writeWithAgent: Object.freeze({ label: 'New: send the sentence to your agent', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
   sheetEmbeds: Object.freeze({ label: 'Sheets embedded in pages (live, by reference)', owner: 'julie', added: '2026-11-11', default: false, preview: true }),
 });
 

@@ -11113,6 +11113,66 @@ function appIdentity(session) {
   return { login: actorKey(session), name: actorDisplayName(session), avatar_url: session.avatar_url || '' };
 }
 
+// ---- Write with your agent (New menu, flag writeWithAgent) ---------------
+// A person types one sentence in the New menu and picks one of their own
+// agents tdoc can push to (a Raft agent, a webhook, the local daemon). tdoc
+// makes a private placeholder doc, puts the sentence on it as the person's
+// comment and hands that comment to the agent through the same route as
+// Send to agent, so delivery, the progress line and the reply are the ones
+// every handoff has. Chat apps connected over MCP cannot be pushed to and are
+// never offered here.
+const WRITE_WITH_AGENT_PROMPT_CHARS = 500;
+const WRITE_WITH_AGENT_PER_HOUR = 10;
+const WRITE_WITH_AGENT_KINDS = Object.freeze({
+  doc: { noun: 'doc', hint: '' },
+  sheet: { noun: 'sheet', hint: ' A sheet is a <table data-tdoc-sheet>.' },
+  slides: { noun: 'slide deck', hint: ' A slide deck is <section data-tdoc-slide> slides.' },
+});
+const WRITE_WITH_AGENT_LINE = 'Your agent is writing this doc.';
+const PUSH_PROVIDERS = new Set(['raft', 'webhook', 'local']);
+
+// The account's own agents tdoc can push to: what the Connectors page and
+// the doc's agent picker list for this account, without anything removed and
+// without a webhook's address.
+async function writeWithAgentTargets(env, accountId) {
+  if (!accountId) return [];
+  const removed = await accountRemovedTargets(env, accountId);
+  const resolved = await resolveAccountNotifyTargets(env, accountId);
+  return (resolved.candidates || []).filter((t) => t && PUSH_PROVIDERS.has(t.provider)
+    && !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)));
+}
+
+function cleanWriteWithAgentPrompt(raw) {
+  return String(raw == null ? '' : raw).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function writeWithAgentTitle(prompt) {
+  const chars = [...prompt];
+  const head = chars.length > 80 ? `${chars.slice(0, 79).join('').trimEnd()}…` : prompt;
+  return head.charAt(0).toUpperCase() + head.slice(1);
+}
+
+// The placeholder v1: the sentence as its title and the line the request
+// comment is anchored to. Escaped here; nothing in it comes from markup.
+function writeWithAgentHtml(prompt) {
+  const title = escapeHtml(writeWithAgentTitle(prompt));
+  return blankDocHtml()
+    .replace('<title>Untitled</title>', `<title>${title}</title>`)
+    .replace(/^<main([^>]*)>[\s\S]*?<\/main>/m, (_m, attrs) => `<main${attrs}>\n<h1>${title}</h1>\n<p>${WRITE_WITH_AGENT_LINE}</p>\n</main>`);
+}
+
+// A route of this worker, called in process as the same browser session, so
+// every rule of that route (comments, Send to agent) applies unchanged.
+async function sessionSubRequest(req, env, ctx, path, body) {
+  const url = new URL(req.url);
+  const headers = new Headers({ 'Content-Type': 'application/json', Origin: url.origin });
+  for (const k of ['cookie', 'cf-connecting-ip', 'user-agent']) { const v = req.headers.get(k); if (v) headers.set(k, v); }
+  const res = await tdocHandlers.fetch(new Request(`${url.origin}${path}`, { method: 'POST', headers, body: JSON.stringify(body) }), env, ctx);
+  let data = null;
+  try { data = await res.json(); } catch {}
+  return { status: res.status, ok: res.status >= 200 && res.status < 300, data };
+}
+
 function blankDocHtml() {
   return `<!doctype html>
 <html lang="en">
@@ -28023,6 +28083,67 @@ const tdocHandlers = {
       });
       if (!made.ok) return made.response;
       return json({ ok: true, slug: made.slug, version: 1, url: `/d/${made.slug}/v/1?edit=1` });
+    }
+
+    // New › Write with your agent. GET lists the agents it can go to; POST
+    //   { prompt, kind?: doc|sheet|slides, recipient }
+    // makes the doc and sends the request. Browser session only, from this
+    // origin; the recipient must be one of the caller's own push agents (as
+    // GET listed them), never an address the page made up; one sentence,
+    // capped; WRITE_WITH_AGENT_PER_HOUR per account. Personal docs only.
+    if (p === '/api/write-with-agent/agents' && method === 'GET') {
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const accountId = await sessionAccountId(env, session);
+      const agents = (await writeWithAgentTargets(env, accountId)).map(withoutWebhookUrl);
+      return json({ agents });
+    }
+    if (p === '/api/write-with-agent' && method === 'POST') {
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const prompt = cleanWriteWithAgentPrompt(body && body.prompt);
+      if (!prompt) return json({ error: 'invalid_arguments', message: 'Say in one sentence what to write.' }, { status: 400 });
+      if ([...prompt].length > WRITE_WITH_AGENT_PROMPT_CHARS) return json({ error: 'prompt_too_long', limit: WRITE_WITH_AGENT_PROMPT_CHARS, message: `Keep it to ${WRITE_WITH_AGENT_PROMPT_CHARS} characters.` }, { status: 400 });
+      const kindKey = Object.prototype.hasOwnProperty.call(WRITE_WITH_AGENT_KINDS, body && body.kind) ? body.kind : 'doc';
+      const kind = WRITE_WITH_AGENT_KINDS[kindKey];
+      const asked = body && body.recipient ? pickedNotifyTarget(body.recipient) : null;
+      if (!asked) return json({ error: 'invalid_arguments', message: 'Pick one of your agents.' }, { status: 400 });
+      const known = (await writeWithAgentTargets(env, accountId)).find((t) => sameNotifyTarget(t, asked));
+      if (!known) return json({ error: 'agent_not_yours', message: 'That agent is not one of yours that tdoc can send to. Connect it first.' }, { status: 403 });
+      if (await rateLimited(env, `write-with-agent:${accountId}`, WRITE_WITH_AGENT_PER_HOUR, 3600)) {
+        return json({ error: 'rate_limited', message: `Up to ${WRITE_WITH_AGENT_PER_HOUR} an hour; try again later.` }, { status: 429 });
+      }
+      const made = await createDocForSession(env, req, session, {
+        html: writeWithAgentHtml(prompt),
+        // Private: a draft the person shares when it is written.
+        meta: { title: writeWithAgentTitle(prompt), created_from: 'agent_request', access: normalizeAccess({ visibility: 'private' }, { legacy: false }) },
+        // Scaffolding, as a blank doc's v1: nobody's agent wrote it, so the
+        // agent's first publish is v2 and its own.
+        version: { prompt: 'Requested from the New menu', blank: true },
+      });
+      if (!made.ok) return made.response;
+      const slug = made.slug;
+      const comment = await sessionSubRequest(req, env, ctx, '/api/comments', {
+        slug, version: 1, text: prompt, anchor: { kind: 'text', text: WRITE_WITH_AGENT_LINE },
+      });
+      if (!comment.ok || !comment.data || !comment.data.id) {
+        return json({ ok: true, slug, url: `/d/${slug}`, sent: false, error: 'comment_failed' });
+      }
+      const instruction = `Write this ${kind.noun} from the request in the comment: "${prompt}". The doc is a placeholder now: publish the whole ${kind.noun} as the next version of ${slug}, then reply on the comment.${kind.hint}`;
+      const sent = await sessionSubRequest(req, env, ctx, '/api/notify/handoff', {
+        slug, comment_ids: [comment.data.id], instruction: instruction.slice(0, 2000), recipient: withoutWebhookUrl(known),
+      });
+      return json({
+        ok: true, slug, url: `/d/${slug}?comment=${encodeURIComponent(comment.data.id)}`, comment_id: comment.data.id,
+        sent: Boolean(sent.ok && sent.data && sent.data.ok),
+        delivery: sent.data && sent.data.delivery ? sent.data.delivery : null,
+        ...(sent.ok ? {} : { error: (sent.data && sent.data.error) || 'send_failed' }),
+      });
     }
 
     if (p === '/api/doc/duplicate' && method === 'POST') {
