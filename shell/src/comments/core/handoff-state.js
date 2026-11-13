@@ -195,6 +195,9 @@ export function handoffActivityAt(comment) {
   return Math.max(
     ts(comment.handoff_at),
     ts(comment.handoff_acked_at),
+    ts(comment.handoff_first_reply_at),
+    ts(comment.handoff_first_version_at),
+    ts(comment.handoff_delivery?.first_at),
     lastHumanAt(comment),
     lastAgentAt(comment),
   );

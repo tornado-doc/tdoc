@@ -381,9 +381,10 @@
   .doc-type { flex: none; align-self: center; display: inline-grid; place-items: center; color: var(--td-muted); }
   .doc-sharing { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
   .doc-sharing svg { flex: none; }
-  .doc-activity { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; padding: 1px 7px; border-radius: 999px; background: var(--td-accent-tint); color: var(--td-accent); font-size: 12px; font-weight: 600; line-height: 18px; }
-  .doc-activity span { display: inline-flex; align-items: center; gap: 3px; }
-  .doc-activity:hover { background: var(--td-accent); color: #fff; }
+  /* Unread: one blue circle with one number -- new comments, replies,
+     @mentions and agent replies together; its label says which. */
+  .doc-activity { flex: none; align-self: center; box-sizing: border-box; display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--td-accent); color: #fff; font-size: 12px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; text-decoration: none; }
+  .doc-activity:hover { background: var(--td-accent-hover, #1146c8); color: #fff; text-decoration: none; }
   button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
   /* Delete lives behind a quiet ⋯ overflow — the catalog reads as a clean list,
      not a management console. Faint by default, clearer on row hover. */

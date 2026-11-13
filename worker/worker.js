@@ -4146,18 +4146,111 @@ async function markAgentRead(env, slug) {
   if (!env || !env.META || !slug) return;
   await env.META.put(`doc-agent-read:${slug}`, JSON.stringify({ at: new Date().toISOString() }));
 }
-// Mark every delivered, not-yet-acknowledged handoff on a doc as picked up.
-async function ackOpenHandoffs(env, slug) {
+// Which handoffs a pulling credential may mark "on it". The pull used to ack
+// every open handoff on the doc, so one agent's read marked another agent's
+// batch received — every handoff on the page read "On it" (Julie,
+// 2026-11). `agentTarget` is the specific agent the request names, already
+// validated against the account's own linked targets by actingAgent; without
+// one, a hosted token acks handoffs to any agent ON ITS ACCOUNT — the best a
+// bare account token can honestly claim — and never somebody else's. The
+// provider admin token names no agent and keeps the old blanket ack.
+async function handoffAckScope(env, actor, agentTarget) {
+  if (!actor) return { keys: new Set() };
+  if (actor.kind === 'admin') return { all: true };
+  const keys = new Set();
+  let teamAgentId = null;
+  if (actor.team_agent) {
+    teamAgentId = actor.team_agent.id;
+    for (const t of await accountNotifyTargets(env, actor.account_id)) keys.add(notifyKey(t));
+  } else if (actor.kind === 'hosted' && actor.account_id) {
+    if (agentTarget) keys.add(notifyKey(agentTarget));
+    else {
+      const removed = await accountRemovedTargets(env, actor.account_id);
+      for (const t of await accountNotifyTargets(env, actor.account_id)) {
+        if (!removed.has(notifyKey(t))) keys.add(notifyKey(t));
+      }
+    }
+  }
+  return { keys, teamAgentId };
+}
+
+function handoffInScope(h, scope) {
+  if (!h || !scope) return false;
+  if (scope.all) return true;
+  if (scope.teamAgentId && h.team_agent && h.team_agent.id === scope.teamAgentId) return true;
+  return !!(h.recipient && scope.keys.has(notifyKey(h.recipient)));
+}
+
+// Mark the handoffs addressed to the pulling agent as picked up — and only
+// those. First ack wins, as on the ack route.
+async function ackOpenHandoffs(env, slug, actor, agentTarget = null) {
   const list = await loadHandoffs(env, slug);
+  const scope = await handoffAckScope(env, actor, agentTarget);
   const at = new Date().toISOString();
   let changed = false;
   const next = list.map((h) => {
     if (!h || h.acked_at || (h.delivery && h.delivery.status === 'failed') || h.resolved_at) return h;
+    if (!handoffInScope(h, scope)) return h;
     changed = true;
     return { ...h, acked_at: at };
   });
   if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
   return changed;
+}
+
+// The first agent reply on a handed-off thread, stamped on the handoff
+// itself: the card can then say when work actually answered, not only when
+// it was picked up. Whichever agent replied, the reply is on this handoff's
+// comments, so the stamp does not try to attribute it.
+async function noteHandoffReply(env, slug, commentId, at) {
+  if (!env || !env.META || !slug || !commentId) return;
+  const list = await loadHandoffs(env, slug);
+  let changed = false;
+  const next = list.map((h) => {
+    if (!h || h.first_reply_at || !Array.isArray(h.comment_ids) || !h.comment_ids.includes(commentId)) return h;
+    changed = true;
+    return { ...h, first_reply_at: at };
+  });
+  if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+}
+
+// The first version an agent published while a handoff addressed to it was
+// still open — the other half of "sent → picked up → replied → changed the
+// doc". Only stamped when the publisher can be named (a verified agent claim
+// or a team agent): an unattributed upload says nothing about whose work it
+// was, and a resolved handoff needs no clock.
+async function noteHandoffVersion(env, slug, { actor, target, at }) {
+  if (!env || !env.META || !slug || !at) return;
+  const teamAgentId = actor && actor.team_agent ? actor.team_agent.id : null;
+  const key = target ? notifyKey(target) : null;
+  if (!teamAgentId && !key) return;
+  const list = await loadHandoffs(env, slug);
+  let changed = false;
+  const next = list.map((h) => {
+    if (!h || h.first_version_at) return h;
+    const mine = (teamAgentId && h.team_agent && h.team_agent.id === teamAgentId)
+      || (key && h.recipient && notifyKey(h.recipient) === key);
+    if (!mine) return h;
+    const open = (h.comment_ids || []).some((id) => !(h.resolved_ids || []).includes(id));
+    if (!open) return h;
+    changed = true;
+    return { ...h, first_version_at: at };
+  });
+  if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+}
+
+// A delivery record's `at` is the LAST send attempt (the resend clock the
+// card runs on); `first_at` is the FIRST time the provider took it, kept
+// across resends so "when did this actually arrive" survives a retry.
+function handoffDelivery(delivery, previous = null) {
+  const now = new Date().toISOString();
+  const firstAt = (previous && previous.first_at)
+    || (delivery && delivery.status !== 'failed' ? now : null);
+  return {
+    ...delivery,
+    at: now,
+    ...(firstAt ? { first_at: firstAt } : {}),
+  };
 }
 async function readAgentStatus(env, slug) {
   let rec = null;
@@ -9017,8 +9110,21 @@ function historyList(list) {
 // picks it up again): the comment now points at different text, so it is no
 // longer the same place.
 //
-// Returns { allowed, reason }. Reasons are stable strings the CLI prints.
-function agentReplyGate(record, agentLogin) {
+// One follow-up (Julie, 2026-11): an agent that said `partial` ("looking for
+// photos, will send options") may post ONE more reply on the same turn ("here
+// are the options"). Only after `partial` — answered / applied / question (or
+// no status) is a finished word — and only one: two agent replies in a row
+// with no human turn between shuts the gate whatever the second one said. A
+// follow-up identical to the agent's last reply (trimmed, whitespace
+// collapsed) is refused as `duplicate_reply`; `text` is optional, a caller
+// with nothing to post yet (handoff filter, Ask before the model runs) skips
+// that check. A human deleting the partial reply still means "dealt with":
+// no follow-up.
+//
+// Returns { allowed, reason }. Reasons are stable strings the CLI prints:
+// first_reply, human_replied_since, followup_after_partial (allowed);
+// already_answered, duplicate_reply, comment_deleted, parent_not_found.
+function agentReplyGate(record, agentLogin, text) {
   if (!record) return { allowed: false, reason: 'parent_not_found' };
   ensureEventLog(record);
   // Same ordering the fold uses — by version, ties broken by append order —
@@ -9033,6 +9139,8 @@ function agentReplyGate(record, agentLogin) {
   let answered = false;   // this agent has spoken at least once
   let theirTurn = true;   // a human has moved since it last did
   let deleted = false;
+  let run = 0;            // agent replies in a row since the last human turn
+  let last = null;        // the agent side's latest reply: { id, status, text }
   for (const e of ordered) {
     if (!e) continue;
     switch (e.kind) {
@@ -9048,8 +9156,12 @@ function agentReplyGate(record, agentLogin) {
         if (isAgentAuthor(e.reply.author)) {
           answered = true;
           theirTurn = false;
+          run += 1;
+          last = { id: e.reply.id, status: e.reply.agent_status || null, text: e.reply.text };
         } else {
           theirTurn = true;
+          run = 0;
+          last = null;
         }
         break;
       case 'text_edited':
@@ -9057,14 +9169,23 @@ function agentReplyGate(record, agentLogin) {
         // question the agent already answered is still the question.
         break;
       case 'anchor_changed':
-        // The agent's own re-anchor (bind_anchor_aid) is not a human turn.
-        if (e.by !== agentLogin) theirTurn = true;
+        // Only a PERSON moving the anchor is a human turn. An agent's
+        // bind_anchor_aid re-anchor stamps by_kind:'agent' — without it, one
+        // agent's re-anchor read as a human turn to every OTHER agent's gate,
+        // and two agents could keep a thread alive by re-anchoring in turn.
+        // Events written before by_kind existed keep the old login check.
+        if (e.by_kind ? e.by_kind === 'human' : e.by !== agentLogin) { theirTurn = true; run = 0; last = null; }
         break;
       case 'reply_deleted':
       case 'reply_text_edited':
         // A human removing or rewriting the agent's answer keeps the gate SHUT.
         // It is the clearest "I have dealt with this" there is, not a request
-        // to hear the same thing again.
+        // to hear the same thing again. Deleting a `partial` reply also takes
+        // away its follow-up; a rewrite is what a duplicate is compared to.
+        if (last && e.reply_id === last.id) {
+          if (e.kind === 'reply_deleted') last = { ...last, status: null };
+          else if (typeof e.text === 'string') last = { ...last, text: e.text };
+        }
         break;
       default:
         break;
@@ -9073,7 +9194,10 @@ function agentReplyGate(record, agentLogin) {
   if (deleted) return { allowed: false, reason: 'comment_deleted' };
   if (!answered) return { allowed: true, reason: 'first_reply' };
   if (theirTurn) return { allowed: true, reason: 'human_replied_since' };
-  return { allowed: false, reason: 'already_answered' };
+  if (run !== 1 || !last || last.status !== 'partial') return { allowed: false, reason: 'already_answered' };
+  const norm = (t) => (typeof t === 'string' ? t.trim().replace(/\s+/g, ' ') : '');
+  if (norm(text) && norm(text) === norm(last.text)) return { allowed: false, reason: 'duplicate_reply' };
+  return { allowed: true, reason: 'followup_after_partial' };
 }
 
 // The version the person last asked on: the comment's own, or a later human
@@ -16070,7 +16194,7 @@ function applyCommentOp(list, op) {
       // session+env). The DO/applyCommentOp only serializes the write.
       const target = list.find(c => c.id === op.id);
       if (!target) return { status: 404, body: { error: 'not_found' } };
-      appendEvent(target, { kind: 'anchor_changed', at_version: op.version, at: now, reset_status: op.reset_status, anchor: op.anchor, by: op.actor && op.actor.login });
+      appendEvent(target, { kind: 'anchor_changed', at_version: op.version, at: now, reset_status: op.reset_status, anchor: op.anchor, by: op.actor && op.actor.login, by_kind: op.actor && op.actor.by_kind });
       return { status: 200, body: snapshotAt(target, op.version) };
     }
     case 'set_status': {
@@ -18671,6 +18795,9 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
   const event = handoffEvent({
     slug, docTitle: meta && meta.title, handoffId, commentIds, instruction, publicHost, replyAs,
   });
+  // The send clock starts when the person (or the route) asked, before the
+  // provider call: a slow delivery must not read as a late send.
+  const sentAt = new Date().toISOString();
   // Locked before the send: the agent can act the moment it hears. A lock that
   // cannot be taken stops the send, as for an answer-only question.
   const locking = replyAs === 'suggestions' && suggestLockApplies(meta, target, teamAgent);
@@ -18692,12 +18819,12 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
   }
   const rec = await putHandoff(env, slug, {
     handoff_id: handoffId,
-    at: new Date().toISOString(),
+    at: sentAt,
     recipient: target,
     comment_ids: commentIds,
     instruction: instruction || '',
     ...(replyAs ? { reply_as: replyAs } : {}),
-    delivery: { ...delivery, at: new Date().toISOString() },
+    delivery: handoffDelivery(delivery),
     ...(by ? { by } : {}),
     // A team agent's handoff names the agent it went to and the member who
     // sent it: `by` is the agent (its daemon's queue), not a person.
@@ -18733,7 +18860,7 @@ function commentThreadActivity(comment) {
 // agent. Resolution is per comment id, so a partially-resolved handoff shows
 // exactly which of its comments are done.
 function withHandoffStatus(list, handoffs) {
-  const bare = { handoff_status: 'note', handoff_id: null, handoff_at: null, handoff_acked_at: null, handoff_delivery: null, handoff_to: null };
+  const bare = { handoff_status: 'note', handoff_id: null, handoff_at: null, handoff_acked_at: null, handoff_delivery: null, handoff_to: null, handoff_first_reply_at: null, handoff_first_version_at: null };
   if (!Array.isArray(list) || !Array.isArray(handoffs) || !handoffs.length) {
     return Array.isArray(list) ? list.map(c => ({ ...c, ...bare })) : list;
   }
@@ -18756,12 +18883,19 @@ function withHandoffStatus(list, handoffs) {
         // not heard — an agent that cannot ack is indistinguishable from one
         // that has not, so the UI must say "no response yet", never "not working".
         handoff_acked_at: h.acked_at || null,
+        // First agent reply and first version this agent published while the
+        // handoff was open — the card's sent → delivered → on it → replied →
+        // published timeline.
+        handoff_first_reply_at: h.first_reply_at || null,
+        handoff_first_version_at: h.first_version_at || null,
         handoff_delivery: h.delivery ? {
           status: h.delivery.status,
           error: h.delivery.error || null,
-          // When it was last (re)sent, and when the provider stops holding it
-          // for the agent: the clock and the deadline for "no response".
+          // When it was last (re)sent, when it FIRST landed, and when the
+          // provider stops holding it for the agent: the resend clock, the
+          // arrival time, and the deadline for "no response".
           at: h.delivery.at || null,
+          first_at: h.delivery.first_at || null,
           expires_at: h.delivery.expires_at || null,
           ...(h.delivery.deduped ? { deduped: true } : {}),
         } : null,
@@ -18780,7 +18914,7 @@ function withHandoffStatus(list, handoffs) {
 // Handoff routing and delivery are private to the commenter and the people
 // who manage this document. A public or team-readable comment can still be
 // read normally without exposing which agent was asked to handle it.
-const PRIVATE_HANDOFF_FIELDS = ['handoff_status', 'handoff_id', 'handoff_at', 'handoff_acked_at', 'handoff_delivery', 'handoff_to', 'handoff_resend_allowed'];
+const PRIVATE_HANDOFF_FIELDS = ['handoff_status', 'handoff_id', 'handoff_at', 'handoff_acked_at', 'handoff_delivery', 'handoff_to', 'handoff_resend_allowed', 'handoff_first_reply_at', 'handoff_first_version_at'];
 // The member who sent a handoff: `sent_by` for one sent to a team agent,
 // `by` for one queued on the member's own agent (a team agent's `by` is the
 // agent, never a person).
@@ -20193,7 +20327,7 @@ async function askedComment(env, slug, session, meta, commentId) {
 // One answer, posted under the comment that asked. agentReplyGate keeps it
 // to one answer per human turn, as for every agent reply.
 async function postThreadAnswer(env, slug, { thread, parentId, agent, text, version, uniqueKey = null }) {
-  const gate = agentReplyGate(thread.root, agent.login);
+  const gate = agentReplyGate(thread.root, agent.login, text);
   if (!gate.allowed) return { skipped: true, reason: gate.reason };
   const V = coerceBodyVersion(version, thread.root.created_in || 1);
   const now = new Date().toISOString();
@@ -25218,7 +25352,12 @@ const MCP_TOOLS = {
       }, { raftAgent: args.raft_agent });
       if (!r.ok || !r.data) return mcpApiError(r);
       if (r.data.skipped) {
-        return mcpToolResult('Not posted: the last word on this thread is already an agent\'s. Wait for the person to reply.', { ok: true, skipped: true, reason: r.data.reason || null });
+        const why = r.data.reason === 'duplicate_reply'
+          ? 'Not posted: it repeats the agent\'s last reply on this thread word for word.'
+          : r.data.reason === 'comment_deleted'
+            ? 'Not posted: that comment was deleted.'
+            : 'Not posted: the last word on this thread is already an agent\'s. Wait for the person to reply. (After a partial reply an agent may post one follow-up; after any other status, or once that follow-up is posted, the next word is the person\'s.)';
+        return mcpToolResult(why, { ok: true, skipped: true, reason: r.data.reason || null });
       }
       const verdict = r.data.verdict || r.data.agent_status || args.status || null;
       const note = r.data.downgraded_from === 'applied' ? ' (recorded as answered: no version was published after the comment, so the doc did not change)' : '';
@@ -30053,7 +30192,14 @@ const tdocHandlers = {
         if (agentAuth && agentAuth.ok) {
           try {
             const writable = await requireDocWriteAccess(env, agentAuth.actor, slug);
-            if (writable.ok) await ackOpenHandoffs(env, slug);
+            if (writable.ok) {
+              // Which agent this pull is, when it says (X-Tdoc-Agent /
+              // X-Tdoc-Raft-Agent, checked against the account's own targets):
+              // only handoffs addressed to it flip to "on it".
+              const claimed = agentAuth.actor.kind === 'hosted'
+                ? await actingAgent(env, req, agentAuth.actor) : null;
+              await ackOpenHandoffs(env, slug, agentAuth.actor, claimed);
+            }
           } catch {}
         }
       }
@@ -30360,7 +30506,7 @@ const tdocHandlers = {
       if (!canReadDoc(accessFromMeta(meta || {}), s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       const V = coerceBodyVersion(version, target.created_in || 1);
       const res = await mutateComments(env, slug, {
-        kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: actorKey(s) },
+        kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: actorKey(s), by_kind: 'human' },
       });
       return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
     }
@@ -30846,7 +30992,8 @@ const tdocHandlers = {
       }
       // Threads whose last word is already an agent's are the person's turn:
       // handing them off again only made the agent answer itself. Drop them
-      // here, whatever the client sent.
+      // here, whatever the client sent. (A thread whose agent said `partial`
+      // still has its one follow-up, so it is not dropped.)
       let skipped = [];
       try {
         const list = await readComments(env, slug);
@@ -31062,7 +31209,9 @@ const tdocHandlers = {
       // queued by whoever pressed Resend (the owner, per the check above).
       const { run: _run, reply_as: _replyAs, ...keep } = prev;
       const rec = await putHandoff(env, slug, {
-        ...keep, ...(replyAs ? { reply_as: replyAs } : {}), delivery: { ...delivery, at: new Date().toISOString() },
+        // `at` stays the original send; delivery.at moves to this attempt and
+        // delivery.first_at keeps the first time the provider took it.
+        ...keep, ...(replyAs ? { reply_as: replyAs } : {}), delivery: handoffDelivery(delivery, prev.delivery),
         // Pressing Resend on a personal doc says nothing about whose agent it
         // is (ownerRecordedAgent reads `by`): only a local run changes hands.
         ...(viaTeamAgent ? { sent_by: caller.accountId } : localDriver && (gate.meta?.workspace_id || isLocalTarget(target)) ? { by: localDriver } : {}),
@@ -31090,6 +31239,13 @@ const tdocHandlers = {
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
       if (!teamHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
+      // Same scoping as the pull ack: "on it" belongs to the agent the
+      // handoff was addressed to, not to any token that can write the doc.
+      if (prev.recipient && auth.actor && auth.actor.kind !== 'admin') {
+        const claimed = auth.actor.kind === 'hosted' ? await actingAgent(env, req, auth.actor) : null;
+        const scope = await handoffAckScope(env, auth.actor, claimed);
+        if (!handoffInScope(prev, scope)) return json({ error: 'not_handoff_recipient' }, { status: 403 });
+      }
       // First ack wins. The useful fact is when work STARTED, not when an agent
       // last pinged, so a re-ack must not push the clock forward.
       if (prev.acked_at) {
@@ -31248,7 +31404,7 @@ const tdocHandlers = {
             } catch { keep.push(e); continue; }
           }
           const accessLost = async () => {
-            await putHandoff(env, e.slug, { ...h, delivery: { status: 'failed', error: 'access_lost', at: new Date().toISOString() } });
+            await putHandoff(env, e.slug, { ...h, delivery: handoffDelivery({ status: 'failed', error: 'access_lost' }, h.delivery) });
             await releaseAnswerLock(env, e.slug, h.handoff_id);
           };
           if (!cache.get(`seat:${e.slug}`)) { await accessLost(); continue; }
@@ -31317,7 +31473,7 @@ const tdocHandlers = {
       const at = new Date().toISOString();
       const rec = await putHandoff(env, slug, {
         ...prev,
-        delivery: { status: 'failed', error: 'agent_run_failed', at },
+        delivery: handoffDelivery({ status: 'failed', error: 'agent_run_failed' }, prev.delivery),
         run: { status: 'failed', at, error: String(body.error || '').slice(0, 300) },
       });
       await localPendingRemove(env, writeGate.meta, prev);
@@ -31439,9 +31595,11 @@ const tdocHandlers = {
       // in the same place; the log remembers what the fold forgot. `force`
       // exists for the caller that means it — nothing in /tdoc edit sets it.
       // No override: when the last word on a thread is an agent's, nothing an
-      // agent sends lands until a person speaks. `force` used to skip this,
-      // and agents used it to answer themselves; it is now ignored.
-      const gate = agentReplyGate(parent, agent.login);
+      // agent sends lands until a person speaks — except ONE follow-up after
+      // a `partial` reply, never a word-for-word repeat (see agentReplyGate).
+      // `force` used to skip this, and agents used it to answer themselves;
+      // it is now ignored.
+      const gate = agentReplyGate(parent, agent.login, replyText);
       if (!gate.allowed) {
         return json({
           ok: true, skipped: true, reason: gate.reason,
@@ -31470,7 +31628,7 @@ const tdocHandlers = {
         const fallback = cur.anchor?.fallback;
         const label = cur.anchor?.label || 'svg';
         events.push({
-          kind: 'anchor_changed', at_version: V, at: now, by: agent.login, reset_status: false,
+          kind: 'anchor_changed', at_version: V, at: now, by: agent.login, by_kind: 'agent', reset_status: false,
           anchor: { kind: 'element', aid: bind_anchor_aid, selector: `[data-tdoc-aid="${bind_anchor_aid}"]`, label, ...(fallback ? { fallback } : {}) },
         });
       }
@@ -31490,6 +31648,12 @@ const tdocHandlers = {
       // The person waiting on this thread sees it on the doc's row in My
       // docs until they open the thread. Never fails the reply.
       if (res.status === 200) await noteAgentReply(env, thread, { slug, at: now, ctx });
+      // And the handoff that carried these comments learns when the first
+      // agent reply landed, so its history can say sent → delivered → on it
+      // → replied → published instead of stopping at "On it".
+      if (res.status === 200) {
+        try { await noteHandoffReply(env, slug, parent.id, now); } catch {}
+      }
       const out = downgradedFrom && res.body && typeof res.body === 'object'
         ? { ...res.body, verdict, downgraded_from: downgradedFrom }
         : res.body;
@@ -32233,6 +32397,12 @@ const tdocHandlers = {
             await touchDocAgent(env, slug, publishingAgent);
             await touchAccountAgent(env, auth.actor.account_id, publishingAgent);
           }
+          // The version is committed; an open handoff addressed to this
+          // agent learns the first time it changed the doc. Never fails
+          // the publish.
+          await noteHandoffVersion(env, slug, {
+            actor: auth.actor, target: publishingAgent, at: new Date().toISOString(),
+          });
         } catch (e) {
           console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));
         }

@@ -163,7 +163,7 @@ async function startServer(worker, env) {
       await press(page.getByRole('button', { name: 'New', exact: true }));
       await press(page.getByRole('menuitem', { name: 'Slides', exact: true }));
       await press(page.getByRole('menuitem', { name: /Blank deck/ }));
-      await page.waitForURL(/\/d\/[^/]+\/v\/1\?edit=1/, { timeout: 15000 });
+      await page.waitForURL(/\/d\/[^/]+\/v\/1(?:[?#]|$)/, { timeout: 15000 });
       const slug = new URL(page.url()).pathname.split('/')[2];
       await frame.locator('[data-tdoc-slide]').first().waitFor({ timeout: 15000 });
       await doc().waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'edit');

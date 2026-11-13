@@ -137,7 +137,7 @@ async function startServer(worker, env) {
       await v.page.getByText(/The doc was just updated\. Your draft is kept\./).first().waitFor({ timeout: 5000 });
       assert.equal(await v.page.getByText('save_in_progress').count(), 0);
       assert.match(await para.innerText(), /A draft worth keeping/);
-      assert.match(v.page.url(), /edit=1/);
+      assert.doesNotMatch(v.page.url(), /\/v\/2/, 'a refused save must not navigate away');
       await v.ctx.close();
     });
 

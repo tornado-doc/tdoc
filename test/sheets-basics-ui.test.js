@@ -391,8 +391,9 @@ async function shot(page, name) {
       await p.locator('textarea').first().waitFor({ timeout: 5000 });
       await shot(p, 'mode-comment-phone');
       // A fresh load for the drag, with nothing open over the page.
-      await chooseMode(p, 'Edit');
+      // A reload no longer reopens Edit (it is not remembered), so pick it again.
       frame = await open('phone', { viewPage: p });
+      await chooseMode(p, 'Edit');
       await frameMode(frame, 'edit');
       // A finger drag (CDP touch events) on the frozen first column's edge.
       const grip = await f.locator('.ts-h[data-c="0"] .ts-resize').boundingBox();
