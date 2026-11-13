@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppMenu, AppMenuItem, AppMenuSeparator } from './ui/menu.jsx';
-import { ChevronLeft, FileText, FolderPlus, MessageSquare, Presentation, Sheet, SquarePen, Table2 } from 'lucide-react';
+import { ChevronLeft, FilePenLine, FileText, FolderPlus, MessageSquare, Presentation, Sheet, SquarePen, Table2 } from 'lucide-react';
+import { AskIcon } from './ui/ask-icon.jsx';
 import { copyText } from './document/model.js';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
@@ -102,7 +103,9 @@ function TypeTile({ kind, icon: Icon, label, onPush }) {
   );
 }
 
-function MethodRow({ icon: Icon, title, busyTitle, busy = false, text, onClick, agents = false }) {
+// `mark`: who writes it, at the end of the row where AgentMarks sits -- tdoc
+// AI's own mark (the one its row wears in the agent picker), not a symbol.
+function MethodRow({ icon: Icon, title, busyTitle, busy = false, text, onClick, agents = false, mark = null }) {
   return (
     <AppMenuItem onClick={onClick} disabled={busy} className="mk-item">
       <Icon size={17} strokeWidth={1.75} aria-hidden="true" />
@@ -112,11 +115,14 @@ function MethodRow({ icon: Icon, title, busyTitle, busy = false, text, onClick, 
       </span>
       {/* At the end of the row, where a list says what it works with. */}
       {agents ? <AgentMarks size={21} /> : null}
+      {mark ? <span className="agent-marks mk-ai-mark" aria-hidden="true"><i>{mark}</i></span> : null}
     </AppMenuItem>
   );
 }
 
-export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuota, onImport, onNewSheet, onNewDeck, onNewFolder, trigger }) {
+// `onWriteWithAi` (flag writeWithTdocAi) adds tdoc AI as a third way to a
+// doc: one sentence, and it writes and publishes it (write-with-ai.jsx).
+export function CreateMenu({ create, team = '', canCreate = true, onAgent, onWriteWithAi, onQuota, onImport, onNewSheet, onNewDeck, onNewFolder, trigger }) {
   const [making, setMaking] = useState('');
   const [pushed, setPushed] = useState(null);
   const popupRef = useRef(null);
@@ -157,6 +163,10 @@ export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuo
           {canCreate ? blank('doc', create, 'Blank doc', 'Opens in edit mode. Type the title on the page.') : null}
           <MethodRow icon={MessageSquare} title="Write it with your agent" agents
             text="Name the subject. It writes and publishes the doc." onClick={() => onAgent('doc')} />
+          {canCreate && onWriteWithAi ? (
+            <MethodRow icon={FilePenLine} title="Write it with tdoc AI" mark={<AskIcon size={13} />}
+              text="One sentence. tdoc AI drafts it and publishes v1." onClick={() => onWriteWithAi('doc')} />
+          ) : null}
         </>
       ),
     },
