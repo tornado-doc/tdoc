@@ -20389,7 +20389,7 @@ function buildAskMessages({ title, docText, truncated, comments, selection, ques
   ];
 }
 
-async function callAskModel(cfg, messages) {
+function askHeaders(cfg) {
   let host = '';
   try { host = new URL(cfg.base).hostname; } catch {}
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.key}` };
@@ -20397,6 +20397,11 @@ async function callAskModel(cfg, messages) {
     headers['HTTP-Referer'] = 'https://tdoc.dev';
     headers['X-Title'] = 'tdoc';
   }
+  return headers;
+}
+
+async function callAskModel(cfg, messages) {
+  const headers = askHeaders(cfg);
   const payload = JSON.stringify({ model: cfg.model, max_tokens: cfg.maxTokens, messages });
   // One attempt, and one sequential retry only when the upstream says 5xx.
   let out = await askAttempt(cfg, headers, payload);
@@ -20435,6 +20440,101 @@ async function askAttempt(cfg, headers, payload) {
     return { ok: false, status: errStatus, detail: msg ? String(msg).slice(0, 200) : `http_${res.status}` };
   }
   return { ok: true, answer: answer.trim() };
+}
+
+// The same model, the same key and endpoint, asked to stream
+// (`stream: true`, the chat-completions server-sent events). Each piece of
+// the answer is handed to `onDelta` as it arrives; awaiting it is the
+// backpressure, and a throw from it (the reader went away) stops the call.
+// `onDelta` returning false stops it too, keeping what came (a length cap).
+// Only `delta.content` counts: a reasoning model's `reasoning` /
+// `reasoning_content` is its scratchpad and never reaches the reader.
+// An endpoint that ignores `stream` and answers with one JSON body is read
+// the way askAttempt reads it. One retry, only on a 5xx before any text.
+// The time limit is between pieces (ASK_TIMEOUT_MS), not for the whole
+// draft, and the whole draft is held to ASK_STREAM_TOTAL_MS.
+const ASK_STREAM_TOTAL_MS = 300000;
+async function streamAskModel(cfg, messages, onDelta) {
+  const headers = { ...askHeaders(cfg), Accept: 'text/event-stream' };
+  const payload = JSON.stringify({ model: cfg.model, max_tokens: cfg.maxTokens, messages, stream: true });
+  let out = await askStreamAttempt(cfg, headers, payload, onDelta);
+  if (!out.ok && out.status >= 500 && !out.sent) out = await askStreamAttempt(cfg, headers, payload, onDelta);
+  return out;
+}
+
+async function askStreamAttempt(cfg, headers, payload, onDelta) {
+  const ctl = new AbortController();
+  let idle = null;
+  const arm = () => { if (idle) clearTimeout(idle); idle = setTimeout(() => ctl.abort('timeout'), ASK_TIMEOUT_MS); };
+  const total = setTimeout(() => ctl.abort('timeout'), ASK_STREAM_TOTAL_MS);
+  let answer = '';
+  let sent = false;
+  let stopped = false;
+  const give = async (text) => {
+    if (!text || stopped) return;
+    answer += text;
+    sent = true;
+    if ((await onDelta(text)) === false) { stopped = true; ctl.abort('enough'); }
+  };
+  try {
+    arm();
+    const res = await fetch(`${cfg.base}/chat/completions`, { method: 'POST', headers, body: payload, signal: ctl.signal });
+    const type = res.headers.get('content-type') || '';
+    if (!res.ok || !type.includes('text/event-stream') || !res.body) {
+      let body = null;
+      try { body = await res.json(); } catch {}
+      const content = body && Array.isArray(body.choices) && body.choices[0] && body.choices[0].message ? body.choices[0].message.content : null;
+      const text = typeof content === 'string' ? content
+        : Array.isArray(content) ? content.map((p) => (p && typeof p.text === 'string' ? p.text : '')).join('') : '';
+      if (!res.ok || (body && body.error) || !text.trim()) {
+        const msg = body && body.error && (body.error.message || body.error.code);
+        const errStatus = !res.ok ? res.status : (body && body.error && Number(body.error.code) >= 500 ? Number(body.error.code) : res.status);
+        return { ok: false, status: errStatus, detail: msg ? String(msg).slice(0, 200) : `http_${res.status}` };
+      }
+      await give(text.trim());
+      return { ok: true, answer: answer.trim(), sent };
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let done = false;
+    while (!done && !stopped) {
+      const step = await reader.read();
+      if (step.done) break;
+      arm();
+      buf += decoder.decode(step.value, { stream: true });
+      let nl;
+      while (!done && !stopped && (nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl).replace(/\r$/, '');
+        buf = buf.slice(nl + 1);
+        // Comment lines (": OPENROUTER PROCESSING") keep the line open; skip.
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (data === '[DONE]') { done = true; break; }
+        let ev = null;
+        try { ev = JSON.parse(data); } catch { continue; }
+        if (ev && ev.error) {
+          const msg = ev.error.message || ev.error.code;
+          try { reader.cancel(); } catch {}
+          return { ok: false, status: Number(ev.error.code) >= 500 ? Number(ev.error.code) : 502, detail: msg ? String(msg).slice(0, 200) : 'stream_error', sent };
+        }
+        const delta = ev && Array.isArray(ev.choices) && ev.choices[0] && ev.choices[0].delta;
+        const c = delta && delta.content;
+        await give(typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => (p && typeof p.text === 'string' ? p.text : '')).join('') : '');
+      }
+    }
+    if (!stopped) { try { reader.cancel(); } catch {} }
+  } catch (e) {
+    if (stopped) return { ok: true, answer: answer.trim(), sent };
+    if (e && e.tdocClientGone) return { ok: false, status: 0, detail: 'client_gone', sent, clientGone: true };
+    const timeout = ctl.signal.aborted && ctl.signal.reason === 'timeout';
+    return { ok: false, status: 0, detail: timeout || (e && e.name === 'AbortError') ? 'timeout' : 'network', sent };
+  } finally {
+    if (idle) clearTimeout(idle);
+    clearTimeout(total);
+  }
+  if (!answer.trim()) return { ok: false, status: 502, detail: 'empty', sent };
+  return { ok: true, answer: answer.trim(), sent };
 }
 
 // ─────────────────── one door: edit, or ask only ───────────────────
@@ -20658,7 +20758,14 @@ async function handleAsk(env, req, url, slug) {
 
 // ─────────────────── Write with tdoc AI (New menu) ───────────────────
 // POST /api/write-with-ai { prompt, team? }
-// GET  /api/write-with-ai                 -> { available, limit, remaining }
+// GET  /api/write-with-ai                 -> { available, limit, remaining, units }
+// POST with Accept: text/event-stream streams the draft as it is written:
+//   event: delta  data: { text }      a piece of the Markdown, in order
+//   event: done   data: { ok, slug, version, title, url, remaining, limit, units }
+//   event: error  data: { error, message?, status }
+// Anything refused before the model runs (sign-in, flag, Origin, prompt,
+// rate limit, allowance) is the same JSON error, with its status, either way.
+// Without that Accept the answer is the one JSON body, as before.
 // One sentence from the New menu; tdoc AI (the Ask this doc model, the same
 // key and the same free allowance) drafts the doc and it is published as v1,
 // private, owned by the person who asked. Behind the shell flag
@@ -20674,6 +20781,14 @@ const WRITE_AI_PROMPT_CHARS = 500;
 const WRITE_AI_RATE_LIMIT = 3;
 const WRITE_AI_RATE_WINDOW = 600;
 const WRITE_AI_MAX_TOKENS = 6000;
+// What one draft costs of the Ask allowance. A question is one unit and
+// answers in ASK_DEFAULT_MAX_TOKENS (4500) at most, usually far less; a
+// draft may run to WRITE_AI_MAX_TOKENS and usually does, so it costs three.
+const WRITE_AI_ASK_UNITS = 3;
+// The longest draft kept (and streamed), in characters.
+const WRITE_AI_MARKDOWN_CHARS = 60000;
+// The preview's fixed draft arrives a couple of lines at a time.
+const WRITE_AI_PREVIEW_STEP_MS = 350;
 const WRITE_AI_SYSTEM_PROMPT = [
   'You are tdoc AI on tdoc.dev. A person typed one sentence describing a document; write that document.',
   'Reply with the document only, as Markdown: one "# " title line first, then "## " sections, short paragraphs, "- " lists, and Markdown tables where a comparison helps. No HTML tags, no code fences around the whole answer, no preamble or sign-off.',
@@ -20710,10 +20825,10 @@ function writeAiMarkdown(answer) {
   // A model that wrapped the whole answer in a fence: unwrap it once.
   const t = String(answer || '').trim();
   const fenced = t.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i);
-  return (fenced ? fenced[1] : t).slice(0, 60000);
+  return (fenced ? fenced[1] : t).slice(0, WRITE_AI_MARKDOWN_CHARS);
 }
 
-async function handleWriteWithAi(env, req, url) {
+async function handleWriteWithAi(env, req, url, ctx) {
   // A person in a browser, nobody else: no token, no feedback session.
   if (req.headers.get('authorization')) return json({ error: 'browser_session_required' }, { status: 403 });
   const session = await getSession(env, req);
@@ -20734,7 +20849,7 @@ async function handleWriteWithAi(env, req, url) {
   if (req.method === 'GET') {
     const q = await askQuotaOp(env, accountKey, { kind: 'read' });
     const used = q && typeof q.used === 'number' ? q.used : 0;
-    return json({ available: true, limit: cfg.limit, remaining: Math.max(0, cfg.limit - used) });
+    return json({ available: true, limit: cfg.limit, remaining: Math.max(0, cfg.limit - used), units: WRITE_AI_ASK_UNITS });
   }
   // A write: same-site only, and a missing Origin is not taken as one.
   if (req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') {
@@ -20755,29 +20870,105 @@ async function handleWriteWithAi(env, req, url) {
     return json({ error: 'rate_limited', retry_after: WRITE_AI_RATE_WINDOW, message: 'A few drafts at a time: try again in a few minutes.' }, { status: 429 });
   }
   // The free allowance Ask this doc uses, charged before the model runs so a
-  // burst cannot spend more than it; a failure gives it back.
+  // burst cannot spend more than it; a failure gives it back. A draft is up
+  // to WRITE_AI_MAX_TOKENS of output, so it costs WRITE_AI_ASK_UNITS
+  // questions, charged and given back as one.
   if (!cfg.previewMock) {
-    const charged = await askQuotaOp(env, accountKey, { kind: 'charge', limit: cfg.limit });
+    const charged = await askQuotaOp(env, accountKey, { kind: 'charge', limit: cfg.limit, units: WRITE_AI_ASK_UNITS });
     if (!charged.ok) {
       if (charged.error === 'ask_limit') {
-        return json({ error: 'ask_limit', limit: cfg.limit, remaining: 0, connect_href: '/start', message: 'You have used your free tdoc AI requests. Connect your own agent to keep writing.' }, { status: 429 });
+        const left = Math.max(0, cfg.limit - (Number(charged.used) || 0));
+        return json({
+          error: 'ask_limit', limit: cfg.limit, remaining: left, units: WRITE_AI_ASK_UNITS, connect_href: '/start',
+          message: left > 0
+            ? `A draft uses ${WRITE_AI_ASK_UNITS} free tdoc AI requests and you have ${left} left. Connect your own agent to keep writing.`
+            : 'You have used your free tdoc AI requests. Connect your own agent to keep writing.',
+        }, { status: 429 });
       }
       return json({ error: 'quota_unavailable' }, { status: 503 });
     }
   }
-  const refund = async () => { if (!cfg.previewMock) await askQuotaOp(env, accountKey, { kind: 'refund' }); };
+  const refund = async () => { if (!cfg.previewMock) await askQuotaOp(env, accountKey, { kind: 'refund', units: WRITE_AI_ASK_UNITS }); };
   const messages = [
     { role: 'system', content: WRITE_AI_SYSTEM_PROMPT },
     // An address typed into the sentence leaves the worker hidden, as in Ask.
     { role: 'user', content: `<request>\n${askFence(askNoEmails(rawPrompt)).replace(/<\/?\s*request\b[^>]*>/gi, '[tag removed]')}\n</request>` },
   ];
-  const out = cfg.previewMock
-    ? { ok: true, answer: WRITE_AI_PREVIEW_DOC }
-    : await callAskModel({ ...cfg, maxTokens: Math.max(cfg.maxTokens, WRITE_AI_MAX_TOKENS) }, messages);
+  const modelCfg = { ...cfg, maxTokens: Math.max(cfg.maxTokens, WRITE_AI_MAX_TOKENS) };
+  const job = { env, req, session, team, rawPrompt, accountKey, cfg, refund };
+
+  // A client that asked for server-sent events watches the draft arrive.
+  if (!(req.headers.get('accept') || '').includes('text/event-stream')) {
+    const out = cfg.previewMock ? { ok: true, answer: WRITE_AI_PREVIEW_DOC } : await callAskModel(modelCfg, messages);
+    const done = await writeAiFinish(job, out);
+    return json(done.body, { status: done.status });
+  }
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const enc = new TextEncoder();
+  const send = (event, data) => writer.write(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+  const run = (async () => {
+    let gone = false;
+    let streamed = 0;
+    // A write that fails means the reader went away: stop the model.
+    const onDelta = async (text) => {
+      if (streamed >= WRITE_AI_MARKDOWN_CHARS) return false;
+      streamed += text.length;
+      try { await send('delta', { text }); } catch { gone = true; const e = new Error('client gone'); e.tdocClientGone = true; throw e; }
+      return streamed < WRITE_AI_MARKDOWN_CHARS;
+    };
+    let out;
+    try {
+      await writer.write(enc.encode(': writing\n\n'));
+      out = cfg.previewMock ? await writeAiPreviewStream(onDelta) : await streamAskModel(modelCfg, messages, onDelta);
+    } catch (e) {
+      gone = gone || Boolean(e && e.tdocClientGone);
+      out = { ok: false, status: 0, detail: gone ? 'client_gone' : 'stream', clientGone: gone };
+    }
+    // Left before the end: nothing is created and the draft is given back.
+    if (out.clientGone || gone) {
+      await refund();
+      console.log(JSON.stringify({ event: 'write_ai_abandoned' }));
+      try { await writer.abort(); } catch {}
+      return;
+    }
+    const done = await writeAiFinish(job, out);
+    try {
+      await send(done.status === 200 ? 'done' : 'error', { ...done.body, status: done.status });
+      await writer.close();
+    } catch {}
+  })();
+  if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(run);
+  return new Response(readable, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Accel-Buffering': 'no',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
+// The PR preview has no model key: its fixed draft, a line or two at a time,
+// so the live view can be tried there.
+async function writeAiPreviewStream(onDelta) {
+  const lines = WRITE_AI_PREVIEW_DOC.split('\n');
+  for (let i = 0; i < lines.length; i += 2) {
+    const piece = lines.slice(i, i + 2).join('\n') + (i + 2 < lines.length ? '\n' : '');
+    if ((await onDelta(piece)) === false) break;
+    await new Promise((r) => setTimeout(r, WRITE_AI_PREVIEW_STEP_MS));
+  }
+  return { ok: true, answer: WRITE_AI_PREVIEW_DOC };
+}
+
+// After the model: store the draft exactly one way for both responses.
+// -> { status, body }
+async function writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, refund }, out) {
   if (!out.ok) {
     await refund();
     console.log(JSON.stringify({ event: 'write_ai_failed', status: out.status || null, detail: out.detail || null }));
-    return json({ error: 'write_failed', message: 'tdoc AI could not write it this time. Nothing was charged; try again.' }, { status: 502 });
+    return { status: 502, body: { error: 'write_failed', message: 'tdoc AI could not write it this time. Nothing was charged; try again.' } };
   }
   const markdown = writeAiMarkdown(out.answer);
   const title = writeAiTitle(markdown, rawPrompt);
@@ -20796,11 +20987,13 @@ async function handleWriteWithAi(env, req, url) {
   });
   if (!made.ok) {
     await refund();
-    return made.response;
+    let body = null;
+    try { body = await made.response.json(); } catch {}
+    return { status: made.response.status, body: body && typeof body === 'object' ? body : { error: 'create_failed' } };
   }
   const q = cfg.previewMock ? null : await askQuotaOp(env, accountKey, { kind: 'read' });
   const remaining = q && typeof q.used === 'number' ? Math.max(0, cfg.limit - q.used) : null;
-  return json({ ok: true, slug: made.slug, version: 1, title, url: `/d/${made.slug}/v/1`, remaining, limit: cfg.limit });
+  return { status: 200, body: { ok: true, slug: made.slug, version: 1, title, url: `/d/${made.slug}/v/1`, remaining, limit: cfg.limit, units: WRITE_AI_ASK_UNITS } };
 }
 
 // The Ask allowance for Ask/Edit v2's change requests (handleSuggest), kept
@@ -20813,21 +21006,31 @@ async function handleWriteWithAi(env, req, url) {
 //   { kind: 'charge', limit, kv } -> { ok, used } | { ok: false, error: 'ask_limit', used }
 //   { kind: 'refund' }            -> { ok, used }
 //   { kind: 'read', kv }          -> { ok, used }
+// A charge or refund may carry `units` (default 1): a request that costs
+// more than one question (a tdoc AI draft, WRITE_AI_ASK_UNITS) is charged
+// and given back as a whole.
 const ASK_QUOTA_PREFIX = 'ask-quota:';
+function askQuotaUnits(op) {
+  const n = Math.floor(Number(op && op.units));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 100) : 1;
+}
 function applyAskQuotaOp(stored, op) {
   const have = Math.max(0, Number(stored) || 0);
   const kv = Math.max(0, Number(op && op.kv) || 0);
   const kind = op && op.kind;
   if (kind === 'read') return { changed: false, used: have, result: { ok: true, used: Math.max(have, kv) } };
+  const units = askQuotaUnits(op);
   if (kind === 'refund') {
-    const used = Math.max(0, have - 1);
+    const used = Math.max(0, have - units);
     return { changed: used !== have, used, result: { ok: true, used } };
   }
   if (kind === 'charge') {
     const cur = Math.max(have, kv);
     const limit = Math.max(0, Number(op.limit) || 0);
-    if (cur >= limit) return { changed: cur !== have, used: cur, result: { ok: false, error: 'ask_limit', used: cur } };
-    return { changed: true, used: cur + 1, result: { ok: true, used: cur + 1 } };
+    // All of it or none: a request costing several units never runs on the
+    // last one or two.
+    if (cur + units > limit) return { changed: cur !== have, used: cur, result: { ok: false, error: 'ask_limit', used: cur } };
+    return { changed: true, used: cur + units, result: { ok: true, used: cur + units } };
   }
   return { changed: false, used: have, result: { ok: false, error: 'bad_quota_op' } };
 }
@@ -20847,7 +21050,7 @@ async function askQuotaOp(env, accountKey, op) {
       if (!out || typeof out.used !== 'number') return { ok: false, error: 'quota_unavailable' };
       // Mirror for the KV readers (Ask's own count and "remaining").
       if (op.kind === 'charge' && out.ok && out.used > kv) await env.META.put(usedKey, String(out.used));
-      if (op.kind === 'refund') await askRefund(env, usedKey);
+      if (op.kind === 'refund') await askRefund(env, usedKey, askQuotaUnits(op));
       return out;
     } catch { return { ok: false, error: 'quota_unavailable' }; }
   }
@@ -20862,10 +21065,10 @@ async function askQuotaOp(env, accountKey, op) {
 
 // Giving back a question the model never answered: decrement the counter
 // as it stands now, not write back the value read before the call.
-async function askRefund(env, usedKey) {
+async function askRefund(env, usedKey, units = 1) {
   try {
     const now = Number(await env.META.get(usedKey)) || 0;
-    if (now > 0) await env.META.put(usedKey, String(now - 1));
+    if (now > 0) await env.META.put(usedKey, String(Math.max(0, now - units)));
   } catch {}
 }
 
@@ -30586,7 +30789,7 @@ const tdocHandlers = {
       if (restoreMatch) return handleVersionRestore(env, req, url, restoreMatch[1], restoreMatch[2]);
       const askMatch = p.match(/^\/api\/docs\/([^/]+)\/ask\/?$/);
       if (askMatch && (method === 'POST' || method === 'GET')) return handleAsk(env, req, url, askMatch[1]);
-      if (p === '/api/write-with-ai' && (method === 'POST' || method === 'GET')) return handleWriteWithAi(env, req, url);
+      if (p === '/api/write-with-ai' && (method === 'POST' || method === 'GET')) return handleWriteWithAi(env, req, url, ctx);
       // Send to my agent: the reader's own agents only (see handleMyAgent).
       const cancelMatch = p.match(/^\/api\/docs\/([^/]+)\/my-agent\/cancel\/?$/);
       if (cancelMatch && method === 'POST') return handleMyAgentCancel(env, req, url, cancelMatch[1]);

@@ -669,6 +669,60 @@ a.ui-menu-item:visited {
 .mk-foot.mk-send-error { color: var(--td-danger); }
 .mk-foot.mk-send-error a { color: inherit; text-decoration: underline; }
 
+/* Write it with tdoc AI, live: the draft appears under the sentence as it is
+   written, set like the doc it becomes (the house style's paper, ink and
+   type scale, in the --td-* tokens), in a wider sheet. The draft scrolls; the
+   sentence, the status line and the buttons stay put. */
+.tdoc-modal.mk-write-live { width: min(720px, calc(100vw - 48px)); }
+.mk-write-live .ui-dialog-body { display: flex; flex-direction: column; }
+.mk-write-live .mk-write-ai { flex: 1 1 auto; min-height: 0; }
+.mk-write-paper {
+  box-sizing: border-box;
+  height: min(52vh, 520px); height: min(52dvh, 520px);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 22px 26px 26px;
+  border: 1px solid var(--td-line); border-radius: 14px;
+  background: var(--td-ground);
+}
+.mk-write-doc { color: var(--td-ink); font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+.mk-write-doc > :first-child { margin-top: 0; }
+.mk-write-doc h1, .mk-write-doc h2, .mk-write-doc h3, .mk-write-doc h4 {
+  color: var(--td-heading); font-family: var(--td-font-display); line-height: 1.25; letter-spacing: -0.01em;
+}
+.mk-write-doc h1 { margin: 0 0 14px; font-size: 26px; font-weight: 700; }
+.mk-write-doc h2 { margin: 24px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--td-h2-rule); font-size: 19px; font-weight: 650; }
+.mk-write-doc h3, .mk-write-doc h4 { margin: 18px 0 6px; font-size: 16px; font-weight: 650; }
+.tdoc-modal .mk-write-doc p { margin: 0 0 12px; color: var(--td-ink); line-height: 1.65; }
+.mk-write-doc ul, .mk-write-doc ol { margin: 0 0 12px; padding-left: 22px; }
+.mk-write-doc li { margin: 3px 0; }
+.mk-write-doc blockquote { margin: 0 0 12px; padding: 2px 0 2px 14px; border-left: 3px solid var(--td-quote); color: var(--td-muted); }
+.mk-write-doc hr { margin: 18px 0; border: 0; border-top: 1px solid var(--td-line); }
+.mk-write-doc code { padding: 1px 5px; border-radius: 4px; background: var(--td-surface); font: 13px ui-monospace, "SF Mono", Menlo, monospace; }
+.mk-write-doc pre { margin: 0 0 12px; padding: 12px 14px; border-radius: 10px; background: var(--td-surface-2); color: var(--td-pre-ink); overflow-x: auto; }
+.mk-write-doc pre code { padding: 0; background: none; }
+.mk-write-table { margin: 0 0 12px; overflow-x: auto; }
+.mk-write-doc table { border-collapse: collapse; font-size: 14px; }
+.mk-write-doc th, .mk-write-doc td { padding: 6px 10px; border: 1px solid var(--td-line); text-align: left; vertical-align: top; }
+.mk-write-doc th { background: var(--td-th-bg); color: var(--td-th-ink); font-weight: 600; }
+.mk-write-link { color: var(--td-accent); }
+/* Where the next words land. */
+.mk-write-caret {
+  display: inline-block; width: 8px; height: 1.1em; margin-left: 2px; vertical-align: text-bottom;
+  border-radius: 2px; background: var(--td-accent);
+  animation: mk-write-blink 1s steps(2, start) infinite;
+}
+@keyframes mk-write-blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .mk-write-caret { animation: none; } }
+.mk-foot.mk-write-error { color: var(--td-danger); }
+.mk-foot.mk-write-error a { color: inherit; text-decoration: underline; }
+@media (max-width: 700px) {
+  .tdoc-modal.mk-write-live { width: calc(100vw - 24px); padding: 20px 16px 16px; }
+  .mk-write-paper { height: min(56vh, 560px); height: min(56dvh, 560px); padding: 16px 16px 20px; }
+  .mk-write-doc { font-size: 15px; }
+  .mk-write-doc h1 { font-size: 22px; }
+  .mk-write-doc h2 { font-size: 18px; }
+}
+
 /* The recipe step, one click in from its card. */
 .tdoc-modal button.mk-back {
   display: inline-flex;
