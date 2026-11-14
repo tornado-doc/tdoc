@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { AgentMentionContext, MentionText } from './mention-field.jsx';
-import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sendToAgentState, sendToAgentWords, taggedAgent, taggedAgentSpan, targetKey } from './agent-choices.js';
+import { AGENT_BUTTON_LABEL, AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sendToAgentState, sendToAgentWords, taggedAgent, taggedAgentSpan, targetKey } from './agent-choices.js';
 import { AppCheckbox } from '../ui/checkbox.jsx';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { AgentMenuItems } from './agent-menu.jsx';
@@ -179,20 +179,23 @@ export function SendToAgentToggle({ ask, busy = false, className = 'tdoc-send-ag
   if (state.kind === 'connect') {
     const title = state.prompt || state.reason || 'Connect an agent to send comments to it';
     if (onConnect) {
-      return <button className={className} type="button" disabled={busy} onClick={onConnect} title={title}>Send to agent</button>;
+      return <button className={className} type="button" disabled={busy} onClick={onConnect} title={title}>{AGENT_BUTTON_LABEL}</button>;
     }
     if (state.href) {
-      return <a className={className} href={state.href} title={title}>Send to agent</a>;
+      return <a className={className} href={state.href} title={title}>{AGENT_BUTTON_LABEL}</a>;
     }
-    return <button className={className} type="button" disabled title={title}>Send to agent</button>;
+    return <button className={className} type="button" disabled title={title}>{AGENT_BUTTON_LABEL}</button>;
   }
   if (state.kind !== 'ready' && !askable) {
-    return <button className={className} type="button" disabled title={state.reason}>Send to agent</button>;
+    return <button className={className} type="button" disabled title={state.reason}>{AGENT_BUTTON_LABEL}</button>;
   }
   const words = sendToAgentWords(shown, { editable, offer, asking: state.kind !== 'ready' });
-  // Nothing named yet: the control is the @agent button -- it puts the
-  // agent it names in, and the pill's own menu swaps it. Once a pill is in
-  // the text the control becomes the switch: pick another agent or turn it off.
+  // Nothing named yet: the control is the @agent button, as before #1034
+  // (Julie, 2026-11-14: "@agent", not "Send to agent · Name"). Its click
+  // puts this box's default agent in (putDefault: composerDefault, which
+  // never hands a member or reader somebody else's agent), else a bare @ to
+  // pick from; the pill's own menu swaps it. Once a pill is in the text the
+  // control becomes the switch: pick another agent or turn it off.
   if (!current) {
     return (
       <button
@@ -200,7 +203,7 @@ export function SendToAgentToggle({ ask, busy = false, className = 'tdoc-send-ag
         type="button"
         disabled={busy}
         onMouseDown={(event) => event.preventDefault()}
-        onClick={() => ask.putTag(fallback)}
+        onClick={ask.putDefault}
         title={words.title}
       >
         {words.label}

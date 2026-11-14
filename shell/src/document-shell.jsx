@@ -79,7 +79,7 @@ import { ConnectAiAppsStrip } from './connect-ai-apps.jsx';
 import { openAppLink, sendToAppLink } from './document/send-to-app.js';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
-import { CONNECT_AGENT_PROMPT, HandoffSendTransport, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, HandoffSendTransport, NotifyHandoffPanel, agentLabel as notifyAgentLabel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
 import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, byRelevance, composerDefault, maySendToAgent, orderedAgentChoices, orderedAskAiChoices, sameTarget, sendToAgentSetup, sendToAgentState, taggedAgentSpan, targetKey } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
@@ -2186,6 +2186,18 @@ export function DocumentShell({ boot, config }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [suggestOn]);
+  // Send every ready comment at once, from Ask AI (DocumentSendAgentAction):
+  // the space page's "Send to agent (N)" rule -- the owner, with an agent to
+  // send to -- and its send (the Send to agent dialog, POST
+  // /api/notify/handoff). A member may send only their own threads
+  // (comment_not_owned), so a member never gets "send all".
+  // Named as the dialog's Send button names it: the server's default.
+  const bulkTarget = notifyTargets.default || null;
+  const bulkSend = config.isOwner && !demoAgents && canSendToAgent && handoffBuckets.ready.length ? {
+    count: handoffBuckets.ready.length,
+    agentName: bulkTarget ? notifyAgentLabel(bulkTarget) : null,
+    onSend: () => openDocNotify(handoffBuckets.ready.map((c) => c.id)),
+  } : null;
   const askAiAction = (askAiPanelEnabled || signedOutAsk) && !unifiedEntry ? (
     <DocumentSendAgentAction
       counts={Object.fromEntries(Object.entries(handoffBuckets).map(([state, list]) => [state, list.length]))}
@@ -2193,6 +2205,7 @@ export function DocumentShell({ boot, config }) {
       open={handoffDetailsOpen}
       onOpenChange={(open) => { setHandoffDetailsOpen(open); if (open) { setAgentActivityOpen(false); setDrawerOpen(false); } }}
       narrow={narrow}
+      bulkSend={bulkSend}
     >
       {askAiPanel(handoffDetailsOpen)}
     </DocumentSendAgentAction>

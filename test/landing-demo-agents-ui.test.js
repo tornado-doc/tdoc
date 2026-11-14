@@ -537,14 +537,14 @@ async function touchSelect(page, phrase) {
       await dragSelect(page, 'Humans and agents collaborate');
       const pop = page.locator('.tdoc-popup');
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
-      if (labels.join('|') !== 'Send to agent · Claude (demo)|Comment') throw new Error(`composer buttons: ${labels.join('|')}`);
+      if (labels.join('|') !== '@agent|Comment') throw new Error(`composer buttons: ${labels.join('|')}`);
       // Typing @ lists the demo agents above people.
       await pop.locator('textarea').pressSequentially('Make the headline shorter @');
       const rows = (await page.locator('.tdoc-mention-option').allTextContents()).map((x) => x.trim());
       if (!/^Claude \(demo\)/.test(rows[0] || '') || !rows.some((r) => /^tdoc AI/.test(r))) throw new Error(`@ list: ${JSON.stringify(rows)}`);
       await page.keyboard.press('Backspace');
-      // The Send to agent button: the default agent's pill.
-      await pop.getByRole('button', { name: /^Send to agent/ }).click();
+      // The @agent button: the default agent's pill.
+      await pop.getByRole('button', { name: '@agent' }).click();
       const pill = pop.locator('.tdoc-agent-pill, .tdoc-mention-agent-pill, [data-agent-pill]').first();
       if (!(await pop.textContent()).includes('Claude (demo)')) throw new Error('no Claude (demo) pill in the composer');
       await shot('desktop-composer-agent.png');
@@ -618,7 +618,7 @@ async function touchSelect(page, phrase) {
       await touchSelect(page, 'Humans and agents collaborate');
       const pop = page.locator('.tdoc-popup');
       await pop.locator('textarea').fill('Shorter headline please ');
-      await pop.getByRole('button', { name: /^Send to agent/ }).click();
+      await pop.getByRole('button', { name: '@agent' }).click();
       if (!(await pop.textContent()).includes('Claude (demo)')) throw new Error('no Claude (demo) pill in the phone composer');
       const box = await pop.boundingBox();
       if (box.x < 0 || box.x + box.width > 390) throw new Error(`composer off screen: ${JSON.stringify(box)}`);

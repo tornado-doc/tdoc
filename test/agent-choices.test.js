@@ -304,26 +304,27 @@ t('who may send to an agent: one rule and one sentence, the server\'s, on the do
   assert(box.sendToAgentSetup({ canSendToAgent: true, may: true, targets: { ready: true } }).disabledReason === null);
 });
 
-t('the control\'s words: Send to agent for a send target, Ask for an agent that may only answer; the click puts in the agent it names', () => {
+t('the control\'s words: @agent for a send target (the pre-#1034 label), Ask for an agent that may only answer; the click puts in the box\'s default', () => {
   const editable = [{ ...local('juliesmac', 'claude'), can_edit: true }];
   const answerOnly = [{ ...local('bobmac', 'codex'), can_edit: false }];
   const send = box.sendToAgentWords(editable[0], { editable, offer: [...editable, ...answerOnly] });
-  assert(/^Send to agent · /.test(send.label) && /^Send this comment to /.test(send.title) && send.off === "Don't send", JSON.stringify(send));
+  assert(send.label === '@agent' && /^Send this comment to /.test(send.title) && send.off === "Don't send", JSON.stringify(send));
+  assert(!/Send to agent/.test(send.label), 'the button is named "Send to agent" again');
   const askW = box.sendToAgentWords(answerOnly[0], { editable: [], offer: answerOnly });
   assert(/^Ask /.test(askW.label) && !/Send/.test(askW.label) && /^Ask .* about this comment$/.test(askW.title) && askW.off === "Don't ask", JSON.stringify(askW));
   // In a ready box, an answer-only agent picked from @ is still asked.
   assert(/^Ask /.test(box.sendToAgentWords(answerOnly[0], { editable, offer: [...editable, ...answerOnly] }).label));
-  assert(box.sendToAgentWords(null).label === 'Send to agent');
+  assert(box.sendToAgentWords(null).label === '@agent');
   assert(box.sendToAgentWords(null, { asking: true }).label === 'Ask agent' && /^Ask an agent/.test(box.sendToAgentWords(null, { asking: true }).title));
-  // The toggle: the label and the click name the same agent -- the box's
-  // default, else nobody (a bare @ to pick from); never a label for
-  // editable[0] and a click that inserts something else.
+  // The toggle, as the pre-#1034 @agent button (AgentButton): its click puts
+  // in the box's default (putDefault: composerDefault, never somebody
+  // else's agent for a member or reader), else a bare @ to pick from.
   const ask = read('shell/src/document/agent-ask.jsx');
   const toggle = ask.slice(ask.indexOf('export function SendToAgentToggle'), ask.indexOf('// "Ask only", beside the send button'));
-  assert(/onClick=\{\(\) => ask\.putTag\(fallback\)\}/.test(toggle), 'the click does not put in the named agent');
-  assert(!/onClick=\{ask\.putDefault\}/.test(toggle), 'the click still inserts the default (a bare @ with none)');
+  assert(/onClick=\{ask\.putDefault\}/.test(toggle), 'the click does not put in the box\'s default');
+  assert(!/>Send to agent</.test(toggle), 'a "Send to agent" label in the comment boxes');
   assert(/sendToAgentWords\(shown/.test(toggle), 'the label is not the shared wording');
-  assert(!/editable\[0\]|offer\[0\]/.test(toggle.slice(toggle.indexOf('const fallback'), toggle.indexOf('const shown'))), 'the label names an agent the click would not put in');
+  assert(!/editable\[0\]|offer\[0\]/.test(toggle.slice(toggle.indexOf('const fallback'), toggle.indexOf('const shown'))), 'the tooltip names an agent the click would not put in');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

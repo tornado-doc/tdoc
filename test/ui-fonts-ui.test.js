@@ -130,7 +130,15 @@ function serifControls(page) {
           await page.locator('button.tdoc-pin').first().click();
           await page.locator('.tdoc-margin-comment').first().waitFor();
           await check(page, 'open card');
-          await page.locator('#tdoc-send-agent-btn').click();
+          const askBtn = page.locator('#tdoc-send-agent-btn');
+          await askBtn.click();
+          // The owner with comments ready to send: Ask AI opens a small menu
+          // first (Send N comments to <agent>, then Ask AI).
+          if (await askBtn.getAttribute('aria-haspopup') === 'menu') {
+            await page.locator('.tdoc-ask-ai-menu').waitFor();
+            await check(page, 'Ask AI menu');
+            await page.locator('.tdoc-ask-ai-menu .tdoc-ask-ai-menu-ask').click();
+          }
           await page.locator('.tdoc-handoff-popover').waitFor();
           await check(page, 'Ask AI');
           await page.keyboard.press('Escape');

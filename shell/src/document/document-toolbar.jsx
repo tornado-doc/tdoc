@@ -17,11 +17,12 @@ import {
   Share2,
   Star,
   Table2,
+  Send,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
-import { AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
+import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
 import { AskIcon } from '../ui/ask-icon.jsx';
 import { usePortalContainer } from '../ui/portal.js';
 
@@ -144,8 +145,22 @@ export function DocumentPrimaryAction({
 
 // One document-level entry for handoff activity and unsent comments. The
 // comment card itself carries the state of that one comment.
-export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenChange, narrow = false, children }) {
+// Bulk send (bulkSend: { count, agentName, onSend }), the doc page's form of
+// the space page's "Send to agent (N)": while the viewer may send every open
+// comment (the owner: POST /api/notify/handoff refuses another member's
+// threads, comment_not_owned) and N are ready, Ask AI wears N and opens a
+// small menu -- Send N comments to <agent>, then Ask AI. With none ready, or
+// for anybody else, the button is exactly Ask AI (Julie, 2026-11-14: no
+// second button in the bar).
+export function bulkSendLabel(count, agentName) {
+  return `Send ${count} comment${count === 1 ? '' : 's'} to ${agentName || 'agent'}`;
+}
+
+export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenChange, narrow = false, bulkSend = null, children }) {
   const portalContainer = usePortalContainer();
+  const anchor = useRef(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const bulk = bulkSend && bulkSend.count > 0 && typeof bulkSend.onSend === 'function' ? bulkSend : null;
   const [visibleViewport, setVisibleViewport] = useState(null);
   const [expanded, setExpanded] = useState(false);
   const dragStart = useRef(null);
@@ -178,11 +193,31 @@ export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenC
   const triggerContents = <>
     <AskIcon className="tdoc-ask-ai-mark" size={18} color="var(--td-accent, #1652f0)" />
     <span className="tdoc-ask-ai-label">Ask AI</span>
-    <AgentActivityBadge summary={summary} />
+    {bulk
+      ? <span className="tdoc-send-agent-badge is-count" aria-hidden="true">{bulk.count > 99 ? '99+' : bulk.count}</span>
+      : <AgentActivityBadge summary={summary} />}
   </>;
   const triggerProps = { id: 'tdoc-send-agent-btn', type: 'button', className: 'tdoc-send-agent-action', 'aria-label': label, title: label };
+  // With bulk send the button opens the menu; the Ask AI panel below opens
+  // from its second row, anchored to the same button.
+  const bulkTrigger = bulk ? (
+    <AppMenu
+      open={menuOpen}
+      onOpenChange={setMenuOpen}
+      align="end"
+      popupClassName="tdoc-ask-ai-menu"
+      trigger={<button ref={anchor} {...triggerProps} aria-haspopup="menu">{triggerContents}</button>}
+    >
+      <AppMenuItem className="tdoc-ask-ai-menu-send" onClick={() => { setMenuOpen(false); bulk.onSend(); }}>
+        <Send size={15} aria-hidden="true" /> {bulkSendLabel(bulk.count, bulk.agentName)}
+      </AppMenuItem>
+      <AppMenuItem className="tdoc-ask-ai-menu-ask" onClick={() => { setMenuOpen(false); requestAnimationFrame(() => onOpenChange(true)); }}>
+        <AskIcon size={15} color="var(--td-accent, #1652f0)" /> Ask AI
+      </AppMenuItem>
+    </AppMenu>
+  ) : null;
   if (narrow) return <Drawer.Root open={open} onOpenChange={(next) => { if (!next) setExpanded(false); onOpenChange(next); }} swipeDirection="down">
-    <Drawer.Trigger {...triggerProps}>{triggerContents}</Drawer.Trigger>
+    {bulkTrigger || <Drawer.Trigger {...triggerProps}>{triggerContents}</Drawer.Trigger>}
     <Drawer.Portal container={portalContainer}>
       <Drawer.Backdrop className="tdoc-ask-drawer-backdrop" />
       <Drawer.Viewport className="tdoc-ask-drawer-viewport">
@@ -205,9 +240,9 @@ export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenC
     </Drawer.Portal>
   </Drawer.Root>;
   return <Popover.Root open={open} onOpenChange={onOpenChange}>
-    <Popover.Trigger {...triggerProps}>{triggerContents}</Popover.Trigger>
+    {bulkTrigger || <Popover.Trigger {...triggerProps}>{triggerContents}</Popover.Trigger>}
     <Popover.Portal container={portalContainer}>
-      <Popover.Positioner side="bottom" align="end" sideOffset={narrow ? 8 : 48} collisionPadding={8} positionMethod="fixed" className="tdoc-picker-positioner">
+      <Popover.Positioner anchor={bulk ? anchor : undefined} side="bottom" align="end" sideOffset={narrow ? 8 : 48} collisionPadding={8} positionMethod="fixed" className="tdoc-picker-positioner">
         <Popover.Popup className="tdoc-handoff-popover" aria-label="Ask AI">
           {children}
         </Popover.Popup>

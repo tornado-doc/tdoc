@@ -433,8 +433,13 @@ export function notifyHandoffReasonText(reason) {
   return reason ? 'No agent can take comments here yet.' : null;
 }
 
+// The comment boxes' agent button reads "@agent" (Julie, 2026-11-14: the
+// pre-#1034 label, not "Send to agent · Name"); who it sends to is in the
+// tooltip and, once named, in the pill.
+export const AGENT_BUTTON_LABEL = '@agent';
+
 // The control's words for the agent it names. One that may take the comment
-// (a send target) is "Send to agent · X"; one that may only answer -- the
+// (a send target) is "@agent" (sends to X); one that may only answer -- the
 // viewer's own agent or tdoc AI where they cannot hand off -- is asked, so the
 // control says "Ask X", which is what submitting does. With no agent named,
 // `asking` (the viewer cannot hand off, only ask) picks the words.
@@ -442,13 +447,13 @@ export function sendToAgentWords(agent, { editable = [], offer = [], asking = fa
   if (!agent) {
     return asking
       ? { label: 'Ask agent', title: 'Ask an agent about this comment', switchTitle: 'Ask an agent about this comment', off: "Don't ask" }
-      : { label: 'Send to agent', title: 'Send this comment to an agent', switchTitle: 'Send this comment to an agent', off: "Don't send" };
+      : { label: AGENT_BUTTON_LABEL, title: 'Send this comment to an agent', switchTitle: 'Send this comment to an agent', off: "Don't send" };
   }
   const sends = editable.some((t) => targetKey(t) === targetKey(agent));
   const list = sends ? editable : offer;
   const short = agentMentionName(agent, list);
   const full = agentDisplayName(agent, list);
   return sends
-    ? { label: `Send to agent · ${short}`, title: `Send this comment to ${full}`, switchTitle: `Sending to ${full} — pick another or turn it off`, off: "Don't send" }
+    ? { label: AGENT_BUTTON_LABEL, title: `Send this comment to ${full}`, switchTitle: `Sending to ${full} — pick another or turn it off`, off: "Don't send" }
     : { label: `Ask ${short}`, title: `Ask ${full} about this comment`, switchTitle: `Asking ${full} — pick another or turn it off`, off: "Don't ask" };
 }

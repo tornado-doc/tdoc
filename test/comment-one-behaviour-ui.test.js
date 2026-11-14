@@ -828,7 +828,11 @@ async function startServer(worker, env) {
         panel = page.locator('#tdoc-comment-layer .tdoc-ask-panel');
       } else {
         await page.keyboard.press('Escape');
-        await page.locator('#tdoc-send-agent-btn').click();
+        const askBtn = page.locator('#tdoc-send-agent-btn');
+        await askBtn.click();
+        // The owner with comments ready to send: Ask AI is the menu's
+        // second row (the first sends them all).
+        if (await askBtn.getAttribute('aria-haspopup') === 'menu') await page.locator('.tdoc-ask-ai-menu .tdoc-ask-ai-menu-ask').click();
         panel = page.getByRole('dialog', { name: 'Ask AI' });
       }
       await panel.waitFor();
