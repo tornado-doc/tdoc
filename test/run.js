@@ -105,6 +105,7 @@ const OFFLINE = [
 
   'pull-acks-handoff.test.js',  // agent pulling comments marks only ITS handoffs received
   'handoff-timestamps.test.js', // send/deliver/ack/reply/publish clocks on a handoff, resend-safe
+  'write-with-agent.test.js',    // New › Write it with your agent: private doc + request comment + handoff to the caller's own push agent only; session + origin, sentence cap, rate limit
   'agent-progress.test.js',      // progress line: Delivered · Reading the doc · Suggested N edits · Published vN · Working · N min; /api/notify/progress only the addressed agent, this doc, capped, rate-limited
   'local-agent.test.js',        // local CLI agents (tdoc-daemon): queued provider, pending index, KV write budget
   'team-agent.test.js',         // team agents: admin adds, members call, one team's reach, survives the adder, revoke
@@ -264,6 +265,7 @@ const BROWSER = [
   'connect-ai-apps-ui.test.js', // remoteMcp flag: Connect in one click on /start, /setup, Settings (Claude/ChatGPT/Cursor links) + OAuth consent page, desktop + phone
   'team-agent-ui.test.js',     // team settings add/remove, member Send to team agent, the real daemon replying, desktop + phone
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
+  'write-with-agent-ui.test.js', // New › Write it with your agent (flag writeWithAgent): Send to your agent opens the new doc on the sent request; no agent: why + Connect an agent; flag off: copy line only; desktop + phone
   'agent-progress-ui.test.js', // agent progress line on the comment card (flag agentProgress): steps, current step + elapsed always shown, agent status via the poll; desktop + phone; flag off = On it
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold

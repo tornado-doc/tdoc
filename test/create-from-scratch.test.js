@@ -216,7 +216,7 @@ t('the choice is a menu, and neither answer is a form', () => {
   // onboarding gate: somebody on their fifth doc should not be sent to a page
   // built to watch their first one arrive.
   assert(!form.includes("location.href = '/setup?step=doc'"), 'and it no longer leaves for the gate');
-  assert(form.includes("export function AgentRecipe({ kind = 'doc' })") && form.includes('agentRecipeLine(kind,'), 'it composes the line in place');
+  assert(form.includes("export function AgentRecipe({ kind = 'doc', send = false })") && form.includes('agentRecipeLine(kind,'), 'it composes the line in place');
 });
 
 t('the menu lives in the Docs Hub, and the line has one implementation', () => {
