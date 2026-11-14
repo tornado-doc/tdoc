@@ -156,6 +156,10 @@ t('has an entry to the feedback tool in a section of its own', () => {
   // its usual section head, and links to /feedback (the bookmark page).
   assert(hrefs.includes('/feedback'), 'no link to /feedback');
   assert(/<p class="eyebrow">Feedback<\/p>\s*<h2>[^<]+<\/h2>\s*<p>[^]*?href="\/feedback"/.test(html), 'the /feedback link is not in a section head');
+  // Both ways in: the bookmark and the SDK (one script line on your site).
+  assert(/<p class="eyebrow">Feedback<\/p>\s*<h2>[^<]+<\/h2>\s*<p>[^<]*SDK[^]*?href="\/feedback#sdk"/.test(html), 'the Feedback section does not offer the SDK');
+  const footer = html.slice(html.indexOf('<footer'), html.indexOf('</footer>'));
+  assert(footer.includes('<a href="/feedback#sdk">Feedback SDK</a>'), 'the footer has no Feedback SDK link');
 });
 
 t('phone rules override the headline, and no redundant Star pill in the doc', () => {

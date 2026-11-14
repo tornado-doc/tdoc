@@ -178,26 +178,38 @@ export function BookmarkDemo({ bookmarklet, omnibox, coaching, pillRef, onTeach,
   );
 }
 
+// The SDK's setup guide: the npm and React forms, CSP and COOP.
+export const FEEDBACK_SDK_GUIDE = 'https://github.com/tornado-doc/tdoc/tree/main/packages/feedback#readme';
+// What to ask an agent with tdoc connected: it calls create_feedback_space
+// and adds the line to the site (the MCP server's own instructions).
+export const FEEDBACK_SDK_PROMPT = 'Add tdoc feedback to my site';
+
 export function FeedbackInstall({ boot }) {
   const { identity = null, bookmarklet, scriptSrc, host } = boot;
   const [coaching, setCoaching] = useState(false);
   const pill = useRef(null);
   useHandFont();
   const close = useCallback(() => setCoaching(false), []);
+  // /feedback#sdk (the homepage links there): the page renders after load,
+  // so the browser's own jump to the fragment finds nothing.
+  useEffect(() => {
+    const id = location.hash.slice(1);
+    const el = id && document.getElementById(id);
+    if (el) el.scrollIntoView();
+  }, []);
 
   return (
     <div className={`tdoc-app docs-hub tdoc-feedback-page${coaching ? ' coaching' : ''}`}>
       <TopBar identity={identity} />
       <main className="fb-main">
-        <h1>Leave feedback on your own app</h1>
-        <p>Click anything in the app you are building, say what is wrong, and hand it to a person or an agent.</p>
+        <h1>Comments on any web app</h1>
+        <p>Click anything on a page, say what is wrong, and hand it to a person or an agent. Two ways in: <a href="#bookmark">the bookmark</a>, to comment on any site yourself, and <a href="#sdk">the SDK</a>, one line that lets everyone who visits your own site comment.</p>
 
-        <p className="phone-only" id="phoneOnly"><strong>Desktop only for now.</strong> Setting this up needs a bookmarks bar (or editing your app’s HTML) — open this page on a computer.</p>
-
-        <div className="install-desktop" id="installDesktop">
-          <div className="bookmark-path" id="bookmarkPath">
-            <h2>Drag a bookmark</h2>
-            <p className="device-note muted">Desktop only — drag the pill onto your bookmarks bar.</p>
+        <section className="bookmark-path" id="bookmark">
+          <h2>The bookmark: comment on any site yourself</h2>
+          <p className="phone-only" id="phoneOnly"><strong>Desktop only for now.</strong> The bookmark lives in a desktop browser’s bookmarks bar: open this page on a computer to get it. To let people comment from a phone, add <a href="#sdk">the SDK</a> to your site.</p>
+          <div className="install-desktop" id="installDesktop">
+            <p className="device-note muted">Drag the pill onto your bookmarks bar.</p>
             <BookmarkDemo bookmarklet={bookmarklet} omnibox="localhost:3000" coaching={coaching} pillRef={pill} onTeach={() => setCoaching(true)} />
             <ol className="install-steps">
               <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
@@ -205,18 +217,19 @@ export function FeedbackInstall({ boot }) {
               <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> — same in Chrome and Safari (Safari calls it the Favorites bar)</li>
             </ol>
             <p className="chrome-hint"><strong>Fullscreen tip.</strong> In Chrome, <kbd>⌘⇧F</kbd> keeps the top bar visible in fullscreen so the bookmarks bar has somewhere to live — or exit fullscreen, then drag.</p>
-            <p className="muted step-after">After that, open your app and click the bookmark. First time opens a small {host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
+            <p className="muted step-after">After that, open a site and click the bookmark. First time opens a small {host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
           </div>
+          <p>Comments land in one shared thread on {host}, named after the site and created the first time you connect. To give feedback together, press <strong>Share</strong> on the site and send the invite link — teammates who open it join the same thread instead of starting their own.</p>
+        </section>
 
-          <div className="script-path" id="scriptPath">
-            <h2>Or one line in the app</h2>
-            <p>Add this once in your HTML (dev and preview builds). Anyone who opens that build — including on a phone — gets the comment button. You still add the line from a computer.</p>
-            <CodeCopy code={`<script src="${scriptSrc}"></script>`} />
-          </div>
-        </div>
-
-        <h2>Where it goes</h2>
-        <p>Comments land in one shared thread on {host}, named after your app and created the first time you connect. To give feedback together, press <strong>Share</strong> in the app and send the invite link — teammates who open it join the same thread instead of starting their own.</p>
+        <section className="script-path" id="sdk">
+          <h2>The SDK: comments on your own site</h2>
+          <p>Add one line to your site’s HTML, before <code>&lt;/head&gt;</code>. Everyone who opens the site, on a computer or a phone, gets a comment button. Their comments land in a feedback space you own, and your agent can pick them up.</p>
+          <CodeCopy code={`<script src="${scriptSrc}" data-tdoc-space="YOUR_SPACE_ID" async></script>`} />
+          <p className="sdk-space">Get <code>YOUR_SPACE_ID</code> from your agent: with tdoc connected, ask it to <q>{FEEDBACK_SDK_PROMPT}</q>. It makes the space for your site’s address and adds the line for you. <CopyPromptButton text={FEEDBACK_SDK_PROMPT} label="Copy prompt" /></p>
+          <p className="muted">Already comment on the site with the bookmark? Turn that space into the site’s own in <a href="/me?view=comments">My docs → Comments</a> → <strong>Add to your site</strong>.</p>
+          <p><a href={FEEDBACK_SDK_GUIDE} target="_blank" rel="noopener">How to set it up: npm, React and Content-Security-Policy →</a></p>
+        </section>
       </main>
       <Coach open={coaching} target={pill} onClose={close} />
     </div>

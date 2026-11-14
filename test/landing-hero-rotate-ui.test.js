@@ -262,7 +262,7 @@ function setTime(ms) {
   });
 
   await t('each demo\'s CTA opens its own route', async () => {
-    const expected = { doc: ['Make your doc', '/setup?step=doc'], sheet: ['Make your sheet', '/me'], deck: ['Make your deck', '/setup?step=doc'], bookmark: ['Add to your site', '/feedback'] };
+    const expected = { doc: ['Make your doc', '/setup?step=doc'], sheet: ['Make your sheet', '/me'], deck: ['Make your deck', '/setup?step=doc'], bookmark: ['Add to your site', '/feedback#sdk'] };
     for (const id of DEMOS) {
       const { context, page, f, frame } = await open({ ...DESKTOP, reducedMotion: 'reduce' });
       await f.locator(`label[for="hd-r-${id}"]`).click();
@@ -275,7 +275,7 @@ function setTime(ms) {
       const u = new URL(page.url());
       // Signed out, /me hands over to the sign-in notice page; the rest are themselves.
       const want = expected[id][1];
-      assert(u.pathname + u.search === want || (want === '/me' && u.pathname === '/' && u.search === '?notice=signin'), `${id}: went to ${u.pathname}${u.search}`);
+      assert(u.pathname + u.search + u.hash === want || (want === '/me' && u.pathname === '/' && u.search === '?notice=signin'), `${id}: went to ${u.pathname}${u.search}${u.hash}`);
       assert(nav && nav.status() < 400, `${id}: ${want} answered ${nav && nav.status()}`);
       await context.close();
     }
