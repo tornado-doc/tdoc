@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Folder, FolderOpen, FolderPlus, Inbox, LayoutGrid, List, MessageSquareText, Plus, Search, Settings, Trash2, UsersRound, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, Inbox, LayoutGrid, List, ListFilter, MessageSquareText, Plus, Search, Settings, Trash2, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppButton } from './ui/button.jsx';
 import { AppSelect } from './ui/select.jsx';
+import { AppMenu, AppMenuItem, AppMenuSeparator } from './ui/menu.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu, agentRecipeFor } from './create-from-scratch.jsx';
 import { WriteWithAiDialog } from './write-with-ai.jsx';
@@ -689,9 +690,9 @@ export function DocsHub({ boot }) {
   const phoneA = layoutA && !wide;
   // A phone has no list table to select in: Select turns on the checkboxes.
   const [phoneSelecting, setPhoneSelecting] = useState(false);
+  const [phoneSearch, setPhoneSearch] = useState(false);
   // The chip rows scroll sideways: keep the chips that are on in sight (a
   // folder chosen from a link, a filter set before the row was scrolled).
-  const chipRows = useRef(null);
   const [cardLayout, setCardLayoutState] = useState(() => {
     try { return localStorage.getItem(MY_DOCS_LAYOUT_KEY) === 'list' ? 'list' : 'grid'; } catch { return 'grid'; }
   });
@@ -1304,11 +1305,12 @@ export function DocsHub({ boot }) {
       onLeave={(current, me) => setModal({ type: 'leave-team', team: current, me })}
     />
   ) : null;
-  const searchA = (className) => (
+  const searchA = (className, autoFocus = false) => (
     <label className={`search-field mda-search${className ? ` ${className}` : ''}`}>
       <Search size={phoneA ? 18 : 15} />
       <input
         type="search"
+        autoFocus={autoFocus}
         value={hub.query}
         onChange={(event) => hub.setQuery(event.target.value)}
         placeholder={phoneA ? 'Search docs, sheets, slides' : 'Search all docs · try title:roadmap'}
@@ -1345,7 +1347,14 @@ export function DocsHub({ boot }) {
   ) : null);
   const headerA = (actions) => (
     <div className="page-hd mda-hd">
-      <span className={`mda-space-mark${team ? ' is-team' : ''}`} aria-hidden="true">{String(team ? team.name : (identity?.name || identity?.login || 'M')).slice(0, 1).toUpperCase()}</span>
+      {/* A team's mark is its initial; My docs is yours, so your avatar. */}
+      {team ? (
+        <span className="mda-space-mark is-team" aria-hidden="true">{String(team.name).slice(0, 1).toUpperCase()}</span>
+      ) : identity?.avatar_url ? (
+        <img className="mda-space-mark is-avatar" src={identity.avatar_url} alt="" />
+      ) : (
+        <span className="mda-space-mark is-avatar" aria-hidden="true">{String(identity?.name || identity?.login || 'M').slice(0, 1).toUpperCase()}</span>
+      )}
       <h1>{team ? team.name : 'My docs'}</h1>
       <div className="page-hd-actions">{actions}</div>
     </div>
@@ -1374,87 +1383,110 @@ export function DocsHub({ boot }) {
   );
 
   // ---- Layout A on a phone: one column. Title and New; search; Needs you
-  // as a strip of cards to swipe; the views (with Comments, Trash, Settings)
+  // as the same to-do list as on desktop (the newest three); the views (with Comments, Trash, Settings)
   // and the type and folder filters as two chip rows that scroll sideways;
   // then one row per doc: type, title, one meta line, unread, ⋯.
   const phoneFolders = folderTree(spaceFolderList);
-  useEffect(() => {
-    if (!phoneA || !chipRows.current) return;
-    for (const row of chipRows.current.querySelectorAll('.mda-scroll')) {
-      // "All folders" is the default, not a choice to bring into sight.
-      const on = [...row.querySelectorAll('.mda-chip.is-on:not(.mda-everything)')].pop();
-      if (!on) continue;
-      const left = on.offsetLeft - row.offsetLeft;
-      if (left < row.scrollLeft || left + on.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = Math.max(0, left - 16);
-    }
-  }, [phoneA, view, docType, activeFolder]);
+  const phoneViewLabel = ({ docs: 'All docs', recent: 'Recent', starred: 'Starred', needs: 'Needs you', comments: 'Comments', trash: 'Trash', settings: team ? 'Team settings' : 'Settings' })[view] || 'All docs';
   const newFolderA = team || capabilities.folders ? () => setModal({ type: team ? 'new-team-folder' : 'new-folder', top: true }) : null;
   const activeFolderItem = activeFolder ? spaceFolderById.get(activeFolder) : null;
   const activeFolderMenu = activeFolderItem ? (team ? teamFolderMenu : folderMenu)(activeFolderItem) : [];
   const phoneMainA = !phoneA ? null : !team && view === 'settings' ? settingsPageA : (
     <div className="mda mda-phone">
       <main className="mda-main">
-        <div className="mda-main-in" ref={chipRows}>
+        <div className="mda-main-in">
           {(boot.team_invites || []).length ? <TeamInviteBanner invites={boot.team_invites} /> : null}
-          {headerA(newMenuA)}
+          {phoneSearch || hub.query ? (
+            <div className="mda-psearch-bar">
+              {searchA('mda-psearch', true)}
+              <AppButton variant="quiet" size="l" onClick={() => { hub.setQuery(''); setPhoneSearch(false); }}>Cancel</AppButton>
+            </div>
+          ) : headerA(
+            <>
+              <AppButton variant="icon" size="l" className="mda-psearch-btn" aria-label="Search docs" title="Search" onClick={() => setPhoneSearch(true)}>
+                <Search size={20} />
+              </AppButton>
+              {newMenuA}
+            </>,
+          )}
           {listViewA ? (
             <>
               {team ? null : checklist}
-              {searchA('mda-psearch')}
               {view !== 'needs' && !searchingA ? (
-                <NeedsYou cards={needCardsShown} limit={6} strip onSeeAll={() => setView('needs')} onDone={doneNeed} />
+                <NeedsYou cards={needCardsShown} limit={3} onSeeAll={() => setView('needs')} onDone={doneNeed} />
               ) : null}
             </>
           ) : null}
-          <div className="mda-pviews mda-scroll" role="tablist" aria-label={`${team ? team.name : 'My docs'} views`}>
-            {scopeChips}
-            <span className="mda-chip-sep" aria-hidden="true" />
-            {[['comments', 'Comments', MessageSquareText], ['trash', 'Trash', Trash2], ['settings', team ? 'Team settings' : 'Settings', Settings]].map(([id, label, Icon]) => (
-              <button key={id} type="button" role="tab" aria-selected={view === id} className={`mda-chip mda-view-${id}${view === id ? ' is-on' : ''}`} onClick={() => setView(id)}>
-                <Icon size={16} aria-hidden="true" />{label}
-              </button>
-            ))}
+          {/* One row, as in the Google Docs app: the view as a menu on the
+              left; filter (type, folder), sort and Select on the right. */}
+          <div className="mda-pbar">
+            <AppMenu
+              align="start"
+              trigger={(
+                <AppButton variant="quiet" size="l" className="mda-pview-btn" aria-label={`View: ${phoneViewLabel}`}>
+                  {phoneViewLabel}<ChevronDown size={16} aria-hidden="true" />
+                </AppButton>
+              )}
+            >
+              {PHONE_SCOPES.map(([id, label]) => (
+                <AppMenuItem key={id} className={`mda-pmenu-item${view === id ? ' is-on' : ''}`} onClick={() => setView(id)}>
+                  <span className="mda-pmenu-check">{view === id ? <Check size={15} /> : null}</span>
+                  {label}<span className="mda-pmenu-n">{scopeCount[id] || ''}</span>
+                </AppMenuItem>
+              ))}
+              <AppMenuSeparator />
+              {[['comments', 'Comments', MessageSquareText], ['trash', 'Trash', Trash2], ['settings', team ? 'Team settings' : 'Settings', Settings]].map(([id, label, Icon]) => (
+                <AppMenuItem key={id} className={`mda-pmenu-item mda-view-${id}${view === id ? ' is-on' : ''}`} onClick={() => setView(id)}>
+                  <span className="mda-pmenu-check"><Icon size={15} aria-hidden="true" /></span>{label}
+                </AppMenuItem>
+              ))}
+            </AppMenu>
+            {listViewA ? (
+              <span className="mda-pbar-tools">
+                <AppMenu
+                  trigger={(
+                    <AppButton variant="icon" size="l" className={`mda-pfilter-btn${docType || activeFolder ? ' is-on' : ''}`} aria-label={docType || activeFolder ? 'Filter (on)' : 'Filter'} title="Filter by type and folder">
+                      <ListFilter size={19} />
+                    </AppButton>
+                  )}
+                >
+                  {DOC_TYPES.map(({ id, label, icon: Icon }) => (
+                    <AppMenuItem key={id} className={`mda-pmenu-item mda-type${docType === id ? ' is-on' : ''}`} data-type={id} onClick={() => setDocType(docType === id ? '' : id)}>
+                      <span className="mda-pmenu-check">{docType === id ? <Check size={15} /> : <Icon size={15} aria-hidden="true" />}</span>
+                      {label}<span className="mda-pmenu-n">{typeCountsA[id] || 0}</span>
+                    </AppMenuItem>
+                  ))}
+                  <AppMenuSeparator />
+                  <AppMenuItem className={`mda-pmenu-item mda-everything${!activeFolder ? ' is-on' : ''}`} onClick={() => pickFolderA('')}>
+                    <span className="mda-pmenu-check">{!activeFolder ? <Check size={15} /> : <Inbox size={15} aria-hidden="true" />}</span>All folders
+                  </AppMenuItem>
+                  {phoneFolders.map(({ folder: item }) => (
+                    <AppMenuItem key={item.id} className={`mda-pmenu-item mda-folder${activeFolder === item.id ? ' is-on' : ''}`} data-folder-id={item.id} onClick={() => pickFolderA(activeFolder === item.id ? '' : item.id)}>
+                      <span className="mda-pmenu-check">{activeFolder === item.id ? <Check size={15} /> : <Folder size={15} aria-hidden="true" />}</span>
+                      {item.name}<span className="mda-pmenu-n">{spaceFolderCounts[item.id]?.docs ?? 0}</span>
+                    </AppMenuItem>
+                  ))}
+                  {newFolderA ? (
+                    <AppMenuItem className="mda-pmenu-item mda-new-folder" onClick={newFolderA}>
+                      <span className="mda-pmenu-check"><FolderPlus size={15} aria-hidden="true" /></span>New folder
+                    </AppMenuItem>
+                  ) : null}
+                </AppMenu>
+                {sortA}
+                {view === 'docs' && !team && (capabilities.folders || capabilities.delete || teams.length) ? (
+                  <AppButton variant="quiet" size="l" className="mda-select-toggle" aria-pressed={phoneSelecting} onClick={() => { if (phoneSelecting) hub.setSelected(new Set()); setPhoneSelecting(!phoneSelecting); }}>
+                    {phoneSelecting ? 'Done' : 'Select'}
+                  </AppButton>
+                ) : null}
+              </span>
+            ) : null}
           </div>
           {listViewA ? (
             <>
-              <div className="mda-pfilters mda-scroll" role="group" aria-label="Filter by type and folder">
-                {DOC_TYPES.map(({ id, label, icon: Icon }) => (
-                  <button key={id} type="button" className={`mda-chip mda-type${docType === id ? ' is-on' : ''}`} data-type={id} aria-pressed={docType === id} aria-label={`${label} (${typeCountsA[id] || 0})`} onClick={() => setDocType(docType === id ? '' : id)}>
-                    <Icon size={16} aria-hidden="true" />{label}<span className="mda-chip-n">{typeCountsA[id] || 0}</span>
-                  </button>
-                ))}
-                <span className="mda-chip-sep" aria-hidden="true" />
-                <button type="button" className={`mda-chip mda-everything${!activeFolder ? ' is-on' : ''}`} aria-pressed={!activeFolder} onClick={() => pickFolderA('')}>
-                  <Inbox size={16} aria-hidden="true" />All folders
-                </button>
-                {phoneFolders.map(({ folder: item }) => (
-                  <button key={item.id} type="button" className={`mda-chip mda-folder${activeFolder === item.id ? ' is-on' : ''}`} data-folder-id={item.id} aria-pressed={activeFolder === item.id} onClick={() => pickFolderA(activeFolder === item.id ? '' : item.id)}>
-                    {activeFolder === item.id ? <FolderOpen size={16} aria-hidden="true" /> : <Folder size={16} aria-hidden="true" />}
-                    {item.name}
-                    <span className="mda-chip-n">{spaceFolderCounts[item.id]?.docs ?? 0}</span>
-                  </button>
-                ))}
-                {newFolderA ? (
-                  <button type="button" className="mda-chip mda-new-folder" aria-label="New folder" title="New folder" onClick={newFolderA}>
-                    <FolderPlus size={16} aria-hidden="true" />
-                  </button>
-                ) : null}
-              </div>
               {team && view === 'docs' && !activeFolder ? <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p> : null}
               {view === 'needs' ? needsViewA : (
                 <>
                   {crumbsA(activeFolderMenu.length ? <span className="row-actions"><RowMenu label="Folder actions" items={activeFolderMenu} /></span> : null)}
-                  {view === 'docs' && shownItemsA.length ? (
-                    <div className="mda-plist-hd">
-                      <span className="mda-plist-n">{shownItemsA.length === 1 ? '1 doc' : `${shownItemsA.length} docs`}</span>
-                      {sortA}
-                      {!team && (capabilities.folders || capabilities.delete || teams.length) ? (
-                        <AppButton variant="quiet" size="l" className="mda-select-toggle" aria-pressed={phoneSelecting} onClick={() => { if (phoneSelecting) hub.setSelected(new Set()); setPhoneSelecting(!phoneSelecting); }}>
-                          {phoneSelecting ? 'Done' : 'Select'}
-                        </AppButton>
-                      ) : null}
-                    </div>
-                  ) : null}
                   {listPaneA}
                 </>
               )}
