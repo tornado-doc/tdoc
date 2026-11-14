@@ -101,7 +101,6 @@ async function dragSelect(page, phrase) {
   // Two threads on launch-plan, one resolved, for the filter.
   const c1 = await api('/api/comments', { method: 'POST', cookie: reader.cookie, body: { slug: 'launch-plan', version: 1, text: 'Who owns billing?', anchor: { kind: 'text', text: 'Search follows in April' } } });
   const c2 = await api('/api/comments', { method: 'POST', cookie: reader.cookie, body: { slug: 'launch-plan', version: 1, text: 'Q4?', anchor: { kind: 'text', text: 'The mobile app waits' } } });
-  void c2;
   // Thread roots to reply to on the team docs.
   const t1 = await api('/api/comments', { method: 'POST', cookie: julie.cookie, body: { slug: 'team-plan', version: 2, text: 'Is March 14 firm?', anchor: { kind: 'text', text: 'Search follows in April' } } });
   const t2 = await api('/api/comments', { method: 'POST', cookie: julie.cookie, body: { slug: 'julies-draft', version: 1, text: 'Is March 14 firm?', anchor: { kind: 'text', text: 'Search follows in April' } } });
@@ -145,11 +144,71 @@ async function dragSelect(page, phrase) {
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
 
   try {
+    await t('doc bar: the owner\'s Ask AI wears the count of comments ready to send; its menu sends them all (Send to agent dialog) or opens Ask AI; a member gets plain Ask AI', async () => {
+      // Desktop: Ask AI sits in the bar. A phone has one entry for comments
+      // and Ask AI (unifiedEntry, on): the bar keeps no Ask AI, and gains no
+      // second button for this.
+      {
+        const { context, page } = await open(julie, 'launch-plan');
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.locator('.tdoc-fab').waitFor();
+        if (await page.locator('.tdoc-bar .tdoc-send-agent-action, .tdoc-bar #tdoc-send-plane-btn').count()) throw new Error('a bulk-send button in the phone bar');
+        await shot(page, 'doc-bar-phone-390.png');
+        await context.close();
+      }
+      for (const width of [1280]) {
+        const { context, page } = await open(julie, 'launch-plan');
+        await page.setViewportSize({ width, height: 844 });
+        const btn = page.locator('#tdoc-send-agent-btn');
+        await btn.waitFor();
+        const badge = btn.locator('.tdoc-send-agent-badge.is-count');
+        await badge.waitFor();
+        if ((await badge.textContent()).trim() !== '2') throw new Error(`badge: ${await badge.textContent()}`);
+        if (await page.locator('.tdoc-bar #tdoc-send-plane-btn, .tdoc-bar .tdoc-bulk-send').count()) throw new Error('a second bulk-send button in the bar');
+        await shot(page, `doc-bar-bulk-badge-${width}.png`);
+        await btn.click();
+        const menu = page.locator('.tdoc-ask-ai-menu');
+        await menu.waitFor();
+        const rows = (await menu.locator('.ui-menu-item').allTextContents()).map((x) => x.trim());
+        if (rows.length !== 2 || !/^Send 2 comments to \S/.test(rows[0]) || rows[1] !== 'Ask AI') throw new Error(`menu: ${JSON.stringify(rows)}`);
+        await shot(page, `doc-bar-bulk-menu-${width}.png`);
+        await menu.locator('.tdoc-ask-ai-menu-send').click();
+        const dialog = page.getByRole('dialog', { name: 'Send to agent' });
+        await dialog.waitFor();
+        await shot(page, `doc-bar-bulk-dialog-${width}.png`);
+        if (!/^2 comments for your agent/m.test(await dialog.innerText())) throw new Error(`dialog: ${await dialog.innerText()}`);
+        // The menu named the agent the dialog sends to.
+        const sendBtn = (await dialog.locator('.actions .primary').textContent()).trim();
+        if (sendBtn.replace(/^Send to /, '') !== rows[0].replace(/^Send 2 comments to /, '')) throw new Error(`menu "${rows[0]}" vs dialog "${sendBtn}"`);
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await dialog.waitFor({ state: 'hidden' });
+        await btn.click();
+        await menu.waitFor();
+        await menu.locator('.tdoc-ask-ai-menu-ask').click();
+        await page.locator('.tdoc-handoff-popover').waitFor();
+        await context.close();
+      }
+      // A member may send only their own threads (comment_not_owned): no
+      // count, no menu -- Ask AI opens straight away.
+      const { context, page } = await open(bob, 'team-plan');
+      const btn = page.locator('#tdoc-send-agent-btn');
+      await btn.waitFor();
+      if (await btn.locator('.tdoc-send-agent-badge.is-count').count()) throw new Error('a member got the bulk-send count');
+      await btn.click();
+      await page.locator('.tdoc-handoff-popover').waitFor();
+      if (await page.locator('.tdoc-ask-ai-menu').count()) throw new Error('a member got the bulk-send menu');
+      await context.close();
+    });
+
     await t('reply, author on own doc: @agent puts their agent in as a pill (no menu), Only me offered; Reply hands the thread to it', async () => {
       const { context, page } = await open(julie, 'launch-plan');
       const { form } = await replyBox(page, c1.body.id);
       if (await form.locator('.tdoc-ask-row, .tdoc-agent-pill').count()) throw new Error('agent options before any agent is named');
       await form.locator('textarea').fill('Can you tighten this?');
+      // The pre-#1034 label (Julie, 2026-11-14): @agent, not "Send to agent · X".
+      const label = (await form.locator('.tdoc-reply-agent').textContent()).trim();
+      if (label !== '@agent') throw new Error(`reply agent button: ${label}`);
+      await shot(page, 'reply-box-agent-button.png');
       await form.locator('.tdoc-reply-agent').click();
       await form.locator('.tdoc-agent-pill').waitFor();
       if (await page.locator('.ui-menu-popup').count()) throw new Error('@agent opened a menu');
@@ -336,6 +395,29 @@ async function dragSelect(page, phrase) {
       await shot(page, 'reply-pill-menu-open.png');
       await page.keyboard.press('Escape');
       await context.close();
+    });
+    await t('the reply box\'s agent button reads @agent at 1280 and 390', async () => {
+      for (const width of [1280, 390]) {
+        const { context, page } = await open(julie, 'launch-plan');
+        await page.setViewportSize({ width, height: 844 });
+        let form;
+        if (width < 700) {
+          await page.locator('.tdoc-fab').click();
+          const card = page.locator(`#tdoc-comment-layer [data-comment-id="${c2.body.id}"]`).first();
+          await card.waitFor();
+          await card.locator('.tdoc-reply-toggle').first().click();
+          form = page.locator(`.tdoc-reply-form.open[data-parent-id="${c2.body.id}"]`);
+        } else {
+          form = (await replyBox(page, c2.body.id)).form;
+        }
+        await form.waitFor();
+        await form.locator('textarea').fill('Can this move to Q3?');
+        const label = (await form.locator('.tdoc-reply-agent').textContent()).trim();
+        if (label !== '@agent') throw new Error(`${width}: reply agent button: ${label}`);
+        await form.locator('.tdoc-reply-form-foot').scrollIntoViewIfNeeded();
+        await shot(page, `reply-box-${width}.png`);
+        await context.close();
+      }
     });
   } finally {
     await browser.close();

@@ -1425,9 +1425,27 @@
     border-radius: 50%;
     background: var(--td-accent, #1652f0);
   }
+  /* Bulk send (owner, comments ready): the same blue badge with the number
+     of comments to send in it. */
+  .tdoc-bar .tdoc-send-agent-badge.is-count {
+    width: auto;
+    min-width: 16px;
+    height: 16px;
+    margin: -3px 0 0 -5px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border: 0;
+    box-shadow: 0 0 0 1.5px var(--td-ground, #fff);
+    color: #fff;
+    font: 600 10.5px/16px system-ui, -apple-system, sans-serif;
+    text-align: center;
+  }
   @media (max-width: 700px) {
     .tdoc-bar .tdoc-send-agent-badge { position: absolute; top: 8px; right: 6px; margin: 0; }
+    .tdoc-bar .tdoc-send-agent-badge.is-count { top: 4px; right: 2px; }
   }
+  .tdoc-ask-ai-menu .ui-menu-item { display: flex; align-items: center; gap: 8px; }
+  .tdoc-ask-ai-menu .ui-menu-item svg { flex: none; }
 
 /* A navigation is under way (shell/src/nav-progress.js): a thin bar along the
    top of the window from the click until the next page replaces this one, so
