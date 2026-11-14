@@ -111,10 +111,18 @@ async function startServer(worker, env) {
     try { await fn(); passed++; console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.stack || error.message}`); }
   };
 
-  const run = async (label, viewport, { agents, flag = true }) => {
+  const run = async (label, viewport, { agents, flag = true, failSend = false }) => {
     const env = makeEnv(mod.CommentsStore);
+    // The routes are dev mode only in production; a PR preview has them for
+    // everyone (writeWithAgentAllowed). Flag off is production.
+    if (flag) env.TDOC_PREVIEW = '1';
     withEtags(env.DOCS);
     await seed(env);
+    if (failSend) {
+      // The handoff cannot be stored: the doc is made, nothing is sent.
+      const put = env.META.put.bind(env.META);
+      env.META.put = (k, ...rest) => { if (String(k).startsWith('handoffs:')) throw new Error('kv down'); return put(k, ...rest); };
+    }
     if (agents) await env.META.put('account-notify:acct-alice', JSON.stringify([{ provider: 'local', device: 'mbp', cli: 'claude' }]));
     const { server, base } = await startServer(worker, env);
     const phone = viewport.width < 600;
@@ -127,7 +135,7 @@ async function startServer(worker, env) {
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
-    const tag = `${label}, ${flag ? (agents ? 'an agent' : 'no agent') : 'flag off'}`;
+    const tag = `${label}, ${flag ? (agents ? (failSend ? 'send fails' : 'an agent') : 'no agent') : 'flag off'}`;
     const shot = async (name) => {
       if (!SHOTS) return;
       fs.mkdirSync(SHOTS, { recursive: true });
@@ -151,6 +159,21 @@ async function startServer(worker, env) {
           const dialog = await openDialog();
           await dialog.locator('.mk-line').waitFor();
           assert.equal(await dialog.locator('.mk-send, .mk-send-loading').count(), 0);
+        });
+      } else if (failSend) {
+        await t(`${tag}: the dialog says it was not sent and stays; the doc is linked, not opened`, async () => {
+          const dialog = await openDialog();
+          const send = dialog.getByRole('button', { name: 'Send', exact: true });
+          await send.waitFor();
+          await dialog.locator('.mk-subject input').fill('a packing list for Iceland in March');
+          await press(send);
+          const err = dialog.locator('.mk-send-error');
+          await err.waitFor({ timeout: 20000 });
+          assert.match(await err.innerText(), /could not send it to your agent/);
+          assert.match(await err.getByRole('link', { name: 'Open the doc' }).getAttribute('href'), /^\/d\/[a-z0-9-]+/);
+          assert.match(new URL(page.url()).pathname, /^\/me/);
+          assert.equal(await send.isDisabled(), false, 'Send stays available to try again');
+          await shot('send-failed');
         });
       } else if (!agents) {
         await t(`${tag}: says why nothing can be sent, links to Connect an agent, keeps the copy line`, async () => {
@@ -197,6 +220,7 @@ async function startServer(worker, env) {
     await run(label, viewport, { agents: false });
   }
   await run('desktop', { width: 1280, height: 860 }, { agents: true, flag: false });
+  await run('desktop', { width: 1280, height: 860 }, { agents: true, failSend: true });
   await browser.close();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

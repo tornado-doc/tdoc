@@ -4830,6 +4830,17 @@ async function rateLimited(env, bucket, limit, windowSeconds) {
   try { await env.META.put(key, String(count + 1), { expirationTtl: windowSeconds * 2 }); } catch {}
   return false;
 }
+// Give back one use of the current window: the attempt rateLimited counted
+// did not do what it is limited for (Write with your agent: nothing sent).
+async function rateLimitRefund(env, bucket, windowSeconds) {
+  if (!env || !env.META) return;
+  const windowId = Math.floor(Date.now() / (windowSeconds * 1000));
+  const key = `rl:${bucket}:${windowId}`;
+  try {
+    const count = Number(await env.META.get(key)) || 0;
+    if (count > 0) await env.META.put(key, String(count - 1), { expirationTtl: windowSeconds * 2 });
+  } catch {}
+}
 
 function clientIp(req) {
   return req.headers.get('cf-connecting-ip') || 'unknown';
@@ -11131,6 +11142,25 @@ const WRITE_WITH_AGENT_KINDS = Object.freeze({
 const WRITE_WITH_AGENT_LINE = 'Your agent is writing this doc.';
 const PUSH_PROVIDERS = new Set(['raft', 'webhook', 'local']);
 
+// The shell's writeWithAgent flag is dev mode only in production and on for
+// everyone on a PR preview; the server holds the same line (as
+// writeWithAiAllowed does for Write it with tdoc AI): anybody else finds no
+// such routes.
+async function writeWithAgentAllowed(env, session) {
+  if (env && env.TDOC_PREVIEW === '1') return true;
+  if (!session || session.feedback || session.team_agent) return false;
+  const dev = await devModeState(env, session).catch(() => null);
+  return Boolean(dev && dev.on);
+}
+
+// What the dialog says when the doc was made but the request did not reach
+// the agent (the handoff route's message when it gave one).
+function writeWithAgentSendError(code, message) {
+  if (message) return String(message).slice(0, 300);
+  if (code === 'comment_failed') return 'tdoc made the doc but could not post your request on it.';
+  return 'tdoc made the doc but could not send it to your agent.';
+}
+
 // The account's own agents tdoc can push to: what the Connectors page and
 // the doc's agent picker list for this account, without anything removed and
 // without a webhook's address.
@@ -11157,7 +11187,9 @@ function writeWithAgentTitle(prompt) {
 function writeWithAgentHtml(prompt) {
   const title = escapeHtml(writeWithAgentTitle(prompt));
   return blankDocHtml()
-    .replace('<title>Untitled</title>', `<title>${title}</title>`)
+    // Replacer functions both: a string replacement would read `$'`, `$&`
+    // or `$\`` in the sentence as a pattern.
+    .replace('<title>Untitled</title>', () => `<title>${title}</title>`)
     .replace(/^<main([^>]*)>[\s\S]*?<\/main>/m, (_m, attrs) => `<main${attrs}>\n<h1>${title}</h1>\n<p>${WRITE_WITH_AGENT_LINE}</p>\n</main>`);
 }
 
@@ -11167,7 +11199,15 @@ async function sessionSubRequest(req, env, ctx, path, body) {
   const url = new URL(req.url);
   const headers = new Headers({ 'Content-Type': 'application/json', Origin: url.origin });
   for (const k of ['cookie', 'cf-connecting-ip', 'user-agent']) { const v = req.headers.get(k); if (v) headers.set(k, v); }
-  const res = await tdocHandlers.fetch(new Request(`${url.origin}${path}`, { method: 'POST', headers, body: JSON.stringify(body) }), env, ctx);
+  let res;
+  try {
+    res = await tdocHandlers.fetch(new Request(`${url.origin}${path}`, { method: 'POST', headers, body: JSON.stringify(body) }), env, ctx);
+  } catch (e) {
+    // A route that threw is a failed step, not a lost response: the caller
+    // still answers with what it made.
+    console.error('[write-with-agent] sub-request failed:', path, e && e.message ? e.message : String(e));
+    return { status: 500, ok: false, data: null };
+  }
   let data = null;
   try { data = await res.json(); } catch {}
   return { status: res.status, ok: res.status >= 200 && res.status < 300, data };
@@ -28094,6 +28134,7 @@ const tdocHandlers = {
     if (p === '/api/write-with-agent/agents' && method === 'GET') {
       const session = await getSession(env, req);
       if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!(await writeWithAgentAllowed(env, session))) return new Response('Not found', { status: 404 });
       const accountId = await sessionAccountId(env, session);
       const agents = (await writeWithAgentTargets(env, accountId)).map(withoutWebhookUrl);
       return json({ agents });
@@ -28101,6 +28142,7 @@ const tdocHandlers = {
     if (p === '/api/write-with-agent' && method === 'POST') {
       const session = await getSession(env, req);
       if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!(await writeWithAgentAllowed(env, session))) return new Response('Not found', { status: 404 });
       if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
       const accountId = await sessionAccountId(env, session);
       if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -28131,18 +28173,24 @@ const tdocHandlers = {
       const comment = await sessionSubRequest(req, env, ctx, '/api/comments', {
         slug, version: 1, text: prompt, anchor: { kind: 'text', text: WRITE_WITH_AGENT_LINE },
       });
+      // Nothing reached the agent: the hour's count is given back, and the
+      // dialog shows `message` instead of opening the doc.
       if (!comment.ok || !comment.data || !comment.data.id) {
-        return json({ ok: true, slug, url: `/d/${slug}`, sent: false, error: 'comment_failed' });
+        await rateLimitRefund(env, `write-with-agent:${accountId}`, 3600);
+        return json({ ok: true, slug, url: `/d/${slug}`, sent: false, error: 'comment_failed', message: writeWithAgentSendError('comment_failed') });
       }
       const instruction = `Write this ${kind.noun} from the request in the comment: "${prompt}". The doc is a placeholder now: publish the whole ${kind.noun} as the next version of ${slug}, then reply on the comment.${kind.hint}`;
       const sent = await sessionSubRequest(req, env, ctx, '/api/notify/handoff', {
         slug, comment_ids: [comment.data.id], instruction: instruction.slice(0, 2000), recipient: withoutWebhookUrl(known),
       });
+      const delivered = Boolean(sent.ok && sent.data && sent.data.ok);
+      if (!delivered) await rateLimitRefund(env, `write-with-agent:${accountId}`, 3600);
+      const code = delivered ? null : (sent.data && sent.data.error) || 'send_failed';
       return json({
         ok: true, slug, url: `/d/${slug}?comment=${encodeURIComponent(comment.data.id)}`, comment_id: comment.data.id,
-        sent: Boolean(sent.ok && sent.data && sent.data.ok),
+        sent: delivered,
         delivery: sent.data && sent.data.delivery ? sent.data.delivery : null,
-        ...(sent.ok ? {} : { error: (sent.data && sent.data.error) || 'send_failed' }),
+        ...(delivered ? {} : { error: code, message: writeWithAgentSendError(code, sent.data && sent.data.message) }),
       });
     }
 

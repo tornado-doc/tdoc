@@ -28,6 +28,9 @@ const OTHERS = { provider: 'local', device: 'evilbox', cli: 'codex' };
   const mod = await loadWorker();
   const worker = mod.default;
   const env = makeEnv(mod.CommentsStore);
+  // Dev mode only in production (writeWithAgentAllowed); a PR preview has it
+  // for everyone. The flag-off case is at the end.
+  env.TDOC_PREVIEW = '1';
   const call = async (p, o = {}) => { const r = await worker.fetch(req(p, o), env, {}); let b = null; try { b = await r.json(); } catch {} return { status: r.status, body: b }; };
   const julie = await issue(worker, env, 'julie');
   const mallory = await issue(worker, env, 'mallory');
@@ -91,6 +94,30 @@ const OTHERS = { provider: 'local', device: 'evilbox', cli: 'codex' };
     assert((await write({ prompt: 'x' })).status === 400, 'no recipient');
   });
 
+  await t('a sentence with $\' $& $` lands as typed (no replacement patterns)', async () => {
+    const prompt = "Budget: $' then $& and $` stay literal";
+    const r = await write({ prompt, recipient: LOCAL_PICK });
+    assert(r.status === 200 && r.body.sent, `${r.status} ${JSON.stringify(r.body)}`);
+    const html = await (await env.DOCS.get(`docs/${r.body.slug}/v1/index.html`)).text();
+    const want = "Budget: $&#39; then $&amp; and $` stay literal";
+    assert(html.includes(`<title>${want}</title>`), `title: ${(html.match(/<title>[\s\S]*?<\/title>/) || [])[0]}`);
+    assert(html.includes(`<h1>${want}</h1>`), `h1: ${(html.match(/<h1>[\s\S]*?<\/h1>/) || [])[0]}`);
+    assert(!html.includes('<title><title>') && (html.match(/<title>/g) || []).length === 1, 'the match was spliced into the title');
+  });
+
+  await t('a send that does not reach the agent: sent false with a message, and the hour is not charged', async () => {
+    const windowId = Math.floor(Date.now() / 3600000);
+    const rl = async () => Number(await env.META.get(`rl:write-with-agent:${julie.account_id}:${windowId}`)) || 0;
+    const before = await rl();
+    const put = env.META.put.bind(env.META);
+    env.META.put = (k, ...rest) => { if (String(k).startsWith('handoffs:')) throw new Error('kv down'); return put(k, ...rest); };
+    let r;
+    try { r = await write({ prompt: 'a doc that will not be sent', recipient: LOCAL_PICK }); } finally { env.META.put = put; }
+    assert(r.status === 200 && r.body.ok && r.body.sent === false, `${r.status} ${JSON.stringify(r.body)}`);
+    assert(r.body.error && typeof r.body.message === 'string' && r.body.message.length > 0, JSON.stringify(r.body));
+    assert((await rl()) === before, `charged a failed send: ${before} -> ${await rl()}`);
+  });
+
   await t('rate-limited per account', async () => {
     let last = null;
     for (let i = 0; i < 12; i++) {
@@ -98,6 +125,17 @@ const OTHERS = { provider: 'local', device: 'evilbox', cli: 'codex' };
       if (last.status === 429) break;
     }
     assert(last.status === 429 && last.body.error === 'rate_limited', `${last.status} ${JSON.stringify(last.body)}`);
+  });
+
+  await t('flag off (no dev mode, not a preview): both routes are not found', async () => {
+    const env2 = makeEnv(mod.CommentsStore);
+    const call2 = async (p, o = {}) => { const r = await worker.fetch(req(p, o), env2, {}); return r.status; };
+    const ann = await issue(worker, env2, 'ann');
+    await env2.META.put(`account-notify:${ann.account_id}`, JSON.stringify([LOCAL]));
+    assert((await call2('/api/write-with-agent/agents', { cookie: ann.cookie })) === 404, 'GET agents');
+    assert((await call2('/api/write-with-agent', { method: 'POST', cookie: ann.cookie, headers: ORIGIN, body: { prompt: 'x', recipient: LOCAL_PICK } })) === 404, 'POST');
+    const docs = (await env2.META.list({ prefix: 'handoffs:' })).keys || [];
+    assert(!docs.length, 'a handoff was made with the flag off');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

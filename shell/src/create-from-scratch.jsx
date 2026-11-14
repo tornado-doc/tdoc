@@ -241,11 +241,19 @@ export const CONNECT_AGENT_HREF = '/me?view=settings#agents';
 // progress line shows the agent at work until it publishes. Chat apps
 // connected over MCP cannot be sent to; with none of the others connected
 // the dialog says so, links to Connect an agent, and the copy line stays.
+// A send that made the doc but did not reach the agent (`sent: false`): the
+// server's message, else a plain line.
+export function writeWithAgentFailure(body) {
+  const msg = typeof body?.message === 'string' && body.message.trim() ? body.message.trim() : '';
+  return msg || 'tdoc made the doc but could not send it to your agent.';
+}
+
 function SendToAgent({ kind, subject, onError }) {
   const [agents, setAgents] = useState(null);
   const [picked, setPicked] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [madeUrl, setMadeUrl] = useState('');
   useEffect(() => {
     let live = true;
     listWriteWithAgentAgents()
@@ -268,8 +276,17 @@ function SendToAgent({ kind, subject, onError }) {
     if (!ready) return;
     setSending(true);
     setError('');
+    setMadeUrl('');
     try {
       const body = await writeWithAgent({ prompt: subject, kind, recipient: agent });
+      // The doc was made but the request never reached the agent: say so
+      // here rather than open a doc nobody is writing.
+      if (!body?.sent) {
+        setSending(false);
+        setError(writeWithAgentFailure(body));
+        setMadeUrl(typeof body?.url === 'string' && body.url.startsWith('/') ? body.url : '');
+        return;
+      }
       // On its way to the new doc: the busy state stays (see CreateMenu).
       location.assign(body.url);
     } catch (err) {
@@ -287,7 +304,10 @@ function SendToAgent({ kind, subject, onError }) {
         ) : <span className="mk-send-agent mk-send-one">{agentDisplayName(agent, agents)}</span>}
         <AppButton variant="primary" onClick={send} disabled={!ready}>{sending ? 'Sending…' : 'Send'}</AppButton>
       </div>
-      <p className="mk-foot">{error || 'tdoc makes a private doc and asks your agent to write it. You watch it there.'}</p>
+      <p className={`mk-foot${error ? ' mk-send-error' : ''}`} role={error ? 'alert' : undefined}>
+        {error || 'tdoc makes a private doc and asks your agent to write it. You watch it there.'}
+        {error && madeUrl ? <> <a href={madeUrl}>Open the doc</a></> : null}
+      </p>
     </div>
   );
 }

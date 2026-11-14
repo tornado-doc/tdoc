@@ -663,6 +663,8 @@ a.ui-menu-item:visited {
 }
 .mk-send-none p { margin: 0; color: var(--td-ink); font-size: 13px; line-height: 1.5; }
 .mk-or { margin: 4px 0 -4px; color: var(--td-ink-soft, #6b6b73); font-size: 12px; font-weight: 600; }
+.mk-foot.mk-send-error { color: var(--td-danger); }
+.mk-foot.mk-send-error a { color: inherit; text-decoration: underline; }
 
 /* The recipe step, one click in from its card. */
 .tdoc-modal button.mk-back {
