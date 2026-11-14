@@ -114,7 +114,11 @@
 
 /* Drawn thumbnails: a page of lines, a grid, or a slide. */
 .mda-th { position: absolute; inset: 0; display: block; }
-.mda-th-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top center; background: #fff; }
+/* Covers are 1200x630 (about 1.9:1) and the tile is 4:3, so `cover` cut a
+   sixth off each side -- titles lost their first characters. `contain` shows
+   the whole cover at full width, pinned to the top; the white below reads as
+   the rest of the page. */
+.mda-th-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: top center; background: #fff; }
 .mda-th .ln { display: block; height: 4px; border-radius: 2px; background: #dedcd6; width: 70%; }
 .mda-th .ln[data-w="0"] { width: 60%; } .mda-th .ln[data-w="1"] { width: 74%; } .mda-th .ln[data-w="2"] { width: 82%; }
 .mda-th .ln[data-w="3"] { width: 90%; } .mda-th .ln[data-w="4"] { width: 66%; }
