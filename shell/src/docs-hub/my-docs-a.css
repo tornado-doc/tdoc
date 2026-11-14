@@ -69,6 +69,26 @@
 .mda-need-doc span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mda-need .mda-need-done { position: absolute; z-index: 1; right: 4px; bottom: 4px; }
 .mda-need .mda-need-done:hover { color: var(--td-accent); }
+/* Wide screens: one inbox list, a row per doc, full width. Small cards in a
+   grid left one 230px card alone with the rest of the row empty and the
+   name cut to "Jingyu Shi (Julie) c..."; a row has room for who, what, which
+   doc and when on one line, with the comment underneath. */
+.mda:not(.mda-phone) .mda-needs-grid { display: block; border: 1px solid var(--td-line); border-radius: 12px; background: #fff; overflow: hidden; }
+.mda:not(.mda-phone) .mda-need {
+  grid-template-columns: 28px minmax(0, max-content) minmax(0, 1fr) auto 32px;
+  grid-template-areas: "who reason doc when done" "who quote quote quote done";
+  align-items: center; column-gap: 10px; row-gap: 2px;
+  padding: 10px 8px 10px 14px; border: 0; border-radius: 0; box-shadow: none; transition: background .12s;
+}
+.mda:not(.mda-phone) .mda-need + .mda-need { border-top: 1px solid var(--td-line); }
+.mda:not(.mda-phone) .mda-need:hover { background: var(--td-surface); box-shadow: none; }
+.mda:not(.mda-phone) .mda-need-top { display: contents; }
+.mda:not(.mda-phone) .mda-who { grid-area: who; align-self: start; width: 28px; height: 28px; }
+.mda:not(.mda-phone) .mda-need-reason { grid-area: reason; font-size: 14px; }
+.mda:not(.mda-phone) .mda-need-doc { grid-area: doc; padding: 0; font-size: 13px; }
+.mda:not(.mda-phone) .mda-need-when { grid-area: when; margin: 0; }
+.mda:not(.mda-phone) .mda-need-quote { grid-area: quote; -webkit-line-clamp: 1; }
+.mda:not(.mda-phone) .mda-need .mda-need-done { grid-area: done; position: relative; right: auto; bottom: auto; }
 
 /* ---------- view chips, search, sort ---------- */
 .mda-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
@@ -236,6 +256,8 @@
 .mda-phone .mda-needs-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .mda-phone .mda-needs-grid.is-strip { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: min(81%, 340px); overflow-x: auto; margin: 0 -16px; padding: 2px 16px 6px; scroll-snap-type: x mandatory; scroll-padding: 0 16px; scrollbar-width: none; }
 .mda-phone .mda-needs-grid.is-strip::-webkit-scrollbar { display: none; }
+/* Nothing to swipe to: one card takes the width instead of floating at 81%. */
+.mda-phone .mda-needs-grid.is-strip:has(> .mda-need:only-child) { grid-auto-columns: 100%; }
 .mda-phone .mda-need { gap: 5px; padding: 10px 12px 8px; scroll-snap-align: start; }
 .mda-phone .mda-who { width: 24px; height: 24px; font-size: 11px; }
 .mda-phone .mda-need-top { align-items: center; }
