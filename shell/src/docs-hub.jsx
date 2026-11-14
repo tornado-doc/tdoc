@@ -6,6 +6,7 @@ import { AppButton } from './ui/button.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu, agentRecipeFor } from './create-from-scratch.jsx';
+import { WriteWithAiDialog } from './write-with-ai.jsx';
 import { createBlankDeck } from './blank-deck.js';
 import { SheetDropHint, SheetFilePicker, SheetImportDialog, createBlankSheet, isSheetFileName, sheetErrorText, useSheetFileDrop } from './sheet-import.jsx';
 import { DocList, DocRow, FolderRow, RowMenu, day, shareMenuItem } from './docs-hub/rows.jsx';
@@ -904,6 +905,9 @@ export function DocsHub({ boot }) {
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
   const openAgentRecipe = (kind = 'doc') => setModal({ type: 'create-agent', kind });
+  // Write with tdoc AI (flag writeWithTdocAi; the server holds the same line).
+  const writeAiOn = isFeatureOn('writeWithTdocAi');
+  const openWriteWithAi = writeAiOn ? () => setModal({ type: 'write-ai' }) : null;
 
   const toggleProfilePin = async (doc, { confirmed = false } = {}) => {
     if (!doc || !doc.slug || !boot.profile || !doc.mine) return;
@@ -1213,6 +1217,7 @@ export function DocsHub({ boot }) {
       team={team ? team.id : ''}
       canCreate={capabilities.create}
       onAgent={openAgentRecipe}
+      onWriteWithAi={openWriteWithAi}
       onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
       onImport={sheetsOn ? () => sheetPicker.current?.click() : null}
       onNewSheet={sheetsOn ? newSheet : null}
@@ -1544,6 +1549,7 @@ export function DocsHub({ boot }) {
                   team={team ? team.id : ''}
                   canCreate={capabilities.create}
                   onAgent={openAgentRecipe}
+                  onWriteWithAi={openWriteWithAi}
                   onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
                   onImport={sheetsOn ? () => sheetPicker.current?.click() : null}
                   onNewSheet={sheetsOn ? newSheet : null}
@@ -1809,6 +1815,9 @@ export function DocsHub({ boot }) {
           suggested={boot.profile?.suggested || ''}
           onClose={closeModal}
         />
+      ) : null}
+      {modal?.type === 'write-ai' ? (
+        <WriteWithAiDialog team={team ? team.id : ''} onClose={closeModal} />
       ) : null}
       {modal?.type === 'create-agent' ? (
         <HubDialog

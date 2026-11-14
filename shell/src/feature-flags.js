@@ -94,6 +94,12 @@ export const FLAGS = Object.freeze({
   // with the progress line (agentProgress) until it publishes. Off: the copy
   // line only, as before. Server: /api/write-with-agent.
   writeWithAgent: Object.freeze({ label: 'New: send the sentence to your agent', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
+  // New -> Doc -> "Write it with tdoc AI": one sentence, the built-in tdoc
+  // AI (the Ask this doc model and its free allowance) drafts the doc and
+  // publishes v1, private (write-with-ai.jsx, worker /api/write-with-ai).
+  // Dev mode and PR previews only; the server holds the same line
+  // (writeWithAiAllowed), so pinning the flag shows a row that 404s.
+  writeWithTdocAi: Object.freeze({ label: 'Write with tdoc AI (New menu)', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
   sheetEmbeds: Object.freeze({ label: 'Sheets embedded in pages (live, by reference)', owner: 'julie', added: '2026-11-11', default: false, preview: true }),
 });
 

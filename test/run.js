@@ -68,6 +68,7 @@ const OFFLINE = [
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
+  'write-with-ai.test.js',     // New -> Write it with tdoc AI: session + same-site only, dev/preview gate, sentence cap, rate limit, Ask allowance charged/refunded, model output escaped (no script/on*), v1 private to the caller
   'ask-doc.test.js',           // Ask this doc: off without a key, browser readers only, read gate, 5 per account, no address to the model
   'reader-agent-ask.test.js',  // Send to my agent: a reader's own agents only, never anyone else's; the answer is the asker's alone
   'suggest-edits.test.js',     // Ask/Edit v2: tdoc AI suggests text edits; editors accept (publish) or reject; text only, no markup
@@ -264,6 +265,7 @@ const BROWSER = [
   'workspace-access-ui.test.js', // Allow page workspace ticks + Settings > Agents change/remove, checked against the server
   'connect-ai-apps-ui.test.js', // remoteMcp flag: Connect in one click on /start, /setup, Settings (Claude/ChatGPT/Cursor links) + OAuth consent page, desktop + phone
   'team-agent-ui.test.js',     // team settings add/remove, member Send to team agent, the real daemon replying, desktop + phone
+  'write-with-ai-ui.test.js', // New -> Doc -> Write it with tdoc AI (flag): one sentence, Writing the draft · N s, lands on the new doc's v1; desktop + phone; flag off = no row
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'write-with-agent-ui.test.js', // New › Write it with your agent (flag writeWithAgent): Send to your agent opens the new doc on the sent request; no agent: why + Connect an agent; flag off: copy line only; desktop + phone
   'agent-progress-ui.test.js', // agent progress line on the comment card (flag agentProgress): steps, current step + elapsed always shown, agent status via the poll; desktop + phone; flag off = On it

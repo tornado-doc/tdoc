@@ -573,6 +573,9 @@ a.ui-menu-item:visited {
 /* At the end of the row, vertically centred against however many lines the
    description runs to. */
 .ui-menu-item.mk-item > .agent-marks { margin-left: auto; align-self: center; }
+/* Write it with tdoc AI: tdoc AI's own mark in the same disc, the accent it
+   wears in the agent picker. */
+.agent-marks.mk-ai-mark { --am: 21px; color: var(--td-accent); }
 .ui-menu-item.mk-item > svg { color: var(--td-ink); opacity: .75; }
 /* A class, not `> span`. The bare element selector also caught the agent
    cluster, which is a span too, and stood its three marks on top of each
