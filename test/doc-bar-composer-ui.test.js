@@ -159,6 +159,17 @@ async function dragSelect(page, phrase) {
   const pending = async (device, token) => (await api(`/api/notify/local/pending?device=${device}`, { token })).body.pending;
   let failed = 0;
   let desktopAskIcon = '';
+  // Ask AI in the bar. For the owner with comments ready to send it opens a
+  // small menu first (Send N comments to <agent>, then Ask AI).
+  const openAskAi = async (page) => {
+    const btn = page.locator('#tdoc-send-agent-btn');
+    await btn.click();
+    if (await btn.getAttribute('aria-haspopup') === 'menu') {
+      const menu = page.locator('.tdoc-ask-ai-menu');
+      await menu.waitFor();
+      await menu.locator('.tdoc-ask-ai-menu-ask').click();
+    }
+  };
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
 
   try {
@@ -440,7 +451,24 @@ async function dragSelect(page, phrase) {
       const unreadDot = page.locator('#tdoc-more-btn .tdoc-unread-dot');
       if (await unreadDot.count() && await unreadDot.evaluate((el) => getComputedStyle(el).backgroundColor) !== 'rgb(22, 82, 240)') throw new Error('mobile unread dot is not blue');
       await page.keyboard.press('Escape');
-      await page.locator('#tdoc-send-agent-btn').click();
+      // The owner has comments ready: the count sits in the icon button's
+      // corner, inside its 44px target, and the menu fits the phone.
+      const badge = page.locator('#tdoc-send-agent-btn .tdoc-send-agent-badge.is-count');
+      if (await badge.count()) {
+        const b = await badge.boundingBox();
+        const a = await page.locator('#tdoc-send-agent-btn').boundingBox();
+        if (!b || b.x < a.x - 2 || b.x + b.width > a.x + a.width + 2 || b.y < 0) throw new Error(`count badge outside Ask AI at ${width}px: ${JSON.stringify({ a, b })}`);
+        if (width === 390) await shot(page, 'doc-bar-bulk-badge-390.png');
+        await page.locator('#tdoc-send-agent-btn').click();
+        const menu = page.locator('.tdoc-ask-ai-menu');
+        await menu.waitFor();
+        const m = await menu.boundingBox();
+        if (m.x < 0 || m.x + m.width > width) throw new Error(`Ask AI menu off a ${width}px screen: ${JSON.stringify(m)}`);
+        if (width === 390) await shot(page, 'doc-bar-bulk-menu-390.png');
+        await page.keyboard.press('Escape');
+        await menu.waitFor({ state: 'hidden' });
+      }
+      await openAskAi(page);
       const drawer = page.getByRole('dialog', { name: 'Ask AI' });
       await drawer.waitFor();
       // The bar's buttons fade their background (.tdoc-bar button, .12s): read
@@ -543,7 +571,7 @@ async function dragSelect(page, phrase) {
 
     await t('Ask AI puts the team editor first in the menu but defaults private questions to tdoc AI', async () => {
       const { context, page } = await open(bob, 'team-plan', true, { unifiedEntry: false });
-      await page.locator('#tdoc-send-agent-btn').click();
+      await openAskAi(page);
       const panel = page.getByRole('dialog', { name: 'Ask AI' });
       if (!(await panel.getByRole('button', { name: 'Who should answer?' }).innerText()).includes('tdoc AI')) throw new Error('a team editor was selected for a private question');
       await panel.getByRole('button', { name: 'Who should answer?' }).click();
@@ -561,7 +589,7 @@ async function dragSelect(page, phrase) {
 
     await t('Ask AI defaults to the viewer’s own agent when it last edited the document', async () => {
       const { context, page } = await open(julie, 'own-agent-draft');
-      await page.locator('#tdoc-send-agent-btn').click();
+      await openAskAi(page);
       const selected = await page.getByRole('dialog', { name: 'Ask AI' }).getByRole('button', { name: 'Who should answer?' }).innerText();
       if (!selected.includes('Claude Code')) throw new Error(`own last editor was not selected: ${selected}`);
       await context.close();
@@ -615,7 +643,7 @@ async function dragSelect(page, phrase) {
       const { context, page } = await open(reader, 'launch-plan', true, { unifiedEntry: false });
       await page.setViewportSize({ width: 390, height: 800 });
       if (!(await page.locator('.tdoc-bar-mark').isVisible())) throw new Error('reader logo is missing');
-      await page.locator('#tdoc-send-agent-btn').click();
+      await openAskAi(page);
       const drawer = page.getByRole('dialog', { name: 'Ask AI' });
       await drawer.getByRole('textbox', { name: 'Ask about this document' }).fill('Explain the plan');
       await drawer.getByRole('button', { name: 'Send question' }).click();
@@ -658,7 +686,7 @@ async function dragSelect(page, phrase) {
         const opened = await open(reader, 'launch-plan');
         ({ context } = opened);
         const { page } = opened;
-        await page.locator('#tdoc-send-agent-btn').click();
+        await openAskAi(page);
         const panel = page.getByRole('dialog', { name: 'Ask AI' });
         await panel.waitFor();
         const filterBox = await page.locator('.tdoc-comment-filter').boundingBox();
@@ -768,7 +796,7 @@ async function dragSelect(page, phrase) {
       }
       const { context, page } = await open(julie, 'launch-plan', true, { unifiedEntry: false });
       await page.setViewportSize({ width: 390, height: 800 });
-      await page.locator('#tdoc-send-agent-btn').click();
+      await openAskAi(page);
       const drawer = page.getByRole('dialog', { name: 'Ask AI' });
       await drawer.getByRole('button', { name: 'Who should answer?' }).click();
       const menu = page.locator('.tdoc-agent-menu');
@@ -804,7 +832,7 @@ async function dragSelect(page, phrase) {
       {
         const { context, page } = await open(julie, 'launch-plan');
         await page.setViewportSize({ width: 1280, height: 800 });
-        await page.locator('#tdoc-send-agent-btn').click();
+        await openAskAi(page);
         const panel = page.getByRole('dialog', { name: 'Ask AI' });
         await panel.locator('textarea').fill('Why billing first?');
         // An answer makes the popover tall enough to sit under the submenu.
