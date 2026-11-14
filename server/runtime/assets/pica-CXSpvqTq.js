@@ -1,4 +1,10 @@
+<<<<<<<< HEAD:server/runtime/assets/pica-CXSpvqTq.js
 import{g as X}from"../shell.bklequG6.js";import{c as T}from"./_commonjs-dynamic-modules-TDtrdbi3.js";function N(H,Y){for(var d=0;d<Y.length;d++){const I=Y[d];if(typeof I!="string"&&!Array.isArray(I)){for(const G in I)if(G!=="default"&&!(G in H)){const v=Object.getOwnPropertyDescriptor(I,G);v&&Object.defineProperty(H,G,v.get?v:{enumerable:!0,get:()=>I[G]})}}}return Object.freeze(Object.defineProperty(H,Symbol.toStringTag,{value:"Module"}))}var W={exports:{}};/*!
+|||||||| d26d735ad:server/runtime/assets/pica-C2SYFrEh.js
+import{g as X}from"../shell.BObukivl.js";import{c as T}from"./_commonjs-dynamic-modules-TDtrdbi3.js";function N(H,Y){for(var d=0;d<Y.length;d++){const I=Y[d];if(typeof I!="string"&&!Array.isArray(I)){for(const G in I)if(G!=="default"&&!(G in H)){const v=Object.getOwnPropertyDescriptor(I,G);v&&Object.defineProperty(H,G,v.get?v:{enumerable:!0,get:()=>I[G]})}}}return Object.freeze(Object.defineProperty(H,Symbol.toStringTag,{value:"Module"}))}var W={exports:{}};/*!
+========
+import{g as X}from"../shell.D_O-o2x3.js";import{c as T}from"./_commonjs-dynamic-modules-TDtrdbi3.js";function N(H,Y){for(var d=0;d<Y.length;d++){const I=Y[d];if(typeof I!="string"&&!Array.isArray(I)){for(const G in I)if(G!=="default"&&!(G in H)){const v=Object.getOwnPropertyDescriptor(I,G);v&&Object.defineProperty(H,G,v.get?v:{enumerable:!0,get:()=>I[G]})}}}return Object.freeze(Object.defineProperty(H,Symbol.toStringTag,{value:"Module"}))}var W={exports:{}};/*!
+>>>>>>>> origin/feat/send-to-agent-toggle-parity:server/runtime/assets/pica-oBcwaNkh.js
 
 pica
 https://github.com/nodeca/pica

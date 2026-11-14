@@ -21,10 +21,10 @@ import { isNarrowViewport } from '../../shell/src/comments/core/narrow.js';
 import { AppSelect } from '../../shell/src/ui/select.jsx';
 import { withPostedComment } from '../../shell/src/comments/core/posted-comment.js';
 import { productPageUrl } from '../../shell/src/document/product-url.js';
-import { AgentButtonsContext, AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
+import { AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
 import { composerAgents } from '../../shell/src/document/ai-answerer.js';
-import { composerDefault } from '../../shell/src/document/agent-choices.js';
+import { composerDefault, maySendToAgent, sendToAgentSetup, sendToAgentState } from '../../shell/src/document/agent-choices.js';
 import { askOwnAgent, threadAskPick, useMyAgent } from '../../shell/src/document/my-agent.js';
 import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, clearNotifyTargetsCache, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
@@ -1586,10 +1586,13 @@ ${uiCss}
     });
     const unreadComments = area.unread;
     const teamMember = Boolean(surface?.teamMember);
+    // Who may send to an agent: the server's rule, shared with the doc page
+    // and the space page (agent-choices.js maySendToAgent).
+    const sendMay = maySendToAgent({ owner, teamMember });
     // The token is this person's session here: a new one (reconnect, another
     // account) is another viewer to the agent-list cache.
     const notifyViewer = session?.token || '';
-    const agent = useNotifyTargets(slug, Boolean((owner || teamMember) && slug && session?.notify), notifyViewer);
+    const agent = useNotifyTargets(slug, Boolean(sendMay && slug && session?.notify), notifyViewer);
     const canSendToAgent = Boolean(agent.ready && agent.available && agent.reason !== 'no_agent_bound'
       && (agent.default || agent.candidates.length || agent.fallback));
     // Send to agent in the dock, as on the doc page. The owner always has it:
@@ -1612,6 +1615,20 @@ ${uiCss}
       // page has none on tdoc.
       mine: session?.own_agent && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: myAgent.state.team_agents || [], tdoc_ai: false } : null,
     }), [canSendToAgent, agent, session?.own_agent, myAgent.state]);
+    // The same Send to agent judgment as the doc page (agent-choices.js): the
+    // widget used to hide the control when nobody was linked or the viewer
+    // could not send; now it always shows, connects, or says why.
+    const { setupHref: sendToAgentSetupHref, disabledReason: sendToAgentDisabledReason } = sendToAgentSetup({
+      canSendToAgent, may: sendMay, notifyOn: Boolean(session?.notify), targets: agent, href: `${base}/me/agents?tab=send`,
+    });
+    const sendToAgentConnectPrompt = sendToAgentSetupHref ? CONNECT_AGENT_PROMPT : null;
+    const sendToAgent = useMemo(() => sendToAgentState({
+      canSendToAgent,
+      choices: agentChoices,
+      disabledReason: sendToAgentDisabledReason,
+      connectPrompt: sendToAgentConnectPrompt,
+      setupHref: sendToAgentSetupHref,
+    }), [canSendToAgent, agentChoices, sendToAgentDisabledReason, sendToAgentConnectPrompt, sendToAgentSetupHref]);
     // The default is an agent that may edit (the owner's, the team's); an
     // own agent is picked from the @ list, as on a doc page.
     const agentMentions = useMemo(() => ({
@@ -1621,7 +1638,12 @@ ${uiCss}
       ai: null, privateAskSupported: false, teamAskSupported: Boolean(session?.own_agent),
       ownAskSupported: Boolean(session?.own_agent),
       fixesTheApp: true,
-    }), [agentChoices, session?.own_agent]);
+      canSendToAgent,
+      sendToAgentDisabledReason,
+      connectAgentPrompt: sendToAgentConnectPrompt,
+      agentSetupHref: sendToAgentSetupHref,
+      sendToAgent,
+    }), [agentChoices, session?.own_agent, canSendToAgent, sendToAgentDisabledReason, sendToAgentConnectPrompt, sendToAgentSetupHref, sendToAgent]);
 
     useEffect(() => {
       const api = {
@@ -2051,7 +2073,9 @@ ${uiCss}
       mentionable,
       productLinkOrigin: location.origin,
       canSendToAgent,
-      agentSetupHref: agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null,
+      agentSetupHref: sendToAgentSetupHref,
+      sendToAgentDisabledReason,
+      connectAgentPrompt: sendToAgentConnectPrompt,
       onReply: (parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: threadAskPick(opts), handoffCommentId: opts.handoffCommentId }),
       onReact: (id, emoji) => mutate({ type: 'tdoc-feedback-react', id, emoji }),
       onDelete: (id) => mutate({ type: 'tdoc-feedback-delete', id }, false),
@@ -2155,7 +2179,6 @@ ${uiCss}
 
     return (
       <AgentMentionContext.Provider value={agentMentions}>
-      <AgentButtonsContext.Provider value={!canSendToAgent && !agentChoices.length}>
         {(picking || reanchorId) && !selected ? (
           <div className="tdoc-fb-banner" role="status">
             {bannerText}
@@ -2199,8 +2222,9 @@ ${uiCss}
             } }}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}
-            connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
-            agentSetupHref={agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null}
+            connectAgentPrompt={sendToAgentConnectPrompt}
+            agentSetupHref={sendToAgentSetupHref}
+            sendToAgentDisabledReason={sendToAgentDisabledReason}
             onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); }}
             onSubmit={async (text, opts = {}) => {
               const anchor = pageSel ? pageContext()
@@ -2314,7 +2338,6 @@ ${uiCss}
             viewer={notifyViewer}
           />
         ) : null}
-      </AgentButtonsContext.Provider>
       </AgentMentionContext.Provider>
     );
   }
