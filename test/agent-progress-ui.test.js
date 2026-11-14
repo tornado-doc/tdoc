@@ -12,7 +12,9 @@ const path = require('node:path');
 const { chromium, webkit } = require('playwright');
 const { resolveTarget } = require('./helpers/fixture-server');
 
-const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+// Fixed per page: real handoff facts keep their clocks across polls, and the
+// chip's minutes only move on its own 30 s tick.
+const clock = (base = Date.now()) => (min) => new Date(base - min * 60000).toISOString();
 
 async function open(browser, target, { flag, width, withStatus = false }) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
@@ -22,6 +24,7 @@ async function open(browser, target, { flag, width, withStatus = false }) {
   const url = new URL('/d/reply-activity/v/3?comment=delivery', target.url).href;
   await page.route('**/api/notify/targets*', (route) => route.fulfill({ json: { default: null, candidates: [] } }));
   let reads = 0;
+  const ago = clock();
   await page.route('**/api/comments*', async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
     const response = await route.fetch();
