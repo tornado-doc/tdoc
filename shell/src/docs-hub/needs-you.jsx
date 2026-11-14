@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, FileText, MessageSquare, MessageSquareText, Presentation, Sheet } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { AppButton } from '../ui/button.jsx';
 import { listNotifications, markNotificationsRead } from '../document/api.js';
 import { actorName, notificationAction, notificationTarget } from '../notification-text.js';
-import { absoluteTime, docTypeLabel, docTypeOf, relativeTime } from './row-meta.js';
+import { absoluteTime, relativeTime } from './row-meta.js';
 import { docHref } from './rows.jsx';
 
 // "Needs you" on My docs: what is waiting on this person, from the data the
@@ -13,7 +13,6 @@ import { docHref } from './rows.jsx';
 // server: a card per doc, newest first.
 
 const INBOX_KINDS = new Set(['comment', 'reply', 'mention']);
-const TYPE_ICONS = { doc: FileText, sheet: Sheet, slides: Presentation };
 
 // The bell's first page, once. A failure leaves only the badge counts.
 export function useNeedsInbox(enabled) {
@@ -32,10 +31,6 @@ export function useNeedsInbox(enabled) {
     return markNotificationsRead(ids);
   }, []);
   return { items, markRead };
-}
-
-function initials(name) {
-  return String(name || '?').split(/\s+/).map((part) => part[0] || '').join('').slice(0, 2).toUpperCase() || '?';
 }
 
 // Cards for one space. `docs`: the docs this space lists (and any other row
@@ -92,41 +87,37 @@ export function needsCards({ inbox, docs, inSpace }) {
   return [...cards.values()].sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
 }
 
+// One to-do, as in Apple's Reminders: a round check on the left marks it
+// done; the doc is the line; who did what, their words and when sit under it
+// in grey. An agent reply has no check (it is read in the doc), only a dot.
 function NeedCard({ card, onDone }) {
-  const type = docTypeOf(card.doc);
-  const TypeIcon = TYPE_ICONS[type];
   const when = relativeTime(card.at);
   return (
     <div className="mda-need" data-slug={card.slug} data-kind={card.kind}>
       <a className="mda-need-link" href={card.href} aria-label={`${card.reason} on ${card.doc.title}`} />
-      <div className="mda-need-top">
-        {card.kind === 'agent' ? (
-          <span className="mda-who is-agent" title="Agent reply"><MessageSquareText size={14} aria-hidden="true" /></span>
-        ) : card.who ? (
-          <span className="mda-who" title={card.who}>{initials(card.who)}</span>
-        ) : (
-          <span className="mda-who is-agent"><MessageSquare size={13} aria-hidden="true" /></span>
-        )}
-        <span className="mda-need-reason">{card.reason}</span>
-        {when ? <time className="mda-need-when" dateTime={card.at} title={absoluteTime(card.at)}>{when}</time> : null}
-      </div>
-      {card.quote ? <p className="mda-need-quote">{card.quote}</p> : null}
-      <div className="mda-need-doc">
-        <TypeIcon size={14} aria-label={docTypeLabel(type)} />
-        <span>{card.doc.title}</span>
-      </div>
       {card.ids.length ? (
         <AppButton variant="icon" size="s" className="mda-need-done" title="Mark done" aria-label={`Mark done: ${card.doc.title}`} onClick={() => onDone(card)}>
-          <Check size={15} />
+          <span className="mda-need-ring"><Check size={11} strokeWidth={3} /></span>
         </AppButton>
-      ) : null}
+      ) : (
+        <span className="mda-need-dot" aria-hidden="true" />
+      )}
+      <div className="mda-need-body">
+        <span className="mda-need-title">{card.doc.title}</span>
+        <span className="mda-need-sub">
+          <span className="mda-need-reason">{card.reason}</span>
+          {/* Someone's words are quoted; an agent card's line is a status. */}
+          {card.quote ? <>{' · '}{card.kind === 'agent' ? <span className="mda-need-note">{card.quote}</span> : <q className="mda-need-quote">{card.quote}</q>}</> : null}
+          {when ? <>{' · '}<time className="mda-need-when" dateTime={card.at} title={absoluteTime(card.at)}>{when}</time></> : null}
+        </span>
+      </div>
     </div>
   );
 }
 
-// `limit`: the strip on top of the list shows four (six on a phone, where
-// `strip` lays them out as one row to swipe); the Needs you view all.
-export function NeedsYou({ cards, limit = 0, strip = false, onSeeAll, onDone, empty = null }) {
+// `limit`: the list on top of My docs shows the newest few; the Needs you
+// view all of them. Desktop and phone are the same list.
+export function NeedsYou({ cards, limit = 0, onSeeAll, onDone, empty = null }) {
   const shown = useMemo(() => (limit ? cards.slice(0, limit) : cards), [cards, limit]);
   if (!cards.length) return empty;
   return (
@@ -137,9 +128,7 @@ export function NeedsYou({ cards, limit = 0, strip = false, onSeeAll, onDone, em
           {onSeeAll ? <button type="button" className="mda-text-link" onClick={onSeeAll}>See all {cards.length}</button> : null}
         </div>
       ) : null}
-      {/* A strip snaps to a card; when the bell's rows arrive and a newer
-          card lands in front, a fresh strip starts at the newest. */}
-      <div key={strip ? shown.map((card) => card.key).join('|') : undefined} className={`mda-needs-grid${strip ? ' is-strip' : ''}`}>
+      <div className="mda-needs-grid">
         {shown.map((card) => <NeedCard key={card.key} card={card} onDone={onDone} />)}
       </div>
     </section>

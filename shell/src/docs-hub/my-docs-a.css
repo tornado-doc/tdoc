@@ -19,6 +19,8 @@
 .mda .mda-hd h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; color: var(--td-ink); line-height: 1.2; }
 .mda-space-mark { flex: none; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; background: var(--td-ink); }
 .mda-space-mark.is-team { background: var(--td-accent); }
+/* My docs is yours: your avatar, round, like the one in the top bar. */
+.mda-space-mark.is-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; background: var(--td-accent-tint); color: var(--td-accent); box-shadow: 0 0 0 1px rgba(0,0,0,.06); }
 .mda .mda-hd .page-hd-actions { gap: 8px; }
 .mda .ui-btn.mda-new { gap: 6px; }
 
@@ -53,42 +55,25 @@
 .mda-sec-hd h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--td-muted); }
 .mda-text-link { margin-left: auto; border: 0; background: none; padding: 0; color: var(--td-accent); font-size: 13px; cursor: pointer; }
 .mda-text-link:hover { text-decoration: underline; }
-.mda-needs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
-.mda-need { position: relative; display: grid; gap: 8px; align-content: start; min-width: 0; padding: 12px 12px 10px; border: 1px solid var(--td-line); border-radius: 12px; background: #fff; transition: border-color .12s, box-shadow .12s; }
-.mda-need:hover { border-color: var(--td-accent); box-shadow: 0 4px 16px var(--td-accent-ring-soft); }
-.mda-need-link { position: absolute; inset: 0; z-index: 0; border-radius: inherit; }
+/* A to-do list, as in Apple's Reminders: a round check, the doc as the line,
+   who / their words / when under it in grey, hairlines between items that
+   start where the text does. No box, no avatars. */
+.mda-needs-grid { display: block; }
+.mda-need { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 10px; align-items: start; min-width: 0; }
+.mda-need-link { position: absolute; inset: 0; z-index: 0; border-radius: 8px; }
 .mda-need-link:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
-.mda-need-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.mda-who { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--td-ink); background: var(--td-surface); }
-.mda-who.is-agent { background: var(--td-accent-tint); color: var(--td-accent); }
-.mda-need-reason { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--td-ink); }
-.mda-need-when { margin-left: auto; white-space: nowrap; font-size: 12px; color: var(--td-muted); }
-.mda-need-quote { margin: 0; font-size: 13px; line-height: 1.45; color: var(--td-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.mda-need-doc { display: flex; align-items: center; gap: 6px; min-width: 0; padding-right: 28px; font-size: 12px; color: var(--td-muted); }
-.mda-need-doc svg { flex: none; }
-.mda-need-doc span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mda-need .mda-need-done { position: absolute; z-index: 1; right: 4px; bottom: 4px; }
-.mda-need .mda-need-done:hover { color: var(--td-accent); }
-/* Wide screens: one inbox list, a row per doc, full width. Small cards in a
-   grid left one 230px card alone with the rest of the row empty and the
-   name cut to "Jingyu Shi (Julie) c..."; a row has room for who, what, which
-   doc and when on one line, with the comment underneath. */
-.mda:not(.mda-phone) .mda-needs-grid { display: block; border: 1px solid var(--td-line); border-radius: 12px; background: #fff; overflow: hidden; }
-.mda:not(.mda-phone) .mda-need {
-  grid-template-columns: 28px minmax(0, max-content) minmax(0, 1fr) auto 32px;
-  grid-template-areas: "who reason doc when done" "who quote quote quote done";
-  align-items: center; column-gap: 10px; row-gap: 2px;
-  padding: 10px 8px 10px 14px; border: 0; border-radius: 0; box-shadow: none; transition: background .12s;
-}
-.mda:not(.mda-phone) .mda-need + .mda-need { border-top: 1px solid var(--td-line); }
-.mda:not(.mda-phone) .mda-need:hover { background: var(--td-surface); box-shadow: none; }
-.mda:not(.mda-phone) .mda-need-top { display: contents; }
-.mda:not(.mda-phone) .mda-who { grid-area: who; align-self: start; width: 28px; height: 28px; }
-.mda:not(.mda-phone) .mda-need-reason { grid-area: reason; font-size: 14px; }
-.mda:not(.mda-phone) .mda-need-doc { grid-area: doc; padding: 0; font-size: 13px; }
-.mda:not(.mda-phone) .mda-need-when { grid-area: when; margin: 0; }
-.mda:not(.mda-phone) .mda-need-quote { grid-area: quote; -webkit-line-clamp: 1; }
-.mda:not(.mda-phone) .mda-need .mda-need-done { grid-area: done; position: relative; right: auto; bottom: auto; }
+.mda-need .mda-need-done { position: relative; z-index: 1; margin-top: 8px; color: var(--td-accent); }
+.mda-need-ring { display: grid; place-items: center; width: 20px; height: 20px; box-sizing: border-box; border: 1.5px solid #c7c6c1; border-radius: 50%; background: #fff; transition: border-color .15s; }
+.mda-need-ring svg { opacity: 0; transition: opacity .15s; }
+.mda-need .mda-need-done:hover .mda-need-ring, .mda-need .mda-need-done:focus-visible .mda-need-ring { border-color: var(--td-accent); }
+.mda-need .mda-need-done:hover .mda-need-ring svg, .mda-need .mda-need-done:focus-visible .mda-need-ring svg { opacity: 1; }
+.mda-need-dot { justify-self: center; width: 8px; height: 8px; margin-top: 18px; border-radius: 50%; background: var(--td-accent); }
+.mda-need-body { min-width: 0; padding: 11px 0 12px; border-bottom: 1px solid var(--td-line); }
+.mda-need:last-child .mda-need-body { border-bottom: 0; }
+.mda-need-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; line-height: 1.4; color: var(--td-ink); }
+.mda-need:hover .mda-need-title { color: var(--td-accent); }
+.mda-need-sub { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.4; color: var(--td-muted); }
+.mda-need-quote { color: var(--td-ink); opacity: .7; }
 
 /* ---------- view chips, search, sort ---------- */
 .mda-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
@@ -111,11 +96,14 @@
 
 /* ---------- card grid ---------- */
 .mda .doc-list.mda-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 18px 16px; }
-.mda .doc-row.mda-card { position: relative; display: grid; gap: 8px; align-content: start; min-width: 0; padding: 0; border: 0; border-radius: 12px; }
+/* One bordered card per doc, as on Google Docs' home: the page on top, a
+   rule, then the title and meta inside the same card. */
+.mda .doc-row.mda-card { position: relative; display: grid; gap: 0; align-content: start; min-width: 0; padding: 0; overflow: hidden; border: 1px solid var(--td-line); border-radius: 10px; background: #fff; transition: border-color .15s, box-shadow .15s; }
+.mda .doc-row.mda-card:hover { border-color: var(--td-accent-ring-soft); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
 .mda-card.is-dragging, .mda-row.is-dragging { opacity: .45; }
-.mda-thumb { position: relative; display: block; aspect-ratio: 4 / 3; overflow: hidden; border: 1px solid var(--td-line); border-radius: 10px; background: var(--td-surface-2); transition: border-color .12s, box-shadow .12s; }
-.mda-card:hover .mda-thumb { border-color: #d6d5d0; box-shadow: 0 6px 18px rgba(0,0,0,.07); }
-.mda-card .doc-info { min-width: 0; padding-right: 30px; }
+.mda-thumb { position: relative; display: block; aspect-ratio: 4 / 3; overflow: hidden; border-bottom: 1px solid var(--td-line); background: var(--td-surface-2); container-type: inline-size; }
+.mda-thumb.is-page { background: #fff; }
+.mda-card .doc-info { min-width: 0; padding: 11px 34px 12px 13px; }
 .mda-card .doc-title-line { display: flex; align-items: baseline; gap: 5px; }
 :where(.docs-hub) .mda-card .doc-title { font-size: 14px; font-weight: 600; color: var(--td-ink); }
 .mda-card .doc-meta { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 3px; font-size: 12px; color: var(--td-muted); }
@@ -123,30 +111,30 @@
 /* On a card the sharing state is its icon (the words are its label). */
 .mda-card .doc-sharing > span[aria-hidden] { display: none; }
 .mda-meta-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mda-card .row-actions { position: absolute; right: -4px; bottom: 2px; margin: 0; }
+.mda-card .row-actions { position: absolute; right: 4px; bottom: 9px; margin: 0; }
 .mda-card .row-menu-btn { opacity: 0; }
 .mda-card:hover .row-menu-btn, .mda-card .row-menu-btn:focus-visible, .mda-card .row-menu-btn[aria-expanded="true"] { opacity: 1; color: var(--td-muted); }
 /* Unread on the drawing's top-right corner, the star on its top-left. */
 .mda-card .doc-activity { position: absolute; top: 8px; right: 8px; z-index: 1; box-shadow: 0 0 0 2px #fff; }
-.mda-card .star-btn { position: absolute; top: 4px; left: 4px; z-index: 1; opacity: 0; }
+.mda-card .star-btn { position: absolute; top: 6px; left: 6px; z-index: 1; opacity: 0; }
 .mda-card .star-btn.is-starred, .mda-card:hover .star-btn, .mda-card .star-btn:focus-visible { opacity: 1; }
 .mda-card:hover .star-btn:not(.is-starred) { color: var(--td-muted); background: rgba(255,255,255,.85); }
 
 /* Drawn thumbnails: a page of lines, a grid, or a slide. */
 .mda-th { position: absolute; inset: 0; display: block; }
-/* Covers are 1200x630 (about 1.9:1) and the tile is 4:3, so `cover` cut a
-   sixth off each side -- titles lost their first characters. `contain` shows
-   the whole cover at full width, pinned to the top; the white below reads as
-   the rest of the page. */
-.mda-th-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: top center; background: #fff; }
 .mda-th .ln { display: block; height: 4px; border-radius: 2px; background: #dedcd6; width: 70%; }
 .mda-th .ln[data-w="0"] { width: 60%; } .mda-th .ln[data-w="1"] { width: 74%; } .mda-th .ln[data-w="2"] { width: 82%; }
 .mda-th .ln[data-w="3"] { width: 90%; } .mda-th .ln[data-w="4"] { width: 66%; }
 .mda-th .ln.h { height: 7px; margin-bottom: 4px; background: var(--td-ink); width: 55%; }
 .mda-th .ln.h[data-w="1"] { width: 62%; } .mda-th .ln.h[data-w="2"] { width: 48%; } .mda-th .ln.h[data-w="3"] { width: 70%; }
 .mda-th .ln.a { background: var(--td-accent); opacity: .55; }
-.mda-th-doc .pg { position: absolute; left: 16%; right: 16%; top: 14%; bottom: -6%; display: grid; align-content: start; gap: 5px; padding: 12% 10% 0; border-radius: 4px 4px 0 0; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-.mda-th-doc .fig { display: block; height: 18px; margin: 2px 0; border-radius: 3px; background: var(--td-surface); }
+/* A doc's page: its own title and opening text, sized to the card's width
+   (cqw) so it reads as the same miniature page at every column width. */
+.mda-th-page { padding: 11% 11% 0; overflow: hidden; }
+.mda-th-page > b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 0 0 3.6cqw; font-size: 5cqw; line-height: 1.3; font-weight: 600; color: var(--td-ink); overflow-wrap: anywhere; }
+.mda-th-text { display: block; font-size: 3.2cqw; line-height: 1.7; color: var(--td-muted); overflow-wrap: anywhere; }
+.mda-th-lines { display: grid; gap: 2.6cqw; }
+.mda-th-lines .ln { height: 1.6cqw; }
 .mda-th-sheet { display: grid; grid-template-columns: 14px repeat(5, 1fr); grid-auto-rows: 1fr; background: #fff; }
 .mda-th-sheet i { display: flex; align-items: center; padding: 0 4px; border-right: 1px solid #ecebe7; border-bottom: 1px solid #ecebe7; }
 .mda-th-sheet i.hd { background: var(--td-surface-2); }
@@ -228,67 +216,60 @@
 .mda-phone .mda-main-in { max-width: 680px; padding: 16px 16px 72px; }
 .mda-phone .page-hd.mda-hd { margin: 0 0 14px; }
 .mda-phone .mda-hd h1 { font-size: 24px; }
-.mda-phone .mda-hd .page-hd-actions { margin-left: auto; }
+.mda-phone .mda-hd .page-hd-actions { margin-left: auto; gap: 4px; }
+.mda-phone .ui-btn.mda-psearch-btn { color: var(--td-ink); }
 .mda-phone .ui-btn.mda-new { font-weight: 600; }
-.mda-phone .mda-search.mda-psearch { display: block; position: relative; max-width: none; margin: 0 0 16px; }
+.mda-psearch-bar { display: flex; align-items: center; gap: 4px; min-height: 44px; margin: 0 0 14px; }
+.mda-phone .mda-search.mda-psearch { display: block; position: relative; flex: 1 1 auto; max-width: none; margin: 0; }
 .mda-phone .mda-psearch svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--td-muted); }
 /* 16px stops iOS zooming into the field. */
 .mda-phone .mda-psearch input[type="search"] { height: 46px; padding: 0 14px 0 42px; border-radius: 12px; font-size: 16px; }
 
-/* Chip rows that scroll sideways, edge to edge. */
-.mda-scroll { display: flex; align-items: center; gap: 8px; overflow-x: auto; margin: 0 -16px 12px; padding: 2px 16px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-.mda-scroll::-webkit-scrollbar { display: none; }
-.mda-phone .mda-chip { flex: none; height: 40px; padding: 0 14px; gap: 7px; border: 1px solid var(--td-line); background: #fff; color: var(--td-ink); font-size: 15px; }
-.mda-phone .mda-chip svg { flex: none; color: var(--td-muted); }
-.mda-phone .mda-chip.is-on { border-color: var(--td-ink); background: var(--td-ink); color: #fff; }
-.mda-phone .mda-chip.is-on svg { color: #fff; }
-.mda-phone .mda-chip-n { font-size: 13px; }
-.mda-phone .mda-pfilters .mda-chip.is-on { border-color: var(--td-accent); background: var(--td-accent-tint); color: var(--td-accent); }
-.mda-phone .mda-pfilters .mda-chip.is-on svg { color: var(--td-accent); }
-.mda-phone .mda-chip.mda-new-folder { width: 40px; padding: 0; justify-content: center; border-style: dashed; }
-.mda-chip-sep { flex: none; width: 1px; height: 24px; background: var(--td-line); }
-.mda-phone .mda-pfilters { margin-bottom: 14px; }
-
-/* Needs you: one row of cards, swiped sideways; the next card peeks in. */
+/* One toolbar row, as in the Google Docs app: the view as a menu on the
+   left, filter / sort / Select on the right. */
+.mda-pbar { display: flex; align-items: center; gap: 2px; min-height: 44px; margin: 0 -8px 4px; }
+.mda-phone .ui-btn.mda-pview-btn { font-weight: 600; color: var(--td-ink); }
+.mda-phone .ui-btn.mda-pview-btn svg { color: var(--td-muted); }
+.mda-pbar-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.mda-phone .ui-btn.mda-pfilter-btn { color: var(--td-muted); }
+.mda-phone .ui-btn.mda-pfilter-btn.is-on { color: var(--td-accent); background: var(--td-accent-tint); }
+.ui-menu-item.mda-pmenu-item { display: flex; align-items: center; gap: 10px; min-height: 40px; min-width: 200px; }
+.mda-pmenu-check { flex: none; display: grid; place-items: center; width: 18px; color: var(--td-muted); }
+.mda-pmenu-item.is-on, .mda-pmenu-item.is-on .mda-pmenu-check { color: var(--td-accent); }
+.mda-pmenu-n { margin-left: auto; padding-left: 16px; font-size: 13px; color: var(--td-muted); font-variant-numeric: tabular-nums; }
+/* Needs you on a phone: the same list, at phone type sizes. */
 .mda-phone .mda-needs { margin: 0 0 18px; }
 .mda-phone .mda-sec-hd h2 { font-size: 15px; color: var(--td-ink); }
 .mda-phone .mda-text-link { font-size: 15px; padding: 6px 0; }
-.mda-phone .mda-needs-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-.mda-phone .mda-needs-grid.is-strip { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: min(81%, 340px); overflow-x: auto; margin: 0 -16px; padding: 2px 16px 6px; scroll-snap-type: x mandatory; scroll-padding: 0 16px; scrollbar-width: none; }
-.mda-phone .mda-needs-grid.is-strip::-webkit-scrollbar { display: none; }
-/* Nothing to swipe to: one card takes the width instead of floating at 81%. */
-.mda-phone .mda-needs-grid.is-strip:has(> .mda-need:only-child) { grid-auto-columns: 100%; }
-.mda-phone .mda-need { gap: 5px; padding: 10px 12px 8px; scroll-snap-align: start; }
-.mda-phone .mda-who { width: 24px; height: 24px; font-size: 11px; }
-.mda-phone .mda-need-top { align-items: center; }
-.mda-phone .mda-need-reason { font-size: 15px; line-height: 1.3; }
-.mda-phone .mda-need-when { font-size: 12px; line-height: 1.3; }
-.mda-phone .mda-need-quote { display: block; -webkit-line-clamp: unset; font-size: 13px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mda-phone .mda-need-doc { font-size: 13px; padding-right: 36px; }
-.mda-phone .mda-need .mda-need-done { right: 4px; bottom: 2px; }
+.mda-phone .mda-need .mda-need-done { margin-top: 10px; }
+.mda-phone .mda-need-dot { margin-top: 20px; }
+.mda-phone .mda-need-title { font-size: 16px; }
+.mda-phone .mda-need-sub { font-size: 14px; }
 
 /* Folder path, with the open folder's ⋯ at its end. */
 .mda-phone .mda-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: 0 0 6px; font-size: 15px; }
 .mda-phone .mda-crumbs .row-actions { margin-left: auto; }
-.mda-plist-hd { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: 0 0 2px; font-size: 14px; color: var(--td-muted); }
-.mda-plist-n { margin-right: auto; }
 .mda-phone .mda .mda-sort, .mda-phone .mda-sort { font-size: 14px; }
 .mda-phone .ui-btn.mda-select-toggle { color: var(--td-accent); }
 
 /* The rows. */
 .mda .doc-list.mda-plist { display: flex; flex-direction: column; margin: 0 -16px; }
-.mda .doc-row.mda-prow { position: relative; display: flex; align-items: center; gap: 12px; min-height: 68px; margin: 0; padding: 10px 6px 10px 16px; border: 0; border-radius: 0; background: #fff; }
-.mda .doc-row.mda-prow + .doc-row.mda-prow { border-top: 1px solid var(--td-line); }
+/* Rows as in the Google Docs app: the type's colored icon with no tile
+   around it, the title on one line, the meta in grey under it, no rules
+   between rows. */
+.mda .doc-row.mda-prow { position: relative; display: flex; align-items: center; gap: 16px; min-height: 64px; margin: 0; padding: 8px 4px 8px 20px; border: 0; border-radius: 0; background: #fff; }
 .mda .doc-row.mda-prow:active { background: var(--td-surface-2); }
 .mda .doc-row.mda-prow.is-selected { background: var(--td-accent-wash); }
-.mda-prow-ic { flex: none; width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; border: 1px solid var(--td-line); background: var(--td-surface-2); }
-.mda-prow-ic .doc-type { display: grid; place-items: center; color: var(--td-ink); }
-.mda-prow-ic .doc-type svg { width: 20px; height: 20px; }
-.mda-prow .doc-info { flex: 1 1 auto; min-width: 0; display: grid; gap: 3px; }
+.mda-prow-ic { flex: none; width: 24px; height: 24px; display: grid; place-items: center; }
+.mda-prow-ic .doc-type { display: grid; place-items: center; color: var(--td-accent); }
+.mda-prow-ic .doc-type.is-sheet { color: var(--td-ok); }
+.mda-prow-ic .doc-type.is-slides { color: var(--td-star, #e8a317); }
+.mda-prow-ic .doc-type svg { width: 22px; height: 22px; }
+.mda-prow .doc-info { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
 .mda-prow .doc-title-line { display: flex; align-items: flex-start; gap: 5px; min-width: 0; }
 .mda-prow .mda-prow-star { margin-top: 3px; }
-/* The title has the line to itself and wraps to two lines before it is cut. */
-:where(.docs-hub) .mda-prow .doc-title { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; font-size: 16px; font-weight: 600; line-height: 1.3; color: var(--td-ink); text-decoration: none; }
+/* The title has the line to itself, one line, cut with an ellipsis. */
+:where(.docs-hub) .mda-prow .doc-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 500; line-height: 1.3; color: var(--td-ink); text-decoration: none; }
 /* The title's link covers the row, so a tap anywhere opens the doc. */
 .mda-prow .doc-title::after { content: ""; position: absolute; inset: 0; }
 .mda-prow-star { flex: none; color: var(--td-star, #e8a317); }

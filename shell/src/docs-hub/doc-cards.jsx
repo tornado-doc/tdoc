@@ -1,6 +1,5 @@
 import React from 'react';
 import { Folder, Star } from 'lucide-react';
-import { isFeatureOn } from '../feature-flags.js';
 import { docTypeOf } from './row-meta.js';
 import { ActivityBadge, DocTypeIcon, MetaParts, RowMenu, SharingState, StarButton, docHref } from './rows.jsx';
 
@@ -35,14 +34,22 @@ function seedOf(text) {
   return h;
 }
 
-// A drawn stand-in for the doc's first page: a page of lines, a grid, or a
-// slide, varied per doc so a wall of cards does not look like one card.
-// With the docThumbnails flag and a stored preview image, the image instead.
+// The top of a card. A doc shows its first page the way Google Docs does:
+// its own title and opening text, set as a page and cut off at the card's
+// edge. (The stored preview image is a 1200x630 link-share card -- a blue
+// rule, the title, one line of tiny print -- not a page, and shrunk into a
+// tile it read as an empty box.) A sheet or deck, with no text to show, is
+// drawn: a grid or a slide, varied per doc so a wall of cards is not one card.
 export function DocThumb({ doc }) {
   const type = docTypeOf(doc);
   const h = seedOf(doc.slug || doc.title);
-  if (isFeatureOn('docThumbnails') && doc.image) {
-    return <img className="mda-th-img" src={doc.image} alt="" loading="lazy" onError={(event) => { event.currentTarget.hidden = true; }} />;
+  if (isPageType(type)) {
+    return (
+      <span className="mda-th mda-th-page" aria-hidden="true">
+        <b>{doc.title}</b>
+        {doc.excerpt ? <span className="mda-th-text">{doc.excerpt}</span> : <PageLines h={h} />}
+      </span>
+    );
   }
   const w = (k) => (h >> k) % 5;
   if (type === 'sheet') {
@@ -74,26 +81,30 @@ export function DocThumb({ doc }) {
       </span>
     );
   }
-  const lines = [];
-  for (let i = 0; i < 9; i += 1) {
-    if (i === 3 && h % 3 === 0) { lines.push(<span key={i} className="fig" />); continue; }
-    lines.push(<span key={i} className={`ln${i === 6 && h % 4 === 1 ? ' a' : ''}`} data-w={i % 4 === 3 ? 0 : w(i + 2)} />);
-  }
-  return (
-    <span className="mda-th mda-th-doc" aria-hidden="true">
-      <span className="pg"><span className="ln h" data-w={w(1)} />{lines}</span>
-    </span>
-  );
+  return null;
 }
 
-// One card: the drawing, the title, then the type icon and the row's own
-// meta line (when, who can open it). Unread sits on the drawing's corner,
-// the star on the other, ⋯ beside the title.
+function isPageType(type) {
+  return type !== 'sheet' && type !== 'slides';
+}
+
+// A doc with no text yet: grey lines where its paragraphs will be.
+function PageLines({ h }) {
+  const w = (k) => (h >> k) % 5;
+  const lines = [];
+  for (let i = 0; i < 7; i += 1) lines.push(<span key={i} className="ln" data-w={i % 4 === 3 ? 0 : w(i + 2)} />);
+  return <span className="mda-th-lines">{lines}</span>;
+}
+
+// One card, as on Google Docs' home: one bordered card, the page on top, a
+// rule, then the title, the type icon and the row's own meta line (when, who
+// can open it). Unread sits on the page's corner, the star on the other, ⋯
+// beside the title.
 export function DocCard({ doc, meta, path, starrable = true, onToggleStar, menuItems = [], dragSlugs, data = {} }) {
   const dataAttrs = Object.fromEntries(Object.entries(data).map(([key, value]) => [`data-${key}`, value]));
   return (
     <div className={`doc-row mda-card${doc.starred ? ' is-starred' : ''}`} data-slug={doc.slug} data-title={doc.title} {...dataAttrs} {...dragProps(doc, dragSlugs)}>
-      <a className="mda-thumb" href={docHref(doc)} tabIndex={-1} aria-hidden="true" draggable={false}>
+      <a className={`mda-thumb${isPageType(docTypeOf(doc)) ? ' is-page' : ''}`} href={docHref(doc)} tabIndex={-1} aria-hidden="true" draggable={false}>
         <DocThumb doc={doc} />
       </a>
       <ActivityBadge doc={doc} />
