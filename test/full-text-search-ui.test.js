@@ -124,7 +124,14 @@ async function startServer(worker, env, waits) {
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     const shot = async (name) => { if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${name}-${viewport.width}.png`), fullPage: false }); };
-    const input = page.getByRole('searchbox', { name: 'Search docs' });
+    const box = page.getByRole('searchbox', { name: 'Search docs' });
+    // On a phone (layout A) the field opens from the header's search icon.
+    const input = {
+      fill: async (text) => {
+        if (!(await box.count())) await page.getByRole('button', { name: 'Search docs' }).click();
+        await box.fill(text);
+      },
+    };
     const results = page.locator('.text-search-row');
     try {
       await env.META.put('dev-mode:alice@example.com', 'off');
