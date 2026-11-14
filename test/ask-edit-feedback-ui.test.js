@@ -131,7 +131,7 @@ async function startServer(worker, env) {
     await page.keyboard.type('shorter please');
     return box;
   };
-  const sendReply = (page) => page.locator('#tdoc-comment-layer .tdoc-reply-submit').first().tap();
+  const sendReply = (page) => page.locator('#tdoc-comment-layer .tdoc-reply-submit.ui-btn-primary').first().tap();
   const selectWords = async (page, frame, id) => {
     const box = await page.locator('iframe').first().boundingBox();
     const r = await frame.evaluate((elId) => { const b = document.getElementById(elId).getBoundingClientRect(); return { x1: b.left + 2, x2: b.left + 200, y: b.top + 8 }; }, id);
