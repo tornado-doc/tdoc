@@ -188,7 +188,18 @@ async function touchSelect(page, phrase) {
       const pop = page.locator('.tdoc-popup');
       await pop.waitFor();
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
-      if (labels.join('|') !== 'Send to agent|Comment') throw new Error(`popover buttons: ${labels.join('|')}`);
+      // A reader who cannot hand off, with an agent that may only answer
+      // (tdoc AI): the control says Ask, as submitting does -- never "Send to
+      // agent". It names no agent (no default here), so its click is the
+      // bare @ to pick from, not somebody it did not name.
+      if (labels.join('|') !== 'Ask agent|Comment') throw new Error(`popover buttons: ${labels.join('|')}`);
+      const toggle0 = pop.locator('.tdoc-composer-foot-actions button').first();
+      const tip = await toggle0.getAttribute('title');
+      if (!/^Ask /.test(tip || '') || /Send/.test(tip || '')) throw new Error(`toggle tooltip: ${tip}`);
+      await toggle0.click();
+      const tagged = await pop.locator('textarea').inputValue();
+      if (tagged.trim() !== '@') throw new Error(`the click put in an agent it did not name: ${JSON.stringify(tagged)}`);
+      await pop.locator('textarea').fill('');
       const { row } = await ask(page, 'Why billing first?');
       if (!/^tdoc AI/.test(row) || !/Limited-time free/.test(row)) throw new Error(`first row: ${row}`);
       await answersOnly(pop);

@@ -80,7 +80,7 @@ import { openAppLink, sendToAppLink } from './document/send-to-app.js';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, HandoffSendTransport, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
-import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, byRelevance, composerDefault, notifyHandoffReasonText, orderedAgentChoices, orderedAskAiChoices, sameTarget, sendToAgentState, taggedAgentSpan, targetKey } from './document/agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, byRelevance, composerDefault, maySendToAgent, orderedAgentChoices, orderedAskAiChoices, sameTarget, sendToAgentSetup, sendToAgentState, taggedAgentSpan, targetKey } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { AskAiPanel, DemoRewriteBar, DemoRewriteCta } from './document/ask-ai-panel.jsx';
@@ -1280,7 +1280,10 @@ export function DocumentShell({ boot, config }) {
   // Team docs: every member may send to the team's agents (and an admin to
   // their own connections); the server lists only those. Send to agent shows
   // on a team doc once there is someone to send to.
-  const notifyQuery = Boolean((config.isOwner || config.teamManage) && !config.isLanding && config.mode !== 'local');
+  // Who may send is maySendToAgent (the server's rule): the owner or a team
+  // member, not a guest of the team.
+  const sendToAgentMay = maySendToAgent({ owner: config.isOwner, teamMember: Boolean(config.teamManage && !config.teamManage.guest) });
+  const notifyQuery = Boolean(sendToAgentMay && !config.isLanding && config.mode !== 'local');
   const notifyViewer = (config.identity && (config.identity.account_id || config.identity.login)) || '';
   const notifyTargets = useNotifyTargets(config.slug, notifyQuery, notifyViewer);
   const hasNotifyTargets = Boolean(
@@ -1556,13 +1559,10 @@ export function DocumentShell({ boot, config }) {
   // The one Send to agent judgment both composers share (agent-choices.js):
   // ready with the agents that may edit, connect when this viewer could send
   // but nobody is linked, disabled with the reason when they cannot.
-  const sendToAgentSetupHref = notifyQuery && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound'
-    ? '/me?view=settings#agents' : null;
+  const { setupHref: sendToAgentSetupHref, disabledReason: sendToAgentDisabledReason } = sendToAgentSetup({
+    canSendToAgent, may: sendToAgentMay, notifyOn: notifyQuery, targets: notifyTargets, href: '/me?view=settings#agents',
+  });
   const sendToAgentConnectPrompt = sendToAgentSetupHref ? CONNECT_AGENT_PROMPT : null;
-  const sendToAgentDisabledReason = canSendToAgent ? null
-    : !notifyQuery ? 'Only the doc author or a team admin can send comments to an agent'
-      : !notifyTargets.ready ? 'Finding your agents…'
-        : notifyHandoffReasonText(notifyTargets.reason) || 'No agent can take comments here yet.';
   const sendToAgent = useMemo(() => sendToAgentState({
     canSendToAgent,
     choices: agentChoices,

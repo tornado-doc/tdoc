@@ -24,7 +24,7 @@ import { productPageUrl } from '../../shell/src/document/product-url.js';
 import { AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
 import { composerAgents } from '../../shell/src/document/ai-answerer.js';
-import { composerDefault, notifyHandoffReasonText, sendToAgentState } from '../../shell/src/document/agent-choices.js';
+import { composerDefault, maySendToAgent, sendToAgentSetup, sendToAgentState } from '../../shell/src/document/agent-choices.js';
 import { askOwnAgent, threadAskPick, useMyAgent } from '../../shell/src/document/my-agent.js';
 import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, clearNotifyTargetsCache, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
@@ -1586,10 +1586,13 @@ ${uiCss}
     });
     const unreadComments = area.unread;
     const teamMember = Boolean(surface?.teamMember);
+    // Who may send to an agent: the server's rule, shared with the doc page
+    // and the space page (agent-choices.js maySendToAgent).
+    const sendMay = maySendToAgent({ owner, teamMember });
     // The token is this person's session here: a new one (reconnect, another
     // account) is another viewer to the agent-list cache.
     const notifyViewer = session?.token || '';
-    const agent = useNotifyTargets(slug, Boolean((owner || teamMember) && slug && session?.notify), notifyViewer);
+    const agent = useNotifyTargets(slug, Boolean(sendMay && slug && session?.notify), notifyViewer);
     const canSendToAgent = Boolean(agent.ready && agent.available && agent.reason !== 'no_agent_bound'
       && (agent.default || agent.candidates.length || agent.fallback));
     // Send to agent in the dock, as on the doc page. The owner always has it:
@@ -1615,14 +1618,10 @@ ${uiCss}
     // The same Send to agent judgment as the doc page (agent-choices.js): the
     // widget used to hide the control when nobody was linked or the viewer
     // could not send; now it always shows, connects, or says why.
-    const sendToAgentSetupHref = (owner || teamMember) && session?.notify && agent.ready && agent.reason === 'no_agent_bound'
-      ? `${base}/me/agents?tab=send` : null;
+    const { setupHref: sendToAgentSetupHref, disabledReason: sendToAgentDisabledReason } = sendToAgentSetup({
+      canSendToAgent, may: sendMay, notifyOn: Boolean(session?.notify), targets: agent, href: `${base}/me/agents?tab=send`,
+    });
     const sendToAgentConnectPrompt = sendToAgentSetupHref ? CONNECT_AGENT_PROMPT : null;
-    const sendToAgentDisabledReason = canSendToAgent ? null
-      : !(owner || teamMember) ? 'Only the space owner or a team member can send comments to an agent'
-        : !session?.notify ? 'Notify is not available on this host yet.'
-          : !agent.ready ? 'Finding your agents…'
-            : notifyHandoffReasonText(agent.reason) || 'No agent can take comments here yet.';
     const sendToAgent = useMemo(() => sendToAgentState({
       canSendToAgent,
       choices: agentChoices,

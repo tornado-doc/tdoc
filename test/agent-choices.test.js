@@ -18,7 +18,7 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 const box = {};
 vm.createContext(box);
 // `const` stays script-scoped in a vm context; hand the joiner out by name.
-vm.runInContext(`${read('shell/src/document/agent-choices.js').replace(/^export /gm, '')}\nthis.AGENT_TAG_JOINER = AGENT_TAG_JOINER;`, box);
+vm.runInContext(`${read('shell/src/document/agent-choices.js').replace(/^export /gm, '')}\nthis.AGENT_TAG_JOINER = AGENT_TAG_JOINER;\nthis.SEND_TO_AGENT_WHO = SEND_TO_AGENT_WHO;`, box);
 // The server's own mention pattern, so the tag is checked against the real one.
 const workerSrc = read('worker/worker.js');
 const reLine = workerSrc.slice(workerSrc.indexOf('const MENTION_RE ='), workerSrc.indexOf('\n', workerSrc.indexOf('const MENTION_RE =')));
@@ -272,6 +272,58 @@ t('notify target reasons become the control\'s hover text', () => {
   assert(/team has no agent/.test(box.notifyHandoffReasonText('no_team_agent')));
   assert(/did not write this doc/.test(box.notifyHandoffReasonText('team_agent_not_writer')));
   assert(box.notifyHandoffReasonText('something_new') === 'No agent can take comments here yet.');
+});
+
+t('who may send to an agent: one rule and one sentence, the server\'s, on the doc page, the space page and the widget', () => {
+  // The server (POST /api/notify/handoff): the owner (authorizeOwnerMutation)
+  // or, on a team doc, any current member (teamAgentCaller).
+  const route = workerSrc.slice(workerSrc.indexOf("if (p === '/api/notify/handoff' && method === 'POST')"));
+  assert(/Any current member may send to the team's own agent \(teamAgentCaller\)/.test(route.slice(0, 6000)), 'the server rule moved; re-check SEND_TO_AGENT_WHO');
+  assert(box.maySendToAgent({ owner: true }) && box.maySendToAgent({ teamMember: true }) && !box.maySendToAgent({}), 'owner or member');
+  assert(/owner or a member of its team/.test(box.SEND_TO_AGENT_WHO), box.SEND_TO_AGENT_WHO);
+  const surfaces = {
+    'shell/src/document-shell.jsx': read('shell/src/document-shell.jsx'),
+    'shell/src/feedback-space.jsx': read('shell/src/feedback-space.jsx'),
+    'feedback/src/main.jsx': read('feedback/src/main.jsx'),
+  };
+  for (const [p, src] of Object.entries(surfaces)) {
+    assert(/maySendToAgent\(\{/.test(src), `${p} does not use the shared owner/member rule`);
+    assert(/sendToAgentSetup\(\{/.test(src), `${p} does not use the shared reason and setup link`);
+    assert(!/Only the (doc|space) (author|owner)/.test(src) && !/can send comments to an agent'/.test(src), `${p} has its own wording`);
+    // The setup link is never decided from the owner alone.
+    assert(!/SetupHref = isOwner/.test(src) && !/SetupHref = owner/.test(src), `${p} builds the setup link from the owner only`);
+  }
+  // Same inputs, same answer, whichever surface asks.
+  const no = box.sendToAgentSetup({ canSendToAgent: false, may: false, targets: { ready: true, reason: 'no_agent_bound' }, href: '/x' });
+  assert(no.disabledReason === box.SEND_TO_AGENT_WHO && no.setupHref === null, JSON.stringify(no));
+  const member = box.sendToAgentSetup({ canSendToAgent: false, may: box.maySendToAgent({ teamMember: true }), targets: { ready: true, reason: 'no_agent_bound' }, href: '/x' });
+  assert(member.setupHref === '/x', `a team member gets the setup link: ${JSON.stringify(member)}`);
+  assert(box.sendToAgentSetup({ may: true, notifyOn: false, targets: { ready: true, reason: 'no_agent_bound' }, href: '/x' }).setupHref === null, 'no host notify, no link');
+  assert(/Finding/.test(box.sendToAgentSetup({ may: true, targets: { ready: false } }).disabledReason));
+  assert(/workspace admin/.test(box.sendToAgentSetup({ may: true, targets: { ready: true, reason: 'team_admin_only' } }).disabledReason));
+  assert(box.sendToAgentSetup({ canSendToAgent: true, may: true, targets: { ready: true } }).disabledReason === null);
+});
+
+t('the control\'s words: Send to agent for a send target, Ask for an agent that may only answer; the click puts in the agent it names', () => {
+  const editable = [{ ...local('juliesmac', 'claude'), can_edit: true }];
+  const answerOnly = [{ ...local('bobmac', 'codex'), can_edit: false }];
+  const send = box.sendToAgentWords(editable[0], { editable, offer: [...editable, ...answerOnly] });
+  assert(/^Send to agent · /.test(send.label) && /^Send this comment to /.test(send.title) && send.off === "Don't send", JSON.stringify(send));
+  const askW = box.sendToAgentWords(answerOnly[0], { editable: [], offer: answerOnly });
+  assert(/^Ask /.test(askW.label) && !/Send/.test(askW.label) && /^Ask .* about this comment$/.test(askW.title) && askW.off === "Don't ask", JSON.stringify(askW));
+  // In a ready box, an answer-only agent picked from @ is still asked.
+  assert(/^Ask /.test(box.sendToAgentWords(answerOnly[0], { editable, offer: [...editable, ...answerOnly] }).label));
+  assert(box.sendToAgentWords(null).label === 'Send to agent');
+  assert(box.sendToAgentWords(null, { asking: true }).label === 'Ask agent' && /^Ask an agent/.test(box.sendToAgentWords(null, { asking: true }).title));
+  // The toggle: the label and the click name the same agent -- the box's
+  // default, else nobody (a bare @ to pick from); never a label for
+  // editable[0] and a click that inserts something else.
+  const ask = read('shell/src/document/agent-ask.jsx');
+  const toggle = ask.slice(ask.indexOf('export function SendToAgentToggle'), ask.indexOf('// "Ask only", beside the send button'));
+  assert(/onClick=\{\(\) => ask\.putTag\(fallback\)\}/.test(toggle), 'the click does not put in the named agent');
+  assert(!/onClick=\{ask\.putDefault\}/.test(toggle), 'the click still inserts the default (a bare @ with none)');
+  assert(/sendToAgentWords\(shown/.test(toggle), 'the label is not the shared wording');
+  assert(!/editable\[0\]|offer\[0\]/.test(toggle.slice(toggle.indexOf('const fallback'), toggle.indexOf('const shown'))), 'the label names an agent the click would not put in');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

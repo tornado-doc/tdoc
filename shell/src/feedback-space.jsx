@@ -8,7 +8,7 @@ import { OwnerAccessDialog } from './document/owner-access-dialog.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { composerAgents } from './document/ai-answerer.js';
-import { composerDefault, notifyHandoffReasonText, sendToAgentState } from './document/agent-choices.js';
+import { composerDefault, maySendToAgent, sendToAgentSetup, sendToAgentState } from './document/agent-choices.js';
 import { askOwnAgent, threadAskPick, useMyAgent } from './document/my-agent.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { CommentPanel } from './comments/panel/comment-panel.jsx';
@@ -59,8 +59,11 @@ export function FeedbackSpace({ boot }) {
   const currentTeam = boot.workspaceId || boot.teamManage?.team?.id || null;
 
   const notifyViewer = (identity && (identity.account_id || identity.login)) || '';
-  const notify = useNotifyTargets(slug, Boolean(isOwner), notifyViewer);
-  const canSendToAgent = Boolean(isOwner && notify.ready && notify.available && notify.reason !== 'no_agent_bound'
+  // Who may send: the owner or a member of the space's team (maySendToAgent,
+  // the server's rule), as on the doc page and in the widget.
+  const sendToAgentMay = maySendToAgent({ owner: isOwner, teamMember: Boolean(boot.teamManage && boot.teamManage.team && !boot.teamManage.guest) });
+  const notify = useNotifyTargets(slug, sendToAgentMay, notifyViewer);
+  const canSendToAgent = Boolean(sendToAgentMay && notify.ready && notify.available && notify.reason !== 'no_agent_bound'
     && (notify.default || (notify.candidates || []).length || notify.fallback));
   // Anyone else who joined: their OWN agents, which answer in the thread
   // and never edit (my-agent.js), as on a doc page.
@@ -75,12 +78,10 @@ export function FeedbackSpace({ boot }) {
     mine: !isOwner && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: myAgent.state.team_agents || [], tdoc_ai: false } : null,
   }), [canSendToAgent, notify.default, notify.candidates, notify.fallback, isOwner, myAgent.state]);
   // The same Send to agent judgment as the doc page and the widget.
-  const sendToAgentSetupHref = isOwner && notify.ready && notify.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null;
+  const { setupHref: sendToAgentSetupHref, disabledReason: sendToAgentDisabledReason } = sendToAgentSetup({
+    canSendToAgent, may: sendToAgentMay, targets: notify, href: '/me?view=settings#agents',
+  });
   const sendToAgentConnectPrompt = sendToAgentSetupHref ? CONNECT_AGENT_PROMPT : null;
-  const sendToAgentDisabledReason = canSendToAgent ? null
-    : !isOwner ? 'Only the space owner or a team admin can send comments to an agent'
-      : !notify.ready ? 'Finding your agents…'
-        : notifyHandoffReasonText(notify.reason) || 'No agent can take comments here yet.';
   const sendToAgent = useMemo(() => sendToAgentState({
     canSendToAgent,
     choices: agentChoices,
