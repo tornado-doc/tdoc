@@ -206,6 +206,49 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
     }
   });
 
+  await t('a new set drops every older set it overlaps: 3 edits on [a,b] then 2 on [a] reads 2, not 5', async () => {
+    const up = await call('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'doc3', version: 1, html: '<h1>d</h1><p>first line one</p><p>second line two</p><p>third line three</p>' } });
+    assert(up.status === 200, `upload ${up.status}`);
+    const mk = async (text) => {
+      const c = await call('/api/comments', { method: 'POST', cookie: reader, body: { slug: 'doc3', version: 1, text, anchor: { kind: 'text', text: 'first line' } } });
+      assert(c.status === 200, `comment ${c.status}`);
+      return c.body.id;
+    };
+    const a = await mk('fix a');
+    const b = await mk('fix b');
+    const h = await call('/api/notify/handoff', { method: 'POST', token: owner.token, body: { slug: 'doc3', comment_ids: [a, b], recipient: LOCAL_CLAUDE, instruction: 'fix them' } });
+    assert(h.status === 200 && h.body.ok, `handoff ${h.status}: ${JSON.stringify(h.body)}`);
+    const suggest = (comment_ids, edits, headers = AS_CLAUDE) => call('/api/docs/doc3/suggestions', { method: 'POST', token: owner.token, headers, body: { comment_ids, edits } });
+    const count = async () => (await call('/api/comments?slug=doc3&version=all', { token: owner.token })).body.find((x) => x.id === a).handoff_suggested_edits;
+    const three = await suggest([a, b], [
+      { find: 'first line one', replace: '1' }, { find: 'second line two', replace: '2' }, { find: 'third line three', replace: '3' },
+    ]);
+    assert(three.status === 200, `suggest 3 ${three.status}: ${JSON.stringify(three.body)}`);
+    assert((await count()) === 3, `after 3: ${await count()}`);
+    const two = await suggest([a], [{ find: 'first line one', replace: 'one' }, { find: 'second line two', replace: 'two' }]);
+    assert(two.status === 200, `suggest 2 ${two.status}: ${JSON.stringify(two.body)}`);
+    assert((await count()) === 2, `stale count: ${await count()} (the [a,b] set was replaced)`);
+    const rec = await byId('doc3', h.body.handoff_id);
+    assert(Object.keys(rec.suggested_sets).join('|') === a, JSON.stringify(rec.suggested_sets));
+  });
+
+  await t('only the agent the comments were handed to is credited with suggestions', async () => {
+    const before = (await byId('doc', handoffId)).suggested_sets;
+    // Agent B (same account, not the recipient) proposes on the handed-off comment.
+    const r = await call('/api/docs/doc/suggestions', {
+      method: 'POST', token: owner.token, headers: AS_B,
+      body: { comment_ids: [commentId], edits: [{ find: 'a sentence to comment on', replace: 'B was here' }, { find: 'another line here', replace: 'B again' }, { find: 'd3', replace: 'x' }] },
+    });
+    assert(r.status === 200, `suggest by B ${r.status}: ${JSON.stringify(r.body)}`);
+    const after = (await byId('doc', handoffId)).suggested_sets || {};
+    assert(before && Object.keys(before).length === 1, `setup ${JSON.stringify(before)}`);
+    // B's set replaced the recipient's in the store, so the recipient's count
+    // goes; B's is not credited to the handoff.
+    assert(!Object.keys(after).length, `credited to the handed-off agent: ${JSON.stringify(after)}`);
+    const c = (await call('/api/comments?slug=doc&version=all', { token: owner.token })).body.find((x) => x.id === commentId);
+    assert(c.handoff_suggested_edits === null, `count ${c.handoff_suggested_edits}`);
+  });
+
   await t('once handled, the handoff takes no more status', async () => {
     const r = await call('/api/notify/resolve', { method: 'POST', token: owner.token, body: { slug: 'doc', handoff_id: handoffId } });
     assert(r.status === 200, `resolve ${r.status}`);
@@ -222,6 +265,42 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
     const cli = fs.readFileSync(path.join(__dirname, '..', 'bin', 'tdoc-agent-reply'), 'utf8');
     assert(cli.includes('/api/notify/progress') && cli.includes('--progress'), 'CLI flag missing');
   });
+
+  // ---- flag off (no dev mode, not a preview) ----------------------------------
+  {
+    const env2 = makeEnv(mod.CommentsStore);
+    const owner2 = await issue(worker, env2, 'owner');
+    const call2 = async (p, opts) => { const r = await worker.fetch(req(p, opts), env2, {}); let b = null; try { b = await r.json(); } catch {} return { status: r.status, body: b }; };
+    const up = await call2('/api/upload', { method: 'POST', token: owner2.token, body: { slug: 'off', version: 1, html: '<h1>d</h1><p>a sentence to comment on</p>' } });
+    await env2.META.put(`account-notify:${owner2.account_id}`, JSON.stringify([LOCAL_CLAUDE]));
+    const reader2 = await putSession(env2, 'reader');
+    const c = await call2('/api/comments', { method: 'POST', cookie: reader2, body: { slug: 'off', version: 1, text: 'fix', anchor: { kind: 'text', text: 'a sentence' } } });
+    const h = await call2('/api/notify/handoff', { method: 'POST', token: owner2.token, body: { slug: 'off', comment_ids: [c.body.id], recipient: LOCAL_CLAUDE, instruction: 'fix it' } });
+    const rec = async () => JSON.parse(await env2.META.get('handoffs:off') || '[]').find((x) => x.handoff_id === h.body.handoff_id);
+
+    await t('flag off: POST /api/notify/progress is not found, even for the addressed agent', async () => {
+      assert(up.status === 200 && c.status === 200 && h.status === 200, `setup ${up.status} ${c.status} ${h.status}`);
+      const r = await call2('/api/notify/progress', { method: 'POST', token: owner2.token, headers: AS_CLAUDE, body: { slug: 'off', comment_id: c.body.id, text: 'Working' } });
+      assert(r.status === 404, `${r.status} ${JSON.stringify(r.body)}`);
+      assert(!(await rec()).progress, 'status written with the flag off');
+    });
+
+    await t('flag off: publishes stamp the first version once and nothing more', async () => {
+      const writes = [];
+      const put = env2.META.put.bind(env2.META);
+      env2.META.put = (k, ...rest) => { if (k === 'handoffs:off') writes.push(k); return put(k, ...rest); };
+      try {
+        for (const v of [2, 3, 4]) {
+          const r = await call2('/api/upload', { method: 'POST', token: owner2.token, headers: AS_CLAUDE, body: { slug: 'off', version: v, html: `<h1>d${v}</h1><p>a sentence to comment on</p>` } });
+          assert(r.status === 200, `upload v${v} ${r.status}`);
+        }
+      } finally { env2.META.put = put; }
+      const x = await rec();
+      assert(x.first_version_at, 'first version not stamped');
+      assert(x.last_version == null && x.last_version_at == null, `last_version written with the flag off: ${JSON.stringify(x)}`);
+      assert(writes.length === 1, `handoffs rewritten on every publish: ${writes.length}`);
+    });
+  }
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

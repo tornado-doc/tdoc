@@ -4219,22 +4219,25 @@ async function noteHandoffReply(env, slug, commentId, at) {
 // doc". Only stamped when the publisher can be named (a verified agent claim
 // or a team agent): an unattributed upload says nothing about whose work it
 // was, and a resolved handoff needs no clock.
+// With the progress line on (`progress`, agentProgressAllowed),
 // `last_version` / `last_version_at` follow every later version the same
 // agent publishes while the handoff is still open, so the card's progress
-// line can say "Published v3" for the newest one, not the first.
-async function noteHandoffVersion(env, slug, { actor, target, at, version = null }) {
+// line can say "Published v3" for the newest one, not the first. Off, a
+// handoff is written once, for its first version, as before.
+async function noteHandoffVersion(env, slug, { actor, target, at, version = null, progress = false }) {
   if (!env || !env.META || !slug || !at) return;
   const teamAgentId = actor && actor.team_agent ? actor.team_agent.id : null;
   const key = target ? notifyKey(target) : null;
   if (!teamAgentId && !key) return;
   const list = await loadHandoffs(env, slug);
-  const n = Number(version);
+  const n = progress ? Number(version) : NaN;
   let changed = false;
   const next = list.map((h) => {
-    if (!h) return h;
+    if (!h || (!progress && h.first_version_at)) return h;
     const mine = (teamAgentId && h.team_agent && h.team_agent.id === teamAgentId)
       || (key && h.recipient && notifyKey(h.recipient) === key);
     if (!mine || !handoffOpen(h)) return h;
+    if (h.first_version_at && !(Number.isInteger(n) && n > 0)) return h;
     changed = true;
     return {
       ...h,
@@ -4250,27 +4253,46 @@ function handoffOpen(h) {
   return !!h && (h.comment_ids || []).some((id) => !(h.resolved_ids || []).includes(id));
 }
 
+// The agent progress line (shell flag agentProgress) is dev mode only in
+// production and on for everyone on a PR preview, held on the server the
+// same way as its MCP tool report_progress (a devMode tool): the status
+// route 404s and the extra handoff bookkeeping below is not written for a
+// caller outside it.
+function agentProgressAllowed(env, actor) {
+  return askEditV2Allowed(env, actor).catch(() => false);
+}
+
 // Suggestions (propose_edits / tdoc-propose) sent for a handed-off comment:
 // how many edits are waiting, for the progress line ("Suggested 3 edits").
-// A new set for the same comments replaces the old one in the store
-// (replace_comments), so the count is kept per comment set and replaced
-// the same way rather than summed blindly.
-// The newest open handoff carrying one of these comments takes the count;
-// suggestions that name no comment belong to no handoff.
-async function noteHandoffSuggestions(env, slug, commentIds, count, at) {
+// A new set replaces every open set sharing ANY of its comments in the store
+// (replace_comments), so the count is kept per comment set and every older
+// set overlapping the new one is dropped the same way rather than summed.
+// Only a proposer the handoff was addressed to (`scope`, handoffAckScope) is
+// credited; another writer's set still clears what it replaced. The newest
+// open handoff carrying one of these comments takes the count; suggestions
+// that name no comment belong to no handoff.
+async function noteHandoffSuggestions(env, slug, commentIds, count, at, scope) {
   if (!env || !env.META || !slug || !Array.isArray(commentIds) || !commentIds.length || !(count > 0)) return;
   const list = await loadHandoffs(env, slug);
+  const overlaps = (key) => String(key).split(',').some((id) => commentIds.includes(id));
   const target = list
     .filter((h) => h && handoffOpen(h) && Array.isArray(h.comment_ids) && h.comment_ids.some((id) => commentIds.includes(id)))
     .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))[0];
-  if (!target) return;
-  let changed = false;
+  const credit = !!(target && handoffInScope(target, scope));
   const key = [...commentIds].sort().join(',');
+  let changed = false;
   const next = list.map((h) => {
-    if (h !== target) return h;
+    if (!h) return h;
+    const had = h.suggested_sets && typeof h.suggested_sets === 'object' ? h.suggested_sets : {};
+    const sets = Object.fromEntries(Object.entries(had).filter(([k]) => !overlaps(k)));
+    const dropped = Object.keys(sets).length !== Object.keys(had).length;
+    if (h === target && credit) {
+      changed = true;
+      return { ...h, suggested_sets: { ...sets, [key]: count }, suggested_at: at };
+    }
+    if (!dropped) return h;
     changed = true;
-    const sets = { ...(h.suggested_sets && typeof h.suggested_sets === 'object' ? h.suggested_sets : {}), [key]: count };
-    return { ...h, suggested_sets: sets, suggested_at: at };
+    return { ...h, suggested_sets: sets };
   });
   if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
 }
@@ -22153,7 +22175,13 @@ async function handleProposeEdits(env, req, url, slug) {
   if (!added.ok) return suggestionsUnavailable();
   // The handoff these comments rode on learns how many edits are waiting,
   // for the progress line on its card. Never fails the suggestion.
-  try { await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created); } catch {}
+  // Only with the progress line on, and only for the agent it was handed to.
+  try {
+    if (await agentProgressAllowed(env, auth.actor)) {
+      const scope = await handoffAckScope(env, auth.actor, acting);
+      await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created, scope);
+    }
+  } catch {}
   // The suggestions this handoff asked for have landed: for the comments they
   // name, or for all of it when they name none.
   if (auth.actor.kind === 'hosted' && !auth.actor.team_agent) {
@@ -31364,6 +31392,9 @@ const tdocHandlers = {
     if (p === '/api/notify/progress' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
       if (!auth.ok) return auth.response;
+      // Dev mode / PR preview only, as report_progress is: anybody else
+      // finds no such route.
+      if (!(await agentProgressAllowed(env, auth.actor))) return new Response('Not found', { status: 404 });
       let body = {};
       try { body = await req.json(); } catch {}
       const slug = body && body.slug;
@@ -32555,6 +32586,7 @@ const tdocHandlers = {
           // the publish.
           await noteHandoffVersion(env, slug, {
             actor: auth.actor, target: publishingAgent, at: new Date().toISOString(), version: verNum,
+            progress: await agentProgressAllowed(env, auth.actor),
           });
         } catch (e) {
           console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));

@@ -11,7 +11,7 @@
 #   tdoc-agent-reply --slug <slug> --ask <ask_id> --text "..."
 #                                       # private answer to a reader's question
 #   tdoc-agent-reply --slug <slug> --parent <id> --progress "Editing the Pack section"
-#                                       # one-line status on a comment handed to you
+#                                       # one-line status on a comment handed to you (dev mode)
 #   tdoc-agent-reply --print-identity   # login/name JSON, no network
 #
 # Posts to the published worker when ~/.tdoc/published.json exists,
