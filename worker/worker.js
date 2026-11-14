@@ -4219,24 +4219,108 @@ async function noteHandoffReply(env, slug, commentId, at) {
 // doc". Only stamped when the publisher can be named (a verified agent claim
 // or a team agent): an unattributed upload says nothing about whose work it
 // was, and a resolved handoff needs no clock.
-async function noteHandoffVersion(env, slug, { actor, target, at }) {
+// With the progress line on (`progress`, agentProgressAllowed),
+// `last_version` / `last_version_at` follow every later version the same
+// agent publishes while the handoff is still open, so the card's progress
+// line can say "Published v3" for the newest one, not the first. Off, a
+// handoff is written once, for its first version, as before.
+async function noteHandoffVersion(env, slug, { actor, target, at, version = null, progress = false }) {
   if (!env || !env.META || !slug || !at) return;
   const teamAgentId = actor && actor.team_agent ? actor.team_agent.id : null;
   const key = target ? notifyKey(target) : null;
   if (!teamAgentId && !key) return;
   const list = await loadHandoffs(env, slug);
+  const n = progress ? Number(version) : NaN;
   let changed = false;
   const next = list.map((h) => {
-    if (!h || h.first_version_at) return h;
+    if (!h || (!progress && h.first_version_at)) return h;
     const mine = (teamAgentId && h.team_agent && h.team_agent.id === teamAgentId)
       || (key && h.recipient && notifyKey(h.recipient) === key);
-    if (!mine) return h;
-    const open = (h.comment_ids || []).some((id) => !(h.resolved_ids || []).includes(id));
-    if (!open) return h;
+    if (!mine || !handoffOpen(h)) return h;
+    if (h.first_version_at && !(Number.isInteger(n) && n > 0)) return h;
     changed = true;
-    return { ...h, first_version_at: at };
+    return {
+      ...h,
+      first_version_at: h.first_version_at || at,
+      ...(Number.isInteger(n) && n > 0 ? { last_version: n, last_version_at: at } : {}),
+    };
   });
   if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+}
+
+// A handoff still has a comment nobody marked handled.
+function handoffOpen(h) {
+  return !!h && (h.comment_ids || []).some((id) => !(h.resolved_ids || []).includes(id));
+}
+
+// The agent progress line (shell flag agentProgress) is dev mode only in
+// production and on for everyone on a PR preview, held on the server the
+// same way as its MCP tool report_progress (a devMode tool): the status
+// route 404s and the extra handoff bookkeeping below is not written for a
+// caller outside it.
+function agentProgressAllowed(env, actor) {
+  return askEditV2Allowed(env, actor).catch(() => false);
+}
+
+// Suggestions (propose_edits / tdoc-propose) sent for a handed-off comment:
+// how many edits are waiting, for the progress line ("Suggested 3 edits").
+// A new set replaces every open set sharing ANY of its comments in the store
+// (replace_comments), so the count is kept per comment set and every older
+// set overlapping the new one is dropped the same way rather than summed.
+// Only a proposer the handoff was addressed to (`scope`, handoffAckScope) is
+// credited; another writer's set still clears what it replaced. The newest
+// open handoff carrying one of these comments takes the count; suggestions
+// that name no comment belong to no handoff.
+async function noteHandoffSuggestions(env, slug, commentIds, count, at, scope) {
+  if (!env || !env.META || !slug || !Array.isArray(commentIds) || !commentIds.length || !(count > 0)) return;
+  const list = await loadHandoffs(env, slug);
+  const overlaps = (key) => String(key).split(',').some((id) => commentIds.includes(id));
+  const target = list
+    .filter((h) => h && handoffOpen(h) && Array.isArray(h.comment_ids) && h.comment_ids.some((id) => commentIds.includes(id)))
+    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))[0];
+  const credit = !!(target && handoffInScope(target, scope));
+  const key = [...commentIds].sort().join(',');
+  let changed = false;
+  const next = list.map((h) => {
+    if (!h) return h;
+    const had = h.suggested_sets && typeof h.suggested_sets === 'object' ? h.suggested_sets : {};
+    const sets = Object.fromEntries(Object.entries(had).filter(([k]) => !overlaps(k)));
+    const dropped = Object.keys(sets).length !== Object.keys(had).length;
+    if (h === target && credit) {
+      changed = true;
+      return { ...h, suggested_sets: { ...sets, [key]: count }, suggested_at: at };
+    }
+    if (!dropped) return h;
+    changed = true;
+    return { ...h, suggested_sets: sets };
+  });
+  if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+}
+
+function handoffSuggestedEdits(h) {
+  const sets = h && h.suggested_sets && typeof h.suggested_sets === 'object' ? Object.values(h.suggested_sets) : [];
+  const total = sets.reduce((sum, n) => sum + (Number.isInteger(n) && n > 0 ? n : 0), 0);
+  return total || null;
+}
+
+// What the handed-to agent says it is doing ("Editing the Pack section"),
+// shown as the current step of the progress line. Plain text, one line,
+// short; an agent may post one every HANDOFF_PROGRESS_MIN_MS and at most
+// HANDOFF_PROGRESS_MAX times per handoff.
+const HANDOFF_PROGRESS_CHARS = 80;
+const HANDOFF_PROGRESS_MIN_MS = 10 * 1000;
+const HANDOFF_PROGRESS_MAX = 60;
+function cleanHandoffProgress(raw) {
+  const one = String(raw == null ? '' : raw)
+    // Control, format (bidi, zero-width) and line separators: one plain line.
+    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!one) return '';
+  const chars = [...one];
+  return chars.length > HANDOFF_PROGRESS_CHARS
+    ? `${chars.slice(0, HANDOFF_PROGRESS_CHARS - 1).join('').trimEnd()}…`
+    : one;
 }
 
 // A delivery record's `at` is the LAST send attempt (the resend clock the
@@ -10522,7 +10606,7 @@ async function createFeedbackSiteSpace(env, req, session, { origins, team, title
 // them loses them when dev mode is turned off). Only flags the widget reads,
 // never the person's dev-mode status as such: the page holding the token
 // can read this answer. UI only -- nothing the server allows depends on it.
-const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['feedbackAreaSelect', 'feedbackDocFramePick']);
+const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['feedbackAreaSelect', 'feedbackDocFramePick', 'agentProgress']);
 async function feedbackDevFlags(env, session) {
   if (!session) return [];
   let dev = null;
@@ -14919,7 +15003,7 @@ const SCOPED_TOKEN_ROUTES = new Set([
   // The daemon's queue (bin/tdoc-daemon). Each re-checks the doc against the
   // token's workspaces; pending lists only handoffs on docs it reaches.
   '/api/notify/local/register', '/api/notify/local/pending', '/api/notify/local/fail',
-  '/api/notify/ack', '/api/notify/resolve',
+  '/api/notify/ack', '/api/notify/resolve', '/api/notify/progress',
   // A question asked of a team agent (Ask only): handleAgentAsk re-checks the
   // doc against the token, and a team agent finds only questions asked of it.
   '/api/agent/ask-ack', '/api/agent/ask-reply', '/api/agent/ask-done',
@@ -18860,7 +18944,7 @@ function commentThreadActivity(comment) {
 // agent. Resolution is per comment id, so a partially-resolved handoff shows
 // exactly which of its comments are done.
 function withHandoffStatus(list, handoffs) {
-  const bare = { handoff_status: 'note', handoff_id: null, handoff_at: null, handoff_acked_at: null, handoff_delivery: null, handoff_to: null, handoff_first_reply_at: null, handoff_first_version_at: null };
+  const bare = { handoff_status: 'note', handoff_id: null, handoff_at: null, handoff_acked_at: null, handoff_delivery: null, handoff_to: null, handoff_first_reply_at: null, handoff_first_version_at: null, handoff_suggested_edits: null, handoff_suggested_at: null, handoff_last_version: null, handoff_last_version_at: null, handoff_progress: null };
   if (!Array.isArray(list) || !Array.isArray(handoffs) || !handoffs.length) {
     return Array.isArray(list) ? list.map(c => ({ ...c, ...bare })) : list;
   }
@@ -18888,6 +18972,13 @@ function withHandoffStatus(list, handoffs) {
         // published timeline.
         handoff_first_reply_at: h.first_reply_at || null,
         handoff_first_version_at: h.first_version_at || null,
+        // The progress line's work steps: edits suggested, the newest version
+        // published while open, and the agent's own one-line status.
+        handoff_suggested_edits: handoffSuggestedEdits(h),
+        handoff_suggested_at: h.suggested_at || null,
+        handoff_last_version: Number.isInteger(h.last_version) ? h.last_version : null,
+        handoff_last_version_at: h.last_version_at || null,
+        handoff_progress: h.progress && h.progress.text ? { text: h.progress.text, at: h.progress.at || null } : null,
         handoff_delivery: h.delivery ? {
           status: h.delivery.status,
           error: h.delivery.error || null,
@@ -18914,7 +19005,7 @@ function withHandoffStatus(list, handoffs) {
 // Handoff routing and delivery are private to the commenter and the people
 // who manage this document. A public or team-readable comment can still be
 // read normally without exposing which agent was asked to handle it.
-const PRIVATE_HANDOFF_FIELDS = ['handoff_status', 'handoff_id', 'handoff_at', 'handoff_acked_at', 'handoff_delivery', 'handoff_to', 'handoff_resend_allowed', 'handoff_first_reply_at', 'handoff_first_version_at'];
+const PRIVATE_HANDOFF_FIELDS = ['handoff_status', 'handoff_id', 'handoff_at', 'handoff_acked_at', 'handoff_delivery', 'handoff_to', 'handoff_resend_allowed', 'handoff_first_reply_at', 'handoff_first_version_at', 'handoff_suggested_edits', 'handoff_suggested_at', 'handoff_last_version', 'handoff_last_version_at', 'handoff_progress'];
 // The member who sent a handoff: `sent_by` for one sent to a team agent,
 // `by` for one queued on the member's own agent (a team agent's `by` is the
 // agent, never a person).
@@ -22082,6 +22173,15 @@ async function handleProposeEdits(env, req, url, slug) {
   const added = await suggestionsOp(env, slug, { kind: 'add', set, replace_comments: true, open_cap: SUGGEST_OPEN_PER_AGENT });
   if (!added.ok && added.error === 'too_many_open_suggestions') return json({ error: 'too_many_open_suggestions', message: 'This agent already has suggestions waiting on this doc; wait for the person to review them.' }, { status: 429 });
   if (!added.ok) return suggestionsUnavailable();
+  // The handoff these comments rode on learns how many edits are waiting,
+  // for the progress line on its card. Never fails the suggestion.
+  // Only with the progress line on, and only for the agent it was handed to.
+  try {
+    if (await agentProgressAllowed(env, auth.actor)) {
+      const scope = await handoffAckScope(env, auth.actor, acting);
+      await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created, scope);
+    }
+  } catch {}
   // The suggestions this handoff asked for have landed: for the comments they
   // name, or for all of it when they name none.
   if (auth.actor.kind === 'hosted' && !auth.actor.team_agent) {
@@ -25391,6 +25491,33 @@ const MCP_TOOLS = {
       const r = await mcpApi(call, 'POST', '/api/notify/resolve', { slug: ref.slug, handoff_id: comment.handoff_id, comment_ids: [args.comment_id] });
       if (!r.ok || !r.data) return mcpApiError(r);
       return mcpToolResult(`Marked handled (${r.data.resolved} of ${r.data.of} comments in that hand-off).`, { ok: true, resolved: true, handoff_id: comment.handoff_id, done: r.data.resolved, of: r.data.of });
+    },
+  },
+
+  report_progress: {
+    title: 'Say what you are working on',
+    // Dev mode only while the progress line is (shell flag agentProgress).
+    devMode: true,
+    description: 'While working on a comment handed to you, post one short line saying what you are doing now ("Editing the Pack section"); the person sees it on the comment. Optional; at most one every 10 seconds.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string' },
+        comment_id: { type: 'string' },
+        text: { type: 'string', maxLength: 200 },
+        raft_agent: MCP_RAFT_AGENT_PARAM,
+      },
+      required: ['slug', 'comment_id', 'text'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    async run(call, args) {
+      const ref = mcpSlugArg(args.slug);
+      const text = typeof args.text === 'string' ? args.text.trim() : '';
+      if (!ref || typeof args.comment_id !== 'string' || !args.comment_id || !text) return mcpToolError('invalid_arguments', 'slug, comment_id and text are required.');
+      const r = await mcpApi(call, 'POST', '/api/notify/progress', { slug: ref.slug, comment_id: args.comment_id, text }, { raftAgent: args.raft_agent });
+      if (!r.ok || !r.data || !r.data.ok) return mcpApiError(r);
+      return mcpToolResult(`Shown on the comment: "${r.data.progress.text}".`, { ok: true, handoff_id: r.data.handoff_id, progress: r.data.progress });
     },
   },
 
@@ -31255,6 +31382,63 @@ const tdocHandlers = {
       return json({ ok: true, handoff_id: rec.handoff_id, acked_at: rec.acked_at, already: false });
     }
 
+    // The handed-to agent's one-line status ("Editing the Pack section"),
+    // shown as the current step of the progress line on the comment card.
+    // Optional: the line is built from what tdoc already records (delivery,
+    // pickup, suggestions, versions, replies) without it. Only the agent the
+    // handoff was addressed to may post, on that handoff, on this doc; the
+    // text is one plain line, capped, and rate-limited per handoff.
+    //   POST /api/notify/progress { slug, handoff_id? | comment_id?, text }
+    if (p === '/api/notify/progress' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      // Dev mode / PR preview only, as report_progress is: anybody else
+      // finds no such route.
+      if (!(await agentProgressAllowed(env, auth.actor))) return new Response('Not found', { status: 404 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = body && body.slug;
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const text = cleanHandoffProgress(body.text);
+      if (!text) return json({ error: 'invalid_arguments', message: 'text is required: one short line.' }, { status: 400 });
+      const handoffId = typeof body.handoff_id === 'string' && body.handoff_id ? body.handoff_id : null;
+      const commentId = typeof body.comment_id === 'string' && body.comment_id ? body.comment_id : null;
+      if (!handoffId && !commentId) return json({ error: 'invalid_arguments', message: 'Pass handoff_id or comment_id.' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
+      // The handoff is looked up on THIS doc only: an id from another doc is
+      // simply not found.
+      const list = await loadHandoffs(env, slug);
+      const prev = handoffId
+        ? list.find((h) => h && h.handoff_id === handoffId)
+        : list
+          .filter((h) => h && handoffOpen(h) && Array.isArray(h.comment_ids) && h.comment_ids.includes(commentId))
+          .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))[0];
+      if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      if (!teamHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
+      // Stricter than the ack: a handoff that names no recipient has nobody
+      // who may speak for it (only the provider admin token).
+      if (auth.actor.kind !== 'admin') {
+        const claimed = auth.actor.kind === 'hosted' ? await actingAgent(env, req, auth.actor) : null;
+        const scope = await handoffAckScope(env, auth.actor, claimed);
+        if (!(prev.recipient || prev.team_agent) || !handoffInScope(prev, scope)) {
+          return json({ error: 'not_handoff_recipient', message: 'Only the agent this comment was handed to can post its status.' }, { status: 403 });
+        }
+      }
+      if (!handoffOpen(prev)) return json({ error: 'handoff_closed', message: 'Every comment in this handoff is marked handled.' }, { status: 409 });
+      const nowMs = Date.now();
+      const lastMs = Date.parse((prev.progress && prev.progress.at) || '');
+      if (Number.isFinite(lastMs) && nowMs - lastMs < HANDOFF_PROGRESS_MIN_MS) {
+        const retryAfter = Math.ceil((HANDOFF_PROGRESS_MIN_MS - (nowMs - lastMs)) / 1000);
+        return json({ error: 'rate_limited', retry_after: retryAfter, message: `One status every ${HANDOFF_PROGRESS_MIN_MS / 1000} seconds.` }, { status: 429, headers: { 'Retry-After': String(retryAfter) } });
+      }
+      const n = Number.isInteger(prev.progress_n) ? prev.progress_n : 0;
+      if (n >= HANDOFF_PROGRESS_MAX) return json({ error: 'too_many_progress', message: 'This handoff has had enough status updates; reply on the comment instead.' }, { status: 429 });
+      const progress = { text, at: new Date(nowMs).toISOString() };
+      const rec = await putHandoff(env, slug, { ...prev, progress, progress_n: n + 1 });
+      return json({ ok: true, handoff_id: rec.handoff_id, progress });
+    }
+
     if (p === '/api/notify/resolve' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
       if (!auth.ok) return auth.response;
@@ -32401,7 +32585,8 @@ const tdocHandlers = {
           // agent learns the first time it changed the doc. Never fails
           // the publish.
           await noteHandoffVersion(env, slug, {
-            actor: auth.actor, target: publishingAgent, at: new Date().toISOString(),
+            actor: auth.actor, target: publishingAgent, at: new Date().toISOString(), version: verNum,
+            progress: await agentProgressAllowed(env, auth.actor),
           });
         } catch (e) {
           console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));
