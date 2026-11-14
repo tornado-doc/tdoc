@@ -10,6 +10,8 @@
 #     [--login grok] [--name Grok] [--avatar-url https://...] [--force]
 #   tdoc-agent-reply --slug <slug> --ask <ask_id> --text "..."
 #                                       # private answer to a reader's question
+#   tdoc-agent-reply --slug <slug> --parent <id> --progress "Editing the Pack section"
+#                                       # one-line status on a comment handed to you (dev mode)
 #   tdoc-agent-reply --print-identity   # login/name JSON, no network
 #
 # Posts to the published worker when ~/.tdoc/published.json exists,
@@ -30,6 +32,7 @@ NAME=""
 AVATAR=""
 FORCE=0
 PRINT_IDENTITY=0
+PROGRESS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -37,6 +40,7 @@ while [ $# -gt 0 ]; do
     --parent|--parent-id) PARENT="${2:-}"; shift 2 ;;
     --ask) ASK="${2:-}"; shift 2 ;;
     --text) TEXT="${2:-}"; shift 2 ;;
+    --progress) PROGRESS="${2:-}"; shift 2 ;;
     --status) STATUS="${2:-}"; shift 2 ;;
     --applied-in) APPLIED_IN="${2:-}"; shift 2 ;;
     --login) LOGIN="${2:-}"; shift 2 ;;
@@ -45,7 +49,7 @@ while [ $# -gt 0 ]; do
     --force) FORCE=1; shift ;;
     --print-identity) PRINT_IDENTITY=1; shift ;;
     -h|--help)
-      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -93,6 +97,18 @@ if [ "$PRINT_IDENTITY" = 1 ]; then
   exit 0
 fi
 
+# A status line (POST /api/notify/progress): what the agent handed this
+# comment is doing now. The server checks it is that agent, caps the text
+# and rate-limits it; the reply below is still how the work is answered.
+WHAT="agent reply"
+if [ -n "$PROGRESS" ]; then
+  if [ -z "$SLUG" ] || [ -z "$PARENT" ] || [ -n "$ASK" ]; then
+    echo "usage: tdoc-agent-reply --slug <slug> --parent <id> --progress \"...\"" >&2
+    exit 1
+  fi
+  TEXT="$PROGRESS"
+  WHAT="progress"
+fi
 if [ -z "$SLUG" ] || { [ -z "$PARENT" ] && [ -z "$ASK" ]; } || [ -z "$TEXT" ]; then
   echo "usage: tdoc-agent-reply --slug <slug> --parent <id> --text \"...\"" >&2
   echo "       tdoc-agent-reply --slug <slug> --ask <ask_id> --text \"...\"" >&2
@@ -102,6 +118,7 @@ fi
 # no comment, no status, and only the account that asked may answer it.
 ROUTE="/api/agent/reply"
 [ -n "$ASK" ] && ROUTE="/api/agent/ask-reply"
+[ -n "$PROGRESS" ] && ROUTE="/api/notify/progress"
 if ! printf '%s' "$SLUG" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
   echo "[tdoc] invalid slug '$SLUG'" >&2
   exit 1
@@ -111,7 +128,8 @@ fi
 # of /tdoc edit, and macOS ships no jq, so a jq dependency here takes the whole
 # comment loop down on a stock machine. See #276.
 PAYLOAD="$(node -e '
-  const [slug, parent, text, status, applied, login, name, avatar, force, ask] = process.argv.slice(1);
+  const [slug, parent, text, status, applied, login, name, avatar, force, ask, progress] = process.argv.slice(1);
+  if (progress) { process.stdout.write(JSON.stringify({ slug, comment_id: parent, text })); process.exit(0); }
   if (ask) { process.stdout.write(JSON.stringify({ slug, ask_id: ask, text, agent_login: login, agent_name: name })); process.exit(0); }
   const o = { slug, parent_id: parent, text, agent_login: login, agent_name: name };
   if (status !== "") o.status = status;
@@ -119,7 +137,7 @@ PAYLOAD="$(node -e '
   if (avatar !== "") o.agent_avatar_url = avatar;
   if (force === "1") o.force = true;
   process.stdout.write(JSON.stringify(o));
-' "$SLUG" "$PARENT" "$TEXT" "$STATUS" "$APPLIED_IN" "$LOGIN" "$NAME" "$AVATAR" "$FORCE" "$ASK")"
+' "$SLUG" "$PARENT" "$TEXT" "$STATUS" "$APPLIED_IN" "$LOGIN" "$NAME" "$AVATAR" "$FORCE" "$ASK" "$PROGRESS")"
 
 # Which Raft agent this is. The Raft runtime exposes both ids; the server honours
 # the claim only for an agent already linked to this account (actingAgent in the
@@ -152,11 +170,11 @@ post_reply() {
     resp="$(curl -sS --max-time 20 -w $'\n%{http_code}' \
       -X POST "$url" -H "Authorization: Bearer $tok" ${RAFT_AGENT_HDR[@]+"${RAFT_AGENT_HDR[@]}"} \
       -H "Content-Type: application/json" -d "$PAYLOAD" 2>&1)" || {
-        echo "[tdoc] agent reply NOT posted: network error calling $url" >&2; return 1; }
+        echo "[tdoc] $WHAT NOT posted: network error calling $url" >&2; return 1; }
   else
     resp="$(curl -sS --max-time 20 -w $'\n%{http_code}' \
       -X POST "$url" -H "Content-Type: application/json" -d "$PAYLOAD" 2>&1)" || {
-        echo "[tdoc] agent reply NOT posted: network error calling $url" >&2; return 1; }
+        echo "[tdoc] $WHAT NOT posted: network error calling $url" >&2; return 1; }
   fi
   http="${resp##*$'\n'}"        # last line = status code
   body="${resp%$'\n'*}"         # everything before it = body
@@ -166,16 +184,16 @@ post_reply() {
     _rerr="$(printf '%s' "$body" | json_get error 2>/dev/null)"
     _rmsg="$(printf '%s' "$body" | json_get message 2>/dev/null)"
     if [ "$_rerr" = "agent_not_author_editor" ] || [ "$_rerr" = "answer_only_run" ]; then
-      echo "[tdoc] agent reply NOT posted ($_rerr): ${_rmsg:-this agent may not change this doc.}" >&2
+      echo "[tdoc] $WHAT NOT posted ($_rerr): ${_rmsg:-this agent may not change this doc.}" >&2
       [ "$_rerr" = "agent_not_author_editor" ] && echo "[tdoc] Post it as an answer instead: drop --status applied/partial." >&2
       return 1
     fi
-    echo "[tdoc] agent reply NOT posted: $url returned HTTP $http" >&2
+    echo "[tdoc] $WHAT NOT posted: $url returned HTTP $http" >&2
     return 1
   fi
   local err
   if err="$(printf '%s' "$body" | json_error)"; then
-    echo "[tdoc] agent reply NOT posted: $err" >&2
+    echo "[tdoc] $WHAT NOT posted: $err" >&2
     return 1
   fi
   # A skip is a success, not a failure — and not silence either. The server

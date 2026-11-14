@@ -1,8 +1,10 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { AgentMentionContext, MentionText } from './mention-field.jsx';
-import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, taggedAgent, targetKey } from './agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sendToAgentState, sendToAgentWords, taggedAgent, taggedAgentSpan, targetKey } from './agent-choices.js';
 import { AppCheckbox } from '../ui/checkbox.jsx';
+import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
+import { AgentMenuItems } from './agent-menu.jsx';
 import { mentionsAi, onlyMeDefault } from './ai-answerer.js';
 
 // The @agent part of a comment box, shared by the new-comment composer and
@@ -58,12 +60,13 @@ export function useAgentAsk(text, setText, fieldRef = null) {
     const tag = `${lead}${tagOf(t)} `;
     return { text: `${before}${tag}${after.replace(/^ /, '')}`, caret: pos + tag.length };
   };
-  // The @agent button: the default agent's pill at the caret. With one there
-  // already, the caret goes back to the text.
-  const putDefault = () => {
+  // The @agent button: `t`'s pill (the default agent's) at the caret, or a
+  // bare @ to pick from when there is none. With a pill there already, the
+  // caret goes back to the text.
+  const putTag = (t) => {
     const box = fieldRef && fieldRef.current;
-    const next = agents.preselected
-      ? withAgent(text, agents.preselected, box ? box.selectionStart : null)
+    const next = t
+      ? withAgent(text, t, box ? box.selectionStart : null)
       : { text: `${text}${text && !/\s$/.test(text) ? ' ' : ''}@`, caret: null };
     if (next.text !== text) setText(next.text);
     requestAnimationFrame(() => {
@@ -73,6 +76,7 @@ export function useAgentAsk(text, setText, fieldRef = null) {
       if (next.caret != null) el.setSelectionRange(next.caret, next.caret);
     });
   };
+  const putDefault = () => putTag(agents.preselected);
   // Start the box with this agent's tag, caret after it. Returns the text.
   const putAgent = (t) => {
     const next = withAgent(text, t, 0);
@@ -82,6 +86,26 @@ export function useAgentAsk(text, setText, fieldRef = null) {
       if (el && next.caret != null && document.activeElement === el) el.setSelectionRange(next.caret, next.caret);
     });
     return next.text;
+  };
+  const caretAfter = (pos) => requestAnimationFrame(() => {
+    const el = fieldRef && fieldRef.current;
+    if (el && document.activeElement === el) el.setSelectionRange(pos, pos);
+  });
+  // The Send to agent control swaps the tag the picker inserted; typing @
+  // makes the same tag, so both paths hand the comment to the same agent.
+  const replaceAgent = (t) => {
+    const span = taggedAgentSpan(text, choices);
+    if (!span) { putAgent(t); return; }
+    const tag = `${tagOf(t)} `;
+    const next = `${text.slice(0, span.start)}${tag}${text.slice(span.end).replace(/^ /, '')}`;
+    setText(next);
+    caretAfter(span.start + tag.length);
+  };
+  const clearAgent = () => {
+    const span = taggedAgentSpan(text, choices);
+    if (!span) return;
+    setText(`${text.slice(0, span.start)}${text.slice(span.end).replace(/^ /, '')}`);
+    caretAfter(span.start);
   };
   // What a submit sends. `withDefault` (⌘⇧Enter): put the default agent in
   // first when none is named.
@@ -97,7 +121,7 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   return {
     agents, choices, target, canChange, ownOrCloud, onlyMe: private_,
     askOnly, askOnlyForced, askOnlyOffered, setAskOnly,
-    setOnlyMe, putDefault, putAgent, outgoing,
+    setOnlyMe, putDefault, putTag, putAgent, replaceAgent, clearAgent, outgoing,
   };
 }
 
@@ -119,6 +143,89 @@ export function AgentButton({ ask, busy = false, className = 'tdoc-composer-agen
     >
       @agent
     </button>
+  );
+}
+
+// The one Send to agent control every comment box shows (Kat feedback): the
+// same judgment the @ picker uses, so the doc page and the widget cannot
+// drift. Ready: it names the default/last agent and its menu swaps the tag
+// the comment will carry (or turns it off). Connect: the viewer could send
+// but nobody is linked, so it opens the connect prompt instead of failing.
+// Disabled: it stays visible and says why on hover.
+export function SendToAgentToggle({ ask, busy = false, className = 'tdoc-send-agent-toggle ui-btn ui-btn-secondary ui-btn-m', onConnect = null }) {
+  const { agents, choices, target } = ask;
+  const state = agents.sendToAgent || sendToAgentState({
+    canSendToAgent: Boolean(agents.canSendToAgent),
+    choices,
+    disabledReason: agents.sendToAgentDisabledReason,
+    connectPrompt: agents.connectAgentPrompt,
+    setupHref: agents.agentSetupHref,
+  });
+  const editable = state.kind === 'ready' ? state.choices : [];
+  // The control is also the @agent button: an agent that may only answer is
+  // still somebody the comment can go to (Ask only / Only me), so the button
+  // stays live on those rows even though they are not send targets.
+  const offer = choices;
+  const askable = state.kind !== 'ready' && state.kind !== 'connect' && offer.length > 0;
+  const menuChoices = editable.length ? editable : offer;
+  const current = target && offer.some((t) => targetKey(t) === targetKey(target)) ? target : null;
+  const pre = (list) => list.find((t) => agents.preselected && targetKey(t) === targetKey(agents.preselected));
+  // The agent the button names is the one its click puts in: this box's
+  // default only. With none (composerDefault never hands a member or reader
+  // somebody else's agent) it names nobody and its click is a bare @ to
+  // pick from -- never a label for one agent and a click for another.
+  const fallback = (state.kind === 'ready' ? pre(editable) : askable ? pre(offer) : null) || null;
+  const shown = current || fallback;
+  if (state.kind === 'connect') {
+    const title = state.prompt || state.reason || 'Connect an agent to send comments to it';
+    if (onConnect) {
+      return <button className={className} type="button" disabled={busy} onClick={onConnect} title={title}>Send to agent</button>;
+    }
+    if (state.href) {
+      return <a className={className} href={state.href} title={title}>Send to agent</a>;
+    }
+    return <button className={className} type="button" disabled title={title}>Send to agent</button>;
+  }
+  if (state.kind !== 'ready' && !askable) {
+    return <button className={className} type="button" disabled title={state.reason}>Send to agent</button>;
+  }
+  const words = sendToAgentWords(shown, { editable, offer, asking: state.kind !== 'ready' });
+  // Nothing named yet: the control is the @agent button -- it puts the
+  // agent it names in, and the pill's own menu swaps it. Once a pill is in
+  // the text the control becomes the switch: pick another agent or turn it off.
+  if (!current) {
+    return (
+      <button
+        className={className}
+        type="button"
+        disabled={busy}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => ask.putTag(fallback)}
+        title={words.title}
+      >
+        {words.label}
+      </button>
+    );
+  }
+  return (
+    <AppMenu
+      align="end"
+      popupClassName="tdoc-agent-menu"
+      trigger={(
+        <button
+          className={className}
+          type="button"
+          disabled={busy}
+          aria-pressed
+          title={words.switchTitle}
+        >
+          {words.label}
+        </button>
+      )}
+    >
+      <AppMenuItem className="tdoc-agent-menu-item" onClick={ask.clearAgent}><span className="tdoc-agent-menu-name">{words.off}</span></AppMenuItem>
+      <AgentMenuItems choices={menuChoices} current={current} onPick={ask.replaceAgent} showConnect={false} preserveOrder />
+    </AppMenu>
   );
 }
 

@@ -380,3 +380,75 @@ export function taggedAgentSpan(text, choices) {
   }
   return best ? { target: best, start: at, end: at + bestLength } : null;
 }
+
+// The one Send to agent control both composers show. `choices` is the
+// composer's @ list; only rows that may edit are send targets. The state is
+// decided once here so the doc page and the feedback widget cannot drift:
+//   ready    - at least one agent may take the comment
+//   connect  - this viewer could send, but nobody is linked yet
+//   disabled - this viewer cannot hand comments to an agent (say why)
+export function sendToAgentState({ canSendToAgent = false, choices = [], disabledReason = null, connectPrompt = null, setupHref = null } = {}) {
+  const editable = (Array.isArray(choices) ? choices : []).filter((t) => t && t.can_edit);
+  if (canSendToAgent && editable.length) return { kind: 'ready', choices: editable };
+  if (connectPrompt || setupHref) return { kind: 'connect', prompt: connectPrompt, href: setupHref, reason: disabledReason };
+  return { kind: 'disabled', reason: disabledReason || 'No agent can take comments here yet.' };
+}
+
+// Who may hand a comment to an agent, as POST /api/notify/handoff decides
+// it: the doc's (space's) owner, or on a team doc any current member of
+// that team (the team's agent; an admin also their own). A team guest is not
+// a member. One rule and one sentence for the doc page, the feedback space
+// and the widget, so the three cannot drift again.
+export const SEND_TO_AGENT_WHO = 'Only the owner or a member of its team can send comments to an agent';
+export function maySendToAgent({ owner = false, teamMember = false } = {}) {
+  return Boolean(owner || teamMember);
+}
+
+// The rest of the control's inputs, from that rule and the notify targets
+// (useNotifyTargets): the Connect link while this viewer may send but nobody
+// is linked, and the hover text while the control is disabled.
+//   may       - maySendToAgent for this viewer
+//   notifyOn  - this host can notify at all
+//   targets   - { ready, reason } from useNotifyTargets
+//   href      - where Connect an agent lives on this surface
+export function sendToAgentSetup({ canSendToAgent = false, may = false, notifyOn = true, targets = null, href = null } = {}) {
+  const ready = Boolean(targets && targets.ready);
+  const setupHref = may && notifyOn && ready && targets.reason === 'no_agent_bound' ? href : null;
+  const disabledReason = canSendToAgent ? null
+    : !may ? SEND_TO_AGENT_WHO
+      : !notifyOn ? 'Notify is not available on this host yet.'
+        : !ready ? 'Finding your agents…'
+          : notifyHandoffReasonText(targets.reason) || 'No agent can take comments here yet.';
+  return { setupHref, disabledReason };
+}
+
+// Why the server would not hand this doc's comments to an agent, in the
+// words the control's tooltip uses. null where the answer is "connect one".
+export function notifyHandoffReasonText(reason) {
+  if (reason === 'team_admin_only') return 'Only a workspace admin can send this team doc to an agent.';
+  if (reason === 'no_team_daemon') return 'Set up an always-on agent before sending comments to an agent.';
+  if (reason === 'no_team_agent') return 'This team has no agent yet.';
+  if (reason === 'team_agent_not_writer') return 'The team agent did not write this doc, so it cannot take these comments.';
+  if (reason === 'no_agent_bound') return null;
+  return reason ? 'No agent can take comments here yet.' : null;
+}
+
+// The control's words for the agent it names. One that may take the comment
+// (a send target) is "Send to agent · X"; one that may only answer -- the
+// viewer's own agent or tdoc AI where they cannot hand off -- is asked, so the
+// control says "Ask X", which is what submitting does. With no agent named,
+// `asking` (the viewer cannot hand off, only ask) picks the words.
+export function sendToAgentWords(agent, { editable = [], offer = [], asking = false } = {}) {
+  if (!agent) {
+    return asking
+      ? { label: 'Ask agent', title: 'Ask an agent about this comment', switchTitle: 'Ask an agent about this comment', off: "Don't ask" }
+      : { label: 'Send to agent', title: 'Send this comment to an agent', switchTitle: 'Send this comment to an agent', off: "Don't send" };
+  }
+  const sends = editable.some((t) => targetKey(t) === targetKey(agent));
+  const list = sends ? editable : offer;
+  const short = agentMentionName(agent, list);
+  const full = agentDisplayName(agent, list);
+  return sends
+    ? { label: `Send to agent · ${short}`, title: `Send this comment to ${full}`, switchTitle: `Sending to ${full} — pick another or turn it off`, off: "Don't send" }
+    : { label: `Ask ${short}`, title: `Ask ${full} about this comment`, switchTitle: `Asking ${full} — pick another or turn it off`, off: "Don't ask" };
+}

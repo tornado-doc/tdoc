@@ -10,7 +10,7 @@ import { usePortalContainer } from '../ui/portal.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
-import { AgentAskRow, AgentButton, AskOnlyToggle, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
+import { AgentAskRow, AskOnlyToggle, PrivateAnswer, SendToAgentToggle, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { agentForThread, targetKey } from './agent-choices.js';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, avatarInitial, QUICK_REACTIONS, tdocUrl } from './model.js';
@@ -313,23 +313,7 @@ function ReplyForm({
           {canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
         </span>
         <div className="tdoc-reply-form-actions">
-          {v4 && agentSetupHref && !canSendToAgent ? (
-            <a className="tdoc-reply-submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref} title="Connect an agent first">@agent</a>
-          ) : v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent ui-btn ui-btn-secondary ui-btn-m" /> : null}
-          {agentButtons && !canSendToAgent && agentSetupHref ? (
-            <a className="tdoc-reply-submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref} title="Connect an agent first">@agent</a>
-          ) : null}
-          {agentButtons && canSendToAgent ? (
-            <button
-              className="tdoc-reply-submit agent ui-btn ui-btn-secondary ui-btn-m"
-              type="button"
-              onClick={() => submit(true)}
-              disabled={busy}
-              title="Reply and hand to the following agent"
-            >
-              {busy ? 'Posting…' : '@agent'}
-            </button>
-          ) : null}
+          {v4 || agentButtons ? <SendToAgentToggle ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent tdoc-send-agent-toggle ui-btn ui-btn-secondary ui-btn-m" /> : null}
           {v4 ? <AskOnlyToggle ask={ask} busy={busy} /> : null}
           <button className="tdoc-reply-submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
             {busy ? 'Posting…' : 'Reply'}
@@ -659,6 +643,9 @@ export const CommentDocVersionContext = createContext(null);
 export function CommentCard({
   comment,
   currentUser,
+  // The agent progress line (flag agentProgress); undefined reads the flag
+  // on tdoc's own origin, the feedback widget passes its session's answer.
+  progressLine,
   handoffViewer = currentUser,
   isOwner = false,
   mentionable = [],
@@ -897,7 +884,7 @@ export function CommentCard({
           </span>
         ) : null}
         {demo || canSeeHandoff(comment, handoffViewer, isOwner) ? (
-          <HandoffStatusChips comment={comment} onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff} />
+          <HandoffStatusChips comment={comment} progressLine={progressLine} onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff} />
         ) : null}
         {unread ? (onMarkRead && !onSeen
           ? <button type="button" className="tdoc-thread-mark-read" aria-label="Mark as read" title="Mark as read" onClick={() => onMarkRead(comment)}><span className="tdoc-thread-unread-dot" aria-hidden="true" /></button>

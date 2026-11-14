@@ -184,6 +184,21 @@ export function createDocument(team) {
   });
 }
 
+// New › Write with your agent (flag writeWithAgent): the account's own agents
+// tdoc can push to, and the send that makes a private doc for the sentence
+// and hands it to the picked one.
+export function listWriteWithAgentAgents() {
+  return request('/api/write-with-agent/agents');
+}
+
+export function writeWithAgent({ prompt, kind, recipient }) {
+  return request('/api/write-with-agent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, kind, recipient }),
+  });
+}
+
 export function duplicateDocument(slug, version) {
   return request('/api/doc/duplicate', {
     method: 'POST',

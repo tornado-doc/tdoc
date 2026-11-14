@@ -34,6 +34,7 @@ const PARITY = {
   reply_to_comment: { http: ['/api/agent/reply'], cli: 'tdoc-agent-reply' },
   resolve_comment: { http: ['/api/comments', '/api/notify/resolve'], cli: 'tdoc-agent-reply' },
   answer_question: { http: ['/api/agent/ask-reply'], cli: 'tdoc-agent-reply' },
+  report_progress: { http: ['/api/notify/progress'], cli: 'tdoc-agent-reply', why: 'tdoc-agent-reply --progress' },
   share_doc: { http: ['/api/doc/access'], cli: 'tdoc-publish', why: 'tdoc-publish --visibility / --allow-user sets access with the upload' },
   create_feedback_space: { http: ['/api/feedback/spaces'], cli: 'tdoc-feedback', strict: true },
 };

@@ -59,7 +59,7 @@ t('Create a doc is a menu, and only the agent answer opens a dialog', () => {
     'New folder lives in the New menu, not beside the search');
   assert(docsHub.includes('create={hub.createDoc}') && docsHub.includes('canCreate={capabilities.create}'),
     'the blank doc is wired to the hub hook and its capability');
-  assert(docsHub.includes("modal?.type === 'create-agent'") && docsHub.includes('<AgentRecipe kind={modal.kind} />'),
+  assert(docsHub.includes("modal?.type === 'create-agent'") && docsHub.includes('<AgentRecipe kind={modal.kind}'),
     'and the agent answer is the only thing left in a dialog');
   assert(!docsHub.includes('CreateChoice') && !docsHub.includes("'create-help'"), 'the two-card dialog is gone');
 });

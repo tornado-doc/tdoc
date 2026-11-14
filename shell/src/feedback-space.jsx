@@ -6,9 +6,9 @@ import { AppButton } from './ui/button.jsx';
 import { ShareDialog } from './document/document-dialogs.jsx';
 import { OwnerAccessDialog } from './document/owner-access-dialog.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
-import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { composerAgents } from './document/ai-answerer.js';
-import { composerDefault } from './document/agent-choices.js';
+import { composerDefault, maySendToAgent, sendToAgentSetup, sendToAgentState } from './document/agent-choices.js';
 import { askOwnAgent, threadAskPick, useMyAgent } from './document/my-agent.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { CommentPanel } from './comments/panel/comment-panel.jsx';
@@ -59,8 +59,11 @@ export function FeedbackSpace({ boot }) {
   const currentTeam = boot.workspaceId || boot.teamManage?.team?.id || null;
 
   const notifyViewer = (identity && (identity.account_id || identity.login)) || '';
-  const notify = useNotifyTargets(slug, Boolean(isOwner), notifyViewer);
-  const canSendToAgent = Boolean(isOwner && notify.ready && notify.available && notify.reason !== 'no_agent_bound'
+  // Who may send: the owner or a member of the space's team (maySendToAgent,
+  // the server's rule), as on the doc page and in the widget.
+  const sendToAgentMay = maySendToAgent({ owner: isOwner, teamMember: Boolean(boot.teamManage && boot.teamManage.team && !boot.teamManage.guest) });
+  const notify = useNotifyTargets(slug, sendToAgentMay, notifyViewer);
+  const canSendToAgent = Boolean(sendToAgentMay && notify.ready && notify.available && notify.reason !== 'no_agent_bound'
     && (notify.default || (notify.candidates || []).length || notify.fallback));
   // Anyone else who joined: their OWN agents, which answer in the thread
   // and never edit (my-agent.js), as on a doc page.
@@ -74,12 +77,29 @@ export function FeedbackSpace({ boot }) {
     notifyTargets: notify,
     mine: !isOwner && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: myAgent.state.team_agents || [], tdoc_ai: false } : null,
   }), [canSendToAgent, notify.default, notify.candidates, notify.fallback, isOwner, myAgent.state]);
+  // The same Send to agent judgment as the doc page and the widget.
+  const { setupHref: sendToAgentSetupHref, disabledReason: sendToAgentDisabledReason } = sendToAgentSetup({
+    canSendToAgent, may: sendToAgentMay, targets: notify, href: '/me?view=settings#agents',
+  });
+  const sendToAgentConnectPrompt = sendToAgentSetupHref ? CONNECT_AGENT_PROMPT : null;
+  const sendToAgent = useMemo(() => sendToAgentState({
+    canSendToAgent,
+    choices: agentChoices,
+    disabledReason: sendToAgentDisabledReason,
+    connectPrompt: sendToAgentConnectPrompt,
+    setupHref: sendToAgentSetupHref,
+  }), [canSendToAgent, agentChoices, sendToAgentDisabledReason, sendToAgentConnectPrompt, sendToAgentSetupHref]);
   const agentMentions = useMemo(() => ({
     choices: agentChoices,
     preselected: canSendToAgent ? composerDefault(agentChoices, { orTop: true }) : null,
     privateAskSupported: false,
     fixesTheApp: true,
-  }), [agentChoices, canSendToAgent]);
+    canSendToAgent,
+    sendToAgentDisabledReason,
+    connectAgentPrompt: sendToAgentConnectPrompt,
+    agentSetupHref: sendToAgentSetupHref,
+    sendToAgent,
+  }), [agentChoices, canSendToAgent, sendToAgentDisabledReason, sendToAgentConnectPrompt, sendToAgentSetupHref, sendToAgent]);
 
   // Which threads this tab shows: the same area the doc page and the widget
   // use, so a card being typed in stays put the same way everywhere.

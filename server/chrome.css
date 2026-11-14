@@ -1069,6 +1069,12 @@
   .tdoc-handoff-chip.tdoc-handoff-status-text { flex: 0 1 auto; min-width: 0; max-width: 100%; gap: 2px; }
   .tdoc-handoff-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-handoff-line-tail { flex: 0 0 auto; white-space: pre; }
+  /* The agent progress line (flag agentProgress) is a sentence of steps: it
+     wraps onto a second line rather than cutting the steps off, and reads as
+     one block of text instead of a pill. */
+  .tdoc-handoff-chip[data-handoff-progress] { display: block; border-radius: 8px; white-space: normal; overflow-wrap: anywhere; }
+  .tdoc-handoff-chip[data-handoff-progress] .tdoc-handoff-line-text,
+  .tdoc-handoff-chip[data-handoff-progress] .tdoc-handoff-line-tail { display: inline; white-space: normal; overflow: visible; }
   .tdoc-handoff-chip .tdoc-handoff-chip-action {
     appearance: none;
     border: 0;
@@ -1361,6 +1367,10 @@
   .tdoc-popup .tdoc-ask-boxes .ui-checkbox-hint { color: #9a9a9a; }
   .tdoc-popup .tdoc-ask-boxes .ui-checkbox-box:not([data-checked]) { border-color: #8a8a90; }
   .tdoc-popup .foot .tdoc-composer-foot-actions { flex: none; margin-left: auto; }
+  /* Send to agent · <agent>, Ask only and Comment do not fit one 320px row:
+     the actions wrap, right-aligned, instead of pushing out of the popover. */
+  .tdoc-popup .foot { flex-wrap: wrap; row-gap: 6px; }
+  .tdoc-popup .foot .tdoc-composer-foot-actions { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; }
   .tdoc-popup.tdoc-private-ask p.tdoc-private-q { margin: 8px 0 6px; color: #fff; font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
   .tdoc-popup.tdoc-private-ask .tdoc-private-a { max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: #1d1d1f; color: #e8e8e8; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
   .tdoc-popup.tdoc-private-ask .tdoc-private-who { display: block; margin-bottom: 4px; font-size: 11px; font-weight: 600; color: #9aa4ff; }

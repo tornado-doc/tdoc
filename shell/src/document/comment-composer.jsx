@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 import { Copy, X } from 'lucide-react';
 import { AgentButtonsContext, MentionField } from './mention-field.jsx';
 import { joinAiTags, mentionsAi } from './ai-answerer.js';
-import { AgentAskRow, AgentButton, AskOnlyToggle, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
+import { AgentAskRow, AskOnlyToggle, PrivateAnswer, SendToAgentToggle, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { TOP_BAR_HEIGHT, copyText } from './model.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 
@@ -204,7 +204,7 @@ export function CommentComposer({
       {connectOpen && connectAgentPrompt ? (
         <div className="tdoc-connect-agent">
           <p><strong>No agent is connected yet.</strong> Connect one once (Raft or a webhook), then @agent works here.</p>
-          <a className="tdoc-connect-agent-cta" href={agentSetupHref || '/me?view=settings#agents'}>Set up an agent</a>
+          <a className="tdoc-connect-agent-cta ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref || '/me?view=settings#agents'}>Set up an agent</a>
           <details>
             <summary>Or paste this into your agent</summary>
             <code>{connectAgentPrompt}</code>
@@ -223,32 +223,12 @@ export function CommentComposer({
           </span>
         )}
         <div className="tdoc-composer-foot-actions">
-          {!agentButtons && connectAgentPrompt ? (
-            <button className="tdoc-composer-agent ui-btn ui-btn-secondary ui-btn-m" type="button" disabled={busy} aria-expanded={connectOpen}
-              onClick={() => setConnectOpen((value) => !value)} title="Connect an agent to use @agent">@agent</button>
-          ) : !agentButtons ? <AgentButton ask={ask} busy={busy} /> : null}
-          {agentButtons && !canSendToAgent && connectAgentPrompt ? (
-            <button
-              className="submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m"
-              type="button"
-              aria-expanded={connectOpen}
-              onClick={() => setConnectOpen((v) => !v)}
-              title="Connect an agent to hand comments to it"
-            >
-              @agent
-            </button>
-          ) : null}
-          {agentButtons && canSendToAgent ? (
-            <button
-              className="submit agent ui-btn ui-btn-secondary ui-btn-m"
-              type="button"
-              onClick={() => submit(true)}
-              disabled={busy}
-              title={sendToAgentDisabledReason || 'Comment and hand to the following agent'}
-            >
-              {busy ? 'Posting…' : '@agent'}
-            </button>
-          ) : null}
+          <SendToAgentToggle
+            ask={ask}
+            busy={busy}
+            className="tdoc-composer-agent tdoc-send-agent-toggle ui-btn ui-btn-secondary ui-btn-m"
+            onConnect={connectAgentPrompt ? () => setConnectOpen(true) : null}
+          />
           {!agentButtons ? <AskOnlyToggle ask={ask} busy={busy} /> : null}
           <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
             {busy ? 'Posting…' : 'Comment'}

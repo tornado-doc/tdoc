@@ -1,7 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppMenu, AppMenuItem, AppMenuSeparator } from './ui/menu.jsx';
-import { ChevronLeft, FileText, FolderPlus, MessageSquare, Presentation, Sheet, SquarePen, Table2 } from 'lucide-react';
+import { ChevronLeft, FilePenLine, FileText, FolderPlus, MessageSquare, Presentation, Sheet, SquarePen, Table2 } from 'lucide-react';
+import { AskIcon } from './ui/ask-icon.jsx';
 import { copyText } from './document/model.js';
+import { listWriteWithAgentAgents, writeWithAgent } from './document/api.js';
+import { agentDisplayName, targetKey } from './document/agent-choices.js';
+import { AppButton } from './ui/button.jsx';
+import { AppSelect } from './ui/select.jsx';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
 import { DOC_SUBJECT_PLACEHOLDER, DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSubjectPrompt } from './setup-gate.jsx';
@@ -102,7 +107,9 @@ function TypeTile({ kind, icon: Icon, label, onPush }) {
   );
 }
 
-function MethodRow({ icon: Icon, title, busyTitle, busy = false, text, onClick, agents = false }) {
+// `mark`: who writes it, at the end of the row where AgentMarks sits -- tdoc
+// AI's own mark (the one its row wears in the agent picker), not a symbol.
+function MethodRow({ icon: Icon, title, busyTitle, busy = false, text, onClick, agents = false, mark = null }) {
   return (
     <AppMenuItem onClick={onClick} disabled={busy} className="mk-item">
       <Icon size={17} strokeWidth={1.75} aria-hidden="true" />
@@ -112,11 +119,14 @@ function MethodRow({ icon: Icon, title, busyTitle, busy = false, text, onClick, 
       </span>
       {/* At the end of the row, where a list says what it works with. */}
       {agents ? <AgentMarks size={21} /> : null}
+      {mark ? <span className="agent-marks mk-ai-mark" aria-hidden="true"><i>{mark}</i></span> : null}
     </AppMenuItem>
   );
 }
 
-export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuota, onImport, onNewSheet, onNewDeck, onNewFolder, trigger }) {
+// `onWriteWithAi` (flag writeWithTdocAi) adds tdoc AI as a third way to a
+// doc: one sentence, and it writes and publishes it (write-with-ai.jsx).
+export function CreateMenu({ create, team = '', canCreate = true, onAgent, onWriteWithAi, onQuota, onImport, onNewSheet, onNewDeck, onNewFolder, trigger }) {
   const [making, setMaking] = useState('');
   const [pushed, setPushed] = useState(null);
   const popupRef = useRef(null);
@@ -157,6 +167,10 @@ export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuo
           {canCreate ? blank('doc', create, 'Blank doc', 'Opens in edit mode. Type the title on the page.') : null}
           <MethodRow icon={MessageSquare} title="Write it with your agent" agents
             text="Name the subject. It writes and publishes the doc." onClick={() => onAgent('doc')} />
+          {canCreate && onWriteWithAi ? (
+            <MethodRow icon={FilePenLine} title="Write it with tdoc AI" mark={<AskIcon size={13} />}
+              text="One sentence. tdoc AI drafts it and publishes v1." onClick={() => onWriteWithAi('doc')} />
+          ) : null}
         </>
       ),
     },
@@ -227,9 +241,90 @@ export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuo
   );
 }
 
-// The agent answer, and only that: a subject, the line that subject composes,
-// and Copy. `kind` picks the line (AGENT_RECIPES).
-export function AgentRecipe({ kind = 'doc' }) {
+// Where Settings lists the agents tdoc can reach.
+export const CONNECT_AGENT_HREF = '/me?view=settings#agents';
+
+// `send` (flag writeWithAgent): above the line, the sentence goes straight to
+// one of the person's own agents tdoc can push to -- a Raft agent, a webhook,
+// Claude Code or Codex through the tdoc app. tdoc makes a private doc, hands
+// the sentence to that agent, and opens the doc, where the comment's
+// progress line shows the agent at work until it publishes. Chat apps
+// connected over MCP cannot be sent to; with none of the others connected
+// the dialog says so, links to Connect an agent, and the copy line stays.
+// A send that made the doc but did not reach the agent (`sent: false`): the
+// server's message, else a plain line.
+export function writeWithAgentFailure(body) {
+  const msg = typeof body?.message === 'string' && body.message.trim() ? body.message.trim() : '';
+  return msg || 'tdoc made the doc but could not send it to your agent.';
+}
+
+function SendToAgent({ kind, subject, onError }) {
+  const [agents, setAgents] = useState(null);
+  const [picked, setPicked] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [madeUrl, setMadeUrl] = useState('');
+  useEffect(() => {
+    let live = true;
+    listWriteWithAgentAgents()
+      .then((body) => { if (!live) return; const list = Array.isArray(body?.agents) ? body.agents : []; setAgents(list); setPicked(list[0] ? targetKey(list[0]) : ''); })
+      .catch(() => { if (live) setAgents([]); });
+    return () => { live = false; };
+  }, []);
+  if (agents === null) return <p className="mk-foot mk-send-loading">Looking for your agents…</p>;
+  if (!agents.length) {
+    return (
+      <div className="mk-send mk-send-none" role="note">
+        <p>No agent tdoc can send this to yet. It can reach a Raft agent, a webhook, or Claude Code or Codex through the tdoc app on your computer. Chat apps like claude.ai or ChatGPT can only take the line below.</p>
+        <a className="ui-btn ui-btn-secondary ui-btn-s" href={CONNECT_AGENT_HREF}>Connect an agent</a>
+      </div>
+    );
+  }
+  const agent = agents.find((t) => targetKey(t) === picked) || agents[0];
+  const ready = Boolean(subject) && !sending;
+  const send = async () => {
+    if (!ready) return;
+    setSending(true);
+    setError('');
+    setMadeUrl('');
+    try {
+      const body = await writeWithAgent({ prompt: subject, kind, recipient: agent });
+      // The doc was made but the request never reached the agent: say so
+      // here rather than open a doc nobody is writing.
+      if (!body?.sent) {
+        setSending(false);
+        setError(writeWithAgentFailure(body));
+        setMadeUrl(typeof body?.url === 'string' && body.url.startsWith('/') ? body.url : '');
+        return;
+      }
+      // On its way to the new doc: the busy state stays (see CreateMenu).
+      location.assign(body.url);
+    } catch (err) {
+      setSending(false);
+      setError(err?.message || 'Could not send it');
+      onError?.(err);
+    }
+  };
+  return (
+    <div className="mk-send">
+      <div className="mk-send-row">
+        {agents.length > 1 ? (
+          <AppSelect ariaLabel="Agent" className="mk-send-agent" value={targetKey(agent)} onChange={setPicked}
+            options={agents.map((t) => ({ value: targetKey(t), label: agentDisplayName(t, agents) }))} />
+        ) : <span className="mk-send-agent mk-send-one">{agentDisplayName(agent, agents)}</span>}
+        <AppButton variant="primary" onClick={send} disabled={!ready}>{sending ? 'Sending…' : 'Send'}</AppButton>
+      </div>
+      <p className={`mk-foot${error ? ' mk-send-error' : ''}`} role={error ? 'alert' : undefined}>
+        {error || 'tdoc makes a private doc and asks your agent to write it. You watch it there.'}
+        {error && madeUrl ? <> <a href={madeUrl}>Open the doc</a></> : null}
+      </p>
+    </div>
+  );
+}
+
+// The agent answer: a subject, the line that subject composes, and Copy.
+// `kind` picks the line (AGENT_RECIPES); `send` adds SendToAgent above it.
+export function AgentRecipe({ kind = 'doc', send = false }) {
   const recipe = agentRecipeFor(kind);
   const [subject, setSubject] = useState('');
   const [copied, setCopied] = useState(false);
@@ -262,6 +357,8 @@ export function AgentRecipe({ kind = 'doc' }) {
           onChange={(event) => { setSubject(event.target.value); setCopied(false); setCopyFailed(false); }}
         />
       </label>
+      {send ? <SendToAgent kind={kind} subject={trimmed} /> : null}
+      {send ? <p className="mk-or">Or copy it into any agent</p> : null}
       <div className={`mk-line${ready ? '' : ' pending'}`}>
         <p ref={promptRef}>
           <span className="mk-fixed">{recipe.prefix}</span>
