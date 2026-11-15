@@ -1,7 +1,7 @@
 // The progress line on a comment handed to an agent, built only from what
 // tdoc already records on the handoff -- no agent cooperation needed:
 //
-//   Delivered · Reading the doc · Suggested 3 edits · Published v3 · Working · 4 min
+//   Delivered · Reading the doc · Suggested 3 edits · New version · Working · 4 min
 //
 // Before this the card said Delivered -> On it -> replied, and sat on "On it"
 // for minutes with nothing to show that anything was happening (Julie,
@@ -9,18 +9,21 @@
 //   handoff_delivery        Sent (a local daemon's queue) / Delivered
 //   handoff_acked_at        the agent pulled the comments: Reading the doc
 //   handoff_suggested_edits propose_edits sets on these comments: Suggested N edits
-//   handoff_last_version    the newest version it published while open: Published vN
+//   handoff_last_version    it published a version while open: New version
+//                           (never the number: Julie, 2026-11-14)
 //   handoff_first_reply_at  Replied
 //   handoff_progress        the agent's own one-line status, when it posts one
 //                           (report_progress / tdoc-agent-reply --progress),
-//                           shown as the current step while it is the newest.
-// Plain words only: never "handoff".
+//                           shown as the current step while it is the newest,
+//                           in the tooltip only.
+// Plain words only: never "handoff", never a version number.
 //
 // Two lengths (Julie, 2026-11-14: the long line in the pill "doesn't feel
-// native"): the status pill shows only the short current stage
-// (handoffProgressStage: "Reading", "3 edits", "New version"), the same size
-// as every other status pill; the whole line, the agent's own words
-// included, is the detail shown inside an opened thread.
+// native", and a detail line in the thread was "far too much text inside
+// the comment"): the status pill is the only progress UI and shows only the
+// short current stage (handoffProgressStage: "Reading", "3 edits", "New
+// version"), the same size as every other status pill; the whole timeline,
+// the agent's own words included, is the pill's tooltip (title) only.
 
 function ts(iso) {
   const n = Date.parse(iso || '');
@@ -53,10 +56,8 @@ export function handoffProgressSteps(comment) {
     steps.push({ key: 'suggested', label: `Suggested ${edits} ${edits === 1 ? 'edit' : 'edits'}`, at: comment.handoff_suggested_at || null });
   }
   const version = Number(comment.handoff_last_version);
-  if (Number.isInteger(version) && version > 0) {
-    steps.push({ key: 'published', label: `Published v${version}`, at: comment.handoff_last_version_at || comment.handoff_first_version_at || null });
-  } else if (comment.handoff_first_version_at) {
-    steps.push({ key: 'published', label: 'Published a version', at: comment.handoff_first_version_at });
+  if ((Number.isInteger(version) && version > 0) || comment.handoff_first_version_at) {
+    steps.push({ key: 'published', label: 'New version', at: comment.handoff_last_version_at || comment.handoff_first_version_at || null });
   }
   if (comment.handoff_first_reply_at) steps.push({ key: 'replied', label: 'Replied', at: comment.handoff_first_reply_at });
   return steps
@@ -89,9 +90,9 @@ export function handoffProgressStage(comment, state) {
 }
 
 /**
- * The whole line for a handoff the agent is working on (surface state
- * 'received': picked up, no reply yet), or null when there is nothing more
- * to say than the plain status chip already does.
+ * The whole timeline for a handoff the agent is working on (surface state
+ * 'received': picked up, no reply yet), for the pill's tooltip only, or null
+ * when there is nothing more to say than the plain status chip already does.
  *   { steps: ['Delivered', 'Reading the doc', ...], current: 'Working' | the
  *     agent's own status, elapsed: '4 min', text: the whole line }
  */

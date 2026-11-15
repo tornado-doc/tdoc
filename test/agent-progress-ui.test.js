@@ -1,9 +1,11 @@
-// The agent progress line on a comment card (flag agentProgress), desktop
-// and phone: while the agent works, the status chip reads "Delivered ·
-// Reading the doc · Suggested 3 edits · Published v3 · Working · N min"
-// from the comments the page already polls, and the agent's own status
-// takes the current step while it is the newest fact. With the flag off the
-// chip still says "On it". Screenshots: TDOC_PROGRESS_SHOTS=<dir>.
+// The agent progress pill on a comment card (flag agentProgress), desktop
+// and phone: while the agent works, the pill names only the current stage
+// ("New version") and its tooltip holds the timeline "Delivered · Reading the
+// doc · Suggested 3 edits · New version · Working · N min", from the comments
+// the page already polls; the agent's own status takes the current step of
+// the tooltip while it is the newest fact. No detail line in the opened
+// thread, no version number anywhere (Julie, 2026-11-14). With the flag off
+// the chip still says "On it". Screenshots: TDOC_PROGRESS_SHOTS=<dir>.
 // Run with: node test/agent-progress-ui.test.js
 
 const assert = require('node:assert/strict');
@@ -67,21 +69,23 @@ async function open(browser, target, { flag, width, withStatus = false }) {
       const chip = page.locator('.tdoc-handoff-chip[data-handoff-progress]:visible').first();
       await chip.waitFor({ timeout: 20000 });
       const title = await chip.getAttribute('title');
-      assert.match(title, /^Delivered · Reading the doc · Suggested 3 edits · Published v3 · (Working|Editing the Pack section) · 6 min$/, title);
+      assert.match(title, /^Delivered · Reading the doc · Suggested 3 edits · New version · (Working|Editing the Pack section) · 6 min$/, title);
       assert(!/handoff/i.test(await chip.innerText()), 'the word handoff is on the card');
       assert.equal(await chip.getAttribute('data-handoff-state'), 'received');
-      // The pill is one short stage, the same pill as any other status
-      // (Julie, 2026-11-14); the whole line, the agent's own words included,
-      // is the detail inside the opened thread.
+      // The pill is one short stage, the same pill as any other status, and
+      // the only progress UI (Julie, 2026-11-14); the whole timeline, the
+      // agent's own words included, is its tooltip.
       assert.equal((await chip.innerText()).trim(), 'New version');
-      const detail = page.locator('.tdoc-handoff-progress-detail:visible').first();
-      await detail.waitFor({ timeout: 10000 });
-      // The next poll brings the agent's own status: into the detail, never the pill.
+      // The next poll brings the agent's own status: into the tooltip, never the pill.
       await page.waitForFunction(() => /Editing the Pack section/.test(document.querySelector('.tdoc-handoff-chip[data-handoff-progress]')?.getAttribute('title') || ''), null, { timeout: 40000 });
       assert(reads() >= 2, 'the status came with the existing comment poll');
-      await page.waitForFunction(() => /Editing the Pack section · 6 min$/.test(document.querySelector('.tdoc-handoff-progress-detail')?.textContent || ''), null, { timeout: 10000 });
-      assert.equal(await detail.innerText(), 'Delivered · Reading the doc · Suggested 3 edits · Published v3 · Editing the Pack section · 6 min');
+      assert.equal(await chip.getAttribute('title'), 'Delivered · Reading the doc · Suggested 3 edits · New version · Editing the Pack section · 6 min');
       assert.equal((await chip.innerText()).trim(), 'New version');
+      // The opened thread carries no grey detail line, and the card shows no
+      // timeline text or version number outside the tooltip.
+      assert.equal(await page.locator('.tdoc-handoff-progress-detail').count(), 0, 'the detail line is back');
+      const cardText = await chip.evaluate((el) => (el.closest('.tdoc-cc, article, [class*="comment-card"]') || document.body).innerText);
+      assert(!/Reading the doc|Editing the Pack section|Published v\d|\bv3\b/.test(cardText), `progress text in the card: ${cardText}`);
       const pill = await chip.evaluate((el) => {
         const r = el.getBoundingClientRect();
         const cs = getComputedStyle(el);
@@ -110,6 +114,6 @@ async function open(browser, target, { flag, width, withStatus = false }) {
     assert.equal((await plain.innerText()).trim(), 'On it');
     assert.equal(await page.locator('.tdoc-handoff-chip[data-handoff-progress]').count(), 0);
     assert.deepEqual(errors, []);
-    console.log('PASS progress line: steps in order, current step + elapsed always visible, agent status via the poll, desktop + phone; flag off keeps On it');
+    console.log('PASS progress pill: one short stage, timeline only in the tooltip, no detail line, no version number, agent status via the poll, desktop + phone; flag off keeps On it');
   } finally { await browser?.close(); target.stop(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

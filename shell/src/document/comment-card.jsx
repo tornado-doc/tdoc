@@ -15,7 +15,7 @@ import { agentForThread, targetKey } from './agent-choices.js';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, avatarInitial, QUICK_REACTIONS, tdocUrl } from './model.js';
 import { AuthorFace } from './author-face.jsx';
-import { HandoffProgressDetail, HandoffStatusChips } from './handoff-status-line.jsx';
+import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from '../comments/core/handoff-state.js';
 import { productPageUrl } from './product-url.js';
 import { observeVisibleRead } from '../comments/core/visible-read.js';
@@ -946,11 +946,6 @@ export function CommentCard({
           ) : null}
         </div>
       </header>
-      {/* The opened thread (from a marker, or the current card) spells out
-          the agent's progress; a closed card keeps only the short pill. */}
-      {(floating || selected) && (demo || canSeeHandoff(comment, handoffViewer, isOwner)) ? (
-        <HandoffProgressDetail comment={comment} progressLine={progressLine} />
-      ) : null}
       <ProductWhere anchor={comment.anchor} origin={productLinkOrigin} />
       {earlierVersion ? <p className="tdoc-cc-earlier">Commented on an earlier version</p> : null}
       {editTarget === comment.id ? (

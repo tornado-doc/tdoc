@@ -100,7 +100,10 @@ const CHIP_CLASS = {
  * `onSendElsewhere(comment)` are the owner's; without them the line is
  * read-only (a reader sees where it stands, not the buttons).
  * `progressLine` (flag agentProgress; the feedback widget passes its own
- * reading of it) turns "On it" into the progress line while the agent works.
+ * reading of it) turns "On it" into the current stage while the agent works,
+ * with the whole timeline as the pill's tooltip. The pill is the only
+ * progress UI: no detail line in the card or the opened thread (Julie,
+ * 2026-11-14: "far too much text inside the comment").
  */
 export function HandoffStatusChips({ comment, onResend = null, progressLine }) {
   const showProgress = progressLine === undefined ? isFeatureOn('agentProgress') : Boolean(progressLine);
@@ -121,7 +124,7 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine }) {
   const displayState = displayHandoffState(comment, state);
   // While the agent works the pill names only the current stage ("Reading",
   // "3 edits", "New version"), the size of any other status pill; the whole
-  // line is its title and HandoffProgressDetail in an opened thread.
+  // timeline (and the agent's own report_progress note) is its title only.
   const progress = showProgress ? handoffProgressLine(comment, displayState, now) : null;
   const stage = progress ? handoffProgressStage(comment, displayState) : '';
   const [lead, tail] = stage ? [stage, ''] : compactHandoffParts(comment, displayState);
@@ -153,24 +156,4 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine }) {
       </> : null}
     </span>
   );
-}
-
-/**
- * The whole progress line for an opened thread (flag agentProgress): every
- * step so far, what the agent says it is doing now (report_progress), and
- * for how long. Wraps; the pill above it stays one short word.
- */
-export function HandoffProgressDetail({ comment, progressLine }) {
-  const showProgress = progressLine === undefined ? isFeatureOn('agentProgress') : Boolean(progressLine);
-  const [now, setNow] = useState(() => Date.now());
-  const state = showProgress ? handoffWaitState(comment, now) : null;
-  const working = state === 'received';
-  useEffect(() => {
-    if (!working) return undefined;
-    const id = window.setInterval(() => setNow(Date.now()), 30000);
-    return () => window.clearInterval(id);
-  }, [working]);
-  const progress = working ? handoffProgressLine(comment, displayHandoffState(comment, state), now) : null;
-  if (!progress) return null;
-  return <p className="tdoc-handoff-progress-detail">{progress.text}</p>;
 }

@@ -4304,7 +4304,7 @@ function handoffSuggestedEdits(h) {
 }
 
 // What the handed-to agent says it is doing ("Editing the Pack section"),
-// shown as the current step of the progress line. Plain text, one line,
+// shown as the current step in the progress pill's tooltip only. Plain text, one line,
 // short; an agent may post one every HANDOFF_PROGRESS_MIN_MS and at most
 // HANDOFF_PROGRESS_MAX times per handoff.
 const HANDOFF_PROGRESS_CHARS = 80;
@@ -25833,7 +25833,7 @@ const MCP_TOOLS = {
     title: 'Say what you are working on',
     // Dev mode only while the progress line is (shell flag agentProgress).
     devMode: true,
-    description: 'While working on a comment handed to you, post one short line saying what you are doing now ("Editing the Pack section"); the person sees it on the comment. Optional; at most one every 10 seconds.',
+    description: 'While working on a comment handed to you, post one short line saying what you are doing now ("Editing the Pack section"); the person sees it when they point at the progress pill on the comment. Optional; at most one every 10 seconds.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -31795,7 +31795,7 @@ const tdocHandlers = {
     }
 
     // The handed-to agent's one-line status ("Editing the Pack section"),
-    // shown as the current step of the progress line on the comment card.
+    // shown as the current step in the progress pill's tooltip on the card.
     // Optional: the line is built from what tdoc already records (delivery,
     // pickup, suggestions, versions, replies) without it. Only the agent the
     // handoff was addressed to may post, on that handoff, on this doc; the

@@ -7,9 +7,9 @@
 //   - POST /api/notify/progress: only the agent the comment was handed to,
 //     on that doc, with write access; one plain line, capped; rate-limited;
 //     refused once the handoff is handled;
-//   - shell: comments/core/handoff-progress.js maps those facts to
-//     "Delivered · Reading the doc · Suggested 3 edits · Published v3 ·
-//     Working · 4 min", never the word "handoff".
+//   - shell: comments/core/handoff-progress.js maps those facts to the pill's
+//     tooltip "Delivered · Reading the doc · Suggested 3 edits · New version ·
+//     Working · 4 min", never the word "handoff", never a version number.
 // Run with: node test/agent-progress.test.js
 
 const fs = require('fs');
@@ -52,16 +52,17 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
       handoff_suggested_edits: 3, handoff_suggested_at: at(2),
     };
     const labels = handoffProgressSteps(c).map((s) => s.label);
-    assert(labels.join(' | ') === 'Delivered | Reading the doc | Suggested 3 edits | Published v3', labels.join(' | '));
+    assert(labels.join(' | ') === 'Delivered | Reading the doc | Suggested 3 edits | New version', labels.join(' | '));
     const line = handoffProgressLine(c, 'received', now);
-    assert(line.text === 'Delivered · Reading the doc · Suggested 3 edits · Published v3 · Working · 5 min', line.text);
+    assert(line.text === 'Delivered · Reading the doc · Suggested 3 edits · New version · Working · 5 min', line.text);
     assert(!/handoff/i.test(line.text), 'the word handoff leaked into the line');
+    assert(!/\bv\d|version \d|\d+ version/i.test(line.text), 'a version number leaked into the line');
   });
 
   await t('mapping: a local daemon queue reads Sent; one edit is singular; a version without a number', () => {
     const c = { ...base, handoff_delivery: { status: 'queued', at: at(0) }, handoff_acked_at: at(1), handoff_suggested_edits: 1, handoff_suggested_at: at(2), handoff_first_version_at: at(3) };
     const labels = handoffProgressSteps(c).map((s) => s.label);
-    assert(labels.join(' | ') === 'Sent | Reading the doc | Suggested 1 edit | Published a version', labels.join(' | '));
+    assert(labels.join(' | ') === 'Sent | Reading the doc | Suggested 1 edit | New version', labels.join(' | '));
   });
 
   await t('mapping: the agent\'s own status is the current step only while it is the newest fact', () => {

@@ -1070,11 +1070,11 @@
   .tdoc-handoff-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-handoff-line-tail { flex: 0 0 auto; white-space: pre; }
   /* The agent progress (flag agentProgress): the pill is one short stage,
-     the same pill as every other status, capped; the whole line (steps, the
-     agent's own words, minutes) is a muted detail in an opened thread
-     (Julie, 2026-11-14: the long pill "doesn't feel native"). */
+     the same pill as every other status, capped, and the only progress UI;
+     the whole timeline (steps, the agent's own words, minutes) is its
+     tooltip (Julie, 2026-11-14: the long pill "doesn't feel native", and no
+     detail line in the thread: "far too much text inside the comment"). */
   .tdoc-handoff-chip[data-handoff-progress] { max-width: min(100%, 12rem); }
-  .tdoc-handoff-progress-detail { margin: 0 0 6px; font-size: 12px; line-height: 1.45; color: var(--td-muted, #6b6a66); overflow-wrap: anywhere; }
   .tdoc-handoff-chip .tdoc-handoff-chip-action {
     appearance: none;
     border: 0;
