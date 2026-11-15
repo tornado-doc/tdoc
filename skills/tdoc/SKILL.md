@@ -734,12 +734,19 @@ silently is the #1 source of regression complaints.
    overrides this. If you need to correct your own reply, say so in your next
    answer after the person writes again.
 
-   One exception: after a `--status partial` reply ("looking for photos, will
-   send options") the agent side may post **one** follow-up on the same
-   thread ("here are the options", "it's live now"). After that follow-up, or
-   after any `applied` / `answered` / `question` reply, the gate is shut
-   until a person replies. A follow-up that repeats the last agent reply word
-   for word is refused (`duplicate_reply`).
+   One exception: the agent side may post **one** follow-up on the same
+   thread, when
+   - its last reply was `--status partial` ("looking for photos, will send
+     options"): any follow-up ("here are the options");
+   - its last reply had no `--status` (an interim "working on it: …"): a
+     follow-up with `--status applied`, `partial` or `answered` ("Live now: …");
+   - the follow-up is `--status applied` with an `--applied-in` newer than
+     every version the agent side cited on the thread and than the doc's
+     version when its last reply was posted (the fix went live since).
+   After that follow-up the gate is shut until a person replies, and after an
+   `applied` / `answered` / `question` reply it stays shut unless the third
+   case holds. A follow-up that repeats the last agent reply word for word is
+   refused (`duplicate_reply`).
 
    The reply text should be specific:
    - applied: "Rewrote the second paragraph in English. The section heading

@@ -32,6 +32,30 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **An agent can say "working on it" and then "live now".** Once an agent had
+  the last word on a comment, every further agent reply was skipped
+  (`already_answered`) unless the last one was `partial`, so a quick "working
+  on it: …" note shut out the "Live now: …" reply when the fix shipped. The
+  Worker's gate (`agentReplyGate`) allows ONE more reply after the agent
+  side's own: anything after `partial` (as before); a reply with status
+  applied / partial / answered after a no-status note; or an `applied` reply
+  whose `applied_in` is newer than every version cited on the thread and than
+  the doc when the last agent reply was posted. Agent replies (route, Ask,
+  accepted suggestions, local preview) now record that version as
+  `doc_version`; a reply without one gives no "live now" follow-up. A third
+  agent reply in a row is still refused, and so is a word-for-word repeat.
+  `tdoc-agent-reply --force` has done nothing since the gate lost its
+  override; it is gone from the usage text and no longer sent.
+
+- **Fixed: the agent reply gate could be walked past.** It took turns in
+  `at_version` order, and an agent reply without `applied_in` is stamped with
+  the comment's creation version, so after one person's reply on a later
+  version agents could reply without limit. Turns now follow the order events
+  were added. The gate is also re-run inside the comment store's write, so
+  two follow-ups sent at once cannot both land; a publish's anchor reconcile
+  (`by_kind: 'system'`) no longer counts as a person's turn; and `applied_in`
+  must be a whole number (`invalid_applied_in`).
+
 - **The reply box has the composer's @agent, and both drop the mode
   control.** A reply under a thread had no @agent at all after #823. Both
   boxes now share one piece (`shell/src/document/agent-ask.jsx`): @agent puts
