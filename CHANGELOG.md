@@ -32,6 +32,20 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **An agent can say "working on it" and then "live now".** Once an agent had
+  the last word on a comment, every further agent reply was skipped
+  (`already_answered`) unless the last one was `partial`, so a quick "working
+  on it: …" note shut out the "Live now: …" reply when the fix shipped. The
+  gate (worker `agentReplyGate`, now also the local server) allows ONE more
+  reply after the agent side's own: anything after `partial` (as before); a
+  reply with status applied / partial / answered after a no-status note; or an
+  `applied` reply whose `applied_in` is newer than every version cited on the
+  thread and than the doc when the last agent reply was posted (replies now
+  record that version). A third agent reply in a row is still refused, and so
+  is a word-for-word repeat. The local server, which never gated, applies the
+  same rule. `tdoc-agent-reply --force` has done nothing since the gate lost
+  its override; it is gone from the usage text and no longer sent.
+
 - **The reply box has the composer's @agent, and both drop the mode
   control.** A reply under a thread had no @agent at all after #823. Both
   boxes now share one piece (`shell/src/document/agent-ask.jsx`): @agent puts

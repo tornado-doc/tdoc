@@ -51,8 +51,8 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     method: 'POST', token, body: { slug, ...body },
   }), env, {});
 
-  const listComments = async (env, slug) => {
-    const r = await worker.fetch(req(`/api/comments?slug=${slug}&version=1`), env, {});
+  const listComments = async (env, slug, version = 1) => {
+    const r = await worker.fetch(req(`/api/comments?slug=${slug}&version=${version}`), env, {});
     return r.json();
   };
 
@@ -155,7 +155,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   vm.createContext(box);
   vm.runInContext([
     fn('isFiniteVersion'), fn('legacyToEvents'), fn('ensureEventLog'),
-    fn('eventEid'), fn('backfillEids'), fn('dedupEvents'), fn('agentReplyGate'),
+    fn('eventEid'), fn('backfillEids'), fn('dedupEvents'), fn('agentReplyGate'), fn('agentFollowupReason'),
   ].join('\n\n'), box);
   const gate = box.agentReplyGate;
 
@@ -327,6 +327,111 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const c = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'And it is live now.', status: 'answered', agent_login: 'claude' })).json();
     assert(c.skipped === true && c.reason === 'already_answered', JSON.stringify(c));
     const [after] = await listComments(env, slug);
+    assert(after.replies.length === 2, `expected 2 replies, got ${after.replies.length}`);
+  });
+
+  // ---- "working on it", then "live now" (Julie, 2026-11) -----------------
+  // An interim note (no status) may be followed by ONE reply with a status;
+  // an `applied` reply naming a version newer than the agent side last saw may
+  // follow anything. Still one extra reply, never two.
+  const agentAt = (id, text, status, atVersion, docVersion) => ({
+    kind: 'reply_added', at_version: atVersion, at: '2026-01-02T00:00:00Z',
+    ...(docVersion != null ? { doc_version: docVersion } : {}),
+    reply: { id, author: bot, text, ...(status ? { agent_status: status } : {}) },
+  });
+
+  await t('interim: after a no-status note, one applied / partial / answered reply', async () => {
+    for (const st of ['applied', 'partial', 'answered']) {
+      const g = gate(thread(agentSaid('r1', 'Working on it: rewriting the intro.', null)), 'claude', 'Live now: the intro is rewritten.', { status: st, applied_in: 2, latest: 2 });
+      assert(g.allowed === true && g.reason === 'followup_after_interim', `${st}: ${JSON.stringify(g)}`);
+    }
+  });
+
+  await t('interim: a question, or no status again, is not that follow-up', async () => {
+    for (const st of ['question', null]) {
+      const g = gate(thread(agentSaid('r1', 'Working on it.', null)), 'claude', 'Still working.', { status: st });
+      assert(g.allowed === false && g.reason === 'already_answered', `${st}: ${JSON.stringify(g)}`);
+    }
+  });
+
+  await t('interim: a deleted note leaves no follow-up', async () => {
+    const g = gate(thread(
+      agentSaid('r1', 'Working on it.', null),
+      { kind: 'reply_deleted', at_version: 1, at: '2026-01-03T00:00:00Z', reply_id: 'r1', by: 'reader' },
+    ), 'claude', 'Live now.', { status: 'applied', applied_in: 2, latest: 2 });
+    assert(g.allowed === false && g.reason === 'already_answered', JSON.stringify(g));
+  });
+
+  await t('live: applied in a version newer than anything cited and than the doc then', async () => {
+    const g = gate(thread(agentAt('r1', 'Fixed in v2.', 'applied', 2, 2)), 'claude', 'Live now in v3.', { status: 'applied', applied_in: 3, latest: 3 });
+    assert(g.allowed === true && g.reason === 'followup_live', JSON.stringify(g));
+    const g2 = gate(thread(agentAt('r1', 'Will fix it in the next version.', 'answered', 1, 4)), 'claude', 'Live now.', { status: 'applied', applied_in: 5, latest: 5 });
+    assert(g2.allowed === true && g2.reason === 'followup_live', JSON.stringify(g2));
+  });
+
+  await t('live: not for a version already cited, older than the doc then, or not published', async () => {
+    const same = gate(thread(agentAt('r1', 'Fixed in v2.', 'applied', 2, 2)), 'claude', 'Fixed in v2, really.', { status: 'applied', applied_in: 2, latest: 3 });
+    assert(same.allowed === false && same.reason === 'already_answered', `same version: ${JSON.stringify(same)}`);
+    const older = gate(thread(agentAt('r1', 'Will fix it.', 'answered', 1, 4)), 'claude', 'Live now.', { status: 'applied', applied_in: 3, latest: 5 });
+    assert(older.allowed === false && older.reason === 'already_answered', `older than the doc then: ${JSON.stringify(older)}`);
+    const future = gate(thread(agentAt('r1', 'Fixed in v2.', 'applied', 2, 2)), 'claude', 'Live in v9.', { status: 'applied', applied_in: 9, latest: 3 });
+    assert(future.allowed === false && future.reason === 'already_answered', `unpublished version: ${JSON.stringify(future)}`);
+    const answered = gate(thread(agentAt('r1', 'Fixed in v2.', 'applied', 2, 2)), 'claude', 'Live now.', { status: 'answered' });
+    assert(answered.allowed === false && answered.reason === 'already_answered', `not applied: ${JSON.stringify(answered)}`);
+  });
+
+  await t('one extra reply only: a third agent reply in a row is refused whatever it says', async () => {
+    const g = gate(thread(
+      agentAt('r1', 'Working on it.', null, 1, 1),
+      agentAt('r2', 'Live now in v2.', 'applied', 2, 2),
+    ), 'claude', 'And v3 too.', { status: 'applied', applied_in: 3, latest: 3 });
+    assert(g.allowed === false && g.reason === 'already_answered', JSON.stringify(g));
+  });
+
+  await t('the handoff filter keeps a thread whose last agent word is an interim note', async () => {
+    const g = gate(thread(agentSaid('r1', 'Working on it.', null)), '', '', { status: 'answered' });
+    assert(g.reason !== 'already_answered', JSON.stringify(g));
+    const done = gate(thread(agentSaid('r1', 'Done.', 'applied')), '', '', { status: 'answered' });
+    assert(done.reason === 'already_answered', JSON.stringify(done));
+  });
+
+  const publish = async (env, token, slug, version) => {
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token,
+      body: { slug, version, html: `<h1>doc</h1><p>a sentence to comment on, v${version}</p>` },
+    }), env, {});
+    assert(up.status === 200, `upload v${version}: ${up.status}`);
+  };
+
+  await t('route (a): "working on it", then "Live now" applied, then shut', async () => {
+    const { env, token, slug, commentId } = await seed('agent-interim');
+    const a = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Working on it: rewriting the paragraph.', agent_login: 'claude' })).json();
+    assert(a.id && !a.skipped, `interim note refused: ${JSON.stringify(a)}`);
+    await publish(env, token, slug, 2);
+    const b = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Live now: the paragraph is rewritten.', status: 'applied', applied_in: 2, agent_login: 'claude' })).json();
+    assert(b.id && !b.skipped && b.agent_status === 'applied', `live reply refused: ${JSON.stringify(b)}`);
+    await publish(env, token, slug, 3);
+    const c = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Tightened it again in v3.', status: 'applied', applied_in: 3, agent_login: 'claude' })).json();
+    assert(c.skipped === true && c.reason === 'already_answered', `third reply posted: ${JSON.stringify(c)}`);
+    const [after] = await listComments(env, slug, 3);
+    assert(after.replies.length === 2, `expected 2 replies, got ${after.replies.length}`);
+  });
+
+  await t('route (b): answered, then applied in a newly published version, then shut', async () => {
+    const { env, token, slug, commentId } = await seed('agent-live');
+    const a = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Good catch, fixing it in the next version.', status: 'answered', agent_login: 'claude' })).json();
+    assert(a.id && !a.skipped, `first reply refused: ${JSON.stringify(a)}`);
+    // Not yet: "applied" in the version the doc was already at is an answer
+    // (downgraded), and an answer after an answer is refused.
+    const early = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Live now.', status: 'applied', applied_in: 1, agent_login: 'claude' })).json();
+    assert(early.skipped === true && early.reason === 'already_answered', `early "live" posted: ${JSON.stringify(early)}`);
+    await publish(env, token, slug, 2);
+    const b = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Live now in v2: the paragraph is rewritten.', status: 'applied', applied_in: 2, agent_login: 'claude' })).json();
+    assert(b.id && !b.skipped && b.agent_status === 'applied', `live reply refused: ${JSON.stringify(b)}`);
+    await publish(env, token, slug, 3);
+    const c = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'And v3.', status: 'applied', applied_in: 3, agent_login: 'claude' })).json();
+    assert(c.skipped === true && c.reason === 'already_answered', `third reply posted: ${JSON.stringify(c)}`);
+    const [after] = await listComments(env, slug, 3);
     assert(after.replies.length === 2, `expected 2 replies, got ${after.replies.length}`);
   });
 
