@@ -14,10 +14,14 @@
 //
 // Column widths, row heights, Wrap text and alignment are the document's
 // (data-width / data-height / data-wrap / data-align, sheet-markup.mjs) when
-// someone who may edit the doc changes them: the change goes through Edit
-// mode and the editor's own draft and Save, from whichever mode it was
-// made in. A reader without edit rights changes them for themselves only:
-// view state, kept by the shell beside the #hash, never saved. A wrapped
+// someone who may edit the doc changes them. A column's width, dragged by
+// its header's edge, is saved as it is in Read and Comment mode: written on
+// the <th> and saved as a new version by the shell (tdoc:sheetLayoutSave,
+// the editor's own save request, attributed the same). In Edit mode it goes
+// into the draft like any edit; the other layout changes ask for Edit mode.
+// Only someone who may edit the doc gets the grip; a reader's own wrap,
+// alignment or fitted width (the column's menu) is view state, kept by the
+// shell beside the #hash, never saved. A wrapped
 // column grows its rows: row tops are a prefix sum over estimated heights,
 // corrected by measuring the rows on screen, so 10,000 rows still scroll.
 //
@@ -313,6 +317,12 @@
     '.ts-flat th button:hover{background:#ececf0}',
     '.ts-flat td{position:relative;padding:7px 8px;border-bottom:1px solid var(--ts-line);vertical-align:top;white-space:normal;overflow-wrap:break-word;min-width:6em;max-width:28em;background:#fff}',
     '.ts-flat tr:last-child td{border-bottom:0}',
+    // A set width holds in the flat view; the grip sits inside the header's
+    // right edge (the next header would cover a grip that stood over it).
+    '.ts-flat td.is-set{min-width:0;max-width:none;overflow-wrap:anywhere}.ts-flat td.is-set:is(.is-num,.is-short){overflow:hidden;text-overflow:ellipsis}',
+    '.ts-flat th .ts-resize{right:0}',
+    '.ts-flat th .ts-resize:hover,.ts-flat th .ts-resize.is-on{background:linear-gradient(90deg,transparent calc(100% - 2px),var(--td-accent) calc(100% - 2px))}',
+    '.ts-flat.is-sizing,.ts-flat.is-sizing *{cursor:col-resize!important}',
     '.ts-flat :is(th,td):first-child{position:sticky;left:0;z-index:1}.ts-flat th:first-child{z-index:3}',
     '.ts-flat td.is-num{text-align:right;white-space:nowrap;min-width:0;font-variant-numeric:tabular-nums}',
     '.ts-flat td.is-short{white-space:nowrap;min-width:0}',
@@ -458,6 +468,9 @@
     });
     tab.wrap = tab.data.columns.map(function (col, c) { var k = colKey(tab, c); return k in loc.wrap ? !!loc.wrap[k] : col.wrap; });
     tab.align = tab.data.columns.map(function (col, c) { var k = colKey(tab, c); return loc.align[k] || col.align || ''; });
+    // A width somebody set (the document's or this reader's own): the flat
+    // view keeps it; every other column there sizes to its content.
+    tab.setW = tab.data.columns.map(function (col, c) { return !!(loc.w[colKey(tab, c)] || col.width); });
     tab.anyWrap = tab.wrap.some(Boolean);
     var hs = null;
     tab.data.rows.forEach(function (row, r) {
@@ -685,6 +698,8 @@
     return b;
   }
   function canEdit() { return config.editing && mode() === 'edit'; }
+  // The column grip: for whoever may edit the doc, in every mode.
+  function canResize() { return config.canEditDoc; }
 
   // ---- rendering -----------------------------------------------------------------
   function renderAll() {
@@ -812,7 +827,7 @@
         (dir ? '<span class="ts-sorted">' + (dir === 'asc' ? ICON.up : ICON.down) + (tab.query.sort.length > 1 ? (s + 1) : '') + '</span>' : '') + '</button>' +
         '<button type="button" class="ts-icon' + (filtered ? ' is-on' : '') + '" data-act="filter" aria-label="Filter ' + esc(col.name) + '" title="Filter">' + ICON.filter + '</button>' +
         '<button type="button" class="ts-icon" data-act="menu" aria-label="' + esc(col.name) + ' column menu" title="More">' + ICON.down + '</button>' +
-        '<span class="ts-resize" data-act="resize" aria-hidden="true"></span></div>';
+        (canResize() ? '<span class="ts-resize" data-act="resize" aria-hidden="true"></span>' : '') + '</div>';
     });
     if (canEdit()) html += '<div class="ts-h-add"><button type="button" class="ts-icon" data-act="addcol" aria-label="Add a column" title="Add a column">' + ICON.plus + '</button></div>';
     ui.head.innerHTML = html;
@@ -1006,7 +1021,7 @@
       else { var href = type === 'url' ? M.safeHref(col.text[r]) : ''; inner = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + mark(col.text[r], needle) + '</a>' : mark(fx.text != null ? fx.text : col.text[r], needle); }
       var cls = (type === 'number' ? ' is-num' : type === 'date' || type === 'checkbox' ? ' is-short' : '') + (needle && col.lower[r].indexOf(needle) !== -1 ? ' is-hit' : '') + (td && commented.has(td) ? ' has-comment' : '') +
         // The grid's line breaks and column alignment read the same here.
-        (type !== 'tags' && type !== 'checkbox' && col.text[r].indexOf('\n') !== -1 ? ' is-ml' : '') + (tab.align && tab.align[c] ? ' al-' + tab.align[c] : '');
+        (type !== 'tags' && type !== 'checkbox' && col.text[r].indexOf('\n') !== -1 ? ' is-ml' : '') + (tab.align && tab.align[c] ? ' al-' + tab.align[c] : '') + (tab.setW[c] ? ' is-set' : '');
       // [sheet-rules] conditional formats read the same here, and win over the cell's own fill
       var fst = rulesExt && rulesExt.flatStyle(tab, r, c);
       cls += fst ? fx.cls.replace(/ fx-fill| fx-f-[a-z]+/g, '') : fx.cls;
@@ -1030,11 +1045,16 @@
       }
       html = '<div role="list" aria-label="' + esc(tab.name) + '">' + html + '</div>';
     } else {
-      html = '<table><thead><tr>';
+      // A column whose width was set keeps it; the rest share what is left.
+      // Every column set: the table is as wide as they are, scrolling
+      // sideways in its box when that is wider than the box.
+      var allSet = vis.every(function (k) { return tab.setW[k]; });
+      html = '<table' + (allSet ? ' style="width:' + vis.reduce(function (a, k) { return a + tab.widths[k]; }, 0) + 'px"' : '') + '><thead><tr>';
       for (v = 0; v < vis.length; v++) {
         c = vis[v];
         var s = tab.query.sort.filter(function (k) { return k.col === c; })[0];
-        html += '<th data-c="' + c + '"' + (s ? ' aria-sort="' + (s.dir === 'desc' ? 'descending' : 'ascending') + '"' : '') + '><button type="button" data-sort="' + c + '" title="Sort by ' + esc(cols[c].name) + '">' + esc(cols[c].name) + (s ? ' <span class="ts-sorted">' + (s.dir === 'desc' ? ICON.down : ICON.up) + '</span>' : '') + '</button></th>';
+        html += '<th data-c="' + c + '"' + (tab.setW[c] ? ' class="is-set" style="' + flatW(tab.widths[c]) + '"' : '') + (s ? ' aria-sort="' + (s.dir === 'desc' ? 'descending' : 'ascending') + '"' : '') + '><button type="button" data-sort="' + c + '" title="Sort by ' + esc(cols[c].name) + '">' + esc(cols[c].name) + (s ? ' <span class="ts-sorted">' + (s.dir === 'desc' ? ICON.down : ICON.up) + '</span>' : '') + '</button>' +
+          (canResize() ? '<span class="ts-resize" data-act="resize" aria-hidden="true"></span>' : '') + '</th>';
       }
       html += '</tr></thead><tbody>';
       for (i = 0; i <= n; i++) {
@@ -1059,6 +1079,7 @@
     var maxH = items.length > EMBED_ROWS && last ? (last.offsetTop + last.offsetHeight + (cards ? 0 : 1)) + 'px' : '';
     if (ui.flat.style.maxHeight !== maxH) ui.flat.style.maxHeight = maxH;
   }
+  function flatW(w) { return 'width:' + w + 'px;min-width:' + w + 'px;max-width:' + w + 'px'; }
   // A header sorts; in Comment mode a cell takes a comment; a commented cell
   // opens its thread.
   function flatClick(e) {
@@ -1083,7 +1104,7 @@
     var root = ui.root, parent = root.parentElement;
     var on = (expand.fit || expand.wide) && !expand.on && innerWidth > 640 && parent;
     if (on) {
-      var need = expand.wide ? Infinity : flatView() ? tab.widths.reduce(function (a, w) { return a + Math.min(w, 240); }, 2) : tab.totalW + 2;
+      var need = expand.wide ? Infinity : flatView() ? tab.widths.reduce(function (a, w, c) { return a + (tab.setW[c] ? w : Math.min(w, 240)); }, 2) : tab.totalW + 2;
       var cs = getComputedStyle(parent), pr = parent.getBoundingClientRect();
       var colLeft = pr.left + parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth);
       var col = parent.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
@@ -1669,12 +1690,71 @@
       saveView();
       return;
     }
+    if (mode() !== 'edit' && widthsOnly(change)) { saveWidths(tab, change); return; }
     if (mode() !== 'edit') {
       pendingLayout = { tab: tab, change: change };
       post({ type: 'tdoc:requestMode', mode: 'edit' });
       return;
     }
     applyLayout(tab, change);
+  }
+  function widthsOnly(change) {
+    var cols = change.cols || {};
+    return !change.rows && Object.keys(cols).length > 0 && Object.keys(cols).every(function (c) {
+      return Object.keys(cols[c]).every(function (k) { return k === 'width'; });
+    });
+  }
+  // A width set outside Edit mode: written on the column's <th> at once and
+  // saved by the shell as a new version (the editor's own save request, so
+  // the same checks and the same author). Saved WIDTH_SAVE_MS after the last
+  // change, so resizing several columns in a row is one version; at once
+  // when the page is hidden or left, or Edit mode opens. One save at a time;
+  // widths set while one is out go in the next. A save that fails takes its
+  // widths back.
+  var WIDTH_SAVE_MS = 1500;
+  var widthSave = { list: [], busy: false, sent: 0, timer: null };
+  function saveWidths(tab, change) {
+    Object.keys(change.cols).forEach(function (c) {
+      var col = tab.data.columns[c];
+      if (!col) return;
+      var before = attrsOf(col.th);
+      M.writeColumnLayout(col.th, change.cols[c]);
+      col.width = M.cleanSize(col.th.getAttribute('data-width'), M.MIN_WIDTH, M.MAX_WIDTH);
+      widthSave.list.push({ tab: tab, c: Number(c), el: col.th, before: before });
+    });
+    relayoutTab(tab);
+    sendWidths();
+  }
+  function sendWidths(now) {
+    clearTimeout(widthSave.timer);
+    widthSave.timer = null;
+    if (widthSave.busy || !widthSave.list.length) return;
+    var send = function () {
+      widthSave.timer = null;
+      widthSave.busy = true;
+      widthSave.sent = widthSave.list.length;
+      post({ type: 'tdoc:sheetLayoutSave' });
+    };
+    if (now) send(); else widthSave.timer = setTimeout(send, WIDTH_SAVE_MS);
+  }
+  function flushWidths() { if (widthSave.timer) sendWidths(true); }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flushWidths(); });
+  window.addEventListener('pagehide', flushWidths);
+  function widthsSaved(ok) {
+    if (!widthSave.busy) return;
+    widthSave.busy = false;
+    var done = widthSave.list.splice(0, ok ? widthSave.sent : widthSave.list.length);
+    if (!ok) {
+      var tabs = [];
+      for (var k = done.length - 1; k >= 0; k--) {
+        var x = done[k];
+        putAttrs(x.el, x.before);
+        if (x.tab.data.columns[x.c] && x.tab.data.columns[x.c].th === x.el) x.tab.data.columns[x.c].width = M.cleanSize(x.before['data-width'], M.MIN_WIDTH, M.MAX_WIDTH);
+        if (tabs.indexOf(x.tab) < 0) tabs.push(x.tab);
+      }
+      tabs.forEach(function (t) { if (book.tabs.indexOf(t) >= 0) relayoutTab(t); });
+    }
+    sendWidths();
   }
   function relayoutTab(tab) {
     readLayout(tab);
@@ -2717,6 +2797,37 @@
       if (!canEdit()) return;
       renameColumn(c);
     });
+    // The same grip on the flat view's headers (a small sheet in a prose
+    // doc, Read and Comment mode): the column takes the width it is dragged
+    // to, the columns without one share the rest, and the sheet takes the
+    // page width beside the reading column when it needs it (pageWidth).
+    ui.flat.addEventListener('pointerdown', function (e) {
+      var grip = e.target.closest('.ts-resize');
+      if (!grip || e.button > 0 || !canResize()) return;
+      e.preventDefault(); e.stopPropagation();
+      var th = grip.parentElement, table = th.closest('table'), tab = cur(), c = Number(th.getAttribute('data-c'));
+      var x0 = e.clientX, w0 = Math.round(th.getBoundingClientRect().width), w = w0;
+      var t0 = table.style.width ? parseFloat(table.style.width) - (tab.setW[c] ? tab.widths[c] : 0) : 0;
+      startSizing(ui.flat, e, function (ev) {
+        var next = Math.max(M.MIN_WIDTH, Math.min(M.MAX_WIDTH, Math.round(w0 + ev.clientX - x0)));
+        if (next === w) return;
+        w = next;
+        tab.widths[c] = w; tab.setW[c] = true;
+        th.classList.add('is-set'); th.style.cssText = flatW(w);
+        if (t0) table.style.width = (t0 + w) + 'px';
+        pageWidth(tab);
+      }, function () {
+        if (w !== w0) setLayout(tab, { cols: colChange(c, { width: w }) });
+      });
+      grip.classList.add('is-on');
+    });
+    ui.flat.addEventListener('dblclick', function (e) {
+      var grip = e.target.closest('.ts-resize');
+      if (!grip || !canResize()) return;
+      e.preventDefault(); e.stopPropagation();
+      var c = Number(grip.parentElement.getAttribute('data-c'));
+      setLayout(cur(), { cols: colChange(c, { width: fitWidth(cur(), c) }) });
+    });
     // Row resize: drag the bottom edge of a row number (every selected row
     // when the row is one of them); a double-click there fits the row again.
     rowsOn('pointerdown', function (e) {
@@ -3006,6 +3117,7 @@
       // After this message's other listeners: the editor (frame-probe.js)
       // turns Edit mode on, and takes its baseline, in its own.
       var pending = pendingLayout; pendingLayout = null;
+      flushWidths(); // widths waiting to be saved go now, not into the draft
       S.onMode(d.mode); // [structure] a structure change that asked for Edit mode
       // Leaving Edit mode saves or discards the draft: its undo history goes with it.
       if (d.mode !== 'edit') { undoStack = []; redoStack = []; }
@@ -3028,6 +3140,8 @@
         if (expand.alone) { book.active = expand.alone - 1; renderAll(); setExpanded(true, true); }
         else if (d.expanded === true) setExpanded(true, true);
       } else renderAll();
+    } else if (d.type === 'tdoc:sheetLayoutSaved') {
+      widthsSaved(d.ok === true);
     } else if (d.type === 'tdoc:editRestore') {
       // A draft was restored into the page: read the tables again.
       setTimeout(reload, 0);

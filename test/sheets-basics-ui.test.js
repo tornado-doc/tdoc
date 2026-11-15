@@ -4,17 +4,22 @@
 //     comments on the cell, Edit edits it
 //   - column resize: drag a header's edge (the frozen first column too),
 //     double-click it to fit; row resize by the row number's edge
-//   - an editor's resize in Comment mode goes into Edit mode and the
-//     editor's own Save bar; Save writes data-width / data-height; the
-//     editor bar's Undo takes it back
-//   - a reader who may not edit resizes for themselves: kept in their view,
-//     never in the document
+//   - an owner's column resize in Read or Comment mode is saved as a new
+//     version (data-width, a browser edit by them) 1.5 s after the last
+//     change, so a burst of resizes is one version, and at once when Edit
+//     mode opens: no Edit mode, no Save bar, no reload, the address as it
+//     was; the same in a prose doc's flat view, where a table wider than its
+//     box scrolls sideways inside it
+//   - in Edit mode a resize goes into the editor's draft: Save writes
+//     data-width / data-height; the editor bar's Undo takes it back
+//   - a reader who may not edit gets no column grip (grid or flat view)
 //   - Wrap text / Clip and Left / Center / Right per column; wrapped rows grow
 //   - line breaks: Alt/Option+Enter and Ctrl+Enter in a cell, Enter commits;
 //     a multi-line cell pasted from Excel / Sheets keeps its breaks; saved as <br>
 //   - fill down (⌘/Ctrl+D), ⌘/Ctrl+arrow to the data's edge, Shift+Space /
 //     header click select a row / column, Esc cancels an edit
-//   - a phone: modes, a touch drag resizes a column
+//   - a phone: modes, a touch drag resizes a column in Read mode (grid and
+//     flat view), saved the same way
 //   - 10,000 rows with a wrapped column: wrap applies and scrolls in budget
 // Screenshots for the PR: TDOC_TEST_SCREENSHOTS=<dir>.
 const fs = require('fs');
@@ -63,7 +68,12 @@ async function shot(page, name) {
   const sheet = (rows = 30) => M.sheetDocumentHtml({ title: 'Basics', sheets: [{ name: 'Tasks', columns: [
     { name: 'Task', type: 'text' }, { name: 'Notes', type: 'text' }, { name: 'Points', type: 'number' }, { name: 'Status', type: 'tags' },
   ], rows: Array.from({ length: rows }, (_, k) => ({ id: `r${k + 1}`, cells: [k === 5 ? '' : `Task ${k + 1}`, k % 3 === 0 ? LONG : `note ${k + 1}`, String(k * 3), [k % 2 ? 'open' : 'done']] })) }] });
-  for (const slug of ['modes', 'resize', 'rows', 'wrap', 'lines', 'keys', 'phone']) writeDoc(slug, sheet());
+  for (const slug of ['modes', 'resize', 'resize-edit', 'rows', 'wrap', 'lines', 'keys', 'phone']) writeDoc(slug, sheet());
+  // A small sheet in a prose doc: the flat view in Read and Comment mode.
+  const prose = (cols) => `<!doctype html><html><head><meta charset="utf-8"><title>Prose</title></head><body><main><h1>Runs</h1><p>One.</p><p>Two.</p><p>Three.</p>${M.tableHtml({ name: 'Runs', columns: cols.map((name) => ({ name, type: 'text' })), rows: Array.from({ length: 6 }, (_, k) => ({ id: `r${k + 1}`, cells: cols.map((n) => `${n} ${k + 1}`) })) })}<p>After.</p></main></body></html>`;
+  writeDoc('flat', prose(['Run', 'Notes', 'Owner', 'State', 'Result']));
+  writeDoc('flat-reader', prose(['Run', 'Notes', 'Owner', 'State', 'Result']), 2);
+  writeDoc('flat-phone', prose(['Run', 'Notes', 'Owner']));
   // A prose doc with a sheet, for full screen and its own page (?sheet=1).
   writeDoc('fullpage', `<!doctype html><html><head><meta charset="utf-8"><title>Full</title></head><body><main><h1>Full</h1><p id="before">Before the sheet.</p>${M.tableHtml({ name: 'Runs', columns: [{ name: 'Run', type: 'text' }, { name: 'Notes', type: 'text' }], rows: Array.from({ length: 8 }, (_, k) => ({ id: `r${k + 1}`, cells: [`run ${k + 1}`, 'n'] })) })}<p>After.</p></main></body></html>`);
   // A reader who may not edit: an older version (local canEdit is latest-only).
@@ -159,15 +169,90 @@ async function shot(page, name) {
     });
 
     // ---- column resize -----------------------------------------------------
-    await test('column resize from Comment mode: drag the edge, Edit mode + the editor Save bar, Save writes data-width; Undo takes it back', async () => {
+    const versionOf = (slug) => JSON.parse(fs.readFileSync(path.join(root, slug, 'meta.json'), 'utf8')).versions;
+    const waitForVersion = async (slug, n) => {
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) { if (fs.existsSync(path.join(root, slug, `v${n}`, 'index.html')) && versionOf(slug).some((v) => v.n === n)) return; await new Promise((r) => setTimeout(r, 100)); }
+      throw new Error(`${slug} v${n} was not saved`);
+    };
+    await test('column resize in Comment and Read mode (owner): saved at once as a new version, no Edit mode, no Save bar, no reload', async () => {
       const frame = await open('resize');
       const f = frameLoc();
       await chooseMode(page, 'Comment');
       await frameMode(frame, 'comment');
+      await frame.evaluate(() => { window.__sameFrame = true; });
       const w0 = await frame.evaluate(() => document.querySelector('.ts-h[data-c="1"]').getBoundingClientRect().width);
       await dragBy(page, f.locator('.ts-h[data-c="1"] .ts-resize'), 90, 0);
-      await page.locator(modeSelector('edit')).waitFor({ timeout: 5000 });
+      await waitForVersion('resize', 2);
+      const v2 = saved('resize', 2);
+      const w1 = Number((v2.match(/<th[^>]*data-key="c2"[^>]*data-width="(\d+)"/) || [])[1]);
+      assert(Math.abs(w1 - (w0 + 90)) <= 2, `width ${w0} → ${w1}`);
+      const meta2 = versionOf('resize').find((v) => v.n === 2);
+      assert(meta2.source === 'browser' && meta2.author === 'owner', `a browser edit by the owner: ${JSON.stringify(meta2)}`);
+      assert(new URL(page.url()).pathname === '/d/resize/v/1', `the address is left as it was: ${page.url()}`);
+      assert(await page.locator('.tdoc-shell-toast', { hasText: /^Column width saved$/ }).count(), 'toast: Column width saved');
+      assert(await page.locator(modeSelector('comment')).count(), 'still Comment mode');
+      assert(!(await page.locator('.tdoc-editor-toolbar').count()), 'no Save bar');
+      assert(await frame.evaluate(() => window.__sameFrame === true), 'no reload');
+      const shown = await frame.evaluate(() => document.querySelector('.ts-row .ts-c[data-c="1"]').getBoundingClientRect().width);
+      assert(Math.abs(shown - w1) <= 1, `the cells follow: ${shown}`);
+      await shot(page, 'resize-column-comment-desktop');
+      // Read mode too; the next save is based on the version this page wrote.
+      await chooseMode(page, 'Read');
+      await frameMode(frame, 'read');
+      await dragBy(page, f.locator('.ts-h[data-c="0"] .ts-resize'), 40, 0);
+      await waitForVersion('resize', 3);
+      assert(/<th[^>]*data-key="c1"[^>]*data-width="\d+"/.test(saved('resize', 3)) && /<th[^>]*data-key="c2"[^>]*data-width="\d+"/.test(saved('resize', 3)), 'v3 holds both widths');
+      // Double-click the edge: fit, saved the same way.
+      await f.locator('.ts-h[data-c="1"] .ts-resize').dblclick();
+      await waitForVersion('resize', 4);
+      // Edit mode afterwards starts from the saved page: nothing to save.
+      await chooseMode(page, 'Edit');
+      await frameMode(frame, 'edit');
+      await page.waitForTimeout(500);
+      assert(await page.locator('.tdoc-editor-toolbar button.primary').isDisabled(), 'Edit mode: no changes to save');
+      await chooseMode(page, 'Read');
+    });
+
+    await test('a burst of resizes is one version; widths still waiting are saved when Edit mode opens', async () => {
+      writeDoc('resize-burst', sheet());
+      const frame = await open('resize-burst');
+      const f = frameLoc();
+      await chooseMode(page, 'Read');
+      await frameMode(frame, 'read');
+      for (const c of [0, 1, 2]) await dragBy(page, f.locator(`.ts-h[data-c="${c}"] .ts-resize`), 30, 0);
+      await waitForVersion('resize-burst', 2);
+      await page.waitForTimeout(2500);
+      assert(!fs.existsSync(path.join(root, 'resize-burst', 'v3')), 'three resizes in a row: one version');
+      assert((saved('resize-burst', 2).match(/<th[^>]*data-width="\d+"/g) || []).length === 3, 'v2 holds all three widths');
+      // Drag, then open Edit mode before the wait is over: saved at once,
+      // and Edit mode has nothing of it left to save.
+      await dragBy(page, f.locator('.ts-h[data-c="3"] .ts-resize'), 30, 0);
+      await chooseMode(page, 'Edit');
+      await waitForVersion('resize-burst', 3);
+      assert(/<th[^>]*data-key="c4"[^>]*data-width="\d+"/.test(saved('resize-burst', 3)), 'v3 holds the fourth width');
+      await frameMode(frame, 'edit');
+      await page.waitForTimeout(500);
+      assert(await page.locator('.tdoc-editor-toolbar button.primary').isDisabled(), 'Edit mode: no changes to save');
+      // The next Save is based on v3.
+      await f.locator('.ts-row[data-i="1"] .ts-c[data-c="0"]').dblclick();
+      await f.locator('.ts-editor').waitFor();
+      await page.keyboard.press(`${MOD}+a`);
+      await page.keyboard.type('After');
+      await page.keyboard.press('Enter');
+      await save('resize-burst', 4);
+      assert(/<th[^>]*data-key="c4"[^>]*data-width="\d+"/.test(saved('resize-burst', 4)) && saved('resize-burst', 4).includes('After'), 'v4: the edit on top of the widths');
+    });
+
+    await test('column resize in Edit mode: the editor draft and Save write data-width; Undo takes it back', async () => {
+      const frame = await open('resize-edit');
+      const f = frameLoc();
+      await chooseMode(page, 'Edit');
+      await frameMode(frame, 'edit');
+      const w0 = await frame.evaluate(() => document.querySelector('.ts-h[data-c="1"]').getBoundingClientRect().width);
+      await dragBy(page, f.locator('.ts-h[data-c="1"] .ts-resize'), 90, 0);
       await frame.waitForFunction(() => document.querySelectorAll('table[data-tdoc-sheet] thead th')[1].hasAttribute('data-width'));
+      assert(!fs.existsSync(path.join(root, 'resize-edit', 'v2')), 'nothing saved before Save');
       const w1 = Number(await th(frame, 1, 'data-width'));
       assert(Math.abs(w1 - (w0 + 90)) <= 2, `width ${w0} → ${w1}`);
       const shown = await frame.evaluate(() => document.querySelector('.ts-row .ts-c[data-c="1"]').getBoundingClientRect().width);
@@ -191,8 +276,8 @@ async function shot(page, name) {
         return t ? { sw: t.scrollWidth, cw: t.clientWidth } : null;
       });
       assert(fit && fit.sw <= fit.cw, `the longest note shows whole: ${JSON.stringify(fit)}`);
-      await save('resize', 2);
-      const html = saved('resize', 2);
+      await save('resize-edit', 2);
+      const html = saved('resize-edit', 2);
       assert(/<th[^>]*data-key="c2"[^>]*data-width="\d+"/.test(html), 'v2 holds the width');
       assert(!/<th[^>]*data-key="c1"[^>]*data-width/.test(html), 'the undone width is not saved');
     });
@@ -228,11 +313,13 @@ async function shot(page, name) {
       clean(saved('fullpage', 2), 'saved v2');
     });
 
-    await test('a reader who may not edit resizes and wraps for themselves: kept across a reload, never in the document', async () => {
+    await test('a reader who may not edit gets no column grip (grid and flat view); their own fitted width is kept across a reload, never in the document', async () => {
       const frame = await open('reader', { v: 1 });
       const f = frameLoc();
+      assert(!(await f.locator('.ts-resize').count()), 'no grip in the grid for a reader');
       const before = await frame.evaluate(() => document.querySelector('table[data-tdoc-sheet]').outerHTML);
-      await dragBy(page, f.locator('.ts-h[data-c="1"] .ts-resize'), 70, 0);
+      await f.getByRole('button', { name: 'Notes column menu' }).click();
+      await f.getByRole('menuitem', { name: 'Fit width to content' }).click();
       await page.waitForTimeout(400);
       assert(!(await page.locator(modeSelector('edit')).count()), 'no Edit mode for a reader');
       assert(!(await page.locator('.tdoc-editor-toolbar').count()), 'no Save bar');
@@ -242,6 +329,62 @@ async function shot(page, name) {
       await frameLoc().locator('.ts-row').first().waitFor();
       const again = page.frames().find((x) => x.url().includes('/frame'));
       await again.waitForFunction((x) => Math.abs(document.querySelector('.ts-h[data-c="1"]').getBoundingClientRect().width - x) <= 1, w);
+      assert(!fs.existsSync(path.join(root, 'reader', 'v3')), 'no version saved');
+      // The flat view (a small sheet in a prose doc), in Read and Comment mode.
+      await page.goto('about:blank');
+      await page.goto(`${base}/d/flat-reader/v/1`);
+      await frameLoc().locator('.ts-flat th').first().waitFor({ timeout: 15000 });
+      for (const m of ['Read', 'Comment']) {
+        await chooseMode(page, m);
+        assert(!(await frameLoc().locator('.ts-resize').count()), `${m}: no grip in the flat view for a reader`);
+      }
+      await shot(page, 'flat-reader-desktop');
+    });
+
+    await test('flat view (a small sheet in a prose doc), owner in Read mode: drag a header edge, saved at once; wider than its box, the table scrolls sideways inside it', async () => {
+      await page.goto('about:blank');
+      await page.goto(`${base}/d/flat`);
+      const f = frameLoc();
+      await f.locator('.ts-flat th').first().waitFor({ timeout: 15000 });
+      const frame = page.frames().find((x) => x.url().includes('/frame'));
+      await chooseMode(page, 'Read');
+      await frameMode(frame, 'read');
+      assert(await frame.evaluate(() => document.querySelector('.tdoc-sheet').classList.contains('is-flat')), 'the flat view');
+      const thw = () => frame.evaluate(() => document.querySelector('.ts-flat th[data-c="1"]').getBoundingClientRect().width);
+      const loadedAt = page.url();
+      const w0 = await thw();
+      await f.locator('.ts-flat th[data-c="1"]').hover();
+      await shot(page, 'flat-grip-hover-desktop');
+      await dragBy(page, f.locator('.ts-flat th[data-c="1"] .ts-resize'), 120, 0);
+      await waitForVersion('flat', 2);
+      const w1 = Number((saved('flat', 2).match(/<th[^>]*data-key="c2"[^>]*data-width="(\d+)"/) || [])[1]);
+      assert(Math.abs(w1 - (w0 + 120)) <= 2, `width ${w0} → ${w1}`);
+      await frame.waitForFunction((w) => Math.abs(document.querySelector('.ts-flat th[data-c="1"]').getBoundingClientRect().width - w) <= 1, w1);
+      assert(await page.locator(modeSelector('read')).count(), 'still Read mode');
+      assert(!(await page.locator('.tdoc-editor-toolbar').count()), 'no Save bar');
+      // Every column far wider: the table scrolls inside its box, the page does not.
+      for (let c = 4; c >= 0; c--) {
+        await f.locator('.ts-flat').evaluate((el) => { el.scrollLeft = 0; });
+        await dragBy(page, f.locator(`.ts-flat th[data-c="${c}"] .ts-resize`), 160, 0);
+        await page.waitForTimeout(150);
+      }
+      await frame.waitForFunction(() => [...document.querySelectorAll('.ts-flat th')].every((t) => t.classList.contains('is-set')), null, { timeout: 8000 })
+        .catch(async (e) => { throw new Error(`${e.message}: ${await frame.evaluate(() => [...document.querySelectorAll('.ts-flat th')].map((t) => t.className + ':' + Math.round(t.getBoundingClientRect().right)).join(' '))}`); });
+      const box = await frame.evaluate(() => { const el = document.querySelector('.ts-flat'); return { sw: el.scrollWidth, cw: el.clientWidth, page: document.documentElement.scrollWidth - innerWidth }; });
+      assert(box.sw > box.cw + 100 && box.page <= 1, `scrolls inside its box: ${JSON.stringify(box)}`);
+      await shot(page, 'flat-wide-desktop');
+      // Every save is in (one at a time; the last drags wait for the one before).
+      const latestHtml = () => { const n = Math.max(...versionOf('flat').map((v) => v.n)); return saved('flat', n); };
+      const deadline = Date.now() + 10000;
+      while ((latestHtml().match(/data-width="\d+"/g) || []).length < 5 && Date.now() < deadline) await page.waitForTimeout(100);
+      assert((latestHtml().match(/data-width="\d+"/g) || []).length === 5, 'the latest version holds all five widths');
+      // The address is left as it was (no new /v/N in it), and the doc's own
+      // address shows the latest version: the widths are the document's.
+      assert(page.url() === loadedAt, `the address is left as it was: ${loadedAt} → ${page.url()}`);
+      await page.goto(`${base}/d/flat`);
+      await f.locator('.ts-flat th').first().waitFor({ timeout: 15000 });
+      const again = page.frames().find((x) => x.url().includes('/frame'));
+      await again.waitForFunction(() => [...document.querySelectorAll('.ts-flat th')].every((t) => t.classList.contains('is-set')));
     });
 
     await test('row resize: drag a row number\'s edge (Save writes data-height); double-click fits it again', async () => {
@@ -390,11 +533,11 @@ async function shot(page, name) {
       await f.locator('.ts-row[data-i="2"] .ts-c[data-c="0"]').tap();
       await p.locator('textarea').first().waitFor({ timeout: 5000 });
       await shot(p, 'mode-comment-phone');
-      // A fresh load for the drag, with nothing open over the page.
-      // A reload no longer reopens Edit (it is not remembered), so pick it again.
+      // A fresh load for the drag, with nothing open over the page: an
+      // owner's drag in Read mode is saved as it is on a desktop.
       frame = await open('phone', { viewPage: p });
-      await chooseMode(p, 'Edit');
-      await frameMode(frame, 'edit');
+      await chooseMode(p, 'Read');
+      await frameMode(frame, 'read');
       // A finger drag (CDP touch events) on the frozen first column's edge.
       const grip = await f.locator('.ts-h[data-c="0"] .ts-resize').boundingBox();
       const iframeBox = await p.locator('iframe[aria-label="Document content"]').boundingBox();
@@ -405,12 +548,33 @@ async function shot(page, name) {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
       for (let k = 1; k <= 6; k++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + k * 10, y, id: 1 }] }); await p.waitForTimeout(30); }
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-      await frame.waitForFunction(() => document.querySelectorAll('table[data-tdoc-sheet] thead th')[0].hasAttribute('data-width'));
-      const w1 = Number(await th(frame, 0, 'data-width'));
+      await waitForVersion('phone', 2);
+      const w1 = Number((saved('phone', 2).match(/<th[^>]*data-key="c1"[^>]*data-width="(\d+)"/) || [])[1]);
       assert(Math.abs(w1 - (w0 + 60)) <= 3, `touch resize ${w0} → ${w1} (frame at ${iframeBox.y})`);
+      assert(!(await p.locator('.tdoc-editor-toolbar').count()), 'phone: no Save bar');
       const overflow = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
       assert(overflow <= 1, `no sideways page scroll: ${overflow}`);
       await shot(p, 'resize-column-phone');
+      // The flat view on a phone (three columns read as a table): the same.
+      await p.goto('about:blank');
+      await p.goto(`${base}/d/flat-phone/v/1`);
+      await frameLoc(p).locator('.ts-flat th').first().waitFor({ timeout: 15000 });
+      frame = p.frames().find((x) => x.url().includes('/frame'));
+      await chooseMode(p, 'Read');
+      await frameMode(frame, 'read');
+      const fg = await frameLoc(p).locator('.ts-flat th[data-c="1"] .ts-resize').boundingBox();
+      assert(fg && fg.width >= 20, `a finger-sized grip in the flat view: ${fg && fg.width}px`);
+      const fw0 = await frame.evaluate(() => document.querySelector('.ts-flat th[data-c="1"]').getBoundingClientRect().width);
+      const fx = fg.x + fg.width / 2, fy = fg.y + fg.height / 2;
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fx, y: fy, id: 2 }] });
+      for (let k = 1; k <= 6; k++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: fx + k * 10, y: fy, id: 2 }] }); await p.waitForTimeout(30); }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await waitForVersion('flat-phone', 2);
+      const fw1 = Number((saved('flat-phone', 2).match(/<th[^>]*data-key="c2"[^>]*data-width="(\d+)"/) || [])[1]);
+      assert(Math.abs(fw1 - (fw0 + 60)) <= 3, `flat touch resize ${fw0} → ${fw1}`);
+      const overflow2 = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+      assert(overflow2 <= 1, `no sideways page scroll: ${overflow2}`);
+      await shot(p, 'flat-resize-phone');
       await phone.close();
     });
 
