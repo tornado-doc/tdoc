@@ -863,58 +863,6 @@ function syncDocumentTitle(html, title) {
     .replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, () => `<title>${safe}</title>`);
 }
 
-// Local twin of the Worker's agentReplyGate, read off the flat replies list
-// instead of an event log: one agent answer per human turn, plus the one
-// follow-up agentFollowupReason allows. Agents are one side: any agent's
-// reply is the agent side having spoken.
-function localAgentReplyGate(parent, text, next) {
-  if (!parent) return { allowed: false, reason: 'parent_not_found' };
-  if (parent.deleted) return { allowed: false, reason: 'comment_deleted' };
-  let answered = false, run = 0, last = null, cited = 0;
-  for (const r of parent.replies || []) {
-    if (!r) continue;
-    if (r.author && r.author.kind === 'agent') {
-      answered = true;
-      run += 1;
-      last = { id: r.id, status: r.agent_status || null, text: r.text, doc_version: Number(r.doc_version != null ? r.doc_version : r.version) || 0, deleted: !!r.deleted };
-      if (r.agent_status === 'applied') cited = Math.max(cited, Number(r.version) || 0);
-    } else {
-      run = 0;
-      last = null;
-    }
-  }
-  if (!answered) return { allowed: true, reason: 'first_reply' };
-  if (run === 0) return { allowed: true, reason: 'human_replied_since' };
-  const reason = agentFollowupReason(last, run, cited, next, text);
-  return { allowed: reason.startsWith('followup_'), reason };
-}
-
-// The one extra agent reply after the agent side's own last word. Duplicated
-// in worker.js and server.js; test/no-drift.test.js pins them equal.
-// `last`: the agent side's latest reply { status, text, doc_version, deleted };
-// `run`: agent replies in a row since the last human turn; `cited`: newest
-// version an agent reply on the thread applied in; `next`: the reply being
-// posted { status, applied_in, latest }.
-function agentFollowupReason(last, run, cited, next, text) {
-  if (run !== 1 || !last || last.deleted) return 'already_answered';
-  const status = next && typeof next.status === 'string' ? next.status : null;
-  let reason = null;
-  if (last.status === 'partial') {
-    reason = 'followup_after_partial';
-  } else if (last.status == null && (status === 'applied' || status === 'partial' || status === 'answered')) {
-    reason = 'followup_after_interim';
-  } else if (status === 'applied') {
-    const v = Number(next.applied_in);
-    const latest = Number(next.latest) || 0;
-    const since = Math.max(Number(cited) || 0, Number(last.doc_version) || 0);
-    if (Number.isFinite(v) && v > since && (!latest || v <= latest)) reason = 'followup_live';
-  }
-  if (!reason) return 'already_answered';
-  const norm = (t) => (typeof t === 'string' ? t.trim().replace(/\s+/g, ' ') : '');
-  if (norm(text) && norm(text) === norm(last.text)) return 'duplicate_reply';
-  return reason;
-}
-
 function latestLocalVersion(slug, meta) {
   const declared = Array.isArray(meta && meta.versions)
     ? meta.versions.map((item) => Number(item && item.n) || 0)
@@ -2535,13 +2483,15 @@ const server = http.createServer(async (req, res) => {
   //   question -> ❓
   // The agent always clears its previous emoji on this comment first, so a
   // stale "applied" emoji can't outlive a later "question" outcome.
-  // The one-answer-per-human-turn gate applies here as on the Worker, with
-  // the same follow-up rule (agentFollowupReason, shared verbatim). What local
-  // preview cannot know: a delete here can remove a reply from the array
-  // outright, so an agent reply deleted without a trace does not count —
-  // the Worker's event log is what makes "already answered, and deleted
-  // since" a knowable thing. A tombstoned agent reply does count, as dealt
-  // with.
+  // NOTE: local preview does NOT gate a repeated agent reply the way the
+  // published Worker does (#349). It cannot: a delete here removes the reply
+  // from the array outright, so there is no record that the agent ever
+  // answered — the Worker's event log is what makes "already answered, and
+  // deleted since" a knowable thing. Local preview is one person on one
+  // machine; the loop this protects against is a published doc being pulled
+  // and regenerated. A reply does record the doc's version when it landed
+  // (doc_version), which publishing carries into the Worker's log as the
+  // baseline for a "live now" follow-up there.
   if (p === '/api/agent/reply' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
@@ -2549,6 +2499,11 @@ const server = http.createServer(async (req, res) => {
     const { parent_id, status: agentStatus, applied_in } = body;
     const text = typeof body.text === 'string' ? body.text.trim() : body.text;
     if (!slug || !parent_id || !text) return json(res, 400, { error: 'invalid slug or missing parent_id/text' });
+    // Same rule as the Worker: a version is a whole number.
+    if (applied_in !== undefined && applied_in !== null && applied_in !== ''
+        && !(Number.isInteger(Number(applied_in)) && Number(applied_in) >= 1)) {
+      return json(res, 400, { error: 'invalid_applied_in', message: 'applied_in must be a whole version number (1, 2, ...).' });
+    }
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
     const parent = all.find(c => c.id === parent_id)
@@ -2559,10 +2514,6 @@ const server = http.createServer(async (req, res) => {
     let latest = 0;
     try { latest = latestLocalVersion(slug, JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8'))); }
     catch { latest = latestLocalVersion(slug, null); }
-    const gate = localAgentReplyGate(parent, text, {
-      status: verdict, applied_in: verdict === 'applied' ? Number(applied_in != null ? applied_in : body.version) || 1 : null, latest,
-    });
-    if (!gate.allowed) return json(res, 200, { ok: true, skipped: true, reason: gate.reason, parent_id, thread_id: parent.id });
     const agent = agentIdentity(body, process.env);
     parent.agent_actor = agent.login;
     const reply = {
@@ -2575,7 +2526,7 @@ const server = http.createServer(async (req, res) => {
       author: agent,
       agent_status: verdict,
       // The doc's latest version as this reply lands: what a later "live
-      // now" follow-up is compared to (agentFollowupReason).
+      // now" follow-up is compared to (the Worker's agentReplyGate).
       ...(latest ? { doc_version: latest } : {}),
       created: new Date().toISOString(),
       reactions: {},

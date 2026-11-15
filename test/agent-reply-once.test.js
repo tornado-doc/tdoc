@@ -151,11 +151,12 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}') { d--; if (d === 0) { i++; break; } } }
     return src.slice(start, i);
   }
-  const box = { crypto: globalThis.crypto };
+  const box = { crypto: globalThis.crypto, AGENT_STATUS_EMOJI: { applied: '✅', partial: '🟡', question: '❓', answered: '💬' } };
   vm.createContext(box);
   vm.runInContext([
     fn('isFiniteVersion'), fn('legacyToEvents'), fn('ensureEventLog'),
     fn('eventEid'), fn('backfillEids'), fn('dedupEvents'), fn('agentReplyGate'), fn('agentFollowupReason'),
+    fn('appendEvent'), fn('ensureMigrated'), fn('snapshotAt'), fn('hasNoWords'), fn('keepThread'), fn('asTombstone'), fn('snapshotList'), fn('compactComments'), fn('reconcileAnchors'),
   ].join('\n\n'), box);
   const gate = box.agentReplyGate;
 
@@ -340,6 +341,65 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     reply: { id, author: bot, text, ...(status ? { agent_status: status } : {}) },
   });
 
+  await t('live: no follow-up when the previous reply recorded no doc version (no at_version fallback)', async () => {
+    // at_version 1 is the comment's creation version, not what the doc was.
+    const g = gate(thread(agentAt('r1', 'Will fix it in the next version.', 'answered', 1)), 'claude', 'Live now.', { status: 'applied', applied_in: 3, latest: 3 });
+    assert(g.allowed === false && g.reason === 'already_answered', JSON.stringify(g));
+  });
+
+  await t('live: applied_in must be a whole version number', async () => {
+    const g = gate(thread(agentAt('r1', 'Fixed in v2.', 'applied', 2, 2)), 'claude', 'Live in v2.5.', { status: 'applied', applied_in: 2.5, latest: 3 });
+    assert(g.allowed === false && g.reason === 'already_answered', JSON.stringify(g));
+  });
+
+  await t('a published local reply keeps its doc_version in the log', async () => {
+    const events = box.legacyToEvents({
+      id: 'c1', version: 1, text: 'fix', created: '2026-01-01T00:00:00Z', status: 'open',
+      replies: [{ id: 'r1', version: 1, author: bot, text: 'Working on it.', agent_status: null, doc_version: 3, created: '2026-01-02T00:00:00Z' }],
+    });
+    const ev = events.find((e) => e.kind === 'reply_added');
+    assert(ev && ev.doc_version === 3, JSON.stringify(ev));
+  });
+
+  await t('turns follow the order events were added, not at_version [unlimited replies]', async () => {
+    // The person replies on v3; agent replies without applied_in are stamped
+    // with the comment's creation version (1). Sorted by at_version, every
+    // agent reply sat before the person's and the gate never shut.
+    const replies = [];
+    let g;
+    for (let i = 0; i < 4; i += 1) {
+      g = gate(thread(
+        { kind: 'reply_added', at_version: 3, at: '2026-01-02T00:00:00Z', reply: { id: 'h1', author: human, text: 'still wrong' } },
+        ...replies,
+      ), 'claude', `Answer ${i}.`, { status: 'answered' });
+      if (!g.allowed) break;
+      replies.push(agentAt(`r${i}`, `Answer ${i}.`, 'answered', 1, 3));
+    }
+    assert(replies.length === 1, `agent replied ${replies.length} times in a row after one human reply`);
+    assert(g.reason === 'already_answered', JSON.stringify(g));
+  });
+
+  await t('a publish that re-binds the anchor is nobody\'s turn', async () => {
+    const c = {
+      id: 'c1', author: human, created: '2026-01-01T00:00:00Z', created_in: 1,
+      events: [
+        { kind: 'created', at_version: 1, at: '2026-01-01T00:00:00Z', text: 'fix this', eid: 'created:c1',
+          anchor: { kind: 'element', aid: 'OLD', selector: '[data-tdoc-aid="OLD"]', label: 'section', fingerprint: { tag: 'section' }, fallback: { nearestHeading: { text: 'Intro' } } } },
+        { ...agentAt('r1', 'Done.', 'answered', 1, 1), eid: 'r1' },
+      ],
+    };
+    box.reconcileAnchors([c], [{ aid: 'NEW', tag: 'section', heading: 'Intro' }], 2);
+    const rebind = c.events.find((e) => e.kind === 'anchor_changed');
+    assert(rebind && rebind.by === 'reconcile' && rebind.by_kind === 'system', `rebind not marked system: ${JSON.stringify(rebind)}`);
+    const g = gate(c, 'claude', 'Done again.', { status: 'answered' });
+    assert(g.allowed === false && g.reason === 'already_answered', JSON.stringify(g));
+    // A rebind written before the stamp (by:'reconcile', no by_kind) is no turn either.
+    const legacy = gate(thread(agentSaid('r1', 'Done.', 'answered'), {
+      kind: 'anchor_changed', at_version: 2, at: '2026-01-03T00:00:00Z', by: 'reconcile', reset_status: false, anchor: { kind: 'lost' },
+    }), 'claude', 'Done again.', { status: 'answered' });
+    assert(legacy.allowed === false && legacy.reason === 'already_answered', JSON.stringify(legacy));
+  });
+
   await t('interim: after a no-status note, one applied / partial / answered reply', async () => {
     for (const st of ['applied', 'partial', 'answered']) {
       const g = gate(thread(agentSaid('r1', 'Working on it: rewriting the intro.', null)), 'claude', 'Live now: the intro is rewritten.', { status: st, applied_in: 2, latest: 2 });
@@ -433,6 +493,105 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(c.skipped === true && c.reason === 'already_answered', `third reply posted: ${JSON.stringify(c)}`);
     const [after] = await listComments(env, slug, 3);
     assert(after.replies.length === 2, `expected 2 replies, got ${after.replies.length}`);
+  });
+
+  const rawThread = async (env, slug, id) => {
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
+    const r = await stub.fetch('https://do/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
+    return ((await r.json()).list || []).find((c) => c.id === id);
+  };
+
+  await t('route: an agent reply records the doc version it landed on', async () => {
+    const { env, token, slug, commentId } = await seed('agent-docv');
+    await publish(env, token, slug, 2);
+    const a = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Looking into it.', agent_login: 'claude' })).json();
+    assert(a.id && !a.skipped, JSON.stringify(a));
+    const c = await rawThread(env, slug, commentId);
+    const ev = c.events.find((e) => e.kind === 'reply_added' && e.reply && e.reply.id === a.id);
+    assert(ev && ev.doc_version === 2, `doc_version: ${JSON.stringify(ev)}`);
+  });
+
+  await t('route: applied_in must be a whole number (2.5 is refused)', async () => {
+    const { env, token, slug, commentId } = await seed('agent-intver');
+    await publish(env, token, slug, 2);
+    const r = await reply(worker, env, slug, token, { parent_id: commentId, text: 'Fixed.', status: 'applied', applied_in: 2.5, agent_login: 'claude' });
+    const body = await r.json();
+    assert(r.status === 400 && body.error === 'invalid_applied_in', `${r.status} ${JSON.stringify(body)}`);
+    const [after] = await listComments(env, slug, 2);
+    assert(after.replies.length === 0, 'the reply was posted anyway');
+  });
+
+  await t('route: the unlimited-reply repro — one human reply on a later version, then only one agent answer', async () => {
+    const { env, token, reader, slug, commentId } = await seed('agent-unlimited');
+    await publish(env, token, slug, 2);
+    await publish(env, token, slug, 3);
+    const human = await worker.fetch(req('/api/comments', { method: 'POST', cookie: reader, body: { slug, version: 3, text: 'still wrong', parent_id: commentId } }), env, {});
+    assert(human.status === 200, `human reply ${human.status}`);
+    const out = [];
+    for (let i = 0; i < 4; i += 1) {
+      out.push(await (await reply(worker, env, slug, token, { parent_id: commentId, text: `Answer number ${i}.`, status: 'answered', agent_login: 'claude' })).json());
+    }
+    const posted = out.filter((b) => b.id && !b.skipped).length;
+    assert(posted === 1, `${posted} agent answers landed in a row: ${JSON.stringify(out.map((b) => b.reason || b.id))}`);
+  });
+
+  await t('route: two follow-ups sent at once — only one lands (gate re-run in the store)', async () => {
+    const { env, token, slug, commentId } = await seed('agent-race');
+    const a = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Working on it.', status: 'partial', agent_login: 'claude' })).json();
+    assert(a.id && !a.skipped, JSON.stringify(a));
+    // Hold each write until both requests have reached it, so both pass the
+    // route's own gate check on the same read: only the store can refuse.
+    const realGet = env.COMMENTS.get.bind(env.COMMENTS);
+    let waiting = 0, release;
+    const barrier = new Promise((r) => { release = r; });
+    env.COMMENTS.get = (id) => {
+      const stub = realGet(id);
+      return { fetch: async (url, init) => {
+        if (String(url).endsWith('/mutate')) { waiting += 1; if (waiting >= 2) release(); await barrier; }
+        return stub.fetch(url, init);
+      } };
+    };
+    const both = await Promise.all([
+      reply(worker, env, slug, token, { parent_id: commentId, text: 'Here is option A.', status: 'answered', agent_login: 'claude' }).then((r) => r.json()),
+      reply(worker, env, slug, token, { parent_id: commentId, text: 'Here is option B.', status: 'answered', agent_login: 'codex' }).then((r) => r.json()),
+    ]);
+    env.COMMENTS.get = realGet;
+    const landed = both.filter((b) => b.id && !b.skipped);
+    const refused = both.filter((b) => b.skipped);
+    assert(landed.length === 1 && refused.length === 1 && refused[0].reason === 'already_answered', JSON.stringify(both));
+    const c = await rawThread(env, slug, commentId);
+    const agentReplies = c.events.filter((e) => e.kind === 'reply_added' && e.reply && e.reply.author && e.reply.author.kind === 'agent');
+    assert(agentReplies.length === 2, `expected 2 agent replies stored, got ${agentReplies.length}`);
+  });
+
+  await t('store: a raw_events write carrying a gate is refused there, and nothing is written', async () => {
+    const { env, token, slug, commentId } = await seed('agent-store-gate');
+    await reply(worker, env, slug, token, { parent_id: commentId, text: 'Done.', status: 'answered', agent_login: 'claude' });
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
+    const r = await (await stub.fetch('https://do/mutate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, op: {
+      kind: 'raw_events', slug, id: commentId, gate: { agent_login: 'claude', text: 'Done again.', next: { status: 'answered' } },
+      events: [{ kind: 'reply_added', at_version: 1, at: new Date().toISOString(), reply: { id: 'r_x', author: { kind: 'agent', login: 'claude' }, text: 'Done again.', agent_status: 'answered' } }],
+    } }) })).json();
+    assert(r.status === 202 && r.body.skipped === true && r.body.reason === 'already_answered', JSON.stringify(r));
+    const c = await rawThread(env, slug, commentId);
+    assert(!c.events.some((e) => e.reply && e.reply.id === 'r_x'), 'the refused reply was written');
+  });
+
+  await t('Ask: tdoc AI\'s answer records the doc version it landed on', async () => {
+    const { env, token, reader, slug, commentId } = await seed('agent-ask-docv');
+    await publish(env, token, slug, 2);
+    env.TDOC_PREVIEW = '1';
+    try {
+      const r = await worker.fetch(req(`/api/docs/${slug}/ask`, {
+        method: 'POST', cookie: reader, headers: { Origin: 'https://tdoc.dev', 'Sec-Fetch-Site': 'same-origin' },
+        body: { comment_id: commentId, version: 2 },
+      }), env, {});
+      const body = await r.json();
+      assert(r.status === 200 && !body.skipped, `ask ${r.status}: ${JSON.stringify(body)}`);
+    } finally { delete env.TDOC_PREVIEW; }
+    const c = await rawThread(env, slug, commentId);
+    const ev = c.events.find((e) => e.kind === 'reply_added' && e.reply && e.reply.author && e.reply.author.login === 'tdoc-ai');
+    assert(ev && ev.doc_version === 2, `doc_version: ${JSON.stringify(ev)}`);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

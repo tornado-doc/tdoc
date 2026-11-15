@@ -341,69 +341,36 @@ function waitReady(port, ms = 5000) {
     if (/tdoc_home-card|og:image:width|twitter:image:alt/.test(doc)) throw new Error('plain doc took the home card tags');
   });
 
-  // Agent replies answer once per human turn here as on the Worker, with the
-  // same single follow-up: "working on it" then "Live now", or an applied
-  // reply in a newer version. Never a third agent reply in a row.
+  // Local preview does not gate agent replies (the Worker does, #349): who
+  // may reply here is unchanged. A reply records the doc's version when it
+  // landed (doc_version), which publishing carries into the Worker's log as
+  // the baseline for its "live now" follow-up; applied_in is a whole number.
   {
-    const GATE = 'api-gate-' + Date.now();
+    const GATE = 'api-agent-' + Date.now();
     const gateDir = path.join(TMP_DIR, GATE);
-    const publishLocal = (n) => {
-      fs.mkdirSync(path.join(gateDir, `v${n}`), { recursive: true });
-      fs.writeFileSync(path.join(gateDir, `v${n}`, 'index.html'), `<h1>gate v${n}</h1>`);
-      fs.writeFileSync(path.join(gateDir, 'meta.json'), JSON.stringify({ title: 'gate', versions: Array.from({ length: n }, (_, i) => ({ n: i + 1 })) }));
-    };
-    fs.mkdirSync(gateDir, { recursive: true });
+    fs.mkdirSync(path.join(gateDir, 'v1'), { recursive: true });
+    fs.mkdirSync(path.join(gateDir, 'v2'), { recursive: true });
+    fs.writeFileSync(path.join(gateDir, 'v1', 'index.html'), '<h1>v1</h1>');
+    fs.writeFileSync(path.join(gateDir, 'v2', 'index.html'), '<h1>v2</h1>');
+    fs.writeFileSync(path.join(gateDir, 'meta.json'), JSON.stringify({ title: 'agent', versions: [{ n: 1 }, { n: 2 }] }));
     fs.writeFileSync(path.join(gateDir, 'comments.json'), '[]');
-    publishLocal(1);
-    const comment = async (text) => (await req('POST', '/api/comments', { slug: GATE, version: 1, text, anchor: null })).body.id;
-    const agentReply = async (body) => (await req('POST', '/api/agent/reply', { slug: GATE, agent_login: 'claude', ...body })).body;
+    const id = (await req('POST', '/api/comments', { slug: GATE, version: 1, text: 'fix the intro', anchor: null })).body.id;
 
-    await t('local agent reply: a second word on an untouched thread is skipped', async () => {
-      const id = await comment('fix the intro');
-      const a = await agentReply({ parent_id: id, text: 'Rewrote the intro.', status: 'answered' });
-      if (!a.id || a.skipped) throw new Error(`first reply refused: ${JSON.stringify(a)}`);
-      const b = await agentReply({ parent_id: id, text: 'Rewrote it again.', status: 'answered' });
-      if (b.skipped !== true || b.reason !== 'already_answered') throw new Error(`second reply: ${JSON.stringify(b)}`);
+    await t('local agent replies are not gated: a second agent reply in a row still lands', async () => {
+      const a = await req('POST', '/api/agent/reply', { slug: GATE, parent_id: id, text: 'Working on it.', agent_login: 'claude' });
+      const b = await req('POST', '/api/agent/reply', { slug: GATE, parent_id: id, text: 'Rewrote it again.', status: 'answered', agent_login: 'claude' });
+      const c = await req('POST', '/api/agent/reply', { slug: GATE, parent_id: id, text: 'And once more.', status: 'answered', agent_login: 'claude' });
+      for (const r of [a, b, c]) if (r.status !== 200 || !r.body.id || r.body.skipped) throw new Error(`refused: ${JSON.stringify(r.body)}`);
     });
 
-    await t('local agent reply (a): "working on it", then one "Live now" with a status, then shut', async () => {
-      const id = await comment('the chart is wrong');
-      const a = await agentReply({ parent_id: id, text: 'Working on it: redrawing the chart.' });
-      if (!a.id || a.skipped) throw new Error(`interim refused: ${JSON.stringify(a)}`);
-      const q = await agentReply({ parent_id: id, text: 'Which axis did you mean?', status: 'question' });
-      if (q.skipped !== true || q.reason !== 'already_answered') throw new Error(`question after interim: ${JSON.stringify(q)}`);
-      publishLocal(2);
-      const b = await agentReply({ parent_id: id, text: 'Live now: the chart is redrawn.', status: 'applied', applied_in: 2 });
-      if (!b.id || b.skipped || b.agent_status !== 'applied') throw new Error(`live reply refused: ${JSON.stringify(b)}`);
-      const c = await agentReply({ parent_id: id, text: 'Also fixed the legend.', status: 'answered' });
-      if (c.skipped !== true || c.reason !== 'already_answered') throw new Error(`third reply posted: ${JSON.stringify(c)}`);
+    await t('a local agent reply records the doc version it landed on', async () => {
+      const r = await req('POST', '/api/agent/reply', { slug: GATE, parent_id: id, text: 'Live now.', status: 'applied', applied_in: 2, agent_login: 'claude' });
+      if (r.status !== 200 || r.body.doc_version !== 2) throw new Error(`doc_version: ${JSON.stringify(r.body)}`);
     });
 
-    await t('local agent reply (b): applied in a newer version after an applied reply, then shut', async () => {
-      const id = await comment('typo in the title');
-      const a = await agentReply({ parent_id: id, text: 'Fixed in v2.', status: 'applied', applied_in: 2 });
-      if (!a.id || a.skipped) throw new Error(`first reply refused: ${JSON.stringify(a)}`);
-      const same = await agentReply({ parent_id: id, text: 'Fixed in v2, double-checked.', status: 'applied', applied_in: 2 });
-      if (same.skipped !== true || same.reason !== 'already_answered') throw new Error(`same version: ${JSON.stringify(same)}`);
-      const future = await agentReply({ parent_id: id, text: 'Live in v7.', status: 'applied', applied_in: 7 });
-      if (future.skipped !== true || future.reason !== 'already_answered') throw new Error(`unpublished version: ${JSON.stringify(future)}`);
-      publishLocal(3);
-      const b = await agentReply({ parent_id: id, text: 'Live now in v3.', status: 'applied', applied_in: 3 });
-      if (!b.id || b.skipped) throw new Error(`live reply refused: ${JSON.stringify(b)}`);
-      publishLocal(4);
-      const c = await agentReply({ parent_id: id, text: 'And v4.', status: 'applied', applied_in: 4 });
-      if (c.skipped !== true || c.reason !== 'already_answered') throw new Error(`third reply posted: ${JSON.stringify(c)}`);
-      const list = (await req('GET', `/api/comments?slug=${GATE}`)).body;
-      const thread = list.find((x) => x.id === id);
-      if (thread.replies.length !== 2) throw new Error(`expected 2 replies, got ${thread.replies.length}`);
-    });
-
-    await t('local agent reply: a person writing back re-opens the thread', async () => {
-      const id = await comment('shorter please');
-      await agentReply({ parent_id: id, text: 'Shortened it.', status: 'answered' });
-      await req('POST', '/api/comments', { slug: GATE, parent_id: id, text: 'shorter still' });
-      const b = await agentReply({ parent_id: id, text: 'Cut it to two lines.', status: 'answered' });
-      if (!b.id || b.skipped) throw new Error(`reply after a person refused: ${JSON.stringify(b)}`);
+    await t('local applied_in must be a whole number (2.5 is refused)', async () => {
+      const r = await req('POST', '/api/agent/reply', { slug: GATE, parent_id: id, text: 'Fixed.', status: 'applied', applied_in: 2.5, agent_login: 'claude' });
+      if (r.status !== 400 || r.body.error !== 'invalid_applied_in') throw new Error(`${r.status} ${JSON.stringify(r.body)}`);
     });
   }
 

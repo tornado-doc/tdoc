@@ -3058,7 +3058,7 @@ function reconcileAnchors(comments, aidsInVersion, V) {
       // Append the rebind as an event at THIS version. Older folds are
       // unchanged.
       appendEvent(c, {
-        kind: 'anchor_changed', at_version: version, at: now, by: 'reconcile',
+        kind: 'anchor_changed', at_version: version, at: now, by: 'reconcile', by_kind: 'system',
         reset_status: false,
         anchor: {
           kind: 'element',
@@ -3076,7 +3076,7 @@ function reconcileAnchors(comments, aidsInVersion, V) {
       // lost and still has no candidate, do nothing — re-appending an identical
       // lost event every publish would bloat the log for no benefit.
       appendEvent(c, {
-        kind: 'anchor_changed', at_version: version, at: now, by: 'reconcile',
+        kind: 'anchor_changed', at_version: version, at: now, by: 'reconcile', by_kind: 'system',
         reset_status: false,
         anchor: {
           kind: 'lost',
@@ -8858,6 +8858,9 @@ function legacyToEvents(c) {
     for (const r of c.replies) {
       events.push({
         kind: 'reply_added', at_version: Number(r.version) || v, at: r.created || at,
+        // A local agent reply records the doc's version when it landed (the
+        // "live now" baseline, agentReplyGate); it survives the publish.
+        ...(Number.isInteger(r.doc_version) && r.doc_version > 0 ? { doc_version: r.doc_version } : {}),
         reply: {
           id: r.id, author: r.author || null, text: r.text || '',
           agent_status: r.agent_status || null,
@@ -9217,7 +9220,7 @@ function historyList(list) {
 // no follow-up.
 //
 // Two more single follow-ups (Julie, 2026-11: "working on it", then "live
-// now"), decided by agentFollowupReason, shared verbatim with server.js:
+// now"), decided by agentFollowupReason:
 //   - after an interim note (a reply with no status), one reply whose status
 //     is applied / partial / answered;
 //   - one `applied` reply whose applied_in is newer than every version the
@@ -9234,14 +9237,14 @@ function historyList(list) {
 function agentReplyGate(record, agentLogin, text, next) {
   if (!record) return { allowed: false, reason: 'parent_not_found' };
   ensureEventLog(record);
-  // Same ordering the fold uses — by version, ties broken by append order —
-  // so "who spoke last" means the same thing here as it does on the card.
-  // Timestamps are not the tiebreak: two events in one round land in the same
-  // millisecond, and a tie must not read as "nobody has answered since".
-  const ordered = dedupEvents(record.events)
-    .map((e, i) => ({ e, i }))
-    .sort((a, b) => ((a.e.at_version || 0) - (b.e.at_version || 0)) || (a.i - b.i))
-    .map((x) => x.e);
+  // Turns are taken in the order the events were added, not by at_version.
+  // at_version says which version an event belongs to, not when it happened:
+  // an agent reply without applied_in is stamped with the comment's creation
+  // version, so sorted by version it landed BEFORE a person's later reply on
+  // a newer version, the person kept the last word, and agents could reply
+  // without limit. Timestamps are not used either: two events in one round
+  // land in the same millisecond.
+  const ordered = dedupEvents(record.events);
   const isAgentAuthor = (author) => !!(author && author.kind === 'agent');
   let answered = false;   // this agent has spoken at least once
   let theirTurn = true;   // a human has moved since it last did
@@ -9266,10 +9269,13 @@ function agentReplyGate(record, agentLogin, text, next) {
           theirTurn = false;
           run += 1;
           // doc_version is the doc's latest version when the reply landed
-          // (stamped since 2026-11); older events fall back to at_version.
+          // (stamped since 2026-11). Without it there is no baseline, and no
+          // "live now" follow-up: at_version is usually the comment's own
+          // creation version, which would let any version count as newer.
+          const dv = Number(e.doc_version);
           last = {
             id: e.reply.id, status: e.reply.agent_status || null, text: e.reply.text,
-            doc_version: Number(e.doc_version != null ? e.doc_version : e.at_version) || 0, deleted: false,
+            doc_version: Number.isInteger(dv) && dv > 0 ? dv : null, deleted: false,
           };
           if (e.reply.agent_status === 'applied') cited = Math.max(cited, Number(e.at_version) || 0);
         } else {
@@ -9287,7 +9293,11 @@ function agentReplyGate(record, agentLogin, text, next) {
         // bind_anchor_aid re-anchor stamps by_kind:'agent' — without it, one
         // agent's re-anchor read as a human turn to every OTHER agent's gate,
         // and two agents could keep a thread alive by re-anchoring in turn.
-        // Events written before by_kind existed keep the old login check.
+        // A publish's own anchor reconcile (by_kind:'system'; by:'reconcile'
+        // before the stamp) is nobody's turn: otherwise every publish that
+        // re-bound an anchor re-opened the thread. Other events written
+        // before by_kind existed keep the old login check.
+        if (e.by_kind === 'system' || (!e.by_kind && e.by === 'reconcile')) break;
         if (e.by_kind ? e.by_kind === 'human' : e.by !== agentLogin) { theirTurn = true; run = 0; last = null; }
         break;
       case 'reply_deleted':
@@ -9312,9 +9322,9 @@ function agentReplyGate(record, agentLogin, text, next) {
   return { allowed: reason.startsWith('followup_'), reason };
 }
 
-// The one extra agent reply after the agent side's own last word. Duplicated
-// in worker.js and server.js; test/no-drift.test.js pins them equal.
-// `last`: the agent side's latest reply { status, text, doc_version, deleted };
+// The one extra agent reply after the agent side's own last word.
+// `last`: the agent side's latest reply { status, text, doc_version (null when
+// not recorded), deleted };
 // `run`: agent replies in a row since the last human turn; `cited`: newest
 // version an agent reply on the thread applied in; `next`: the reply being
 // posted { status, applied_in, latest }.
@@ -9329,8 +9339,11 @@ function agentFollowupReason(last, run, cited, next, text) {
   } else if (status === 'applied') {
     const v = Number(next.applied_in);
     const latest = Number(next.latest) || 0;
-    const since = Math.max(Number(cited) || 0, Number(last.doc_version) || 0);
-    if (Number.isFinite(v) && v > since && (!latest || v <= latest)) reason = 'followup_live';
+    // No recorded doc version for the previous reply: no baseline, no follow-up.
+    if (last.doc_version != null && Number.isInteger(v)) {
+      const since = Math.max(Number(cited) || 0, Number(last.doc_version) || 0);
+      if (v > since && (!latest || v <= latest)) reason = 'followup_live';
+    }
   }
   if (!reason) return 'already_answered';
   const norm = (t) => (typeof t === 'string' ? t.trim().replace(/\s+/g, ' ') : '');
@@ -16577,6 +16590,13 @@ function applyCommentOp(list, op) {
       if (op.unique_key && list.some((c) => c && (c.events || []).some((e) => e && e.publish_key === op.unique_key))) {
         return { status: 409, body: { error: 'already_public' } };
       }
+      // The agent reply gate, again, inside the serialized write: the route
+      // checked a copy read outside the store, so two follow-ups sent at once
+      // could both pass. A refusal writes nothing (status 202, not 200).
+      if (op.gate) {
+        const g = agentReplyGate(target, op.gate.agent_login || '', op.gate.text, op.gate.next);
+        if (!g.allowed) return { status: 202, body: { ok: true, skipped: true, reason: g.reason, thread_id: target.id } };
+      }
       for (const ev of op.events) appendEvent(target, ev);
       return { status: 200, body: op.responseBody || { ok: true } };
     }
@@ -20654,16 +20674,23 @@ async function postThreadAnswer(env, slug, { thread, parentId, agent, text, vers
   const V = coerceBodyVersion(version, thread.root.created_in || 1);
   const now = new Date().toISOString();
   const replyId = `r_${Date.now()}_${rand(4)}`;
+  // The doc's latest version as the answer lands: the baseline a later
+  // "live now" follow-up is checked against (agentReplyGate).
+  let latest = 0;
+  try { latest = latestVersionNumber(await loadDocMeta(env, slug)) || 0; } catch {}
   const res = await mutateComments(env, slug, {
     kind: 'raw_events', slug, id: thread.root.id,
+    // Checked again inside the serialized write (see raw_events).
+    gate: { agent_login: agent.login, text },
     events: [
-      { kind: 'reply_added', at_version: V, at: now, reply: { id: replyId, author: agent, text, agent_status: 'answered', parent_id: parentId }, ...(uniqueKey ? { publish_key: uniqueKey } : {}) },
+      { kind: 'reply_added', at_version: V, at: now, ...(latest ? { doc_version: latest } : {}), reply: { id: replyId, author: agent, text, agent_status: 'answered', parent_id: parentId }, ...(uniqueKey ? { publish_key: uniqueKey } : {}) },
       { kind: 'marked_open', at_version: V, at: now, by: agent.login, agent_status: 'answered' },
     ],
     ...(uniqueKey ? { unique_key: uniqueKey } : {}),
     responseBody: { id: replyId, parent_id: parentId, thread_id: thread.root.id, text, author: agent, agent_status: 'answered', created: now, reactions: {} },
   });
   if (res.status === 409) return { duplicate: true };
+  if (res.status === 202 && res.body && res.body.skipped) return { skipped: true, reason: res.body.reason };
   // The asker sees the answer on the doc's row in My docs until they open it.
   if (res.status === 200) await noteAgentReply(env, thread, { slug, at: now });
   return res.status === 200 ? { reply: res.body } : { failed: res.status };
@@ -22417,7 +22444,7 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
       const res = await mutateComments(env, slug, {
         kind: 'raw_events', slug, id: thread.root.id,
         events: [
-          { kind: 'reply_added', at_version: version, at: now, reply: { id: replyId, author: agent, text, agent_status: 'applied', parent_id: cid } },
+          { kind: 'reply_added', at_version: version, at: now, doc_version: version, reply: { id: replyId, author: agent, text, agent_status: 'applied', parent_id: cid } },
           { kind: 'marked_applied', at_version: version, at: now, applied_in: version, by: agent.login, agent_status: 'applied' },
         ],
         unique_key: `suggest-applied:${set.id}:${cid}`,
@@ -32143,6 +32170,12 @@ const tdocHandlers = {
       const replyText = typeof body.text === 'string' ? body.text.trim() : body.text;
       if (!slug || !parent_id || !replyText) return json({ error: 'slug, parent_id, text required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      // A version is a whole number: 2.5 is not a version anything was
+      // applied in (coerceBodyVersion would have taken it).
+      if (applied_in !== undefined && applied_in !== null && applied_in !== ''
+          && !(Number.isInteger(Number(applied_in)) && Number(applied_in) >= 1)) {
+        return json({ error: 'invalid_applied_in', message: 'applied_in must be a whole version number (1, 2, ...).' }, { status: 400 });
+      }
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
       if (!writeGate.ok) return writeGate.response;
       // Marking a comment applied / partial, or moving its anchor, is an
@@ -32285,6 +32318,9 @@ const tdocHandlers = {
       }
       const res = await mutateComments(env, slug, {
         kind: 'raw_events', slug, id: parent.id, events,
+        // The same gate, re-run inside the serialized write: two follow-ups
+        // sent at once both pass the check above, only one lands.
+        gate: { agent_login: agent.login, text: replyText, next: { status: verdict, applied_in: verdict === 'applied' ? V : null, latest } },
         responseBody: { id: replyId, parent_id, thread_id: parent.id, text: replyText, author: agent, agent_status: verdict, created: now, reactions: {} },
       });
       // An answer is how a suggestions handoff ends for a question (or for "I
@@ -32304,6 +32340,9 @@ const tdocHandlers = {
       // → replied → published instead of stopping at "On it".
       if (res.status === 200) {
         try { await noteHandoffReply(env, slug, parent.id, now); } catch {}
+      }
+      if (res.status === 202 && res.body && res.body.skipped) {
+        return json({ ok: true, skipped: true, reason: res.body.reason, parent_id, thread_id: parent.id });
       }
       const out = downgradedFrom && res.body && typeof res.body === 'object'
         ? { ...res.body, verdict, downgraded_from: downgradedFrom }
