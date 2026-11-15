@@ -201,7 +201,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // in Read or Comment mode): the page is that version now, so everything
   // that names the version (the next save's base, comments, history, the
   // newer-version notice) names it. The frame already shows it: its address
-  // only changes for a later reload (Discard).
+  // only changes for a later reload (Discard). The page's own address is
+  // left as it is: no /v/N in it.
   const [ownVersion, setOwnVersion] = useState(null);
   const ownVersionRef = useRef(0);
   const config = useMemo(() => (ownVersion ? {
@@ -681,12 +682,13 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     // A sheet's column width set in Read or Comment mode by someone who may
     // edit the doc: saved as a new version at once, through the editor's own
     // document request and save (same checks, same author), without a mode
-    // change or a reload. The frame waits for the answer before it asks
-    // again, and takes the widths back when the save fails.
+    // change or a reload. The frame batches a burst of resizes into one
+    // request, waits for the answer before it asks again, and takes the
+    // widths back when the save fails.
     'tdoc:sheetLayoutSave': async () => {
       const current = editorRef.current;
       const reply = (ok) => bridgeRef.current?.({ type: 'tdoc:sheetLayoutSaved', ok });
-      if (!config.canEdit || config.isLanding || !current || current.mode === 'edit') { reply(false); return; }
+      if (!config.canEdit || config.isLanding || !current) { reply(false); return; }
       const base = Math.max(Number(config.version) || 0, ownVersionRef.current);
       try {
         const result = await current.saveInPlace(base);
@@ -694,12 +696,9 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         if (!n) throw new Error('Could not save');
         ownVersionRef.current = n;
         setOwnVersion({ n, created: new Date().toISOString(), source: 'browser', ...(config.identity?.login ? { author: config.identity.login } : {}) });
-        if (/\/v\/\d+\/?$/.test(location.pathname)) {
-          try { history.replaceState(history.state, '', `${location.pathname.replace(/\/v\/\d+(\/?)$/, `/v/${n}$1`)}${location.search}${location.hash}`); } catch {}
-        }
         bridgeRef.current?.({ type: 'tdoc:editRebase' });
         reply(true);
-        showToast(`Column width saved · v${n}`);
+        showToast('Column width saved');
       } catch (error) {
         reply(false);
         if (error.status === 409 && error.body?.error === 'version_conflict') showToast('This doc has a newer version. Open it to change column widths.', true);

@@ -1706,8 +1706,12 @@
   }
   // A width set outside Edit mode: written on the column's <th> at once and
   // saved by the shell as a new version (the editor's own save request, so
-  // the same checks and the same author). One save at a time; widths set
-  // while one is out go in the next. A save that fails takes its widths back.
+  // the same checks and the same author). Saved WIDTH_SAVE_MS after the last
+  // change, so resizing several columns in a row is one version; at once
+  // when the page is hidden or left, or Edit mode opens. One save at a time;
+  // widths set while one is out go in the next. A save that fails takes its
+  // widths back.
+  var WIDTH_SAVE_MS = 1500;
   var widthSave = { list: [], busy: false, sent: 0, timer: null };
   function saveWidths(tab, change) {
     Object.keys(change.cols).forEach(function (c) {
@@ -1721,15 +1725,21 @@
     relayoutTab(tab);
     sendWidths();
   }
-  function sendWidths() {
+  function sendWidths(now) {
     clearTimeout(widthSave.timer);
+    widthSave.timer = null;
     if (widthSave.busy || !widthSave.list.length) return;
-    widthSave.timer = setTimeout(function () {
+    var send = function () {
+      widthSave.timer = null;
       widthSave.busy = true;
       widthSave.sent = widthSave.list.length;
       post({ type: 'tdoc:sheetLayoutSave' });
-    }, 150);
+    };
+    if (now) send(); else widthSave.timer = setTimeout(send, WIDTH_SAVE_MS);
   }
+  function flushWidths() { if (widthSave.timer) sendWidths(true); }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flushWidths(); });
+  window.addEventListener('pagehide', flushWidths);
   function widthsSaved(ok) {
     if (!widthSave.busy) return;
     widthSave.busy = false;
@@ -3107,6 +3117,7 @@
       // After this message's other listeners: the editor (frame-probe.js)
       // turns Edit mode on, and takes its baseline, in its own.
       var pending = pendingLayout; pendingLayout = null;
+      flushWidths(); // widths waiting to be saved go now, not into the draft
       S.onMode(d.mode); // [structure] a structure change that asked for Edit mode
       // Leaving Edit mode saves or discards the draft: its undo history goes with it.
       if (d.mode !== 'edit') { undoStack = []; redoStack = []; }

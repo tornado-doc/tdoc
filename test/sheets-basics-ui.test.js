@@ -4,10 +4,12 @@
 //     comments on the cell, Edit edits it
 //   - column resize: drag a header's edge (the frozen first column too),
 //     double-click it to fit; row resize by the row number's edge
-//   - an owner's column resize in Read or Comment mode is saved at once as a
-//     new version (data-width, a browser edit by them): no Edit mode, no
-//     Save bar, no reload; the same in a prose doc's flat view, where a
-//     table wider than its box scrolls sideways inside it
+//   - an owner's column resize in Read or Comment mode is saved as a new
+//     version (data-width, a browser edit by them) 1.5 s after the last
+//     change, so a burst of resizes is one version, and at once when Edit
+//     mode opens: no Edit mode, no Save bar, no reload, the address as it
+//     was; the same in a prose doc's flat view, where a table wider than its
+//     box scrolls sideways inside it
 //   - in Edit mode a resize goes into the editor's draft: Save writes
 //     data-width / data-height; the editor bar's Undo takes it back
 //   - a reader who may not edit gets no column grip (grid or flat view)
@@ -187,7 +189,8 @@ async function shot(page, name) {
       assert(Math.abs(w1 - (w0 + 90)) <= 2, `width ${w0} → ${w1}`);
       const meta2 = versionOf('resize').find((v) => v.n === 2);
       assert(meta2.source === 'browser' && meta2.author === 'owner', `a browser edit by the owner: ${JSON.stringify(meta2)}`);
-      await page.waitForURL(/\/d\/resize\/v\/2$/);
+      assert(new URL(page.url()).pathname === '/d/resize/v/1', `the address is left as it was: ${page.url()}`);
+      assert(await page.locator('.tdoc-shell-toast', { hasText: /^Column width saved$/ }).count(), 'toast: Column width saved');
       assert(await page.locator(modeSelector('comment')).count(), 'still Comment mode');
       assert(!(await page.locator('.tdoc-editor-toolbar').count()), 'no Save bar');
       assert(await frame.evaluate(() => window.__sameFrame === true), 'no reload');
@@ -209,6 +212,36 @@ async function shot(page, name) {
       await page.waitForTimeout(500);
       assert(await page.locator('.tdoc-editor-toolbar button.primary').isDisabled(), 'Edit mode: no changes to save');
       await chooseMode(page, 'Read');
+    });
+
+    await test('a burst of resizes is one version; widths still waiting are saved when Edit mode opens', async () => {
+      writeDoc('resize-burst', sheet());
+      const frame = await open('resize-burst');
+      const f = frameLoc();
+      await chooseMode(page, 'Read');
+      await frameMode(frame, 'read');
+      for (const c of [0, 1, 2]) await dragBy(page, f.locator(`.ts-h[data-c="${c}"] .ts-resize`), 30, 0);
+      await waitForVersion('resize-burst', 2);
+      await page.waitForTimeout(2500);
+      assert(!fs.existsSync(path.join(root, 'resize-burst', 'v3')), 'three resizes in a row: one version');
+      assert((saved('resize-burst', 2).match(/<th[^>]*data-width="\d+"/g) || []).length === 3, 'v2 holds all three widths');
+      // Drag, then open Edit mode before the wait is over: saved at once,
+      // and Edit mode has nothing of it left to save.
+      await dragBy(page, f.locator('.ts-h[data-c="3"] .ts-resize'), 30, 0);
+      await chooseMode(page, 'Edit');
+      await waitForVersion('resize-burst', 3);
+      assert(/<th[^>]*data-key="c4"[^>]*data-width="\d+"/.test(saved('resize-burst', 3)), 'v3 holds the fourth width');
+      await frameMode(frame, 'edit');
+      await page.waitForTimeout(500);
+      assert(await page.locator('.tdoc-editor-toolbar button.primary').isDisabled(), 'Edit mode: no changes to save');
+      // The next Save is based on v3.
+      await f.locator('.ts-row[data-i="1"] .ts-c[data-c="0"]').dblclick();
+      await f.locator('.ts-editor').waitFor();
+      await page.keyboard.press(`${MOD}+a`);
+      await page.keyboard.type('After');
+      await page.keyboard.press('Enter');
+      await save('resize-burst', 4);
+      assert(/<th[^>]*data-key="c4"[^>]*data-width="\d+"/.test(saved('resize-burst', 4)) && saved('resize-burst', 4).includes('After'), 'v4: the edit on top of the widths');
     });
 
     await test('column resize in Edit mode: the editor draft and Save write data-width; Undo takes it back', async () => {
@@ -310,7 +343,7 @@ async function shot(page, name) {
 
     await test('flat view (a small sheet in a prose doc), owner in Read mode: drag a header edge, saved at once; wider than its box, the table scrolls sideways inside it', async () => {
       await page.goto('about:blank');
-      await page.goto(`${base}/d/flat/v/1`);
+      await page.goto(`${base}/d/flat`);
       const f = frameLoc();
       await f.locator('.ts-flat th').first().waitFor({ timeout: 15000 });
       const frame = page.frames().find((x) => x.url().includes('/frame'));
@@ -318,6 +351,7 @@ async function shot(page, name) {
       await frameMode(frame, 'read');
       assert(await frame.evaluate(() => document.querySelector('.tdoc-sheet').classList.contains('is-flat')), 'the flat view');
       const thw = () => frame.evaluate(() => document.querySelector('.ts-flat th[data-c="1"]').getBoundingClientRect().width);
+      const loadedAt = page.url();
       const w0 = await thw();
       await f.locator('.ts-flat th[data-c="1"]').hover();
       await shot(page, 'flat-grip-hover-desktop');
@@ -344,8 +378,10 @@ async function shot(page, name) {
       const deadline = Date.now() + 10000;
       while ((latestHtml().match(/data-width="\d+"/g) || []).length < 5 && Date.now() < deadline) await page.waitForTimeout(100);
       assert((latestHtml().match(/data-width="\d+"/g) || []).length === 5, 'the latest version holds all five widths');
-      // A reload keeps it: the saved widths are the document's.
-      await page.reload();
+      // The address is left as it was (no new /v/N in it), and the doc's own
+      // address shows the latest version: the widths are the document's.
+      assert(page.url() === loadedAt, `the address is left as it was: ${loadedAt} → ${page.url()}`);
+      await page.goto(`${base}/d/flat`);
       await f.locator('.ts-flat th').first().waitFor({ timeout: 15000 });
       const again = page.frames().find((x) => x.url().includes('/frame'));
       await again.waitForFunction(() => [...document.querySelectorAll('.ts-flat th')].every((t) => t.classList.contains('is-set')));
