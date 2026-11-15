@@ -291,7 +291,9 @@ async function startServer(worker, env) {
     // that is gone) is sent once, then dropped from this browser's cache.
     for (const kind of ['doc', 'widget']) {
       const s = ui[kind];
-      await t(`${tag}: ${kind}: a steady poll over an open human-only thread sends no read marks`, async () => {
+      // Opening a human-only thread reads it once (its bell rows go with it,
+      // Needs you); a steady poll over it sends nothing more.
+      await t(`${tag}: ${kind}: a steady poll over an open human-only thread sends no further read marks`, async () => {
         const target = kind === 'doc' ? await freshDoc() : await freshSpace();
         const id = await thread(target, kind, 0, `Quiet ${tag}`);
         const ctx = await contextFor();
@@ -301,8 +303,11 @@ async function startServer(worker, env) {
         await s.open(page, target);
         await (await s.present(page, id)).first().waitFor({ timeout: 10000 });
         if (!(kind === 'doc' && phone)) await s.openThread(page, id);
+        await page.waitForTimeout(1500);
+        const opened = posts.length;
+        assert.ok(opened <= 1, `${opened} read-mark POSTs on opening`);
         await page.waitForTimeout(4000);
-        assert.deepEqual(posts, [], `${posts.length} read-mark POSTs at rest`);
+        assert.equal(posts.length, opened, `${posts.length - opened} read-mark POSTs at rest`);
         assert.deepEqual(page.errors, []);
         await ctx.close();
       });

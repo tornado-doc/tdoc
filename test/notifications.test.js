@@ -44,6 +44,8 @@ vm.runInContext([
   fn('normalizeGithubLogin'),
   fn('emptyInbox'),
   fn('inboxUnread'),
+  fn('inboxRowThreads'),
+  fn('noteInboxThread'),
   fn('applyInboxEvent'),
   fn('markInboxRead'),
   fn('pageInbox'),
@@ -54,6 +56,36 @@ vm.runInContext([
 ].join('\n\n'), box);
 
 console.log('notifications inbox');
+
+t('a grouped comment row lists its threads; seen clears it only when all are seen', () => {
+  box.DOC_ACTIVITY_INBOX_KINDS = new Set(['comment', 'reply', 'mention']);
+  let inbox = box.emptyInbox();
+  inbox = box.applyInboxEvent(inbox, { id: 'n1', kind: 'comment', slug: 'd', comment_id: 'T1', thread_id: 'T1', at: '2026-01-01T01:00:00.000Z' });
+  inbox = box.applyInboxEvent(inbox, { id: 'n2', kind: 'comment', slug: 'd', comment_id: 'T2', thread_id: 'T2', at: '2026-01-01T02:00:00.000Z' });
+  assert(inbox.items.length === 1 && inbox.items[0].count === 2, JSON.stringify(inbox));
+  assert(JSON.stringify(Object.keys(inbox.items[0].thread_at).sort()) === '["T1","T2"]', JSON.stringify(inbox.items[0]));
+  const only2 = box.markInboxRead(inbox, { slug: 'd', seen: { T2: Date.parse('2026-01-01T02:00:00.000Z') } });
+  assert(!only2.items[0].read, 'T1 is still unread');
+  const both = box.markInboxRead(inbox, { slug: 'd', seen: { T1: Date.parse('2026-01-01T01:00:00.000Z'), T2: Date.parse('2026-01-01T02:00:00.000Z') } });
+  assert(both.items[0].read, 'both seen');
+});
+
+t('a grouped row stored before rows listed their threads is never cleared by seen', () => {
+  const legacy = { items: [{ id: 'n1', kind: 'comment', group_key: 'comment:d', slug: 'd', comment_id: 'T2', thread_id: 'T2', at: '2026-01-01T02:00:00.000Z', read: false, count: 2 }] };
+  assert(!box.markInboxRead(legacy, { slug: 'd', seen: { T2: Date.parse('2026-01-02T00:00:00.000Z') } }).items[0].read);
+  const grown = box.applyInboxEvent({ items: [{ ...legacy.items[0], count: 1 }] }, { id: 'n3', kind: 'comment', slug: 'd', comment_id: 'T3', thread_id: 'T3', at: '2026-01-01T03:00:00.000Z' });
+  assert(JSON.stringify(Object.keys(grown.items[0].thread_at).sort()) === '["T2","T3"]', 'a one-thread legacy row starts its list right');
+});
+
+t('past the cap a grouped row stops listing and waits for the bell', () => {
+  let inbox = box.emptyInbox();
+  for (let n = 0; n <= 50; n += 1) { // INBOX_ROW_THREADS_MAX
+    inbox = box.applyInboxEvent(inbox, { id: `n${n}`, kind: 'comment', slug: 'd', comment_id: `T${n}`, thread_id: `T${n}`, at: '2026-01-01T01:00:00.000Z' });
+  }
+  assert(inbox.items[0].threads_capped === true, JSON.stringify(Object.keys(inbox.items[0])));
+  const seen = Object.fromEntries(Array.from({ length: 60 }, (_, n) => [`T${n}`, Date.parse('2026-01-02T00:00:00.000Z')]));
+  assert(!box.markInboxRead(inbox, { slug: 'd', seen }).items[0].read);
+});
 
 t('inboxKey lowercases github login', () => {
   assert(box.inboxKey('SerenaKeyitan') === 'inbox:serenakeyitan');

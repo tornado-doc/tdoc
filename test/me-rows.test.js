@@ -10,6 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const { loadWorker, makeEnv, req, putSession, issue } = require('./helpers/worker-harness');
+const SAME_ORIGIN = { Origin: 'https://tdoc.dev' };
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -179,28 +180,55 @@ const PROSE_WITH_SHEET = `<h1>Runs and plan</h1><p>What we ran, and what is next
     eq(row(data.docs, 'q-doc').activity, { comments: 1, agent: 0 });
     eq(row(data.recent, 'q-doc').activity, { comments: 1, agent: 0 }, 'the same doc in Recent');
     assert(!('activity' in row(data.docs, 'q-deck')), 'a quiet doc has no activity field');
-    const read = await call(env, '/api/notifications/read', { method: 'POST', cookie: owner, body: { all: true } });
+    const read = await call(env, '/api/notifications/read', { method: 'POST', cookie: owner, body: { all: true }, headers: SAME_ORIGIN });
     assert(read.status === 200, `read ${read.status}`);
     data = await me(env, owner);
     assert(!('activity' in row(data.docs, 'q-doc')), `still unread: ${JSON.stringify(row(data.docs, 'q-doc'))}`);
   });
 
-  await t('reading a thread on the doc page clears its bell rows, other threads stay (Needs you)', async () => {
+  await t('a grouped "commented" row goes read only when every thread it covers is seen [review #1]', async () => {
+    const { env, owner } = fixture;
+    const alice = await putSession(env, 'alice');
+    const bob = await putSession(env, 'bob');
+    const a = await call(env, '/api/comments', { method: 'POST', cookie: alice, body: { slug: 'q-doc', version: 1, text: 'first thread', anchor: { kind: 'text', text: 'A sentence' } } });
+    const b = await call(env, '/api/comments', { method: 'POST', cookie: bob, body: { slug: 'q-doc', version: 1, text: 'second thread', anchor: { kind: 'text', text: 'A sentence' } } });
+    assert(a.status === 200 && b.status === 200, `comments ${a.status} ${b.status}`);
+    const rows = async () => (await call(env, '/api/notifications', { cookie: owner })).body.items.filter((i) => i.slug === 'q-doc' && !i.read);
+    const grouped = await rows();
+    assert(grouped.length === 1 && grouped[0].count === 2, JSON.stringify(grouped));
+    eq(Object.keys(grouped[0].thread_at).sort(), [a.body.id, b.body.id].sort(), 'the row knows both threads');
+    // Only the newest (Bob's) thread read: Alice's comment is still unread.
+    const at = (c) => Date.parse(c.body.created);
+    await call(env, '/api/comments/seen', { method: 'POST', cookie: owner, body: { slug: 'q-doc', seen: { [b.body.id]: at(b) } } });
+    eq((await rows()).length, 1, 'one thread seen: the grouped row stays');
+    const seen = await call(env, '/api/comments/seen', { method: 'POST', cookie: owner, body: { slug: 'q-doc', seen: { [a.body.id]: at(a) } } });
+    assert(seen.status === 200, `seen ${seen.status} ${seen.text}`);
+    eq((await rows()).length, 0, 'both seen: read');
+  });
+
+  await t('a human-only thread read up to its newest reply clears its bell row; an older mark does not [review #2]', async () => {
     const { env, owner } = fixture;
     const reader = await putSession(env, 'reader');
-    const a = await call(env, '/api/comments', { method: 'POST', cookie: reader, body: { slug: 'q-doc', version: 1, text: 'first thread', anchor: { kind: 'text', text: 'A sentence' } } });
-    const b = await call(env, '/api/comments', { method: 'POST', cookie: reader, body: { slug: 'q-doc', version: 1, text: 'second thread', anchor: { kind: 'text', text: 'A sentence' } } });
-    assert(a.status === 200 && b.status === 200, `comments ${a.status} ${b.status}`);
-    // The grouped "commented" row names the newest thread; seeing an older
-    // thread leaves it, seeing that one clears it.
-    const rows = async () => (await call(env, '/api/notifications', { cookie: owner })).body.items.filter((i) => i.slug === 'q-doc' && !i.read);
-    assert((await rows()).length === 1, JSON.stringify(await rows()));
-    const now = Date.now() + 1000;
-    await call(env, '/api/comments/seen', { method: 'POST', cookie: owner, body: { slug: 'q-doc', seen: { [a.body.id]: now } } });
-    assert((await rows()).length === 1, 'an older thread seen: the row about the newest stays');
-    const seen = await call(env, '/api/comments/seen', { method: 'POST', cookie: owner, body: { slug: 'q-doc', seen: { [b.body.id]: now } } });
-    assert(seen.status === 200, `seen ${seen.status} ${seen.text}`);
-    eq((await rows()).length, 0, 'the thread was read on the page: its row is read');
+    // The owner's own thread, a person replies: the owner's reply row.
+    const root = await call(env, '/api/comments', { method: 'POST', cookie: owner, body: { slug: 'q-deck', version: 1, text: 'what do you think?', anchor: { kind: 'text', text: 'Two' } } });
+    const reply = await call(env, '/api/comments', { method: 'POST', cookie: reader, body: { slug: 'q-deck', version: 1, parent_id: root.body.id, text: 'looks right' } });
+    assert(root.status === 200 && reply.status === 200, `${root.status} ${reply.status} ${reply.text}`);
+    const rows = async () => (await call(env, '/api/notifications', { cookie: owner })).body.items.filter((i) => i.slug === 'q-deck' && !i.read);
+    eq((await rows()).length, 1);
+    // What markThreadSeen sends: the thread's newest activity (the reply).
+    const replyAt = Date.parse(reply.body.created);
+    await call(env, '/api/comments/seen', { method: 'POST', cookie: owner, body: { slug: 'q-deck', seen: { [root.body.id]: replyAt - 1000 } } });
+    eq((await rows()).length, 1, 'seen before the reply: still unread');
+    await call(env, '/api/comments/seen', { method: 'POST', cookie: owner, body: { slug: 'q-deck', seen: { [root.body.id]: replyAt } } });
+    eq((await rows()).length, 0, 'seen up to the reply: read');
+  });
+
+  await t('marking read needs the page\'s own origin [review #4]', async () => {
+    const { env, owner } = fixture;
+    const r = await call(env, '/api/notifications/read', { method: 'POST', cookie: owner, body: { all: true }, headers: { Origin: 'https://evil.example' } });
+    eq(r.status, 403);
+    const bare = await call(env, '/api/notifications/read', { method: 'POST', cookie: owner, body: { all: true } });
+    eq(bare.status, 403, 'no Origin and no Sec-Fetch-Site: refused');
   });
 
   await t('marking a doc done in Needs you clears its comment rows only (slug)', async () => {
@@ -208,12 +236,12 @@ const PROSE_WITH_SHEET = `<h1>Runs and plan</h1><p>What we ran, and what is next
     const reader = await putSession(env, 'reader');
     await call(env, '/api/comments', { method: 'POST', cookie: reader, body: { slug: 'q-doc', version: 1, text: 'one more', anchor: { kind: 'text', text: 'A sentence' } } });
     await call(env, '/api/comments', { method: 'POST', cookie: reader, body: { slug: 'q-deck', version: 1, text: 'and here', anchor: { kind: 'text', text: 'Two' } } });
-    const read = await call(env, '/api/notifications/read', { method: 'POST', cookie: owner, body: { slug: 'q-doc' } });
+    const read = await call(env, '/api/notifications/read', { method: 'POST', cookie: owner, body: { slug: 'q-doc' }, headers: SAME_ORIGIN });
     assert(read.status === 200, `read ${read.status}`);
     const items = (await call(env, '/api/notifications', { cookie: owner })).body.items.filter((i) => !i.read);
     assert(!items.some((i) => i.slug === 'q-doc'), JSON.stringify(items));
     assert(items.some((i) => i.slug === 'q-deck'), 'another doc keeps its row');
-    await call(env, '/api/notifications/read', { method: 'POST', cookie: owner, body: { all: true } });
+    await call(env, '/api/notifications/read', { method: 'POST', cookie: owner, body: { all: true }, headers: SAME_ORIGIN });
   });
 
   await t('an agent reply to your comment shows on the row until you open the thread (thread-seen)', async () => {

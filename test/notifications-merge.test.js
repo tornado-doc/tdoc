@@ -34,7 +34,7 @@ const item = (id, at, extra = {}) => ({ id, kind: 'mention', group_key: `mention
 
   await t('reading one marks it in whichever inbox holds it', async () => {
     const { env, cookie } = await seed();
-    const r = await (await worker.fetch(req('/api/notifications/read', { method: 'POST', cookie, body: { ids: ['n_email'] } }), env, {})).json();
+    const r = await (await worker.fetch(req('/api/notifications/read', { method: 'POST', cookie, body: { ids: ['n_email'] }, headers: { Origin: 'https://tdoc.dev' } }), env, {})).json();
     assert(r.unread === 1, `unread ${r.unread}`);
     const stored = JSON.parse(await env.META.get('inbox:email:julie@example.com'));
     assert(stored.items[0].read === true, 'the email inbox was not updated');
@@ -42,7 +42,7 @@ const item = (id, at, extra = {}) => ({ id, kind: 'mention', group_key: `mention
 
   await t('mark all read clears every inbox', async () => {
     const { env, cookie } = await seed();
-    const r = await (await worker.fetch(req('/api/notifications/read', { method: 'POST', cookie, body: { all: true } }), env, {})).json();
+    const r = await (await worker.fetch(req('/api/notifications/read', { method: 'POST', cookie, body: { all: true }, headers: { Origin: 'https://tdoc.dev' } }), env, {})).json();
     assert(r.unread === 0, `unread ${r.unread}`);
     for (const key of ['inbox:julie', 'inbox:email:julie@example.com']) {
       assert(JSON.parse(await env.META.get(key)).items.every((i) => i.read), `${key} still unread`);

@@ -59,8 +59,11 @@ export function useNeedsInbox(enabled) {
     if (card.ids.length) work.push(markNotificationsRead(card.ids));
     else if (card.allOfDoc) work.push(markDocNotificationsRead(card.slug));
     if (card.threads.length) {
+      // Seen up to the reply's own (server) time at least: a browser clock
+      // running behind would otherwise mark it seen before it was written.
       const now = Date.now();
-      work.push(postThreadSeen(card.slug, Object.fromEntries(card.threads.map((thread) => [thread, now]))));
+      const at = card.threadAt || {};
+      work.push(postThreadSeen(card.slug, Object.fromEntries(card.threads.map((thread) => [thread, Math.max(Date.parse(at[thread] || '') || 0, now)]))));
     }
     return Promise.all(work);
   }, []);
@@ -135,7 +138,11 @@ export function needsCards({ inbox, docs, inSpace }) {
       const rest = [];
       for (const row of agentThreads) {
         const card = cards.get(`n:${doc.slug}:${row.thread}`);
-        if (card) { card.agent = true; card.threads.push(row.thread); } else rest.push(row);
+        if (card) {
+          card.agent = true;
+          card.threads.push(row.thread);
+          card.threadAt = { ...(card.threadAt || {}), [row.thread]: row.at };
+        } else rest.push(row);
       }
       const left = agentThreads.length ? rest.length : agent;
       if (left) {
@@ -148,6 +155,7 @@ export function needsCards({ inbox, docs, inSpace }) {
           href: newest ? `/d/${encodeURIComponent(doc.slug)}?comment=${encodeURIComponent(newest.thread)}` : docHref(doc),
           ids: [],
           threads: rest.map((row) => row.thread),
+          threadAt: Object.fromEntries(rest.map((row) => [row.thread, row.at])),
         });
       }
     }
