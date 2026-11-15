@@ -112,6 +112,17 @@ function useProgress(comment, progressLine) {
   return { now, state, displayState, progress };
 }
 
+// Steps that end the agent's turn: once one is the latest, nothing is
+// still running, so it gets a check like the others, not a spinner.
+const TERMINAL_STEPS = new Set(['updated', 'replied']);
+
+// A small spinner at the front of the pill while the agent still has the
+// comment, so a running handoff reads as running at a glance (Julie,
+// 2026-11-15).
+function PillSpinner() {
+  return <span className="tdoc-handoff-chip-spinner" role="img" aria-label="Working" />;
+}
+
 // "Sent to <agent>" / "<agent> is reading": the name is what shortens.
 function StepWords({ parts }) {
   const [before, name, after] = parts;
@@ -145,6 +156,7 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine, ste
     : displayState === 'partial' ? 'is-partial'
       : (displayState === 'answered' || displayState === 'applied') ? 'is-done' : CHIP_CLASS[state] || '';
   const stuck = state === 'failed' || state === 'stale' || state === 'expired';
+  const working = current ? !TERMINAL_STEPS.has(current.key) : isHandoffInFlight(displayState);
   const resend = async () => {
     if (busy || !onResend) return;
     setBusy(true);
@@ -174,6 +186,7 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine, ste
           },
         } : {})}
       >
+        {working ? <PillSpinner /> : null}
         <StepWords parts={current.parts} />
         {onToggleSteps ? (
           <svg className="tdoc-handoff-chip-caret" data-open={stepsOpen ? '' : undefined} viewBox="0 0 10 10" width="8" height="8" aria-hidden="true">
@@ -189,6 +202,7 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine, ste
       data-handoff-state={displayState}
       title={title}
     >
+      {working ? <PillSpinner /> : null}
       <span className="tdoc-handoff-line-text">{lead}</span>
       {tail ? <span className="tdoc-handoff-line-tail">{tail}</span> : null}
       {stuck && onResend ? <>
@@ -200,10 +214,6 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine, ste
     </span>
   );
 }
-
-// Steps that end the agent's turn: once one is the latest, nothing is
-// still running, so it gets a check like the others, not a spinner.
-const TERMINAL_STEPS = new Set(['updated', 'replied']);
 
 /**
  * The agent's steps under the pill, one short line each: a check for a

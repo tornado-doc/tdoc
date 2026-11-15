@@ -1081,6 +1081,7 @@
   .tdoc-handoff-step-words > .tdoc-handoff-step-fixed { flex: 0 0 auto; white-space: pre; }
   .tdoc-handoff-chip[data-handoff-progress] > .tdoc-handoff-step-name,
   .tdoc-handoff-step-words > .tdoc-handoff-step-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-handoff-chip-spinner { flex: none; width: 10px; height: 10px; margin-right: 5px; box-sizing: border-box; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: tdoc-comment-spin .9s linear infinite; }
   .tdoc-handoff-chip-caret { flex: none; margin-left: 4px; transition: transform .15s ease; }
   .tdoc-handoff-chip-caret[data-open] { transform: rotate(180deg); }
   .tdoc-handoff-steps { list-style: none; margin: 0 0 8px; padding: 0 0 0 2px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; line-height: 1.4; color: var(--td-muted, #6b6a66); }
@@ -1096,6 +1097,7 @@
   @media (prefers-reduced-motion: reduce) {
     .tdoc-handoff-step-mark.is-current { animation: none; border-right-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); transform: scale(.6); }
     .tdoc-handoff-chip-caret { transition: none; }
+    .tdoc-handoff-chip-spinner { animation: none; border-right-color: currentColor; background: currentColor; transform: scale(.6); }
   }
   .tdoc-handoff-chip .tdoc-handoff-chip-action {
     appearance: none;

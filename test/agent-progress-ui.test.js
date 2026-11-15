@@ -19,7 +19,7 @@ const { resolveTarget } = require('./helpers/fixture-server');
 // chip's minutes only move on its own 30 s tick.
 const clock = (base = Date.now()) => (min) => new Date(base - min * 60000).toISOString();
 
-async function open(browser, target, { flag, width, withStatus = false, working = false }) {
+async function open(browser, target, { flag, width, withStatus = false, working = false, agentName = 'Claude' }) {
   const phone = width < 600;
   const page = await browser.newPage({ viewport: { width, height: 900 }, hasTouch: phone, isMobile: phone && browser.browserType().name() !== 'firefox' });
   const errors = [];
@@ -49,7 +49,7 @@ async function open(browser, target, { flag, width, withStatus = false, working 
         handoff_first_version_at: working ? null : ago(3),
         // The second poll brings the agent's own status (newest fact).
         handoff_progress: withStatus && reads > 1 ? { text: 'Editing the Pack section', at: ago(1) } : null,
-        handoff_to: { provider: 'local', device: 'mbp', cli: 'claude', agent_name: 'Claude' },
+        handoff_to: { provider: 'local', device: 'mbp', cli: 'claude', agent_name: agentName },
       });
     }
     await route.fulfill({ json: comments });
@@ -91,6 +91,8 @@ async function open(browser, target, { flag, width, withStatus = false, working 
       const card = chip.locator('xpath=ancestor::article[1]');
       const cardText = async () => card.innerText();
       assert(!/is reading|Editing the Pack section|Published|\bv3\b/.test(await cardText()), `progress text in the closed card: ${await cardText()}`);
+      // Finished: no loading spinner in the pill.
+      assert.equal(await chip.locator('.tdoc-handoff-chip-spinner').count(), 0, 'a finished pill still spins');
       if (shots) {
         fs.mkdirSync(shots, { recursive: true });
         await page.screenshot({ path: path.join(shots, `progress-collapsed-${width}.png`) });
@@ -160,6 +162,8 @@ async function open(browser, target, { flag, width, withStatus = false, working 
       await chip.waitFor({ timeout: 20000 });
       await page.waitForFunction(() => /Editing the Pack section/.test(document.querySelector('.tdoc-handoff-chip[data-handoff-progress]')?.getAttribute('title') || ''), null, { timeout: 40000 });
       assert.equal((await chip.textContent()).trim(), 'Claude suggested 3 edits');
+      // Still working: a loading spinner at the front of the pill.
+      assert.equal(await chip.locator('.tdoc-handoff-chip-spinner').count(), 1, 'no spinner in a working pill');
       if (width < 600) await chip.tap(); else await chip.click();
       const steps = page.locator('.tdoc-handoff-steps:visible').first();
       await steps.waitFor({ timeout: 5000 });
@@ -178,6 +182,30 @@ async function open(browser, target, { flag, width, withStatus = false, working 
         await page.screenshot({ path: path.join(shots, `progress-working-expanded-${width}.png`) });
         await chip.locator('xpath=ancestor::article[1]').screenshot({ path: path.join(shots, `progress-working-expanded-card-${width}.png`) });
       }
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+    // A very long agent name: the pill keeps its cap, the spinner and the
+    // step words stay, only the name gives way.
+    for (const width of [1440, 390]) {
+      const agentName = 'Research assistant for the quarterly planning offsite';
+      const { page, errors } = await open(browser, target, { flag: true, width, withStatus: true, working: true, agentName });
+      if (width === 390 && !(await page.locator('.tdoc-handoff-chip:visible').count())) {
+        await page.locator('.tdoc-fab').click().catch(() => {});
+      }
+      const chip = page.locator('.tdoc-handoff-chip[data-handoff-progress]:visible').first();
+      await chip.waitFor({ timeout: 20000 });
+      await page.waitForFunction(() => /suggested 3 edits/.test(document.querySelector('.tdoc-handoff-chip[data-handoff-progress]')?.textContent || ''), null, { timeout: 40000 });
+      const long = await chip.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const fixed = [...el.querySelectorAll('.tdoc-handoff-step-fixed')].map((n) => ({ text: n.textContent, cut: n.scrollWidth > n.clientWidth + 1, right: n.getBoundingClientRect().right }));
+        const sp = el.querySelector('.tdoc-handoff-chip-spinner')?.getBoundingClientRect();
+        return { w: r.width, right: r.right, fixed, spinner: sp ? sp.width : 0 };
+      });
+      assert(long.w <= 16 * 16 + 1, `a long agent name makes the pill ${long.w}px wide at ${width}`);
+      assert(long.spinner > 0, 'the spinner is squeezed out by a long name');
+      assert(long.fixed.some((f) => /suggested 3 edits/.test(f.text) && !f.cut && f.right <= long.right + 1), `the step words are cut by a long name: ${JSON.stringify(long.fixed)}`);
+      if (shots) await chip.locator('xpath=ancestor::article[1]').screenshot({ path: path.join(shots, `progress-long-name-${width}.png`) });
       assert.deepEqual(errors, []);
       await page.close();
     }
