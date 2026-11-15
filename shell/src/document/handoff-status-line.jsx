@@ -15,7 +15,7 @@ import React, { useEffect, useState } from 'react';
 import { deliveryErrorText, readableHandle } from './notify-handoff.jsx';
 import { formatHandoffAgo } from './handoff-ago.js';
 import { handoffWaitMinutes, handoffWaitState, isHandoffInFlight } from '../comments/core/handoff-state.js';
-import { handoffProgressLine, handoffProgressStage } from '../comments/core/handoff-progress.js';
+import { handoffProgressLine } from '../comments/core/handoff-progress.js';
 import { isFeatureOn } from '../feature-flags.js';
 
 /** Latest agent verdict on a reply, if any (applied / partial / question). */
@@ -95,19 +95,11 @@ const CHIP_CLASS = {
   replied: 'is-waiting',
 };
 
-/**
- * Chips for the card's status row. `onResend(comment)` and
- * `onSendElsewhere(comment)` are the owner's; without them the line is
- * read-only (a reader sees where it stands, not the buttons).
- * `progressLine` (flag agentProgress; the feedback widget passes its own
- * reading of it) turns "On it" into the progress line while the agent works.
- */
-export function HandoffStatusChips({ comment, onResend = null, progressLine }) {
+// The agent's steps (flag agentProgress; the feedback widget passes its own
+// reading as `progressLine`), or null. One reading for the pill and the list.
+function useProgress(comment, progressLine) {
   const showProgress = progressLine === undefined ? isFeatureOn('agentProgress') : Boolean(progressLine);
-  // Tick so "3 min ago" advances, and a quiet handoff turns into "No
-  // response" on its own, while the card stays open.
   const [now, setNow] = useState(() => Date.now());
-  const [busy, setBusy] = useState(false);
   const state = handoffWaitState(comment, now);
   const ticking = isHandoffInFlight(state) || state === 'stale';
   useEffect(() => {
@@ -115,16 +107,39 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine }) {
     const id = window.setInterval(() => setNow(Date.now()), 30000);
     return () => window.clearInterval(id);
   }, [ticking]);
+  const displayState = displayHandoffState(comment, state);
+  const progress = showProgress ? handoffProgressLine(comment, displayState, now, readableHandle(comment?.handoff_to)) : null;
+  return { now, state, displayState, progress };
+}
 
+// "Sent to <agent>" / "<agent> is reading": the name is what shortens.
+function StepWords({ parts }) {
+  const [before, name, after] = parts;
+  return <>
+    {before ? <span className="tdoc-handoff-step-fixed">{before}</span> : null}
+    <span className="tdoc-handoff-step-name">{name}</span>
+    {after ? <span className="tdoc-handoff-step-fixed">{after}</span> : null}
+  </>;
+}
+
+/**
+ * Chips for the card's status row. `onResend(comment)` and
+ * `onSendElsewhere(comment)` are the owner's; without them the line is
+ * read-only (a reader sees where it stands, not the buttons).
+ * While the agent has the comment (flag agentProgress) the pill names the
+ * current step in plain words ("Claude is reading", "Claude updated the
+ * doc") and, with `onToggleSteps`, is a toggle for the step list under it
+ * (HandoffProgressSteps, `stepsId`); its tooltip holds the whole line.
+ */
+export function HandoffStatusChips({ comment, onResend = null, progressLine, stepsOpen = false, onToggleSteps = null, stepsId }) {
+  const [busy, setBusy] = useState(false);
+  // Ticks so "3 min ago" advances, and a quiet handoff turns into "No
+  // response" on its own, while the card stays open.
+  const { now, state, displayState, progress } = useProgress(comment, progressLine);
   // A reply verdict is more current than the delivery receipt. One comment
   // shows one status, never both "sent" and "asked you" at the same time.
-  const displayState = displayHandoffState(comment, state);
-  // While the agent works the pill names only the current stage ("Reading",
-  // "3 edits", "New version"), the size of any other status pill; the whole
-  // line is its title and HandoffProgressDetail in an opened thread.
-  const progress = showProgress ? handoffProgressLine(comment, displayState, now) : null;
-  const stage = progress ? handoffProgressStage(comment, displayState) : '';
-  const [lead, tail] = stage ? [stage, ''] : compactHandoffParts(comment, displayState);
+  const current = progress ? progress.steps[progress.steps.length - 1] : null;
+  const [lead, tail] = current ? [current.label, ''] : compactHandoffParts(comment, displayState);
   const text = lead + tail;
   const chipClass = displayState === 'question' ? 'is-question'
     : displayState === 'partial' ? 'is-partial'
@@ -136,12 +151,43 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine }) {
     try { await onResend(comment); } finally { setBusy(false); }
   };
   if (!displayState || displayState === 'ready' || !text) return null;
+  const title = state === 'failed' ? (deliveryErrorText(comment.handoff_delivery?.error) || undefined) : progress ? progress.text : handoffStatusText(comment, state, now);
+  if (current) {
+    const toggle = onToggleSteps ? (event) => { event.stopPropagation(); onToggleSteps(); } : undefined;
+    return (
+      <span
+        className={`tdoc-handoff-chip tdoc-handoff-status-text ${chipClass}`}
+        data-handoff-state={displayState}
+        data-handoff-progress=""
+        title={title}
+        {...(onToggleSteps ? {
+          role: 'button',
+          tabIndex: 0,
+          'aria-expanded': stepsOpen,
+          'aria-controls': stepsOpen ? stepsId : undefined,
+          'aria-description': `${progress.text}. ${stepsOpen ? 'Hide' : 'Show'} the steps.`,
+          onClick: toggle,
+          onKeyDown: (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            toggle(event);
+          },
+        } : {})}
+      >
+        <StepWords parts={current.parts} />
+        {onToggleSteps ? (
+          <svg className="tdoc-handoff-chip-caret" data-open={stepsOpen ? '' : undefined} viewBox="0 0 10 10" width="8" height="8" aria-hidden="true">
+            <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ) : null}
+      </span>
+    );
+  }
   return (
     <span
       className={`tdoc-handoff-chip tdoc-handoff-status-text ${chipClass}`}
       data-handoff-state={displayState}
-      data-handoff-progress={stage ? '' : undefined}
-      title={state === 'failed' ? (deliveryErrorText(comment.handoff_delivery?.error) || undefined) : progress ? progress.text : handoffStatusText(comment, state, now)}
+      title={title}
     >
       <span className="tdoc-handoff-line-text">{lead}</span>
       {tail ? <span className="tdoc-handoff-line-tail">{tail}</span> : null}
@@ -155,22 +201,43 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine }) {
   );
 }
 
+// Steps that end the agent's turn: once one is the latest, nothing is
+// still running, so it gets a check like the others, not a spinner.
+const TERMINAL_STEPS = new Set(['updated', 'replied']);
+
 /**
- * The whole progress line for an opened thread (flag agentProgress): every
- * step so far, what the agent says it is doing now (report_progress), and
- * for how long. Wraps; the pill above it stays one short word.
+ * The agent's steps under the pill, one short line each: a check for a
+ * finished step, a spinner on the current one while the agent is still
+ * working (latest step Sent / reading / N edits), with the agent's own
+ * report_progress note as a small muted line under it. Shown only while
+ * `open` (the pill toggles it; collapsed by default so the comment stays
+ * clean) and while the agent still has the comment.
  */
-export function HandoffProgressDetail({ comment, progressLine }) {
-  const showProgress = progressLine === undefined ? isFeatureOn('agentProgress') : Boolean(progressLine);
-  const [now, setNow] = useState(() => Date.now());
-  const state = showProgress ? handoffWaitState(comment, now) : null;
-  const working = state === 'received';
-  useEffect(() => {
-    if (!working) return undefined;
-    const id = window.setInterval(() => setNow(Date.now()), 30000);
-    return () => window.clearInterval(id);
-  }, [working]);
-  const progress = working ? handoffProgressLine(comment, displayHandoffState(comment, state), now) : null;
-  if (!progress) return null;
-  return <p className="tdoc-handoff-progress-detail">{progress.text}</p>;
+export function HandoffProgressSteps({ comment, progressLine, open, id }) {
+  const { progress } = useProgress(comment, progressLine);
+  if (!open || !progress) return null;
+  const last = progress.steps.length - 1;
+  const working = !TERMINAL_STEPS.has(progress.steps[last].key);
+  return (
+    <ol className="tdoc-handoff-steps" id={id} aria-label="Agent steps">
+      {progress.steps.map((st, i) => {
+        const current = working && i === last;
+        return (
+          <li key={st.key} className="tdoc-handoff-step" data-step={st.key} aria-current={current ? 'step' : undefined}>
+            <span className="tdoc-handoff-step-line">
+              {current
+                ? <span className="tdoc-handoff-step-mark is-current" role="img" aria-label="Now" />
+                : (
+                  <svg className="tdoc-handoff-step-mark is-done" viewBox="0 0 12 12" width="12" height="12" role="img" aria-label="Done">
+                    <path d="M2.5 6.5 5 9l4.5-6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              <span className="tdoc-handoff-step-words"><StepWords parts={st.parts} /></span>
+            </span>
+            {current && progress.note ? <span className="tdoc-handoff-step-note">{progress.note}</span> : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
