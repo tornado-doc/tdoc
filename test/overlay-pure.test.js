@@ -71,8 +71,9 @@ t('agent avatars map to product marks without the Anthropic company avatar', () 
 
 t('notification destinations validate and encode slug/version/comment', () => {
   assert(box.notificationTarget(null) === '');
-  assert(box.notificationTarget({ slug: 'a b', version: 3, comment_id: 'c 1' }) === '/d/a%20b/v/3?comment=c%201');
-  assert(box.notificationTarget({ slug: 'd', version: 0 }) === '/d/d/v/1');
+  // The doc as it is now, at the comment: never a pinned /v/<n>.
+  assert(box.notificationTarget({ slug: 'a b', version: 3, comment_id: 'c 1' }) === '/d/a%20b?comment=c%201');
+  assert(box.notificationTarget({ slug: 'd', version: 0 }) === '/d/d');
 });
 
 t('frame copy and theme protocols remain framework-free', () => {

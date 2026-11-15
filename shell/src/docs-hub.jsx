@@ -1173,9 +1173,18 @@ export function DocsHub({ boot }) {
     if (!listViewA) setView('docs');
   };
   const doneNeed = (card) => {
-    // The bell rows go read; the row badge's comment count goes with them.
-    needsInbox.markRead(card.ids).catch(() => hub.notify('Could not mark it done', true));
-    const clear = (list) => list.map((doc) => (doc.slug === card.slug && doc.activity ? { ...doc, activity: { ...doc.activity, comments: 0 } } : doc));
+    // What made the item is cleared (bell rows, agent threads); the row's
+    // badge counts go down with it.
+    needsInbox.markDone(card).catch(() => hub.notify('Could not mark it done', true));
+    const cleared = new Set(card.threads);
+    const lessActivity = (activity) => {
+      const threads = (activity.agent_threads || []).filter((row) => !cleared.has(row.thread));
+      const comments = card.allOfDoc ? 0 : Math.max(0, (Number(activity.comments) || 0) - (card.ids.length ? card.count : 0));
+      const agent = card.kind === 'agent' && !activity.agent_threads ? 0
+        : Math.max(0, (Number(activity.agent) || 0) - ((activity.agent_threads || []).length - threads.length));
+      return { ...activity, comments, agent, agent_threads: threads };
+    };
+    const clear = (list) => list.map((doc) => (doc.slug === card.slug && doc.activity ? { ...doc, activity: lessActivity(doc.activity) } : doc));
     hub.setDocs(clear);
     setTeamDocs(clear);
   };

@@ -77,7 +77,7 @@ async function t(name, fn) {
       const { context, page, calls } = await open(1100);
       assert.deepEqual(calls, [0, 12]);
       assert.equal(await page.locator('.tm-comment-row').count(), 4);
-      assert.match(await page.locator('.tm-comment-row').first().getAttribute('href'), /\/d\/daily-report\/v\/4\?comment=r_claire/);
+      assert.match(await page.locator('.tm-comment-row').first().getAttribute('href'), /^\/d\/daily-report\?comment=r_claire$/);
       assert.match(await page.locator('.tm-comment-row').first().textContent(), /Claire.*replied in.*Daily report.*Unresolved/);
       assert.match(await page.locator('.tm-comment-anchor').first().textContent(), /Paid conversion by country/);
       if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'team-comments-desktop.png'), fullPage: true }); }

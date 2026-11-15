@@ -15858,6 +15858,8 @@ function mayDelete(record, session, env, meta) {
 // Per-user inbox (same host, cross-doc). KV key inbox:<github-login>.
 // Rows are aggregated by group_key so a viral doc does not write 40 lines.
 const INBOX_MAX = 200;
+// The threads one grouped inbox row lists (inboxRowThreads).
+const INBOX_ROW_THREADS_MAX = 50;
 const INBOX_PAGE = 20;
 
 // Accepts either shape of actor key. normalizeGithubLogin rejects anything
@@ -15911,6 +15913,29 @@ function inboxGroupKey(kind, slug, targetId) {
 
 function emptyInbox() { return { items: [] }; }
 
+// The threads an inbox row speaks for, as [thread id, newest ms], or null
+// when that is not known in full: a grouped row past the cap, or one stored
+// before rows kept the list (several comments, only the newest thread).
+function inboxRowThreads(row) {
+  if (!row || row.threads_capped) return null;
+  if (row.thread_at && typeof row.thread_at === 'object') {
+    const list = Object.entries(row.thread_at).map(([id, at]) => [id, Date.parse(at) || 0]);
+    // A grouped comment row counts one comment per thread.
+    if (row.kind === 'comment' && list.length < (Number(row.count) || 1)) return null;
+    return list.length ? list : null;
+  }
+  if (row.kind === 'comment' && (Number(row.count) || 1) > 1) return null;
+  const id = row.thread_id || row.comment_id;
+  return id ? [[id, Date.parse(row.at) || 0]] : null;
+}
+function noteInboxThread(row, thread, at) {
+  if (!thread) return;
+  const map = row.thread_at || {};
+  if (!(thread in map) && Object.keys(map).length >= INBOX_ROW_THREADS_MAX) { row.threads_capped = true; return; }
+  if (!map[thread] || (Date.parse(at) || 0) > (Date.parse(map[thread]) || 0)) map[thread] = at;
+  row.thread_at = map;
+}
+
 function inboxUnread(inbox) {
   const items = inbox && Array.isArray(inbox.items) ? inbox.items : [];
   return items.filter(i => i && !i.read).length;
@@ -15921,11 +15946,21 @@ function applyInboxEvent(inbox, ev) {
   const gk = inboxGroupKey(ev.kind, ev.slug, ev.target_id || ev.comment_id);
   const existing = items.find(i => i && !i.read && i.group_key === gk);
   if (existing) {
+    // Every thread the row now speaks for, with its newest time: a grouped
+    // "commented" row covers several, and reading one of them on the page
+    // must not clear the others (markInboxRead). Taken before the count
+    // moves, so a row stored before the list existed starts it right.
+    if (!existing.thread_at && !existing.threads_capped) {
+      const covered = inboxRowThreads(existing);
+      if (covered) existing.thread_at = Object.fromEntries(covered.map(([id, ms]) => [id, new Date(ms).toISOString()]));
+      else existing.threads_capped = true;
+    }
     existing.count = (Number(existing.count) || 1) + 1;
     existing.at = ev.at;
     existing.actor = ev.actor || existing.actor;
     existing.comment_id = ev.comment_id || existing.comment_id;
     existing.thread_id = ev.thread_id || existing.thread_id;
+    if (!existing.threads_capped) noteInboxThread(existing, ev.thread_id || ev.comment_id, ev.at);
     existing.preview = ev.preview != null ? ev.preview : existing.preview;
     if (ev.emoji) existing.emoji = ev.emoji;
     existing.version = ev.version || existing.version;
@@ -15940,6 +15975,7 @@ function applyInboxEvent(inbox, ev) {
     version: ev.version || 1,
     comment_id: ev.comment_id,
     thread_id: ev.thread_id || ev.comment_id,
+    ...(ev.thread_id || ev.comment_id ? { thread_at: { [ev.thread_id || ev.comment_id]: ev.at } } : {}),
     actor: ev.actor || null,
     preview: ev.preview || '',
     title: ev.title || ev.slug,
@@ -15955,14 +15991,44 @@ function applyInboxEvent(inbox, ev) {
   return { items: [row, ...items].slice(0, INBOX_MAX) };
 }
 
-function markInboxRead(inbox, { ids, comment_id } = {}) {
+// `slug`: every unread comment, reply and mention row on that doc (My docs'
+// Needs you, marking a doc's item done). `slug` + `seen` (thread id -> ms):
+// only the rows of those threads that the person has seen up to -- what they
+// read on the doc page needs nobody's attention in the bell any more.
+function markInboxRead(inbox, { ids, comment_id, slug, seen } = {}) {
   const items = (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
     if (!i) return i;
     if (Array.isArray(ids) && ids.includes(i.id)) return { ...i, read: true };
     if (comment_id && i.comment_id === comment_id) return { ...i, read: true };
+    if (slug && !i.read && i.slug === slug && DOC_ACTIVITY_INBOX_KINDS.has(i.kind)) {
+      if (!seen) return { ...i, read: true };
+      // Read only when every thread the row covers has been seen up to its
+      // newest activity; a row that does not know its threads in full waits
+      // for the bell or Mark done.
+      const threads = inboxRowThreads(i);
+      if (threads && threads.every(([id, ms]) => (Number(seen[id]) || 0) >= ms)) return { ...i, read: true };
+    }
     return i;
   });
   return { items };
+}
+
+// The rows of a doc's threads this person has now seen go read, in every
+// inbox they have (loadViewerInboxes), through each inbox's lane. Only an
+// inbox that holds such a row is written.
+async function markInboxSeen(env, session, slug, seen) {
+  if (!seen || !Object.keys(seen).length) return;
+  for (const part of await loadViewerInboxes(env, session)) {
+    const next = markInboxRead(part.inbox, { slug, seen });
+    if (JSON.stringify(next) === JSON.stringify(part.inbox)) continue;
+    await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark: { slug, seen } });
+  }
+}
+
+// `mark`: { all } (Mark all read) or markInboxRead's options.
+function applyInboxRead(inbox, mark) {
+  if (mark && mark.all) return { items: (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => (i ? { ...i, read: true } : i)) };
+  return markInboxRead(inbox, mark || {});
 }
 
 // One person can be several actor keys -- a GitHub handle and the email
@@ -16597,7 +16663,7 @@ async function viewerDocActivity(env, session) {
   const [inboxes, agentParts] = await Promise.all([loadViewerInboxes(env, session), loadAgentUnread(env, session)]);
   const out = new Map();
   const forSlug = (slug) => {
-    if (!out.has(slug)) out.set(slug, { comments: 0, agent: 0 });
+    if (!out.has(slug)) out.set(slug, { comments: 0, agent: 0, threads: [] });
     return out.get(slug);
   };
   for (const item of mergeInboxes(inboxes).items) {
@@ -16610,14 +16676,22 @@ async function viewerDocActivity(env, session) {
       const id = `${item.slug}\n${item.thread}`;
       if (threads.has(id)) continue;
       threads.add(id);
-      forSlug(item.slug).agent += 1;
+      const entry = forSlug(item.slug);
+      entry.agent += 1;
+      entry.threads.push({ thread: item.thread, at: item.at });
     }
   }
   return out;
 }
+// `agent_threads`: the threads with an unread agent reply, newest first, so
+// Needs you can open the newest and mark them seen (POST /api/comments/seen).
+const DOC_ACTIVITY_AGENT_THREADS = 20;
 function docActivityFields(entry) {
   if (!entry || (!entry.comments && !entry.agent)) return {};
-  return { activity: { comments: entry.comments, agent: entry.agent } };
+  const threads = (entry.threads || [])
+    .slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+    .slice(0, DOC_ACTIVITY_AGENT_THREADS);
+  return { activity: { comments: entry.comments, agent: entry.agent, ...(threads.length ? { agent_threads: threads } : {}) } };
 }
 
 // An agent's reply is not a notification (no bell row, push or email), yet
@@ -16752,6 +16826,17 @@ const SERIAL_KV_OPS = {
     const next = applyInboxEvent(inbox, ev);
     await env.META.put(key, JSON.stringify(next));
     return next.items[0];
+  },
+  // Rows go read (POST /api/notifications/read, markInboxSeen) in the same
+  // lane rows come in by, so a row delivered meanwhile is never dropped.
+  // Nothing is written when no row changes. The inbox as stored comes back.
+  async inbox_mark_read(env, { key, mark }) {
+    let inbox = emptyInbox();
+    try { inbox = JSON.parse(await env.META.get(key) || 'null') || emptyInbox(); } catch {}
+    const next = applyInboxRead(inbox, mark);
+    if (JSON.stringify(next) === JSON.stringify(inbox)) return inbox;
+    await env.META.put(key, JSON.stringify(next));
+    return next;
   },
   contacts_merge: (env, args) => mergeContacts(env, args),
   onboarding_stamp: (env, args) => stampOnboardingNow(env, args),
@@ -19260,6 +19345,9 @@ async function handleThreadSeen(env, req, url) {
     const upTo = { ...seen };
     for (const [id, stamp] of Object.entries(cleanThreadSeen(body.seen))) upTo[id] = Math.max(stamp, Number(upTo[id]) || 0);
     try { await clearAgentUnread(env, session, slug, upTo); } catch {}
+    // The bell's rows for those threads too: a comment read on the page is
+    // not still waiting in Needs you (Julie, 2026-11-14).
+    try { await markInboxSeen(env, session, slug, upTo); } catch {}
   };
   // Nothing newer than what is kept: no comment read, no write.
   const asked = Object.entries(cleanThreadSeen(body.seen)).filter(([id, stamp]) => stamp > (stored[id] || 0));
@@ -29020,6 +29108,10 @@ const tdocHandlers = {
       return json({ unread: inboxUnread(mergeInboxes(parts)) });
     }
     if (p === '/api/notifications/read' && method === 'POST') {
+      // A page's own request only: another site cannot clear someone's bell.
+      if (req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') {
+        return json({ error: 'cross_origin' }, { status: 403 });
+      }
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       const parts = await loadViewerInboxes(env, s);
@@ -29027,13 +29119,16 @@ const tdocHandlers = {
       let body = {};
       try { body = await req.json(); } catch {}
       // `all` marks everything read (the dialog's Mark all read).
+      const mark = body.all ? { all: true } : {
+        ids: Array.isArray(body.ids) ? body.ids : undefined,
+        comment_id: typeof body.comment_id === 'string' ? body.comment_id : undefined,
+        ...(typeof body.slug === 'string' && isValidSlug(body.slug) ? { slug: body.slug } : {}),
+      };
       for (const part of parts) {
-        const next = body.all
-          ? { items: part.inbox.items.map((i) => (i ? { ...i, read: true } : i)) }
-          : markInboxRead(part.inbox, { ids: body.ids, comment_id: body.comment_id });
-        if (JSON.stringify(next) === JSON.stringify(part.inbox)) continue;
-        part.inbox = next;
-        await env.META.put(part.key, JSON.stringify(next));
+        // Read first, outside the lane: most marks change nothing.
+        if (JSON.stringify(applyInboxRead(part.inbox, mark)) === JSON.stringify(part.inbox)) continue;
+        const stored = await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark });
+        if (stored && Array.isArray(stored.items)) part.inbox = stored;
       }
       return json({ ok: true, unread: inboxUnread(mergeInboxes(parts)) });
     }

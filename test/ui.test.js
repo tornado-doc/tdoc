@@ -187,7 +187,7 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     if (title !== 'Write it with your agent') throw new Error(`unexpected dialog title: ${title}`);
     // Copy is refused until the line is a line and not a placeholder.
     if (!await page.isDisabled('.mk-line button')) throw new Error('Copy offered an unfinished line');
-    await page.fill('.mk-subject input', 'what our on-call rotation costs');
+    await page.fill('.mk-subject textarea', 'what our on-call rotation costs');
     await page.click('.mk-line button');
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
     if (!clipboard.includes('Use tdoc to write a doc about what our on-call rotation costs')) {

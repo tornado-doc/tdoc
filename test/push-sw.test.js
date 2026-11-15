@@ -60,7 +60,7 @@ const item = { id: 'n_1', kind: 'mention', slug: 'q3 plan', version: 2, comment_
     const n = log.shown[0];
     assert(n.title === 'Claire mentioned you on Q3 plan', n.title);
     assert(n.body === 'Check the numbers' && n.tag === 'n_1', JSON.stringify(n));
-    assert(n.data.url === '/d/q3%20plan/v/2?comment=c_9', n.data.url);
+    assert(n.data.url === '/d/q3%20plan?comment=c_9', n.data.url);
     assert(log.posted.some((m) => m.type === 'tdoc-push'), 'open tab not told');
   });
 
@@ -73,15 +73,15 @@ const item = { id: 'n_1', kind: 'mention', slug: 'q3 plan', version: 2, comment_
   await t('clicking opens the comment in a new window', async () => {
     const { log, fire } = boot(['https://tdoc.dev/me']);
     let closed = false;
-    await fire('notificationclick', { notification: { data: { url: '/d/q3%20plan/v/2?comment=c_9' }, close: () => { closed = true; } } });
+    await fire('notificationclick', { notification: { data: { url: '/d/q3%20plan?comment=c_9' }, close: () => { closed = true; } } });
     assert(closed, 'notification not closed');
-    assert(log.opened[0] === 'https://tdoc.dev/d/q3%20plan/v/2?comment=c_9', JSON.stringify(log.opened));
+    assert(log.opened[0] === 'https://tdoc.dev/d/q3%20plan?comment=c_9', JSON.stringify(log.opened));
   });
 
   await t('clicking focuses the tab already on that comment instead of opening another', async () => {
-    const target = 'https://tdoc.dev/d/q3%20plan/v/2?comment=c_9';
+    const target = 'https://tdoc.dev/d/q3%20plan?comment=c_9';
     const { log, fire } = boot([target]);
-    await fire('notificationclick', { notification: { data: { url: '/d/q3%20plan/v/2?comment=c_9' }, close: () => {} } });
+    await fire('notificationclick', { notification: { data: { url: '/d/q3%20plan?comment=c_9' }, close: () => {} } });
     assert(log.focused[0] === target && log.opened.length === 0, JSON.stringify(log));
   });
 
