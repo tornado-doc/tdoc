@@ -36,7 +36,7 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
   console.log('agent progress line');
 
   // ---- the mapping (pure) ----------------------------------------------------
-  const { handoffProgressSteps, handoffProgressLine, formatWorkingFor } = await loadEsm('shell/src/comments/core/handoff-progress.js');
+  const { handoffProgressSteps, handoffProgressLine, handoffProgressStage, formatWorkingFor } = await loadEsm('shell/src/comments/core/handoff-progress.js');
   const base = {
     handoff_at: '2026-11-12T10:00:00Z',
     handoff_delivery: { status: 'delivered', at: '2026-11-12T10:00:02Z', first_at: '2026-11-12T10:00:01Z' },
@@ -69,6 +69,17 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
     assert(handoffProgressLine(c, 'received', now).text === 'Delivered · Reading the doc · Editing the Pack section · 5 min');
     const later = { ...c, handoff_last_version: 4, handoff_last_version_at: at(3) };
     assert(handoffProgressLine(later, 'received', now).current === 'Working', 'a stale status outlived a newer fact');
+  });
+
+  await t('the pill names only the short current stage; the agent\'s own words stay out of it', () => {
+    const delivered = { ...base };
+    assert(handoffProgressStage(delivered, 'received') === 'Delivered');
+    const reading = { ...base, handoff_acked_at: at(1), handoff_progress: { text: 'Editing the Pack section', at: at(2) } };
+    assert(handoffProgressStage(reading, 'received') === 'Reading', handoffProgressStage(reading, 'received'));
+    assert(handoffProgressStage({ ...reading, handoff_suggested_edits: 3, handoff_suggested_at: at(3) }, 'received') === '3 edits');
+    assert(handoffProgressStage({ ...reading, handoff_suggested_edits: 1, handoff_suggested_at: at(3) }, 'received') === '1 edit');
+    assert(handoffProgressStage({ ...reading, handoff_suggested_edits: 3, handoff_suggested_at: at(3), handoff_last_version: 3, handoff_last_version_at: at(4) }, 'received') === 'New version');
+    assert(handoffProgressStage(reading, 'waiting') === '' && handoffProgressStage({}, 'received') === '');
   });
 
   await t('mapping: only while the agent is working; nothing for other states or no handoff', () => {

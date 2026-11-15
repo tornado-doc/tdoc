@@ -104,6 +104,16 @@
 .tdoc-feedback-page .script-path { margin: 2rem 0 0; padding: 1rem 1.1rem; border: 1px solid var(--fb-line);
   border-radius: 12px; background: #fafafa; }
 .tdoc-feedback-page .script-path h2 { margin-top: 0; }
+/* The two ways in, each a section the intro (and the homepage, #sdk) links
+   to; the margin keeps a jumped-to heading clear of the top bar. */
+.tdoc-feedback-page .bookmark-path,
+.tdoc-feedback-page .script-path { scroll-margin-top: 4.5rem; }
+.tdoc-feedback-page .script-path > :last-child { margin-bottom: 0; }
+.tdoc-feedback-page .script-path .code-copy { margin: 0 0 1rem; }
+/* The whole line shows, space id included: it wraps rather than scrolls. */
+.tdoc-feedback-page .script-path .code-copy pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tdoc-feedback-page .sdk-space q { color: var(--td-ink); font-weight: 600; }
+.tdoc-feedback-page .sdk-space .tdoc-copy-prompt { margin-left: .25rem; vertical-align: middle; }
 /* A code snippet with its Copy button: one grey box, the code scrolls, the
    button (the shared CopyPromptButton) stays put. */
 .tdoc-feedback-page .code-copy { display: flex; align-items: center; gap: .5rem; background: #f3f3f6; border-radius: 6px;
