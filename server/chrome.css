@@ -1069,12 +1069,12 @@
   .tdoc-handoff-chip.tdoc-handoff-status-text { flex: 0 1 auto; min-width: 0; max-width: 100%; gap: 2px; }
   .tdoc-handoff-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-handoff-line-tail { flex: 0 0 auto; white-space: pre; }
-  /* The agent progress line (flag agentProgress) is a sentence of steps: it
-     wraps onto a second line rather than cutting the steps off, and reads as
-     one block of text instead of a pill. */
-  .tdoc-handoff-chip[data-handoff-progress] { display: block; border-radius: 8px; white-space: normal; overflow-wrap: anywhere; }
-  .tdoc-handoff-chip[data-handoff-progress] .tdoc-handoff-line-text,
-  .tdoc-handoff-chip[data-handoff-progress] .tdoc-handoff-line-tail { display: inline; white-space: normal; overflow: visible; }
+  /* The agent progress (flag agentProgress): the pill is one short stage,
+     the same pill as every other status, capped; the whole line (steps, the
+     agent's own words, minutes) is a muted detail in an opened thread
+     (Julie, 2026-11-14: the long pill "doesn't feel native"). */
+  .tdoc-handoff-chip[data-handoff-progress] { max-width: min(100%, 12rem); }
+  .tdoc-handoff-progress-detail { margin: 0 0 6px; font-size: 12px; line-height: 1.45; color: var(--td-muted, #6b6a66); overflow-wrap: anywhere; }
   .tdoc-handoff-chip .tdoc-handoff-chip-action {
     appearance: none;
     border: 0;

@@ -15,7 +15,7 @@ import React, { useEffect, useState } from 'react';
 import { deliveryErrorText, readableHandle } from './notify-handoff.jsx';
 import { formatHandoffAgo } from './handoff-ago.js';
 import { handoffWaitMinutes, handoffWaitState, isHandoffInFlight } from '../comments/core/handoff-state.js';
-import { handoffProgressLine } from '../comments/core/handoff-progress.js';
+import { handoffProgressLine, handoffProgressStage } from '../comments/core/handoff-progress.js';
 import { isFeatureOn } from '../feature-flags.js';
 
 /** Latest agent verdict on a reply, if any (applied / partial / question). */
@@ -119,14 +119,12 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine }) {
   // A reply verdict is more current than the delivery receipt. One comment
   // shows one status, never both "sent" and "asked you" at the same time.
   const displayState = displayHandoffState(comment, state);
-  // While the agent works: what it has done so far (the lead, which gives
-  // way in a narrow card) and what it is doing now and for how long (the
-  // tail, which always shows). Polled with the comments; the tick above
-  // moves the minutes.
+  // While the agent works the pill names only the current stage ("Reading",
+  // "3 edits", "New version"), the size of any other status pill; the whole
+  // line is its title and HandoffProgressDetail in an opened thread.
   const progress = showProgress ? handoffProgressLine(comment, displayState, now) : null;
-  const [lead, tail] = progress
-    ? [progress.steps.join(' · '), ` · ${[progress.current, progress.elapsed].filter(Boolean).join(' · ')}`]
-    : compactHandoffParts(comment, displayState);
+  const stage = progress ? handoffProgressStage(comment, displayState) : '';
+  const [lead, tail] = stage ? [stage, ''] : compactHandoffParts(comment, displayState);
   const text = lead + tail;
   const chipClass = displayState === 'question' ? 'is-question'
     : displayState === 'partial' ? 'is-partial'
@@ -142,7 +140,7 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine }) {
     <span
       className={`tdoc-handoff-chip tdoc-handoff-status-text ${chipClass}`}
       data-handoff-state={displayState}
-      data-handoff-progress={progress ? '' : undefined}
+      data-handoff-progress={stage ? '' : undefined}
       title={state === 'failed' ? (deliveryErrorText(comment.handoff_delivery?.error) || undefined) : progress ? progress.text : handoffStatusText(comment, state, now)}
     >
       <span className="tdoc-handoff-line-text">{lead}</span>
@@ -155,4 +153,24 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine }) {
       </> : null}
     </span>
   );
+}
+
+/**
+ * The whole progress line for an opened thread (flag agentProgress): every
+ * step so far, what the agent says it is doing now (report_progress), and
+ * for how long. Wraps; the pill above it stays one short word.
+ */
+export function HandoffProgressDetail({ comment, progressLine }) {
+  const showProgress = progressLine === undefined ? isFeatureOn('agentProgress') : Boolean(progressLine);
+  const [now, setNow] = useState(() => Date.now());
+  const state = showProgress ? handoffWaitState(comment, now) : null;
+  const working = state === 'received';
+  useEffect(() => {
+    if (!working) return undefined;
+    const id = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(id);
+  }, [working]);
+  const progress = working ? handoffProgressLine(comment, displayHandoffState(comment, state), now) : null;
+  if (!progress) return null;
+  return <p className="tdoc-handoff-progress-detail">{progress.text}</p>;
 }

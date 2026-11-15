@@ -15,6 +15,12 @@
 //                           (report_progress / tdoc-agent-reply --progress),
 //                           shown as the current step while it is the newest.
 // Plain words only: never "handoff".
+//
+// Two lengths (Julie, 2026-11-14: the long line in the pill "doesn't feel
+// native"): the status pill shows only the short current stage
+// (handoffProgressStage: "Reading", "3 edits", "New version"), the same size
+// as every other status pill; the whole line, the agent's own words
+// included, is the detail shown inside an opened thread.
 
 function ts(iso) {
   const n = Date.parse(iso || '');
@@ -57,6 +63,29 @@ export function handoffProgressSteps(comment) {
     .map((step, i) => ({ step, i, t: ts(step.at) || Infinity }))
     .sort((a, b) => (a.t - b.t) || (a.i - b.i))
     .map(({ step }) => step);
+}
+
+// The pill's word for each step: short, one or two words.
+function shortStage(step, comment) {
+  if (step.key === 'delivered') return step.label; // Sent / Delivered
+  if (step.key === 'reading') return 'Reading';
+  if (step.key === 'suggested') {
+    const n = Number(comment.handoff_suggested_edits);
+    return `${n} ${n === 1 ? 'edit' : 'edits'}`;
+  }
+  if (step.key === 'published') return 'New version';
+  if (step.key === 'replied') return 'Replied';
+  return 'Working';
+}
+
+/**
+ * The short current stage for the status pill, or '' when there is no
+ * progress to show (the pill then says what it always did, "On it").
+ */
+export function handoffProgressStage(comment, state) {
+  if (state !== 'received') return '';
+  const steps = handoffProgressSteps(comment);
+  return steps.length ? shortStage(steps[steps.length - 1], comment) : '';
 }
 
 /**
