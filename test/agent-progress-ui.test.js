@@ -70,17 +70,31 @@ async function open(browser, target, { flag, width, withStatus = false }) {
       assert.match(title, /^Delivered · Reading the doc · Suggested 3 edits · Published v3 · (Working|Editing the Pack section) · 6 min$/, title);
       assert(!/handoff/i.test(await chip.innerText()), 'the word handoff is on the card');
       assert.equal(await chip.getAttribute('data-handoff-state'), 'received');
-      // Nothing is cut off: the line wraps instead (what it is doing now and
-      // how long always show).
-      const tail = chip.locator('.tdoc-handoff-line-tail');
-      assert.match(await tail.innerText(), /· (Working|Editing the Pack section) · 6 min/);
-      const box = await tail.boundingBox();
-      assert(box && box.width > 0 && box.x + box.width <= width, `tail off screen at ${width}`);
-      const clipped = await chip.evaluate((el) => [...el.querySelectorAll('span')].some((s) => s.scrollWidth > s.clientWidth + 1 && getComputedStyle(s).display !== 'inline'));
-      assert(!clipped, `a step is cut off at ${width}`);
-      // The next poll brings the agent's own status as the current step.
+      // The pill is one short stage, the same pill as any other status
+      // (Julie, 2026-11-14); the whole line, the agent's own words included,
+      // is the detail inside the opened thread.
+      assert.equal((await chip.innerText()).trim(), 'New version');
+      const detail = page.locator('.tdoc-handoff-progress-detail:visible').first();
+      await detail.waitFor({ timeout: 10000 });
+      // The next poll brings the agent's own status: into the detail, never the pill.
       await page.waitForFunction(() => /Editing the Pack section/.test(document.querySelector('.tdoc-handoff-chip[data-handoff-progress]')?.getAttribute('title') || ''), null, { timeout: 40000 });
       assert(reads() >= 2, 'the status came with the existing comment poll');
+      await page.waitForFunction(() => /Editing the Pack section · 6 min$/.test(document.querySelector('.tdoc-handoff-progress-detail')?.textContent || ''), null, { timeout: 10000 });
+      assert.equal(await detail.innerText(), 'Delivered · Reading the doc · Suggested 3 edits · Published v3 · Editing the Pack section · 6 min');
+      assert.equal((await chip.innerText()).trim(), 'New version');
+      const pill = await chip.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        const plain = document.createElement('span');
+        plain.className = 'tdoc-handoff-chip';
+        plain.textContent = 'On it';
+        el.parentElement.appendChild(plain);
+        const h = plain.getBoundingClientRect().height;
+        plain.remove();
+        return { h: r.height, plainH: h, w: r.width, clipped: el.scrollWidth > el.clientWidth + 1, ws: cs.whiteSpace };
+      });
+      assert(Math.abs(pill.h - pill.plainH) <= 1, `the progress pill is ${pill.h}px tall, a plain pill ${pill.plainH}px, at ${width}`);
+      assert(pill.w <= 12 * 16 + 1 && !pill.clipped, `the progress pill is ${pill.w}px wide or cut off at ${width}`);
       if (shots) {
         fs.mkdirSync(shots, { recursive: true });
         await page.screenshot({ path: path.join(shots, `progress-${width}.png`) });

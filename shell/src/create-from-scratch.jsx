@@ -7,6 +7,8 @@ import { listWriteWithAgentAgents, writeWithAgent } from './document/api.js';
 import { agentDisplayName, targetKey } from './document/agent-choices.js';
 import { AppButton } from './ui/button.jsx';
 import { AppSelect } from './ui/select.jsx';
+import { AppTextarea } from './ui/textarea.jsx';
+import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
 import { DOC_SUBJECT_PLACEHOLDER, DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSubjectPrompt } from './setup-gate.jsx';
@@ -253,6 +255,9 @@ export const CONNECT_AGENT_HREF = '/me?view=settings#agents';
 // the dialog says so, links to Connect an agent, and the copy line stays.
 // A send that made the doc but did not reach the agent (`sent: false`): the
 // server's message, else a plain line.
+// What Send takes (worker WRITE_WITH_AGENT_PROMPT_CHARS); Copy takes any length.
+export const WRITE_WITH_AGENT_PROMPT_CHARS = 500;
+
 export function writeWithAgentFailure(body) {
   const msg = typeof body?.message === 'string' && body.message.trim() ? body.message.trim() : '';
   return msg || 'tdoc made the doc but could not send it to your agent.';
@@ -281,7 +286,8 @@ function SendToAgent({ kind, subject, onError }) {
     );
   }
   const agent = agents.find((t) => targetKey(t) === picked) || agents[0];
-  const ready = Boolean(subject) && !sending;
+  const tooLong = [...subject].length > WRITE_WITH_AGENT_PROMPT_CHARS;
+  const ready = Boolean(subject) && !sending && !tooLong;
   const send = async () => {
     if (!ready) return;
     setSending(true);
@@ -315,7 +321,9 @@ function SendToAgent({ kind, subject, onError }) {
         <AppButton variant="primary" onClick={send} disabled={!ready}>{sending ? 'Sending…' : 'Send'}</AppButton>
       </div>
       <p className={`mk-foot${error ? ' mk-send-error' : ''}`} role={error ? 'alert' : undefined}>
-        {error || 'tdoc makes a private doc and asks your agent to write it. You watch it there.'}
+        {error || (tooLong
+          ? `Send takes up to ${WRITE_WITH_AGENT_PROMPT_CHARS} characters; Copy below takes any length.`
+          : 'tdoc makes a private doc and asks your agent to write it. You watch it there.')}
         {error && madeUrl ? <> <a href={madeUrl}>Open the doc</a></> : null}
       </p>
     </div>
@@ -349,10 +357,12 @@ export function AgentRecipe({ kind = 'doc', send = false }) {
     <div className="mk-agent" data-kind={kind}>
       <label className="mk-subject">
         <span className="mk-sr">{recipe.label}</span>
-        <input
+        {/* Grows with what is typed (Julie, 2026-11-14: one line was too
+            short for a real brief), then scrolls. */}
+        <AppTextarea
           ref={subjectRef}
-          type="text"
           value={subject}
+          maxHeight={200}
           placeholder={recipe.placeholder}
           onChange={(event) => { setSubject(event.target.value); setCopied(false); setCopyFailed(false); }}
         />
@@ -365,9 +375,7 @@ export function AgentRecipe({ kind = 'doc', send = false }) {
           <span className="mk-typed">{trimmed || recipe.placeholder}</span>
           <span className="mk-fixed">{recipe.suffix}</span>
         </p>
-        <button type="button" className={copied ? 'copied' : ''} onClick={copy} disabled={!ready}>
-          {copied ? 'Copied' : 'Copy'}
-        </button>
+        <CopyPromptButton className="mk-copy" onCopy={copy} copied={copied} label="Copy" disabled={!ready} />
       </div>
       <p className="mk-foot">
         {copyFailed ? COPY_FALLBACK : recipe.foot}

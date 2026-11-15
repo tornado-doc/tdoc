@@ -25,6 +25,20 @@ export function latestAgentActivityAt(comment) {
   return latest;
 }
 
+/**
+ * Newest activity of any kind on the thread (the comment, any reply, an
+ * agent's status), ms since epoch. What opening the thread has read up to.
+ */
+export function latestThreadActivityAt(comment) {
+  let latest = Date.parse(comment?.created || '') || 0;
+  for (const r of comment?.replies || []) {
+    if (!r) continue;
+    const t = Date.parse(r.created || '');
+    if (Number.isFinite(t) && t > latest) latest = t;
+  }
+  return Math.max(latest, latestAgentActivityAt(comment));
+}
+
 function latestViewerReplyAt(comment, viewerLogin) {
   const viewers = (Array.isArray(viewerLogin) ? viewerLogin : [viewerLogin])
     .map((login) => String(login || '').trim().toLowerCase())
@@ -63,13 +77,15 @@ export function isThreadUnread(comment, seenMap, viewerLogin = '') {
 }
 
 /**
- * Marks the thread seen up to its latest agent activity. The stamp, or false.
- * A thread no agent has spoken in has nothing to read: nothing is written
- * (here or on the server), however often it is opened or polled.
+ * Marks the thread seen up to its newest activity of any kind (an agent's
+ * turn included, so the pin's unread goes as before). The stamp, or false.
+ * The server takes it for the bell too: a person's comment read here is not
+ * still waiting in Needs you (Julie, 2026-11-14). Written only when the
+ * thread has moved on since the last mark -- never on every view or poll.
  */
 export function markThreadSeen(slug, comment) {
   if (!slug || !comment?.id) return false;
-  const activity = latestAgentActivityAt(comment);
+  const activity = latestThreadActivityAt(comment);
   if (!activity) return false;
   const map = readSeenMap(slug);
   const prev = Number(map[comment.id] || 0);

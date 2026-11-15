@@ -53,7 +53,6 @@
  "shell/src/setup-gate.css :: .sg-doctor button",
  "shell/src/shell.css :: .tdoc-bar button.tdoc-mode-trigger",
  "shell/src/shell.css :: .tdoc-editor-toolbar button",
- "shell/src/ui/ui.css :: .mk-line button",
  "shell/src/ui/ui.css :: .tdoc-activate-page button.primary",
  "shell/src/ui/ui.css :: .tdoc-activate-page button.secondary",
  "shell/src/ui/ui.css :: .tdoc-conn-pick > button",

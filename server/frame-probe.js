@@ -2150,6 +2150,11 @@
     else if (d.type === 'tdoc:editSerialize') {
       post({ type: 'tdoc:editDocument', requestId: d.requestId, html: serializeDocument() });
     }
+    // A version saved without Edit mode (a sheet's column width): it is the
+    // page now, so the next Edit mode measures its changes from it.
+    else if (d.type === 'tdoc:editRebase') {
+      if (interactionMode !== 'edit') editBaselineHtml = null;
+    }
     else if (d.type === 'tdoc:demoRewrite') runDemoRewrite(d);
     else if (d.type === 'tdoc:demoRewriteShow') {
       if (demoRewrite) {

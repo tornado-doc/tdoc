@@ -165,7 +165,7 @@ async function startServer(worker, env) {
           const dialog = await openDialog();
           const send = dialog.getByRole('button', { name: 'Send', exact: true });
           await send.waitFor();
-          await dialog.locator('.mk-subject input').fill('a packing list for Iceland in March');
+          await dialog.locator('.mk-subject textarea').fill('a packing list for Iceland in March');
           await press(send);
           const err = dialog.locator('.mk-send-error');
           await err.waitFor({ timeout: 20000 });
@@ -193,7 +193,7 @@ async function startServer(worker, env) {
           await send.waitFor();
           assert.ok(await send.isDisabled(), 'Send before a sentence');
           assert.match(await dialog.locator('.mk-send-agent').innerText(), /claude/i);
-          await dialog.locator('.mk-subject input').fill('a packing list for Iceland in March');
+          await dialog.locator('.mk-subject textarea').fill('a packing list for Iceland in March');
           await shot('dialog');
           await press(send);
           await page.waitForURL(/\/d\/[a-z0-9-]+/, { timeout: 20000 });

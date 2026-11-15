@@ -37,9 +37,12 @@ t('each slide has its own CTA to a real route', () => {
   const ctas = [...work.matchAll(/<a class="btn btn-primary hd-go" href="([^"]+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
   assert(JSON.stringify(ctas) === JSON.stringify([
     ['/setup?step=doc', 'Make your doc'], ['/me', 'Make your sheet'],
-    ['/setup?step=doc', 'Make your deck'], ['/feedback', 'Add to your site'],
+    ['/setup?step=doc', 'Make your deck'], ['/feedback#sdk', 'Add to your site'],
   ]), `CTAs: ${JSON.stringify(ctas)}`);
   const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
+  // "Add to your site" is the SDK (Julie, 2026-11-14: the homepage had no
+  // place that said the feedback SDK exists); the caption names both ways.
+  assert(/<a class="hd-real-cap" href="\/feedback#sdk">Any web app: [^<]*bookmark[^<]*<b>[^<]*SDK/.test(work), 'the Any web app caption does not name the bookmark and the SDK');
   for (const route of ['/setup', '/me', '/feedback']) {
     assert(worker.includes(`p === '${route}'`), `the worker has no ${route} route`);
   }
