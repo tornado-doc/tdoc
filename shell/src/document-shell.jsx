@@ -196,7 +196,24 @@ const exitLine = (answered, version) => (
     : `v${version} published. Share it.`
 );
 
-export function DocumentShell({ boot, config }) {
+export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
+  // A version this page saved without leaving it (a sheet's column width set
+  // in Read or Comment mode): the page is that version now, so everything
+  // that names the version (the next save's base, comments, history, the
+  // newer-version notice) names it. The frame already shows it: its address
+  // only changes for a later reload (Discard).
+  const [ownVersion, setOwnVersion] = useState(null);
+  const ownVersionRef = useRef(0);
+  const config = useMemo(() => (ownVersion ? {
+    ...servedConfig,
+    version: ownVersion.n,
+    versions: [...(servedConfig.versions || []).filter((v) => Number(v.n) !== ownVersion.n), ownVersion],
+  } : servedConfig), [servedConfig, ownVersion]);
+  const boot = useMemo(() => (ownVersion ? {
+    ...servedBoot,
+    oldVersion: null,
+    frameSrc: String(servedBoot.frameSrc).replace(/\/v\/\d+\/frame/, `/v/${ownVersion.n}/frame`),
+  } : servedBoot), [servedBoot, ownVersion]);
   const [comparing, setComparing] = useState(() => new URLSearchParams(location.search).get('compare') === '1');
   const changeComparison = (next) => {
     if (next === comparing) return;
@@ -660,6 +677,35 @@ export function DocumentShell({ boot, config }) {
       if (message.mode !== 'edit' || !config.canEdit || !current || current.mode === 'edit') return;
       current.changeMode('edit');
       showToast('Edit mode: Save to keep this for everyone, or Discard');
+    },
+    // A sheet's column width set in Read or Comment mode by someone who may
+    // edit the doc: saved as a new version at once, through the editor's own
+    // document request and save (same checks, same author), without a mode
+    // change or a reload. The frame waits for the answer before it asks
+    // again, and takes the widths back when the save fails.
+    'tdoc:sheetLayoutSave': async () => {
+      const current = editorRef.current;
+      const reply = (ok) => bridgeRef.current?.({ type: 'tdoc:sheetLayoutSaved', ok });
+      if (!config.canEdit || config.isLanding || !current || current.mode === 'edit') { reply(false); return; }
+      const base = Math.max(Number(config.version) || 0, ownVersionRef.current);
+      try {
+        const result = await current.saveInPlace(base);
+        const n = Number(result?.version) || 0;
+        if (!n) throw new Error('Could not save');
+        ownVersionRef.current = n;
+        setOwnVersion({ n, created: new Date().toISOString(), source: 'browser', ...(config.identity?.login ? { author: config.identity.login } : {}) });
+        if (/\/v\/\d+\/?$/.test(location.pathname)) {
+          try { history.replaceState(history.state, '', `${location.pathname.replace(/\/v\/\d+(\/?)$/, `/v/${n}$1`)}${location.search}${location.hash}`); } catch {}
+        }
+        bridgeRef.current?.({ type: 'tdoc:editRebase' });
+        reply(true);
+        showToast(`Column width saved · v${n}`);
+      } catch (error) {
+        reply(false);
+        if (error.status === 409 && error.body?.error === 'version_conflict') showToast('This doc has a newer version. Open it to change column widths.', true);
+        else if (error.status === 409 && error.body?.error === 'save_in_progress') showToast('The doc was just updated. Try again in a moment.', true);
+        else showToast(error.message || 'Could not save the column width', true);
+      }
     },
     'tdoc:editState': (message) => editorRef.current?.frameHandlers.editState(message),
     'tdoc:editBaseline': (message) => editorRef.current?.frameHandlers.editBaseline(message),

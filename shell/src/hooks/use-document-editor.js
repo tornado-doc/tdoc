@@ -166,6 +166,20 @@ export function useDocumentEditor({
     }
   }, [checking, config.slug, config.version, dirty, requestDocument, saving, showToast, storeKey]);
 
+  // A version saved without Edit mode (a sheet's column width set in Read
+  // or Comment mode): the same document request and the same save as Save,
+  // so the same checks and the same author, but the page stays where it is.
+  // Never over an unsaved draft: that would publish it unasked.
+  const saveInPlace = useCallback(async (baseVersion) => {
+    if (dirty || saving || mode === 'edit') {
+      const error = new Error('Save or discard the draft first');
+      error.code = 'draft_open';
+      throw error;
+    }
+    const html = await requestDocument();
+    return saveDocumentVersion(config.slug, baseVersion, html);
+  }, [config.slug, dirty, mode, requestDocument, saving]);
+
   const discard = useCallback(async () => {
     await clearDraftBody(storeKey);
     setDirty(false);
@@ -264,6 +278,7 @@ export function useDocumentEditor({
     changeMode,
     discard,
     save,
+    saveInPlace,
     restoreDraft: () => staleDraft && restoreDraft(staleDraft.bodyHtml),
     keepPublished,
     closeConflict: () => setConflict(null),
