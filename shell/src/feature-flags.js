@@ -85,7 +85,7 @@ export const FLAGS = Object.freeze({
   // opens the list of steps inside the comment; the tooltip holds the whole
   // line, from what tdoc records (comments/core/handoff-progress.js), plus
   // the agent's own one-line status when it posts one (report_progress, a
-  // dev-mode MCP tool while this is), in the tooltip only. Off: Delivered ->
+  // dev-mode MCP tool while this is), under the current step. Off: Delivered ->
   // On it -> replied, as before. Like feedbackAreaSelect the widget reads it
   // from its session (worker FEEDBACK_WIDGET_DEV_FLAGS).
   agentProgress: Object.freeze({ label: 'Agent progress line on comments', owner: 'julie', added: '2026-11-12', default: false, preview: true }),

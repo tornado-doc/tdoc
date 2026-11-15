@@ -1084,8 +1084,11 @@
   .tdoc-handoff-chip-caret { flex: none; margin-left: 4px; transition: transform .15s ease; }
   .tdoc-handoff-chip-caret[data-open] { transform: rotate(180deg); }
   .tdoc-handoff-steps { list-style: none; margin: 0 0 8px; padding: 0 0 0 2px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; line-height: 1.4; color: var(--td-muted, #6b6a66); }
-  .tdoc-handoff-step { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .tdoc-handoff-step[aria-current] { color: var(--td-ink, #1a1a1a); }
+  .tdoc-handoff-step { display: flex; flex-direction: column; min-width: 0; }
+  .tdoc-handoff-step-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .tdoc-handoff-step[aria-current] .tdoc-handoff-step-line { color: var(--td-ink, #1a1a1a); }
+  /* The agent's own note (report_progress), under the current step only. */
+  .tdoc-handoff-step-note { margin-left: 18px; font-size: 11px; color: var(--td-muted, #6b6a66); overflow-wrap: anywhere; }
   .tdoc-handoff-step-words { display: flex; min-width: 0; }
   .tdoc-handoff-step-mark { flex: none; width: 12px; height: 12px; box-sizing: border-box; }
   .tdoc-handoff-step-mark.is-done { color: var(--td-muted, #6b6a66); }

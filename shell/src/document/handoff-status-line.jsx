@@ -201,30 +201,43 @@ export function HandoffStatusChips({ comment, onResend = null, progressLine, ste
   );
 }
 
+// Steps that end the agent's turn: once one is the latest, nothing is
+// still running, so it gets a check like the others, not a spinner.
+const TERMINAL_STEPS = new Set(['updated', 'replied']);
+
 /**
  * The agent's steps under the pill, one short line each: a check for a
- * finished step, a spinner for the current one. Shown only while `open`
- * (the pill toggles it; collapsed by default so the comment stays clean)
- * and while the agent still has the comment.
+ * finished step, a spinner on the current one while the agent is still
+ * working (latest step Sent / reading / N edits), with the agent's own
+ * report_progress note as a small muted line under it. Shown only while
+ * `open` (the pill toggles it; collapsed by default so the comment stays
+ * clean) and while the agent still has the comment.
  */
 export function HandoffProgressSteps({ comment, progressLine, open, id }) {
   const { progress } = useProgress(comment, progressLine);
   if (!open || !progress) return null;
   const last = progress.steps.length - 1;
+  const working = !TERMINAL_STEPS.has(progress.steps[last].key);
   return (
     <ol className="tdoc-handoff-steps" id={id} aria-label="Agent steps">
-      {progress.steps.map((st, i) => (
-        <li key={st.key} className="tdoc-handoff-step" data-step={st.key} aria-current={i === last ? 'step' : undefined}>
-          {i === last
-            ? <span className="tdoc-handoff-step-mark is-current" role="img" aria-label="Now" />
-            : (
-              <svg className="tdoc-handoff-step-mark is-done" viewBox="0 0 12 12" width="12" height="12" role="img" aria-label="Done">
-                <path d="M2.5 6.5 5 9l4.5-6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
-          <span className="tdoc-handoff-step-words"><StepWords parts={st.parts} /></span>
-        </li>
-      ))}
+      {progress.steps.map((st, i) => {
+        const current = working && i === last;
+        return (
+          <li key={st.key} className="tdoc-handoff-step" data-step={st.key} aria-current={current ? 'step' : undefined}>
+            <span className="tdoc-handoff-step-line">
+              {current
+                ? <span className="tdoc-handoff-step-mark is-current" role="img" aria-label="Now" />
+                : (
+                  <svg className="tdoc-handoff-step-mark is-done" viewBox="0 0 12 12" width="12" height="12" role="img" aria-label="Done">
+                    <path d="M2.5 6.5 5 9l4.5-6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              <span className="tdoc-handoff-step-words"><StepWords parts={st.parts} /></span>
+            </span>
+            {current && progress.note ? <span className="tdoc-handoff-step-note">{progress.note}</span> : null}
+          </li>
+        );
+      })}
     </ol>
   );
 }

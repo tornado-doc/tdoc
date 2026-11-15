@@ -16,7 +16,9 @@
 //   handoff_first_reply_at  <agent> replied
 //   handoff_progress        the agent's own one-line status, when it posts one
 //                           (report_progress / tdoc-agent-reply --progress):
-//                           in the pill's tooltip only, while it is the newest.
+//                           while it is the newest fact, a muted line under the
+//                           current step in the step list, and in the tooltip;
+//                           never in the pill.
 // Plain words only: never "handoff", never a version number. No name: "Agent".
 //
 // Where it shows (handoff-status-line.jsx): the status pill names the current
