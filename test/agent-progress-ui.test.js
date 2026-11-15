@@ -1,11 +1,11 @@
 // The agent progress pill on a comment card (flag agentProgress), desktop
-// and phone: while the agent works, the pill names only the current stage
-// ("New version") and its tooltip holds the timeline "Delivered · Reading the
-// doc · Suggested 3 edits · New version · Working · N min", from the comments
-// the page already polls; the agent's own status takes the current step of
-// the tooltip while it is the newest fact. No detail line in the opened
-// thread, no version number anywhere (Julie, 2026-11-14). With the flag off
-// the chip still says "On it". Screenshots: TDOC_PROGRESS_SHOTS=<dir>.
+// and phone: while the agent works, the pill names the current step in plain
+// words with the agent's name ("Claude updated the doc"), from the comments
+// the page already polls. Tapping it opens the step list under it inside the
+// comment (a check per finished step, a spinner on the current one);
+// collapsed by default. Its tooltip holds the whole line, the agent's own
+// status included; no version number anywhere (Julie, 2026-11-14). With the
+// flag off the chip still says "On it". Screenshots: TDOC_PROGRESS_SHOTS=<dir>.
 // Run with: node test/agent-progress-ui.test.js
 
 const assert = require('node:assert/strict');
@@ -19,7 +19,8 @@ const { resolveTarget } = require('./helpers/fixture-server');
 const clock = (base = Date.now()) => (min) => new Date(base - min * 60000).toISOString();
 
 async function open(browser, target, { flag, width, withStatus = false }) {
-  const page = await browser.newPage({ viewport: { width, height: 900 } });
+  const phone = width < 600;
+  const page = await browser.newPage({ viewport: { width, height: 900 }, hasTouch: phone, isMobile: phone && browser.browserType().name() !== 'firefox' });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.addInitScript((on) => { window.__TDOC_FLAGS__ = { agentProgress: on }; window.__TDOC_COMMENT_POLL_MS = 2000; }, flag);
@@ -46,7 +47,7 @@ async function open(browser, target, { flag, width, withStatus = false }) {
         handoff_first_version_at: ago(3),
         // The second poll brings the agent's own status (newest fact).
         handoff_progress: withStatus && reads > 1 ? { text: 'Editing the Pack section', at: ago(1) } : null,
-        handoff_to: { provider: 'local', device: 'mbp', cli: 'claude', agent_name: 'claude on mbp' },
+        handoff_to: { provider: 'local', device: 'mbp', cli: 'claude', agent_name: 'Claude' },
       });
     }
     await route.fulfill({ json: comments });
@@ -69,23 +70,64 @@ async function open(browser, target, { flag, width, withStatus = false }) {
       const chip = page.locator('.tdoc-handoff-chip[data-handoff-progress]:visible').first();
       await chip.waitFor({ timeout: 20000 });
       const title = await chip.getAttribute('title');
-      assert.match(title, /^Delivered · Reading the doc · Suggested 3 edits · New version · (Working|Editing the Pack section) · 6 min$/, title);
+      assert.match(title, /^Sent to Claude · Claude is reading · Claude suggested 3 edits · Claude updated the doc · (Editing the Pack section · )?6 min$/, title);
       assert(!/handoff/i.test(await chip.innerText()), 'the word handoff is on the card');
       assert.equal(await chip.getAttribute('data-handoff-state'), 'received');
-      // The pill is one short stage, the same pill as any other status, and
-      // the only progress UI (Julie, 2026-11-14); the whole timeline, the
-      // agent's own words included, is its tooltip.
-      assert.equal((await chip.innerText()).trim(), 'New version');
+      // The pill names the current step in plain words, the same pill as any
+      // other status (Julie, 2026-11-14).
+      assert.equal((await chip.textContent()).trim(), 'Claude updated the doc');
       // The next poll brings the agent's own status: into the tooltip, never the pill.
       await page.waitForFunction(() => /Editing the Pack section/.test(document.querySelector('.tdoc-handoff-chip[data-handoff-progress]')?.getAttribute('title') || ''), null, { timeout: 40000 });
       assert(reads() >= 2, 'the status came with the existing comment poll');
-      assert.equal(await chip.getAttribute('title'), 'Delivered · Reading the doc · Suggested 3 edits · New version · Editing the Pack section · 6 min');
-      assert.equal((await chip.innerText()).trim(), 'New version');
-      // The opened thread carries no grey detail line, and the card shows no
-      // timeline text or version number outside the tooltip.
-      assert.equal(await page.locator('.tdoc-handoff-progress-detail').count(), 0, 'the detail line is back');
-      const cardText = await chip.evaluate((el) => (el.closest('.tdoc-cc, article, [class*="comment-card"]') || document.body).innerText);
-      assert(!/Reading the doc|Editing the Pack section|Published v\d|\bv3\b/.test(cardText), `progress text in the card: ${cardText}`);
+      assert.equal(await chip.getAttribute('title'), 'Sent to Claude · Claude is reading · Claude suggested 3 edits · Claude updated the doc · Editing the Pack section · 6 min');
+      assert.equal((await chip.textContent()).trim(), 'Claude updated the doc');
+      // Collapsed by default: the comment shows no steps and no version.
+      assert.equal(await chip.getAttribute('role'), 'button');
+      assert.equal(await chip.getAttribute('aria-expanded'), 'false');
+      assert.equal(await page.locator('.tdoc-handoff-steps').count(), 0, 'the steps are open before the pill was tapped');
+      assert.equal(await page.locator('.tdoc-handoff-progress-detail').count(), 0, 'the old detail line is back');
+      const card = chip.locator('xpath=ancestor::article[1]');
+      const cardText = async () => card.innerText();
+      assert(!/is reading|Editing the Pack section|Published|\bv3\b/.test(await cardText()), `progress text in the closed card: ${await cardText()}`);
+      if (shots) {
+        fs.mkdirSync(shots, { recursive: true });
+        await page.screenshot({ path: path.join(shots, `progress-collapsed-${width}.png`) });
+      }
+      // Tap (phone) or click (desktop): the steps open under the pill.
+      if (width < 600) await chip.tap(); else await chip.click();
+      const steps = page.locator('.tdoc-handoff-steps:visible').first();
+      await steps.waitFor({ timeout: 5000 });
+      assert.equal(await chip.getAttribute('aria-expanded'), 'true');
+      assert.equal(await chip.getAttribute('aria-controls'), await steps.getAttribute('id'));
+      const lines = (await steps.locator('.tdoc-handoff-step').allTextContents()).map((t) => t.trim());
+      assert.deepEqual(lines, ['Sent to Claude', 'Claude is reading', 'Claude suggested 3 edits', 'Claude updated the doc']);
+      assert.equal(await steps.locator('.tdoc-handoff-step-mark.is-done').count(), 3);
+      assert.equal(await steps.locator('.tdoc-handoff-step[aria-current="step"] .tdoc-handoff-step-mark.is-current').count(), 1);
+      assert(!/Editing the Pack section|Published|\bv3\b|version/i.test(await steps.innerText()), 'the note or a version is in the steps');
+      // The list sits inside the comment, under the pill, and the card stayed put.
+      const box = await steps.evaluate((el) => {
+        const c = el.closest('article').getBoundingClientRect();
+        const p = document.querySelector('.tdoc-handoff-chip[data-handoff-progress]').getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        return { inside: r.left >= c.left && r.right <= c.right + 1 && r.top >= p.bottom - 1, h: r.height };
+      });
+      assert(box.inside && box.h > 0, `the steps are not under the pill inside the comment: ${JSON.stringify(box)}`);
+      if (shots) {
+        await page.waitForTimeout(300); // the caret's turn
+        await page.screenshot({ path: path.join(shots, `progress-expanded-${width}.png`) });
+        await card.screenshot({ path: path.join(shots, `progress-expanded-card-${width}.png`) });
+      }
+      // Again: collapsed. On desktop the keyboard opens it too.
+      if (width < 600) await chip.tap(); else await chip.click();
+      await page.waitForFunction(() => !document.querySelector('.tdoc-handoff-steps'), null, { timeout: 5000 });
+      assert.equal(await chip.getAttribute('aria-expanded'), 'false');
+      if (width >= 600) {
+        await chip.focus();
+        await page.keyboard.press('Enter');
+        await steps.waitFor({ timeout: 5000 });
+        await page.keyboard.press(' ');
+        await page.waitForFunction(() => !document.querySelector('.tdoc-handoff-steps'), null, { timeout: 5000 });
+      }
       const pill = await chip.evaluate((el) => {
         const r = el.getBoundingClientRect();
         const cs = getComputedStyle(el);
@@ -98,12 +140,7 @@ async function open(browser, target, { flag, width, withStatus = false }) {
         return { h: r.height, plainH: h, w: r.width, clipped: el.scrollWidth > el.clientWidth + 1, ws: cs.whiteSpace };
       });
       assert(Math.abs(pill.h - pill.plainH) <= 1, `the progress pill is ${pill.h}px tall, a plain pill ${pill.plainH}px, at ${width}`);
-      assert(pill.w <= 12 * 16 + 1 && !pill.clipped, `the progress pill is ${pill.w}px wide or cut off at ${width}`);
-      if (shots) {
-        fs.mkdirSync(shots, { recursive: true });
-        await page.screenshot({ path: path.join(shots, `progress-${width}.png`) });
-        await chip.screenshot({ path: path.join(shots, `progress-chip-${width}.png`) });
-      }
+      assert(pill.w <= 16 * 16 + 1 && !pill.clipped, `the progress pill is ${pill.w}px wide or cut off at ${width}`);
       assert.deepEqual(errors, []);
       await page.close();
     }
@@ -114,6 +151,6 @@ async function open(browser, target, { flag, width, withStatus = false }) {
     assert.equal((await plain.innerText()).trim(), 'On it');
     assert.equal(await page.locator('.tdoc-handoff-chip[data-handoff-progress]').count(), 0);
     assert.deepEqual(errors, []);
-    console.log('PASS progress pill: one short stage, timeline only in the tooltip, no detail line, no version number, agent status via the poll, desktop + phone; flag off keeps On it');
+    console.log('PASS progress pill: plain step with the agent name, tap/click/keyboard opens the step list inside the comment, collapsed by default, whole line in the tooltip, no version number, desktop + phone; flag off keeps On it');
   } finally { await browser?.close(); target.stop(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

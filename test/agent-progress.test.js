@@ -7,9 +7,10 @@
 //   - POST /api/notify/progress: only the agent the comment was handed to,
 //     on that doc, with write access; one plain line, capped; rate-limited;
 //     refused once the handoff is handled;
-//   - shell: comments/core/handoff-progress.js maps those facts to the pill's
-//     tooltip "Delivered · Reading the doc · Suggested 3 edits · New version ·
-//     Working · 4 min", never the word "handoff", never a version number.
+//   - shell: comments/core/handoff-progress.js maps those facts to plain
+//     steps with the agent's name: "Sent to Claude · Claude is reading ·
+//     Claude suggested 3 edits · Claude updated the doc", never the word
+//     "handoff", never a version number; "Agent" without a name.
 // Run with: node test/agent-progress.test.js
 
 const fs = require('fs');
@@ -36,7 +37,7 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
   console.log('agent progress line');
 
   // ---- the mapping (pure) ----------------------------------------------------
-  const { handoffProgressSteps, handoffProgressLine, handoffProgressStage, formatWorkingFor } = await loadEsm('shell/src/comments/core/handoff-progress.js');
+  const { handoffProgressSteps, handoffProgressLine, handoffProgressStage, progressAgentName, formatWorkingFor } = await loadEsm('shell/src/comments/core/handoff-progress.js');
   const base = {
     handoff_at: '2026-11-12T10:00:00Z',
     handoff_delivery: { status: 'delivered', at: '2026-11-12T10:00:02Z', first_at: '2026-11-12T10:00:01Z' },
@@ -44,48 +45,55 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
   const at = (min) => new Date(Date.parse('2026-11-12T10:00:00Z') + min * 60000).toISOString();
   const now = Date.parse(at(6));
 
-  await t('mapping: delivered, then read, then suggestions and a version, in clock order', () => {
+  await t('mapping: sent, then read, then suggestions and a version, in clock order, with the agent\'s name', () => {
     const c = {
       ...base,
       handoff_acked_at: at(1),
       handoff_last_version: 3, handoff_last_version_at: at(4), handoff_first_version_at: at(3),
       handoff_suggested_edits: 3, handoff_suggested_at: at(2),
     };
-    const labels = handoffProgressSteps(c).map((s) => s.label);
-    assert(labels.join(' | ') === 'Delivered | Reading the doc | Suggested 3 edits | New version', labels.join(' | '));
-    const line = handoffProgressLine(c, 'received', now);
-    assert(line.text === 'Delivered · Reading the doc · Suggested 3 edits · New version · Working · 5 min', line.text);
+    const labels = handoffProgressSteps(c, 'Claude').map((s) => s.label);
+    assert(labels.join(' | ') === 'Sent to Claude | Claude is reading | Claude suggested 3 edits | Claude updated the doc', labels.join(' | '));
+    const line = handoffProgressLine(c, 'received', now, 'Claude');
+    assert(line.text === 'Sent to Claude · Claude is reading · Claude suggested 3 edits · Claude updated the doc · 5 min', line.text);
     assert(!/handoff/i.test(line.text), 'the word handoff leaked into the line');
-    assert(!/\bv\d|version \d|\d+ version/i.test(line.text), 'a version number leaked into the line');
+    assert(!/\bv\d|version/i.test(line.text), 'a version leaked into the line');
+    assert(handoffProgressSteps(c, 'Claude')[3].parts.join('|') === '|Claude| updated the doc');
   });
 
-  await t('mapping: a local daemon queue reads Sent; one edit is singular; a version without a number', () => {
+  await t('mapping: no name reads Agent; a long name is cut with an ellipsis; a local queue also reads Sent; one edit is singular', () => {
     const c = { ...base, handoff_delivery: { status: 'queued', at: at(0) }, handoff_acked_at: at(1), handoff_suggested_edits: 1, handoff_suggested_at: at(2), handoff_first_version_at: at(3) };
     const labels = handoffProgressSteps(c).map((s) => s.label);
-    assert(labels.join(' | ') === 'Sent | Reading the doc | Suggested 1 edit | New version', labels.join(' | '));
+    assert(labels.join(' | ') === 'Sent to Agent | Agent is reading | Agent suggested 1 edit | Agent updated the doc', labels.join(' | '));
+    const long = progressAgentName('a-really-long-agent-name-for-the-pill');
+    assert([...long].length === 20 && long.endsWith('…'), long);
+    assert(progressAgentName('  ') === 'Agent' && progressAgentName('Claude') === 'Claude');
   });
 
-  await t('mapping: the agent\'s own status is the current step only while it is the newest fact', () => {
+  await t('mapping: the agent\'s own status is in the line only while it is the newest fact', () => {
     const c = { ...base, handoff_acked_at: at(1), handoff_progress: { text: 'Editing the Pack section', at: at(2) } };
-    assert(handoffProgressLine(c, 'received', now).text === 'Delivered · Reading the doc · Editing the Pack section · 5 min');
+    const line = handoffProgressLine(c, 'received', now, 'Claude');
+    assert(line.text === 'Sent to Claude · Claude is reading · Editing the Pack section · 5 min', line.text);
+    assert(line.note === 'Editing the Pack section' && !line.steps.some((s) => /Pack/.test(s.label)), 'the note became a step');
     const later = { ...c, handoff_last_version: 4, handoff_last_version_at: at(3) };
-    assert(handoffProgressLine(later, 'received', now).current === 'Working', 'a stale status outlived a newer fact');
+    assert(handoffProgressLine(later, 'received', now).note === '', 'a stale status outlived a newer fact');
   });
 
-  await t('the pill names only the short current stage; the agent\'s own words stay out of it', () => {
-    const delivered = { ...base };
-    assert(handoffProgressStage(delivered, 'received') === 'Delivered');
+  await t('the pill names the current step in plain words; the agent\'s own words stay out of it', () => {
+    assert(handoffProgressStage({ ...base }, 'waiting', 'Claude') === 'Sent to Claude');
+    assert(handoffProgressStage({ ...base }, 'received', 'Claude') === 'Sent to Claude');
     const reading = { ...base, handoff_acked_at: at(1), handoff_progress: { text: 'Editing the Pack section', at: at(2) } };
-    assert(handoffProgressStage(reading, 'received') === 'Reading', handoffProgressStage(reading, 'received'));
-    assert(handoffProgressStage({ ...reading, handoff_suggested_edits: 3, handoff_suggested_at: at(3) }, 'received') === '3 edits');
-    assert(handoffProgressStage({ ...reading, handoff_suggested_edits: 1, handoff_suggested_at: at(3) }, 'received') === '1 edit');
-    assert(handoffProgressStage({ ...reading, handoff_suggested_edits: 3, handoff_suggested_at: at(3), handoff_last_version: 3, handoff_last_version_at: at(4) }, 'received') === 'New version');
-    assert(handoffProgressStage(reading, 'waiting') === '' && handoffProgressStage({}, 'received') === '');
+    assert(handoffProgressStage(reading, 'received', 'Claude') === 'Claude is reading', handoffProgressStage(reading, 'received', 'Claude'));
+    assert(handoffProgressStage({ ...reading, handoff_suggested_edits: 3, handoff_suggested_at: at(3) }, 'received', 'Claude') === 'Claude suggested 3 edits');
+    assert(handoffProgressStage({ ...reading, handoff_suggested_edits: 1, handoff_suggested_at: at(3) }, 'received') === 'Agent suggested 1 edit');
+    assert(handoffProgressStage({ ...reading, handoff_suggested_edits: 3, handoff_suggested_at: at(3), handoff_last_version: 3, handoff_last_version_at: at(4) }, 'received', 'Claude') === 'Claude updated the doc');
+    assert(handoffProgressStage({ ...reading, handoff_first_reply_at: at(5) }, 'received', 'Claude') === 'Claude replied');
+    assert(handoffProgressStage(reading, 'stale') === '' && handoffProgressStage({}, 'received') === '');
   });
 
-  await t('mapping: only while the agent is working; nothing for other states or no handoff', () => {
+  await t('mapping: only while the agent has it; nothing for other states or no handoff', () => {
     const c = { ...base, handoff_acked_at: at(1) };
-    for (const s of ['waiting', 'stale', 'replied', 'failed', 'question', 'ready']) assert(handoffProgressLine(c, s, now) === null, s);
+    for (const s of ['stale', 'expired', 'replied', 'failed', 'question', 'ready']) assert(handoffProgressLine(c, s, now) === null, s);
     assert(handoffProgressSteps({}).length === 0);
     assert(handoffProgressLine({ handoff_at: null }, 'received', now) === null);
   });
