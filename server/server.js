@@ -1735,6 +1735,8 @@ const server = http.createServer(async (req, res) => {
       if (!i) return i;
       if (Array.isArray(body.ids) && body.ids.includes(i.id)) return { ...i, read: true };
       if (body.comment_id && i.comment_id === body.comment_id) return { ...i, read: true };
+      // A doc's unread comment, reply and mention rows (My docs' Needs you).
+      if (typeof body.slug === 'string' && body.slug && i.slug === body.slug && ['comment', 'reply', 'mention'].includes(i.kind)) return { ...i, read: true };
       return i;
     });
     writeJson(file, { items });

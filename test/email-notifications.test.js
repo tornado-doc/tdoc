@@ -45,7 +45,7 @@ async function seedDoc(env, slug, owner) {
     assert(mail.to === 'alice@example.com', mail.to);
     assert(mail.subject === 'bob commented on Launch plan', mail.subject);
     assert(mail.text.includes('> Can we ship Friday?'), mail.text);
-    assert(/Open it: https:\/\/tdoc\.dev\/d\/launch\/v\/1\?comment=c_/.test(mail.text), mail.text);
+    assert(/Open it: https:\/\/tdoc\.dev\/d\/launch\?comment=c_/.test(mail.text), mail.text);
     assert(mail.from.email === 'notifications@tdoc.dev', mail.from.email);
     assert(/\/email\/optout\?t=[a-f0-9]{32}/.test(mail.text), 'no unsubscribe link');
   });

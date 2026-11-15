@@ -15955,14 +15955,35 @@ function applyInboxEvent(inbox, ev) {
   return { items: [row, ...items].slice(0, INBOX_MAX) };
 }
 
-function markInboxRead(inbox, { ids, comment_id } = {}) {
+// `slug`: every unread comment, reply and mention row on that doc (My docs'
+// Needs you, marking a doc's item done). `slug` + `seen` (thread id -> ms):
+// only the rows of those threads that the person has seen up to -- what they
+// read on the doc page needs nobody's attention in the bell any more.
+function markInboxRead(inbox, { ids, comment_id, slug, seen } = {}) {
   const items = (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
     if (!i) return i;
     if (Array.isArray(ids) && ids.includes(i.id)) return { ...i, read: true };
     if (comment_id && i.comment_id === comment_id) return { ...i, read: true };
+    if (slug && !i.read && i.slug === slug && DOC_ACTIVITY_INBOX_KINDS.has(i.kind)) {
+      if (!seen) return { ...i, read: true };
+      const upTo = Number(seen[i.thread_id || i.comment_id]) || 0;
+      if (upTo && (Date.parse(i.at) || 0) <= upTo) return { ...i, read: true };
+    }
     return i;
   });
   return { items };
+}
+
+// The rows of a doc's threads this person has now seen go read, in every
+// inbox they have (loadViewerInboxes), through each inbox's lane. Only an
+// inbox that holds such a row is written.
+async function markInboxSeen(env, session, slug, seen) {
+  if (!seen || !Object.keys(seen).length) return;
+  for (const part of await loadViewerInboxes(env, session)) {
+    const next = markInboxRead(part.inbox, { slug, seen });
+    if (JSON.stringify(next) === JSON.stringify(part.inbox)) continue;
+    await serialKvOp(env, part.key, 'inbox_mark_seen', { key: part.key, slug, seen });
+  }
 }
 
 // One person can be several actor keys -- a GitHub handle and the email
@@ -16597,7 +16618,7 @@ async function viewerDocActivity(env, session) {
   const [inboxes, agentParts] = await Promise.all([loadViewerInboxes(env, session), loadAgentUnread(env, session)]);
   const out = new Map();
   const forSlug = (slug) => {
-    if (!out.has(slug)) out.set(slug, { comments: 0, agent: 0 });
+    if (!out.has(slug)) out.set(slug, { comments: 0, agent: 0, threads: [] });
     return out.get(slug);
   };
   for (const item of mergeInboxes(inboxes).items) {
@@ -16610,14 +16631,22 @@ async function viewerDocActivity(env, session) {
       const id = `${item.slug}\n${item.thread}`;
       if (threads.has(id)) continue;
       threads.add(id);
-      forSlug(item.slug).agent += 1;
+      const entry = forSlug(item.slug);
+      entry.agent += 1;
+      entry.threads.push({ thread: item.thread, at: item.at });
     }
   }
   return out;
 }
+// `agent_threads`: the threads with an unread agent reply, newest first, so
+// Needs you can open the newest and mark them seen (POST /api/comments/seen).
+const DOC_ACTIVITY_AGENT_THREADS = 20;
 function docActivityFields(entry) {
   if (!entry || (!entry.comments && !entry.agent)) return {};
-  return { activity: { comments: entry.comments, agent: entry.agent } };
+  const threads = (entry.threads || [])
+    .slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+    .slice(0, DOC_ACTIVITY_AGENT_THREADS);
+  return { activity: { comments: entry.comments, agent: entry.agent, ...(threads.length ? { agent_threads: threads } : {}) } };
 }
 
 // An agent's reply is not a notification (no bell row, push or email), yet
@@ -16752,6 +16781,15 @@ const SERIAL_KV_OPS = {
     const next = applyInboxEvent(inbox, ev);
     await env.META.put(key, JSON.stringify(next));
     return next.items[0];
+  },
+  // A doc's seen threads go read (markInboxSeen); nothing is written when no
+  // row changes.
+  async inbox_mark_seen(env, { key, slug, seen }) {
+    let inbox = emptyInbox();
+    try { inbox = JSON.parse(await env.META.get(key) || 'null') || emptyInbox(); } catch {}
+    const next = markInboxRead(inbox, { slug, seen });
+    if (JSON.stringify(next) !== JSON.stringify(inbox)) await env.META.put(key, JSON.stringify(next));
+    return null;
   },
   contacts_merge: (env, args) => mergeContacts(env, args),
   onboarding_stamp: (env, args) => stampOnboardingNow(env, args),
@@ -19260,6 +19298,9 @@ async function handleThreadSeen(env, req, url) {
     const upTo = { ...seen };
     for (const [id, stamp] of Object.entries(cleanThreadSeen(body.seen))) upTo[id] = Math.max(stamp, Number(upTo[id]) || 0);
     try { await clearAgentUnread(env, session, slug, upTo); } catch {}
+    // The bell's rows for those threads too: a comment read on the page is
+    // not still waiting in Needs you (Julie, 2026-11-14).
+    try { await markInboxSeen(env, session, slug, upTo); } catch {}
   };
   // Nothing newer than what is kept: no comment read, no write.
   const asked = Object.entries(cleanThreadSeen(body.seen)).filter(([id, stamp]) => stamp > (stored[id] || 0));
@@ -29030,7 +29071,11 @@ const tdocHandlers = {
       for (const part of parts) {
         const next = body.all
           ? { items: part.inbox.items.map((i) => (i ? { ...i, read: true } : i)) }
-          : markInboxRead(part.inbox, { ids: body.ids, comment_id: body.comment_id });
+          : markInboxRead(part.inbox, {
+          ids: body.ids,
+          comment_id: body.comment_id,
+          ...(typeof body.slug === 'string' && isValidSlug(body.slug) ? { slug: body.slug } : {}),
+        });
         if (JSON.stringify(next) === JSON.stringify(part.inbox)) continue;
         part.inbox = next;
         await env.META.put(part.key, JSON.stringify(next));

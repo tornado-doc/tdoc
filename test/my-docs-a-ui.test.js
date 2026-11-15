@@ -20,6 +20,7 @@ const { loadRuntimeAssets } = require('../server/runtime-assets');
 const { chromium } = requirePlaywrightOrSkip('my-docs-a-ui.test.js');
 
 const JULIE = 'c3'.repeat(16);
+const BOB_AVATAR = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><rect width="28" height="28" fill="#2f7d5b"/></svg>')}`;
 const SHOTS = process.env.TDOC_SHOTS_DIR || '';
 const H = 3600e3;
 const D = 24 * H;
@@ -63,8 +64,10 @@ async function seed(env) {
   await env.META.put('recents:julie', JSON.stringify({ items: [{ slug: 'bobs-doc', at: ago(5 * H) }, { slug: 'q4-plan', at: ago(D + H) }] }));
   await env.META.put('stars:julie', JSON.stringify({ items: [{ slug: 'launch-deck', at: ago(2 * D) }] }));
   await env.META.put('inbox:julie', JSON.stringify({ items: [
-    { id: 'n1', kind: 'comment', group_key: 'comment:q4-plan', slug: 'q4-plan', version: 2, comment_id: 'c_1', thread_id: 'c_1', actor: { login: 'bob', name: 'Bob Lee' }, preview: 'Is this final? The Q3 numbers moved.', title: 'Q4 plan', at: ago(H), read: false, count: 2 },
+    { id: 'n1', kind: 'reply', group_key: 'reply:c_1', slug: 'q4-plan', version: 2, comment_id: 'c_1r', thread_id: 'c_1', actor: { login: 'bob', name: 'Bob Lee', avatar_url: BOB_AVATAR }, preview: 'Is this final? The Q3 numbers moved.', title: 'Q4 plan', at: ago(H), read: false, count: 1 },
     { id: 'n2', kind: 'mention', group_key: 'mention:budget-2027', slug: 'budget-2027', version: 2, comment_id: 'c_2', thread_id: 'c_2', actor: { login: 'serena', name: 'Serena Park' }, preview: '@julie can we drop the annual line?', title: 'Budget 2027', at: ago(3 * H), read: false, count: 1 },
+    // The same thread, left on an older version: one item with n1, not two.
+    { id: 'n3', kind: 'comment', group_key: 'comment:q4-plan', slug: 'q4-plan', version: 1, comment_id: 'c_1', thread_id: 'c_1', actor: { login: 'bob', name: 'Bob Lee', avatar_url: BOB_AVATAR }, preview: 'Starting a thread on the numbers.', title: 'Q4 plan', at: ago(D), read: false, count: 1 },
   ] }));
   await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: ago(30 * 60e3) }] }));
 }
@@ -172,16 +175,28 @@ async function startServer(worker, env) {
         const needs = page.locator('.mda-needs').first();
         await needs.locator('.mda-need').first().waitFor();
         const slugs = await needs.locator('.mda-need').evaluateAll((cards) => cards.map((c) => c.dataset.slug));
-        assert.deepEqual(slugs, ['q4-plan', 'budget-2027', 'launch-deck']);
+        assert.deepEqual(slugs, ['launch-deck', 'q4-plan', 'budget-2027'], 'newest first: the agent replied 30 min ago');
         const q4 = needs.locator('.mda-need[data-slug="q4-plan"]');
-        assert.match(await q4.locator('.mda-need-reason').textContent(), /^Bob Lee commented/);
+        assert.equal(await q4.count(), 1, 'one item per doc and thread, whatever version each row was left on');
+        // What to do, in plain words, then the doc.
+        assert.equal(await q4.locator('.mda-need-action').textContent(), 'Answer Bob Lee\u2019s question');
         assert.equal(await q4.locator('.mda-need-quote').textContent(), 'Is this final? The Q3 numbers moved.');
-        assert.equal(await q4.locator('.mda-need-title').textContent(), await card(page, 'q4-plan').getAttribute('data-title'), 'the doc is the to-do line');
-        assert.match(await q4.locator('.mda-need-link').getAttribute('href'), /^\/d\/q4-plan\/v\/2\?comment=c_1$/);
+        assert.equal(await q4.locator('.mda-need-more').textContent(), '+1 more');
+        assert.equal(await q4.locator('.mda-need-title').textContent(), await card(page, 'q4-plan').getAttribute('data-title'));
+        // Whose it is: their photo.
+        assert.equal(await q4.locator('img.mda-need-avatar').getAttribute('src'), BOB_AVATAR);
+        const serena = needs.locator('.mda-need[data-slug="budget-2027"]');
+        assert.equal(await serena.locator('.mda-need-avatar').textContent(), 'S', 'no photo: the initial');
+        assert.equal(await serena.locator('.mda-need-action').textContent(), 'Answer Serena Park\u2019s question');
+        // The doc as it is now, at the thread: never a /v/<n>.
+        assert.equal(await q4.locator('.mda-need-link').getAttribute('href'), '/d/q4-plan?comment=c_1');
         const agent = needs.locator('.mda-need[data-slug="launch-deck"]');
         assert.equal(await agent.getAttribute('data-kind'), 'agent');
-        assert.equal(await agent.locator('.mda-need-reason').textContent(), 'An agent replied');
-        assert.equal(await agent.getByRole('button', { name: /Mark done/ }).count(), 0, 'no done for an agent reply (read it in the doc)');
+        assert.equal(await agent.locator('.mda-need-action').textContent(), 'Review the agent\u2019s reply');
+        assert.equal(await agent.locator('.mda-need-link').getAttribute('href'), '/d/launch-deck?comment=c_9');
+        assert.equal(await agent.locator('.mda-need-avatar svg').count(), 1, 'an agent reply: the agent mark');
+        // Every item has the check.
+        assert.equal(await needs.locator('.mda-need').count(), await needs.locator('.mda-need .mda-need-done').count());
         assert.equal(await page.getByRole('tab', { name: /Needs you/ }).locator('.mda-chip-n').textContent(), '3');
         // The card's unread: one blue circle with one number on the drawing's corner.
         const unread = card(page, 'launch-deck').locator('.doc-activity');
@@ -193,13 +208,30 @@ async function startServer(worker, env) {
 
       await t('1440: Mark done reads the bell rows on the server, and the card stays gone after a reload', async () => {
         const read = page.waitForRequest((req) => req.url().includes('/api/notifications/read') && req.method() === 'POST');
-        await page.locator('.mda-need[data-slug="budget-2027"]').getByRole('button', { name: 'Mark done: Budget 2027' }).click();
+        await page.locator('.mda-need[data-slug="budget-2027"]').getByRole('button', { name: /^Mark done: .* in Budget 2027$/ }).click();
         assert.deepEqual(JSON.parse((await read).postData()).ids, ['n2']);
         await page.locator('.mda-need[data-slug="budget-2027"]').waitFor({ state: 'detached' });
         await page.waitForTimeout(200);
         await page.reload();
         await page.locator('.mda-need[data-slug="q4-plan"]').waitFor();
         assert.equal(await page.locator('.mda-need[data-slug="budget-2027"]').count(), 0);
+      });
+
+      await t('1440: an agent reply\u2019s check marks its thread seen, as opening it would', async () => {
+        const seen = page.waitForRequest((req) => req.url().includes('/api/comments/seen') && req.method() === 'POST');
+        await page.locator('.mda-need[data-slug="launch-deck"]').getByRole('button', { name: /^Mark done: / }).click();
+        const body = JSON.parse((await seen).postData());
+        assert.equal(body.slug, 'launch-deck');
+        assert.deepEqual(Object.keys(body.seen), ['c_9']);
+        await page.locator('.mda-need[data-slug="launch-deck"]').waitFor({ state: 'detached' });
+        await page.waitForTimeout(200);
+        await page.reload();
+        await page.locator('.mda-need[data-slug="q4-plan"]').waitFor();
+        assert.equal(await page.locator('.mda-need[data-slug="launch-deck"]').count(), 0, 'gone on the server too');
+        // Back for the views below.
+        await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: new Date(Date.now() - 30 * 60e3).toISOString() }] }));
+        await page.reload();
+        await page.locator('.mda-need[data-slug="launch-deck"]').waitFor();
       });
 
       await t('1440: Needs you view lists every card; the chip is a tab', async () => {
@@ -483,7 +515,7 @@ async function startServer(worker, env) {
           await p.goto(`${base}/me`);
           const list = p.locator('.mda-needs-grid');
           await list.locator('.mda-need').first().waitFor();
-          assert.deepEqual(await list.locator('.mda-need').evaluateAll((rows) => rows.map((r) => r.dataset.slug)), ['q4-plan', 'launch-deck']);
+          assert.deepEqual(await list.locator('.mda-need').evaluateAll((rows) => rows.map((r) => r.dataset.slug)), ['launch-deck', 'q4-plan']);
           const layout = await list.evaluate((el) => {
             const rows = [...el.querySelectorAll('.mda-need')].map((r) => r.getBoundingClientRect());
             return { stacked: rows.every((r, i) => i === 0 || r.top >= rows[i - 1].bottom - 1), sideways: el.scrollWidth > el.clientWidth + 1 };

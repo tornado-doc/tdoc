@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppButton } from './ui/button.jsx';
+import { AppTextarea } from './ui/textarea.jsx';
 
 // Write with tdoc AI (New -> Doc, flag writeWithTdocAi): one sentence, and
 // tdoc AI drafts the doc and publishes it as v1, private. The sibling of
@@ -105,14 +106,18 @@ export function WriteWithAiDialog({ team = '', onClose, navigate = (url) => { lo
       <div className="mk-agent mk-write-ai">
         <label className="mk-subject">
           <span className="mk-sr">What the doc is about, in one sentence</span>
-          <input
+          {/* The same growing box as Write it with your agent. Enter
+              writes it (not mid-IME); Shift+Enter is a new line. */}
+          <AppTextarea
             ref={inputRef}
-            type="text"
             value={prompt}
+            maxHeight={200}
             disabled={busy}
             placeholder="A packing list for a week of hiking in Iceland"
             onChange={(event) => { setPrompt(event.target.value); setError(null); }}
-            onKeyDown={(event) => { if (event.key === 'Enter') submit(); }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); }
+            }}
           />
         </label>
         {status ? <p className="mk-foot mk-write-status" role="status" aria-live="polite">{status}</p> : null}
