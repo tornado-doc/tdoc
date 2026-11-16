@@ -2450,20 +2450,21 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
               // (+ New comment), from a selection, or with double-tap Option.
               // The Read / Comment / Edit switch that sat beside it read as a
               // second comment button (Julie, 2026-11-10); it heads ⋯ now.
-              // The filter is the chevron beside it (CommentFilterMenu); a
-              // choice other than Open names itself on the button.
+              // The filter is the chevron beside it (CommentFilterMenu). The
+              // button is only the mark and the count (Julie, 2026-11-16: the
+              // word and "· Resolved" made it too large); a filter other than
+              // Open is a check in the menu and a small dot on the button.
               <span className="tdoc-comments-split">
                 <AppButton variant="quiet" className="tdoc-comments-toggle" aria-pressed={sidePanelOpen ? 'true' : 'false'}
-                  aria-label={`Comment${commentFilter !== DEFAULT_FILTER ? `, showing ${filterName(commentFilter)} (${filterCount})` : (openCount ? ` (${openCount} open)` : '')}`}
-                  title={sidePanelOpen ? 'Hide comments' : 'Show comments'}
+                  aria-label={`Comments${commentFilter !== DEFAULT_FILTER ? `, showing ${filterName(commentFilter)} (${filterCount})` : (openCount ? ` (${openCount} open)` : '')}`}
+                  title="Comments" data-filter={commentFilter}
                   onClick={() => {
                     if (!sidePanelOpen && editor.mode === 'read') editor.changeMode('comment');
                     setSidePanel(!sidePanelOpen);
                   }}>
                   <CommentIcon size={16} outline />
-                  <span className="tdoc-comments-toggle-label">Comment</span>
-                  {commentFilter !== DEFAULT_FILTER ? <span className="tdoc-comments-toggle-filter">· {filterName(commentFilter)}</span> : null}
                   {filterCount ? <span className="tdoc-comments-toggle-count">{filterCount}</span> : null}
+                  {commentFilter !== DEFAULT_FILTER ? <span className="tdoc-comments-toggle-dot" aria-hidden="true" /> : null}
                 </AppButton>
                 {comments.comments.length ? (
                   <CommentFilterMenu area={commentArea} prefs={listPrefs} onChange={setCommentFilter}

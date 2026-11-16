@@ -72,7 +72,7 @@ export function CommentFilterMenu({ area, prefs, onChange = null, unreadCount = 
     <span className="tdoc-comments-filter-wrap" onPointerDown={(event) => event.stopPropagation()}>
       <AppMenu align="end" popupClassName="tdoc-comments-filter-popup" trigger={(
         <AppButton variant="icon" className="tdoc-comments-filter-menu" aria-label="Filter comments" title="Filter comments">
-          <ChevronDown size={14} aria-hidden="true" />
+          <ChevronDown size={12} aria-hidden="true" />
         </AppButton>
       )}>
         <div className="tdoc-menu-label">Show</div>
