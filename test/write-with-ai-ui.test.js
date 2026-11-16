@@ -167,7 +167,7 @@ async function startServer(worker, env) {
   const run = async (label, viewport, flag) => {
     const env = makeEnv(mod.CommentsStore);
     env.ASK_API_KEY = 'test-key';
-    env.TDOC_DEBUG_ACCOUNTS = 'alice@example.com';
+    // alice is a plain account (no dev mode): writeWithTdocAi graduated.
     await seed(env);
     const { server, base } = await startServer(worker, env);
     const phone = viewport.width < 600;
@@ -175,7 +175,8 @@ async function startServer(worker, env) {
     await context.addCookies([{ name: 'tdoc_sid', value: SID, url: base }]);
     await context.addInitScript((on) => {
       try { localStorage.setItem('tdoc-save-notice-dismissed', '1'); } catch {}
-      if (window === window.top) window.__TDOC_FLAGS__ = Object.assign({}, window.__TDOC_FLAGS__, { writeWithTdocAi: on });
+      // On: the default, unpinned; off: pinned off (the off switch).
+      if (window === window.top && !on) window.__TDOC_FLAGS__ = Object.assign({}, window.__TDOC_FLAGS__, { writeWithTdocAi: false });
     }, flag);
     const page = await context.newPage();
     const errors = [];
@@ -392,7 +393,7 @@ async function startServer(worker, env) {
         assert.deepEqual(errors, []);
       });
       if (phone) { await thinkingTests(); return; }
-      await t(`${label}: Stop mid-stream: no doc, no navigation, the requests given back`, async () => {
+      await t(`${label}: Stop mid-stream: no doc, no navigation; the draft had begun, so it is charged and the dialog says so`, async () => {
         await page.goto(`${base}/me`);
         await page.locator('.doc-row[data-slug="q4-roadmap"]').waitFor();
         env.ASK_FREE_LIMIT = '9';
@@ -403,19 +404,19 @@ async function startServer(worker, env) {
         await press(dialog.getByRole('button', { name: 'Write it', exact: true }));
         await dialog.locator('.mk-write-paper h2').first().waitFor({ timeout: 10000 });
         await press(dialog.getByRole('button', { name: 'Stop' }));
-        await dialog.getByText(/Stopped\. Nothing was saved/).waitFor();
+        await dialog.getByText(/Stopped\. Nothing was saved; the draft still counts/).waitFor();
         // What was written stays readable; the sentence can be sent again.
         assert.equal(await dialog.locator('.mk-write-paper h1').count(), 1);
         assert.equal(await dialog.getByRole('button', { name: 'Try again' }).isEnabled(), true);
-        let left = null;
-        for (let i = 0; i < 50 && left !== before; i++) { left = await remaining(); if (left !== before) await page.waitForTimeout(100); }
-        assert.equal(left, before, 'not given back');
+        // Pieces had been delivered: not given back (no free drafts by Stop).
+        await page.waitForTimeout(500);
+        assert.equal(await remaining(), before - 3, 'a delivered draft was given back');
         await page.waitForTimeout(DRAFT.length * model.step);
         assert.match(page.url(), /\/me$/);
         assert.equal((await env.META.list({ prefix: 'meta:' })).keys.length, docs, 'a doc was created');
         await page.keyboard.press('Escape');
       });
-      await t(`${label}: the model fails mid-stream: the error shows, no navigation, nothing charged`, async () => {
+      await t(`${label}: the model fails mid-stream: the error shows, no navigation; the delivered draft is charged`, async () => {
         await page.goto(`${base}/me`);
         await page.locator('.doc-row[data-slug="q4-roadmap"]').waitFor();
         const before = await remaining();
@@ -424,9 +425,9 @@ async function startServer(worker, env) {
           const dialog = await openDialog();
           await dialog.getByRole('textbox').fill('A third list');
           await press(dialog.getByRole('button', { name: 'Write it', exact: true }));
-          await dialog.getByRole('alert').getByText(/could not write it this time/).waitFor({ timeout: 15000 });
+          await dialog.getByRole('alert').getByText(/stopped partway/).waitFor({ timeout: 15000 });
           assert.equal(await dialog.locator('.mk-write-paper h1').count(), 1, 'the partial draft went away');
-          assert.equal(await remaining(), before, 'charged for a failure');
+          assert.equal(await remaining(), before - 3, 'a delivered draft was given back');
           assert.match(page.url(), /\/me$/);
           await shot('failed');
         } finally { model.fail = false; }

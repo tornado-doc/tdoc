@@ -20,19 +20,33 @@ const assert = require('assert/strict');
       assert.match(flag.added, /^\d{4}-\d{2}-\d{2}$/, `${name}: added`);
       assert.equal(typeof flag.default, 'boolean', `${name}: default`);
     }
-    assert.ok(Object.isFrozen(FLAGS) && Object.isFrozen(FLAGS.docThumbnails), 'registry is read-only');
-  });
-
-  t('doc thumbnails are a dev-mode-only flag for now', () => {
-    assert.equal(FLAGS.docThumbnails.default, false);
-    assert.equal(FLAGS.docThumbnails.label, 'Doc thumbnails');
+    assert.ok(Object.isFrozen(FLAGS) && Object.isFrozen(FLAGS.askEditV2), 'registry is read-only');
   });
 
   t('a default-off flag is on only when dev mode is on', () => {
-    assert.equal(isFeatureOn('docThumbnails', null), false, 'not on the allow-list');
-    assert.equal(isFeatureOn('docThumbnails', { on: false }), false, 'dev mode off');
-    assert.equal(isFeatureOn('docThumbnails', { on: true }), true, 'dev mode on');
-    assert.equal(isFeatureOn('docThumbnails'), false, 'no window, no boot: off');
+    assert.equal(FLAGS.sheetEmbeds.default, false);
+    assert.equal(isFeatureOn('sheetEmbeds', null), false, 'not on the allow-list');
+    assert.equal(isFeatureOn('sheetEmbeds', { on: false }), false, 'dev mode off');
+    assert.equal(isFeatureOn('sheetEmbeds', { on: true }), true, 'dev mode on');
+    assert.equal(isFeatureOn('sheetEmbeds'), false, 'no window, no boot: off');
+  });
+
+  t('every default-off (dev-mode) flag has a graduate_by date (AGENTS.md)', () => {
+    for (const [name, flag] of Object.entries(FLAGS)) {
+      if (flag.default === true) continue;
+      assert.equal(typeof flag.graduate_by, 'string', `${name}: a dev-mode flag needs graduate_by: 'YYYY-MM-DD' (added + 7 days by default)`);
+      assert.match(flag.graduate_by, /^\d{4}-\d{2}-\d{2}$/, `${name}: graduate_by is YYYY-MM-DD`);
+      assert.ok(!Number.isNaN(Date.parse(`${flag.graduate_by}T00:00:00Z`)), `${name}: graduate_by is a real date`);
+      assert.ok(flag.graduate_by >= flag.added, `${name}: graduate_by is not before added`);
+    }
+  });
+
+  t('the obsolete docThumbnails flag and its code path are gone', () => {
+    const fs = require('fs');
+    assert.equal(Object.prototype.hasOwnProperty.call(FLAGS, 'docThumbnails'), false);
+    for (const file of ['../shell/src/docs-hub/rows.jsx', '../shell/src/profile.jsx']) {
+      assert.ok(!fs.readFileSync(require.resolve(file), 'utf8').includes('docThumbnails'), `${file} no longer reads docThumbnails`);
+    }
   });
 
   t('unknown names, and inherited keys, are off even in dev mode', () => {
@@ -44,31 +58,19 @@ const assert = require('assert/strict');
   t('the menu lists the default-off flags by label', () => {
     const listed = devOnlyFlags();
     assert.deepEqual(listed.map((flag) => flag.name), Object.keys(FLAGS).filter((name) => FLAGS[name].default !== true));
-    assert.ok(listed.some((flag) => flag.label === 'Doc thumbnails'));
+    assert.ok(listed.some((flag) => flag.label === 'Ask AI edits the doc (inline suggestions)'));
   });
 
-  t('myDocsA (layout A) is a dev-mode flag, read by the hub', () => {
-    assert.equal(FLAGS.myDocsA.default, false);
-    assert.equal(isFeatureOn('myDocsA', null), false);
-    assert.equal(isFeatureOn('myDocsA', { on: true }), true);
-    assert.ok(devOnlyFlags().some((flag) => flag.name === 'myDocsA'));
-    const hub = require('fs').readFileSync(require.resolve('../shell/src/docs-hub.jsx'), 'utf8');
-    assert.ok(hub.includes("isFeatureOn('myDocsA')"), 'docs-hub.jsx reads the flag');
-  });
-
-  t('grids and the profile read the flag, not dev mode directly', () => {
+  t('graduated flags (2026-11-16) are on for everyone, not listed as dev-only', () => {
+    const graduated = ['agentProgress', 'myDocsA', 'fullTextSearch', 'autoReadComments', 'writeWithTdocAi', 'feedbackAreaSelect', 'feedbackDocFramePick'];
+    for (const name of graduated) {
+      assert.equal(FLAGS[name].default, true, `${name}: default true`);
+      assert.equal(isFeatureOn(name, null), true, `${name}: on with dev mode off`);
+      assert.ok(!devOnlyFlags().some((flag) => flag.name === name), `${name}: not dev-only`);
+    }
     const fs = require('fs');
-    const rows = fs.readFileSync(require.resolve('../shell/src/docs-hub/rows.jsx'), 'utf8');
-    const profile = fs.readFileSync(require.resolve('../shell/src/profile.jsx'), 'utf8');
-    assert.ok(rows.includes("isFeatureOn('docThumbnails')"), 'rows.jsx gates the grid thumbnail');
-    assert.ok(profile.includes("isFeatureOn('docThumbnails')"), 'profile.jsx gates the card thumbnail');
-  });
-
-  t('full-text search results are a dev-mode-only flag, read by the hub', () => {
-    assert.equal(FLAGS.fullTextSearch.default, false);
-    assert.equal(isFeatureOn('fullTextSearch', null), false);
-    assert.equal(isFeatureOn('fullTextSearch', { on: true }), true);
-    const hub = require('fs').readFileSync(require.resolve('../shell/src/docs-hub.jsx'), 'utf8');
+    const hub = fs.readFileSync(require.resolve('../shell/src/docs-hub.jsx'), 'utf8');
+    assert.ok(hub.includes("isFeatureOn('myDocsA')"), 'docs-hub.jsx reads myDocsA (the off switch)');
     assert.ok(hub.includes("isFeatureOn('fullTextSearch')"), 'docs-hub.jsx gates the text results');
   });
 

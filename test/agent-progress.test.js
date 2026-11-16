@@ -276,17 +276,17 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
     assert(p.status === 409 && p.body.error === 'handoff_closed', `${p.status} ${JSON.stringify(p.body)}`);
   });
 
-  await t('MCP report_progress is a thin wrapper over /api/notify/progress (dev mode tool)', () => {
+  await t('MCP report_progress is a thin wrapper over /api/notify/progress (open to every agent)', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
     const block = src.slice(src.indexOf('  report_progress: {'), src.indexOf('  answer_question: {'));
-    assert(/devMode: true/.test(block), 'not dev mode');
+    assert(!/devMode: true/.test(block), 'still a dev-mode tool');
     assert(/mcpApi\(call, 'POST', '\/api\/notify\/progress'/.test(block), 'does not call the endpoint');
     assert(!/env\.META|loadHandoffs/.test(block), 'reaches storage itself');
     const cli = fs.readFileSync(path.join(__dirname, '..', 'bin', 'tdoc-agent-reply'), 'utf8');
     assert(cli.includes('/api/notify/progress') && cli.includes('--progress'), 'CLI flag missing');
   });
 
-  // ---- flag off (no dev mode, not a preview) ----------------------------------
+  // ---- graduated (2026-11-16): no dev mode, not a preview --------------------
   {
     const env2 = makeEnv(mod.CommentsStore);
     const owner2 = await issue(worker, env2, 'owner');
@@ -298,14 +298,14 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
     const h = await call2('/api/notify/handoff', { method: 'POST', token: owner2.token, body: { slug: 'off', comment_ids: [c.body.id], recipient: LOCAL_CLAUDE, instruction: 'fix it' } });
     const rec = async () => JSON.parse(await env2.META.get('handoffs:off') || '[]').find((x) => x.handoff_id === h.body.handoff_id);
 
-    await t('flag off: POST /api/notify/progress is not found, even for the addressed agent', async () => {
+    await t('no dev mode: POST /api/notify/progress works for the addressed agent', async () => {
       assert(up.status === 200 && c.status === 200 && h.status === 200, `setup ${up.status} ${c.status} ${h.status}`);
       const r = await call2('/api/notify/progress', { method: 'POST', token: owner2.token, headers: AS_CLAUDE, body: { slug: 'off', comment_id: c.body.id, text: 'Working' } });
-      assert(r.status === 404, `${r.status} ${JSON.stringify(r.body)}`);
-      assert(!(await rec()).progress, 'status written with the flag off');
+      assert(r.status === 200, `${r.status} ${JSON.stringify(r.body)}`);
+      assert((await rec()).progress, 'status not written without dev mode');
     });
 
-    await t('flag off: publishes stamp the first version once and nothing more', async () => {
+    await t('no dev mode: publishes stamp the first version and follow the newest', async () => {
       const writes = [];
       const put = env2.META.put.bind(env2.META);
       env2.META.put = (k, ...rest) => { if (k === 'handoffs:off') writes.push(k); return put(k, ...rest); };
@@ -317,8 +317,72 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
       } finally { env2.META.put = put; }
       const x = await rec();
       assert(x.first_version_at, 'first version not stamped');
-      assert(x.last_version == null && x.last_version_at == null, `last_version written with the flag off: ${JSON.stringify(x)}`);
-      assert(writes.length === 1, `handoffs rewritten on every publish: ${writes.length}`);
+      assert(x.last_version === 4 && x.last_version_at, `last_version not followed: ${JSON.stringify(x)}`);
+      assert(writes.length >= 1, `handoffs not written: ${writes.length}`);
+    });
+  }
+
+  // ---- handoffs:<slug> is read-modify-written: only real changes write --------
+  {
+    const env3 = makeEnv(mod.CommentsStore);
+    const owner3 = await issue(worker, env3, 'owner3');
+    const call3 = async (p, opts) => { const r = await worker.fetch(req(p, opts), env3, {}); let b = null; try { b = await r.json(); } catch {} return { status: r.status, body: b }; };
+    await call3('/api/upload', { method: 'POST', token: owner3.token, body: { slug: 'rmw', version: 1, html: '<h1>d</h1><p>a sentence to comment on</p><p>another line here</p>' } });
+    await env3.META.put(`account-notify:${owner3.account_id}`, JSON.stringify([LOCAL_CLAUDE]));
+    const reader3 = await putSession(env3, 'reader3');
+    const c = await call3('/api/comments', { method: 'POST', cookie: reader3, body: { slug: 'rmw', version: 1, text: 'fix', anchor: { kind: 'text', text: 'a sentence' } } });
+    const h = await call3('/api/notify/handoff', { method: 'POST', token: owner3.token, body: { slug: 'rmw', comment_ids: [c.body.id], recipient: LOCAL_CLAUDE, instruction: 'fix it' } });
+    const writes = [];
+    const put = env3.META.put.bind(env3.META);
+    let refuse = false;
+    env3.META.put = (k, ...rest) => {
+      if (k === 'handoffs:rmw') { if (refuse) return Promise.reject(new Error('KV PUT failed: 429 Too Many Requests')); writes.push(k); }
+      return put(k, ...rest);
+    };
+    const count = () => writes.length;
+
+    await t('a re-upload of the newest version (or an older one) writes nothing to the handoff', async () => {
+      assert(c.status === 200 && h.status === 200, `setup ${c.status} ${h.status}`);
+      const up2 = await call3('/api/upload', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body: { slug: 'rmw', version: 2, html: '<h1>d2</h1><p>a sentence to comment on</p>' } });
+      assert(up2.status === 200, `v2 ${up2.status}`);
+      const after2 = count();
+      assert(after2 === 1, `first version: ${after2} writes`);
+      const again = await call3('/api/upload', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body: { slug: 'rmw', version: 2, html: '<h1>d2</h1><p>a sentence to comment on</p>' } });
+      assert(again.status === 200 || again.status === 409, `re-upload ${again.status}`);
+      assert(count() === after2, `re-upload wrote the handoff (${count()})`);
+      const up3 = await call3('/api/upload', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body: { slug: 'rmw', version: 3, html: '<h1>d3</h1><p>a sentence to comment on</p>' } });
+      assert(up3.status === 200 && count() === after2 + 1, `a newer version: ${count()} writes`);
+    });
+
+    await t('the same suggestion set twice writes the handoff once', async () => {
+      env3.TDOC_PREVIEW = '1'; // propose_edits is dev-mode only (askEditV2); a preview has it for everyone
+      try {
+        const before = count();
+        const body = { comment_ids: [c.body.id], edits: [{ find: 'a sentence to comment on', replace: 'one sentence' }] };
+        const a = await call3('/api/docs/rmw/suggestions', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body });
+        assert(a.status === 200, `suggest ${a.status} ${JSON.stringify(a.body)}`);
+        assert(count() === before + 1, `first set: ${count() - before} writes`);
+        const b = await call3('/api/docs/rmw/suggestions', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body });
+        assert(b.status === 200, `suggest again ${b.status} ${JSON.stringify(b.body)}`);
+        assert(count() === before + 1, `the same set wrote again: ${count() - before} writes`);
+      } finally { delete env3.TDOC_PREVIEW; }
+    });
+
+    await t('/api/notify/progress: the same line writes nothing; a refused KV write is 429, not 500', async () => {
+      const progress3 = (text) => call3('/api/notify/progress', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body: { slug: 'rmw', comment_id: c.body.id, text } });
+      const first = await progress3('Working on it');
+      assert(first.status === 200, `progress ${first.status} ${JSON.stringify(first.body)}`);
+      const before = count();
+      // Past the per-handoff rate window, the same words: no write.
+      const list = JSON.parse(await env3.META.get('handoffs:rmw'));
+      await put('handoffs:rmw', JSON.stringify(list.map((x) => (x.progress ? { ...x, progress: { ...x.progress, at: '2026-01-01T00:00:00Z' } } : x))));
+      const same = await progress3('Working on it');
+      assert(same.status === 200 && same.body.unchanged === true && count() === before, `same line: ${same.status} ${JSON.stringify(same.body)} writes ${count() - before}`);
+      refuse = true;
+      try {
+        const r = await progress3('Something new');
+        assert(r.status === 429 && r.body.error === 'rate_limited' && r.body.retry_after > 0, `${r.status} ${JSON.stringify(r.body)}`);
+      } finally { refuse = false; }
     });
   }
 

@@ -93,6 +93,8 @@ async function startServer(worker, env) {
 
   const open = async (opts = {}, which = browser) => {
     const ctx = await which.newContext(opts.phone ? PHONE : { viewport: { width: 1280, height: 800 } });
+    // Dev mode turns modelessEdit on; these cases are about Comment mode's composer and Edit mode's Save.
+    await ctx.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), modelessEdit: false }; });
     await ctx.addCookies([{ name: 'tdoc_sid', value: opts.sid || sid, domain: '127.0.0.1', path: '/' }]);
     await ctx.route(/api\.github\.com/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' }));
     if (opts.delayHandoff) await ctx.route(/\/(hand-off|api\/notify\/handoff)(\?|$)/, async (r) => { await new Promise((f) => setTimeout(f, opts.delayHandoff)); await r.continue(); });
@@ -623,6 +625,8 @@ async function startServer(worker, env) {
     assert.equal((await api('/api/upload', { method: 'POST', token, body: { slug: RW, version: 2, html: rwDoc(SMALL.replace('March 14', 'March 21'), `${LONG_NEW.slice(0, 20)}<a href="https://tdoc.dev">${LONG_NEW.slice(20, 40)}</a>${LONG_NEW.slice(40)}`, 'Launches now spread out across autumn so support can keep up', 'Nothing dangerous remains and these words share nothing with the earlier ones'), meta: { title: 'Rewrites' } } })).status, 200);
     const compare = (which, phone) => outside(`${which === browser ? 'chromium' : 'webkit'} ${phone ? 390 : 1280}: the version compare shows a rewrite as blocks, a small edit word by word`, async () => {
       const ctx = await which.newContext(phone ? PHONE : { viewport: { width: 1280, height: 800 } });
+      // Dev mode turns modelessEdit on; these cases are about Comment mode's composer and Edit mode's Save.
+      await ctx.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), modelessEdit: false }; });
       await ctx.addCookies([{ name: 'tdoc_sid', value: sid, domain: '127.0.0.1', path: '/' }]);
       const page = await ctx.newPage();
       const errors = [];

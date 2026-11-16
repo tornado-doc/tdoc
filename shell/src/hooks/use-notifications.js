@@ -9,6 +9,7 @@ import {
   setEmailNotifications,
 } from '../document/api.js';
 import { notificationLabel, notificationTarget } from '../notifications-dialog.jsx';
+import { THREAD_SEEN_EVENT } from '../comments/core/thread-seen.js';
 import {
   alertNewNotifications,
   browserNotificationMode,
@@ -126,6 +127,15 @@ export function useNotifications(enabled) {
     });
     return () => { live = false; };
   }, [enabled]);
+
+  // A thread was marked seen on this page (comment-area): its bell rows went
+  // read on the server with it, so the count is refreshed now.
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return undefined;
+    const onSeen = () => { refreshUnread(); };
+    window.addEventListener(THREAD_SEEN_EVENT, onSeen);
+    return () => window.removeEventListener(THREAD_SEEN_EVENT, onSeen);
+  }, [enabled, refreshUnread]);
 
   // A push for this person just arrived: refresh the bell now.
   useEffect(() => {

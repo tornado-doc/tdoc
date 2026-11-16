@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { deliveryErrorText, resendResultText } from './document/notify-handoff.jsx';
 import { handoffSurfaceState } from './comments/core/handoff-state.js';
 import { TopBar } from './top-bar.jsx';
-import { SegmentedControl } from './ui/segmented-control.jsx';
 import {
   duplicateDocument,
   getAgentStatus,
@@ -22,7 +21,7 @@ import {
 } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
 import {
-  CommentListControls,
+  CommentFilterMenu,
   DesktopCommentLayer,
   MobileCommentDrawer,
 } from './document/comment-layer.jsx';
@@ -50,7 +49,9 @@ import {
   SaveNoticeDialog,
   StaleDraftDialog,
   saveNoticeDismissed,
+  EditorSaveStatus,
 } from './document/editor-toolbar.jsx';
+import { flashEdited, useModelessEdit } from './document/modeless-edit.jsx';
 import {
   DeleteDocumentDialog,
   OwnerAccessDialog,
@@ -87,7 +88,7 @@ import { AskAiPanel, DemoRewriteBar, DemoRewriteCta } from './document/ask-ai-pa
 import { SuggestContext, useSuggestions } from './document/suggestions.js';
 import { SuggestInlineChip, SuggestReviewBar } from './document/suggest-review-bar.jsx';
 import { useCommentArea, useCommentListPrefs } from './comments/core/comment-area.js';
-import { filterOptions, groupBy, matchesFilter, sortThreads } from './comments/core/comment-query.js';
+import { DEFAULT_FILTER, filterName, groupBy, matchesFilter, sortThreads } from './comments/core/comment-query.js';
 import { useCommentFeed } from './comments/core/use-comment-feed.js';
 import { useNarrowViewport } from './comments/core/narrow.js';
 import { useSheetView } from './document/sheet-view.js';
@@ -141,7 +142,14 @@ function OldVersionNotice({ value }) {
   return (
     <div className="tdoc-oldver-slot">
       <div className="tdoc-oldver-strip tdoc-oldver-visible">
-        {value.fresh ? (
+        {value.editing ? (
+          // Modeless editing: someone published while this person has a
+          // draft (theirs was not published over it).
+          <span role="status">
+            Someone else just edited this doc. Your changes are kept.{' '}
+            <a href={value.latestUrl}>Show latest</a>
+          </span>
+        ) : value.fresh ? (
           // Published while this page was open: say so, and let the reader
           // move when they are ready instead of reloading under them.
           <span role="status">
@@ -349,7 +357,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // Two arrivals the journey makes on its own: the first doc (`welcome`) and
   // a version the agent just published (`revised`). Read once and taken off
   // the URL, so a reload is an ordinary visit.
-  const [arrival] = useState(() => {
+  const [arrival, setArrival] = useState(() => {
     const params = new URLSearchParams(location.search);
     // `step` is the checklist arriving: a row on My docs sends people here, and
     // the page opens whatever that row is about instead of leaving them on a
@@ -593,7 +601,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     showToast('Sheet embeds allowed on this page');
     if (bridge.frameRef.current) bridge.frameRef.current.src = embedFrameSrc(boot.frameSrc, true);
   }, [boot.frameSrc, showToast]);
+  const modelessRef = useRef(null);
   const bridge = useFrameBridge({
+    // Modeless editing (flag modelessEdit; document/modeless-edit.jsx).
+    'tdoc:bubble': (message) => modelessRef.current?.handlers['tdoc:bubble'](message),
+    'tdoc:slash': (message) => modelessRef.current?.handlers['tdoc:slash'](message),
+    'tdoc:swapped': (message) => modelessRef.current?.handlers['tdoc:swapped'](message),
     ...sheetHandlers,
     'tdoc:sheetEmbed': sheetEmbed,
     'tdoc:demoRewriteDone': (message) => {
@@ -641,13 +654,13 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     'tdoc:exportHtml': (message) => exportHtml.handle(message),
     'tdoc:ready': (message) => {
       setVisualOpen(false);
-      setDocShape({ sheets: Number(message.sheets) || 0, sheetDoc: message.sheetDoc === true });
+      setDocShape({ sheets: Number(message.sheets) || 0, sheetDoc: message.sheetDoc === true, slides: Number(message.slides) || 0 });
       setSupportsTheme(message.supportsTheme === true);
       const storedTheme = readStored('tdoc-theme');
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
       setTheme(nextTheme);
       if (message.supportsTheme === true) bridge.send({ type: 'tdoc:theme', theme: nextTheme });
-      bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding, areaSelect: !config.isLanding && isFeatureOn('feedbackAreaSelect') });
+      bridge.send(editorRef.current?.modeMessage?.() || { type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding, areaSelect: !config.isLanding && isFeatureOn('feedbackAreaSelect') });
       sendFooterInsetRef.current();
       comments.refresh();
       suggestRef.current?.frameHandlers['tdoc:ready']();
@@ -868,6 +881,32 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   });
   suggestRef.current = suggestions;
 
+  // The page is a version it published itself (modeless autosave) or was
+  // swapped to in place: as after a sheet's column width (ownVersion above).
+  const revisedPending = useRef(0);
+  const modelessFlagRef = useRef(false);
+  const adoptVersion = useCallback((n) => {
+    // The agent's version the owner was waiting for, swapped in: the same
+    // arrival as ?revised=1 (its answered thread opens, the toast says so).
+    if (revisedPending.current && n >= revisedPending.current) {
+      revisedPending.current = 0;
+      arrivedRef.current = false;
+      setArrival('revised');
+    }
+    if (!n || n <= ownVersionRef.current) return;
+    ownVersionRef.current = n;
+    setOwnVersion({ n, created: new Date().toISOString(), source: 'browser' });
+    // An address naming the old version would reopen it on reload.
+    if (/\/v\/\d+\/?$/.test(location.pathname)) {
+      history.replaceState(history.state, '', `/d/${encodeURIComponent(config.slug)}${location.search}${location.hash}`);
+    }
+  }, [config.slug]);
+  // Modeless editing (flag modelessEdit): someone who may edit a prose doc
+  // types into it; sheets and slides keep Read / Comment / Edit.
+  const modelessFlag = isFeatureOn('modelessEdit');
+  modelessFlagRef.current = modelessFlag;
+  const modeless = modelessFlag && Boolean(config.canEdit) && !config.isLanding && !boot.oldVersion
+    && !docShape.sheets && !docShape.slides;
   const editor = useDocumentEditor({
     boot,
     config,
@@ -875,6 +914,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     send: bridge.send,
     showToast,
     onDisableCommentSelection: disableCommentSelection,
+    modeless,
+    onPublished: (result) => { adoptVersion(Number(result?.version) || 0); flashEdited(); },
   });
   editorRef.current = editor;
 
@@ -893,6 +934,18 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     const open = Boolean((cardOpen || composer || handoffDetailsOpen) && !reanchorId);
     bridge.send({ type: 'tdoc:uiOpen', open });
   }, [bridge.send, composer, openClusterKey, openCommentId, reanchorId, narrow, drawerOpen, handoffDetailsOpen]);
+
+  // Whatever opened a comment (its pin, a link to it, an arrival, the list),
+  // the frame learns which one is open: it marks what the comment is on (a
+  // text highlight, a sheet's cell) and unmarks it once none is. An id the
+  // frame already has active changes nothing there, so focusComment's own
+  // message and this one do not repeat a scroll.
+  const openAnchorRef = useRef(null);
+  useEffect(() => {
+    if (openAnchorRef.current === openCommentId) return;
+    openAnchorRef.current = openCommentId;
+    bridge.send({ type: 'tdoc:focusAnchor', id: openCommentId || null });
+  }, [bridge.send, openCommentId]);
 
   const focusComment = useCallback((id, { scroll = false, closeDrawer = false } = {}) => {
     setOpenCommentId(id);
@@ -1844,6 +1897,15 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           // The thing it was waiting for arrived; the wait should not outlive
           // it into the next page.
           try { localStorage.removeItem(handoffKey); } catch {}
+          // modelessEdit: no navigation. The version is swapped into this
+          // page (as for anyone) and the "revised" arrival is set here; only
+          // a version that cannot be swapped in navigates (onSwapFailed).
+          if (modelessFlagRef.current) {
+            revisedPending.current = latest;
+            setHandoff({ state: 'idle', copiedAt: null });
+            setLiveLatest(latest);
+            return;
+          }
           // On the doc's own address the newest version is what it shows; a
           // reader who chose a version is taken to the new one explicitly.
           location.href = /\/v\/\d+\/?$/.test(location.pathname)
@@ -1872,7 +1934,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // Threads stay current the way the feedback widget's do, through the same
   // hook (use-comment-feed.js): every 15 s while the tab is visible, at once
   // when it comes back, never while somebody is typing or the composer is
-  // open, and on the Refresh button by the filter. An agent's reply appears
+  // open, and on the Refresh button in the side list and drawer. An agent's reply appears
   // on an open doc without a reload.
   // A quiet doc backs off to a minute, as live sync used to; a handoff still
   // on its way (`sent`) keeps it at 15 s until the agent answers.
@@ -1929,6 +1991,29 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
 
   // Connected-App handoffs still `sent` keep the comment feed at its base
   // pace (above); there is no second poll for them.
+
+  const modelessEdit = useModelessEdit({
+    enabled: editor.modeless,
+    liveSwap: modelessFlag && !boot.oldVersion,
+    config,
+    editor,
+    send: bridge.send,
+    frameRef: bridge.frameRef,
+    narrow,
+    busy: Boolean(composer || dialog || comparing || historyOpen || (narrow && drawerOpen) || editor.conflict || editor.staleDraft),
+    latest: liveLatest,
+    onAdoptVersion: adoptVersion,
+    // A version that cannot be swapped in: the owner waiting on their agent
+    // is taken to it, as before the flag.
+    onSwapFailed: (n) => {
+      if (!revisedPending.current || n < revisedPending.current) return;
+      location.href = /\/v\/\d+\/?$/.test(location.pathname)
+        ? `/d/${encodeURIComponent(config.slug)}/v/${n}?revised=1`
+        : `/d/${encodeURIComponent(config.slug)}?revised=1`;
+    },
+    onLink: () => setDialog({ type: 'link' }),
+  });
+  modelessRef.current = modelessEdit;
 
   const answered = comments.comments.filter((c) => c.status === 'applied').length;
   // Copied in this session: the banner stays, as the confirmation, so the
@@ -2070,21 +2155,21 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   const sideInset = sidePanelOpen ? sidePanelSize.width : 0;
   const viewRight = window.innerWidth - sideInset;
   const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (showExitBanner ? exitBannerHeight : 0)
-    + (hintBar ? STEP_HINT_HEIGHT : 0) + (editor.mode === 'edit' ? 46 : 0);
+    + (hintBar ? STEP_HINT_HEIGHT : 0) + (editor.mode === 'edit' && !editor.modeless ? 46 : 0);
   const pinLeft = Math.min(
     (bridge.layout.articleRight || viewRight - 44) + 14,
     viewRight - 34,
   );
   const openComment = commentArea.selected;
-  // Open / Resolved / All, in the comments area (it was a switch in the bar).
-  // Only when there is something to filter.
   const openCount = commentArea.openCount;
+  // The count on the Comment button: open threads, or what the filter shows.
+  const filterCount = commentFilter === DEFAULT_FILTER ? openCount : (commentArea.counts[commentFilter] || 0);
   // Read / Comment / Edit, at the top of ⋯ (document-toolbar.jsx).
   const modeOptions = availableModes({ canComment: config.canComment, canEdit: config.canEdit, signInToComment: Boolean(config.signInToComment) });
   const mobileUnread = commentArea.unreadCount > 0;
   const startDocumentComment = (askAi = false) => {
     if (!config.canComment && !config.signInToComment) return;
-    if (editor.mode === 'edit' && editor.dirty) {
+    if (editor.mode === 'edit' && editor.dirty && !editor.modeless) {
       showToast('Save or discard the draft before commenting', true);
       return;
     }
@@ -2256,15 +2341,6 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       {askAiPanel(handoffDetailsOpen)}
     </DocumentSendAgentAction>
   ) : null;
-  const commentFilterControl = comments.comments.length ? (
-    <SegmentedControl
-      className="tdoc-comment-filter"
-      ariaLabel="Show comments"
-      value={commentFilter}
-      onChange={setCommentFilter}
-      options={filterOptions(commentArea.counts).map(({ value, label }) => ({ value, label }))}
-    />
-  ) : null;
   const openCluster = clusters.find((cluster) => (
     cluster.items.some(({ comment }) => comment.id === openCommentId)
   ));
@@ -2346,8 +2422,9 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
               config={config}
               onHistory={historyEnabled ? () => changeHistory(!historyOpen) : null}
               historyOpen={historyOpen}
-              disabled={editor.mode === 'edit' && editor.dirty}
+              disabled={editor.mode === 'edit' && editor.dirty && !editor.modeless}
             />
+            {editor.modeless ? <EditorSaveStatus status={editor.saveStatus} /> : null}
             {askAiAction}
             {!narrow && sidePanelAvailable ? (
               // One Comment button, its open count on it: it opens and closes
@@ -2355,17 +2432,26 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
               // (+ New comment), from a selection, or with double-tap Option.
               // The Read / Comment / Edit switch that sat beside it read as a
               // second comment button (Julie, 2026-11-10); it heads ⋯ now.
-              <AppButton variant="quiet" className="tdoc-comments-toggle" aria-pressed={sidePanelOpen ? 'true' : 'false'}
-                aria-label={`Comment${openCount ? ` (${openCount} open)` : ''}`}
-                title={sidePanelOpen ? 'Hide comments' : 'Show comments'}
-                onClick={() => {
-                  if (!sidePanelOpen && editor.mode === 'read') editor.changeMode('comment');
-                  setSidePanel(!sidePanelOpen);
-                }}>
-                <CommentIcon size={16} outline />
-                <span className="tdoc-comments-toggle-label">Comment</span>
-                {openCount ? <span className="tdoc-comments-toggle-count">{openCount}</span> : null}
-              </AppButton>
+              // The filter is the chevron beside it (CommentFilterMenu); a
+              // choice other than Open names itself on the button.
+              <span className="tdoc-comments-split">
+                <AppButton variant="quiet" className="tdoc-comments-toggle" aria-pressed={sidePanelOpen ? 'true' : 'false'}
+                  aria-label={`Comment${commentFilter !== DEFAULT_FILTER ? `, showing ${filterName(commentFilter)} (${filterCount})` : (openCount ? ` (${openCount} open)` : '')}`}
+                  title={sidePanelOpen ? 'Hide comments' : 'Show comments'}
+                  onClick={() => {
+                    if (!sidePanelOpen && editor.mode === 'read') editor.changeMode('comment');
+                    setSidePanel(!sidePanelOpen);
+                  }}>
+                  <CommentIcon size={16} outline />
+                  <span className="tdoc-comments-toggle-label">Comment</span>
+                  {commentFilter !== DEFAULT_FILTER ? <span className="tdoc-comments-toggle-filter">· {filterName(commentFilter)}</span> : null}
+                  {filterCount ? <span className="tdoc-comments-toggle-count">{filterCount}</span> : null}
+                </AppButton>
+                {comments.comments.length ? (
+                  <CommentFilterMenu area={commentArea} prefs={listPrefs} onChange={setCommentFilter}
+                    unreadCount={sidePanelOpen ? 0 : unreadAgentReplies} onMarkAllRead={markAllAgentRepliesRead} />
+                ) : null}
+              </span>
             ) : null}
             {/* Only the "Read only" note is left in the bar: a doc that takes
                 no comments and no edits has no mode to switch to. */}
@@ -2401,7 +2487,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
             onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
             onHistory={historyEnabled ? () => changeHistory(true) : null}
-            mode={{ modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
+            mode={editor.modeless ? null : { modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
             onAllowEmbeds={embedsHeld ? () => setDialog({ type: 'allow-embeds' }) : null}
           />
         )}
@@ -2471,15 +2557,16 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           showToast(`${diagram.isNew ? 'Diagram inserted' : 'Diagram applied'}. Save the document to publish a new version.`);
         }} />
       <div className="tdoc-reader-surface" hidden={comparing || historyOpen} style={sideInset ? { marginRight: sideInset } : undefined}>
-      <OldVersionNotice value={boot.oldVersion || (liveLatest > Number(config.version) ? {
+      <OldVersionNotice value={boot.oldVersion || (modelessEdit.strip !== 'hidden' && modelessEdit.newest > Number(config.version) ? {
         current: Number(config.version),
-        latest: liveLatest,
+        latest: modelessEdit.newest,
         latestUrl: `/d/${encodeURIComponent(config.slug)}`,
         fresh: true,
+        editing: modelessEdit.strip === 'editing',
       } : null)} />
 
       {/* /start: the no-terminal way in (remote MCP), behind remoteMcp. */}
-      {config.onboarding && config.slug === 'tdoc-start' && editor.mode !== 'edit' ? <ConnectAiAppsStrip /> : null}
+      {config.onboarding && config.slug === 'tdoc-start' && (editor.mode !== 'edit' || editor.modeless) ? <ConnectAiAppsStrip /> : null}
 
       {showExitBanner ? (
         <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
@@ -2492,7 +2579,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
 
       {/* Under the chrome, over the document, in flow: the step pushes the page
           down rather than floating in the corner the eye reaches last. */}
-      {editor.mode === 'edit' ? null : (
+      {editor.mode === 'edit' && !editor.modeless ? null : (
         <DocStepHint
           step={hintStep}
           agentState={handoff.state}
@@ -2506,7 +2593,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         />
       )}
 
-      {editor.mode === 'edit' ? (
+      {editor.mode === 'edit' && !editor.modeless ? (
         <EditorToolbar
           proseTools={!docShape.sheetDoc}
           dirty={editor.dirty}
@@ -2547,14 +2634,6 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
 
       <DocumentFooter footerRef={footerRef} visible={bridge.layout.footerVisible && !bridge.layout.fullBleed} />
 
-      {!narrow && commentFilterControl && !comparing && !historyOpen && !sidePanelOpen && !bridge.layout.fullBleed ? (
-        <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.max(8, Math.min(pinLeft - 4, window.innerWidth - 336)) }}>
-          <CommentListControls filter={commentFilterControl}
-            unreadCount={unreadAgentReplies}
-            onMarkAllRead={markAllAgentRepliesRead}
-            onRefresh={commentFeed.refresh} refreshing={commentFeed.refreshing} />
-        </div>
-      ) : null}
       {narrow ? (<>
         {editor.mode !== 'read' ? <DesktopCommentLayer
           clusters={clusters.filter((cluster) => cluster.items.every(({ comment }) => comment.document))}
@@ -2801,6 +2880,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         onOpenChange={setSaveNoticeOpen}
         onConfirm={editor.save}
       />
+      {modelessEdit.overlay}
       <SaveConflictDialog conflict={editor.conflict} onClose={editor.closeConflict} />
       <StaleDraftDialog
         draft={editor.staleDraft}

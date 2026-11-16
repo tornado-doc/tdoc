@@ -914,6 +914,51 @@ function feedbackSessionLocal(slug) {
 }
 
 const LOCAL_THREAD_SEEN = new Map();
+// One read state, the local twin of the worker's markInboxRead /
+// bellThreadsRead: a thread seen reads its bell rows (a reaction on a
+// thread the page says it showed, `viewed`: id -> when, if it came before),
+// a bell row read marks its threads seen.
+const LOCAL_DOC_ACTIVITY_KINDS = ['comment', 'reply', 'mention'];
+function localRowThreads(row) {
+  if (row && row.thread_at && typeof row.thread_at === 'object') return Object.entries(row.thread_at).map(([id, at]) => [id, Date.parse(at) || 0]);
+  const id = row && (row.thread_id || row.comment_id);
+  return id ? [[id, Date.parse(row.at) || 0]] : [];
+}
+function localInboxSeen(login, slug, seen, viewed = {}) {
+  const file = inboxFile(login);
+  const inbox = readJson(file, { items: [] });
+  let changed = false;
+  const items = (Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
+    if (!i || i.read || i.slug !== slug) return i;
+    const threads = localRowThreads(i);
+    const seenAll = LOCAL_DOC_ACTIVITY_KINDS.includes(i.kind) && threads.length && threads.every(([id, ms]) => (Number(seen[id]) || 0) >= ms);
+    const lookedAt = Number(viewed[i.thread_id || i.comment_id]) || 0;
+    const reacted = i.kind === 'reaction' && lookedAt > 0 && (Date.parse(i.at) || Infinity) <= lookedAt;
+    if (!seenAll && !reacted) return i;
+    changed = true;
+    return { ...i, read: true };
+  });
+  if (changed) writeJson(file, { items });
+}
+// One bell mark (POST /api/notifications/read) on one row.
+function localMarkRow(i, body) {
+  if (!i) return i;
+  if (body.all) return { ...i, read: true };
+  if (Array.isArray(body.ids) && body.ids.includes(i.id)) return { ...i, read: true };
+  if (body.comment_id && i.comment_id === body.comment_id) return { ...i, read: true };
+  // A doc's unread comment, reply and mention rows (My docs' Needs you).
+  if (typeof body.slug === 'string' && body.slug && i.slug === body.slug && ['comment', 'reply', 'mention'].includes(i.kind)) return { ...i, read: true };
+  return i;
+}
+function localBellSeen(login, rows) {
+  for (const row of rows) {
+    if (!row || !LOCAL_DOC_ACTIVITY_KINDS.includes(row.kind) || !row.slug) continue;
+    const key = `${row.slug}\n${login}`;
+    const next = { ...(LOCAL_THREAD_SEEN.get(key) || {}) };
+    for (const [id, ms] of localRowThreads(row)) if (ms > (next[id] || 0)) next[id] = ms;
+    LOCAL_THREAD_SEEN.set(key, next);
+  }
+}
 
 function isLocalMutation(req) {
   const ct = (req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
@@ -1707,6 +1752,11 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/notifications' && req.method === 'GET') {
     const ident = e2eIdentity();
     if (!ident) return json(res, 401, { error: 'sign_in_required' });
+    // Rows whose threads were already seen go read when the list opens.
+    for (const [key, seen] of LOCAL_THREAD_SEEN) {
+      const [slug, login] = key.split('\n');
+      if (login === ident.login) localInboxSeen(login, slug, seen);
+    }
     const inbox = readJson(inboxFile(ident.login), { items: [] });
     const items = Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
     const unread = items.filter(i => !i.read);
@@ -1731,14 +1781,13 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const file = inboxFile(ident.login);
     const inbox = readJson(file, { items: [] });
+    const turned = [];
     const items = (Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
-      if (!i) return i;
-      if (Array.isArray(body.ids) && body.ids.includes(i.id)) return { ...i, read: true };
-      if (body.comment_id && i.comment_id === body.comment_id) return { ...i, read: true };
-      // A doc's unread comment, reply and mention rows (My docs' Needs you).
-      if (typeof body.slug === 'string' && body.slug && i.slug === body.slug && ['comment', 'reply', 'mention'].includes(i.kind)) return { ...i, read: true };
-      return i;
+      const out = localMarkRow(i, body);
+      if (out !== i && i && !i.read) turned.push(out);
+      return out;
     });
+    localBellSeen(ident.login, turned);
     writeJson(file, { items });
     return json(res, 200, { ok: true, unread: items.filter(i => i && !i.read).length });
   }
@@ -2380,6 +2429,12 @@ const server = http.createServer(async (req, res) => {
       changed = true;
     }
     if (changed) LOCAL_THREAD_SEEN.set(key, next);
+    const sent = (body && body.seen && typeof body.seen === 'object') ? body.seen : {};
+    const viewed = {};
+    for (const [id, ms] of Object.entries((body && body.viewed && typeof body.viewed === 'object') ? body.viewed : {})) {
+      if (id in sent && Number(ms) > 0) viewed[id] = Math.min(Math.floor(Number(ms)), Date.now() + 60_000);
+    }
+    localInboxSeen(ident.login, slug, next, viewed);
     return json(res, 200, { ok: true, seen: next });
   }
 

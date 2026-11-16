@@ -203,6 +203,8 @@
     '.ts-check.is-on{background:var(--ts-accent);border-color:var(--ts-accent)}',
     '.ts-c.is-check{justify-content:center}',
     '.ts-c.has-comment::after{content:"";position:absolute;top:0;right:0;border-style:solid;border-width:0 9px 9px 0;border-color:transparent #f5a524 transparent transparent;cursor:pointer}',
+    // The cell the open comment is about: the comment layer's active-anchor yellow, in every mode.
+    '.tdoc-sheet .ts-c.is-comment-on,.ts-flat .is-comment-on{background:rgba(255,216,77,.38)!important;box-shadow:inset 0 0 0 2px #b8860b}',
     '.ts-c .tdoc-comment-pill{position:absolute;top:1px;right:2px;width:28px;height:28px;z-index:3}',
     '.ts-c .tdoc-comment-pill svg{width:14px;height:14px}',
     '.ts-off{position:absolute;left:50%;transform:translateX(-50%);z-index:5;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:1px solid #f0c36d;border-radius:999px;background:#fff8e6;color:#7a4b00;font-weight:500;box-shadow:0 2px 8px rgba(0,0,0,.1);white-space:nowrap}',
@@ -979,6 +981,7 @@
     if (isHitOn) cls += ' is-hit-on';
     var td = tab.data.rows[r].tds[c];
     if (td && commented.has(td)) cls += ' has-comment';
+    if (td && td === activeTd) cls += ' is-comment-on';
     // [format] the cell's own format, a merge's span, or a slot it covers
     var fx = FX.cell(tab, r, c, i, type, tab.align[c], col.text[r], tab.widths[c]);
     if (fx && fx.skip) return '';
@@ -1019,7 +1022,7 @@
       if (type === 'tags') { for (var t = 0; t < col.tags[r].length; t++) inner += '<span class="ts-tag" style="' + tagStyle(col.tags[r][t], tab.palettes[c]) + '">' + mark(col.tags[r][t], needle) + '</span>'; }
       else if (type === 'checkbox') inner = col.num[r] === 1 ? '✓' : '';
       else { var href = type === 'url' ? M.safeHref(col.text[r]) : ''; inner = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + mark(col.text[r], needle) + '</a>' : mark(fx.text != null ? fx.text : col.text[r], needle); }
-      var cls = (type === 'number' ? ' is-num' : type === 'date' || type === 'checkbox' ? ' is-short' : '') + (needle && col.lower[r].indexOf(needle) !== -1 ? ' is-hit' : '') + (td && commented.has(td) ? ' has-comment' : '') +
+      var cls = (type === 'number' ? ' is-num' : type === 'date' || type === 'checkbox' ? ' is-short' : '') + (needle && col.lower[r].indexOf(needle) !== -1 ? ' is-hit' : '') + (td && commented.has(td) ? ' has-comment' : '') + (td && td === activeTd ? ' is-comment-on' : '') +
         // The grid's line breaks and column alignment read the same here.
         (type !== 'tags' && type !== 'checkbox' && col.text[r].indexOf('\n') !== -1 ? ' is-ml' : '') + (tab.align && tab.align[c] ? ' al-' + tab.align[c] : '') + (tab.setW[c] ? ' is-set' : '');
       // [sheet-rules] conditional formats read the same here, and win over the cell's own fill
@@ -1386,9 +1389,22 @@
     var c = -1;
     for (var k = 0; k < ths.length; k++) if (ths[k].getAttribute('data-key') === String(a.key)) { c = k; break; }
     if (c < 0) return null;
-    if (!a.row) return ths[c];
-    var tr = null, rows = table.querySelectorAll('tr[data-row]');
-    for (var n = 0; n < rows.length; n++) if (rows[n].getAttribute('data-row') === String(a.row)) { tr = rows[n]; break; }
+    var tr = null;
+    if (!a.row) {
+      // No row id: the header's own comment, or a body cell of a row written
+      // without an id. Only the header is the column: a body cell's row is
+      // where its selector puts it (a document position, which sorting and
+      // filtering never move), and its column is still the key's.
+      var bySel = null;
+      try { bySel = anchor.selector ? document.querySelector(anchor.selector) : null; } catch (x) { bySel = null; }
+      var selRow = bySel && bySel.closest && bySel.closest('tr');
+      if (selRow && selRow.closest(SEL) === table && !(selRow.parentElement && selRow.parentElement.tagName === 'THEAD')) tr = selRow;
+      else if (!bySel && anchor.tag === 'td') return undefined;
+      else return ths[c];
+    } else {
+      var rows = table.querySelectorAll('tr[data-row]');
+      for (var n = 0; n < rows.length; n++) if (rows[n].getAttribute('data-row') === String(a.row)) { tr = rows[n]; break; }
+    }
     if (!tr) return null;
     // [format] past merged cells: the column's cell as the viewer reads it
     var at = book && book.tabs.find(function (x) { return x.table === table; });
@@ -1403,19 +1419,85 @@
     return Math.round(ui.grid.getBoundingClientRect().right);
   };
   // Bring a source element into view: its tab, its row, its cell selected.
-  hooks.reveal = function (el) {
+  // `page` false keeps the page where it is and scrolls only the grid (a
+  // pin pressed beside the row: the row is already in view, its cell may
+  // be columns away).
+  function revealAt(el, page) {
     var at = locate(el);
     if (!at) return false;
     if (at.t !== book.active) { book.active = at.t; renderAll(); }
-    if (at.r == null) { ui.root.scrollIntoView({ block: 'nearest' }); return true; }
+    if (at.r == null) {
+      if (page) ui.root.scrollIntoView({ block: 'nearest' });
+      if (at.head && at.c != null && S.colShown(cur(), at.c)) select(0, at.c, false);
+      return true;
+    }
     S.expandTo(cur(), at.r, at.c); // [structure] its collapsed group opens (the reader's view)
     if (at.c != null && !S.colShown(cur(), at.c)) { toast('That cell is in a hidden column.'); return false; }
     var i = cur().pos[at.r];
     if (i < 0) { toast(S.hiddenRow(cur(), at.r) ? 'That cell is in a hidden row.' : 'That cell is hidden by the search or a filter on this sheet.'); return false; }
-    ui.root.scrollIntoView({ block: 'nearest' });
+    if (page) ui.root.scrollIntoView({ block: 'nearest' });
+    if (flatView()) { scrollFlatToActive(); return true; }
     select(i, at.c || 0, false);
     return true;
+  }
+  hooks.reveal = function (el) { return revealAt(el, true); };
+  // The comment open now (a pin, a card, the list): its cell is marked as
+  // the one the thread is about, and the grid scrolls to it. The pins sit
+  // beside the reading column, which on a sheet wider than the column is
+  // over some other cell of the row: the mark is what says which. null
+  // clears it.
+  var activeTd = null;
+  hooks.activate = function (el, opts) {
+    var td = el && el.closest && el.closest(SEL) ? el.closest('td,th') : null;
+    if (td && !locate(td)) td = null;
+    if (td === activeTd) return;
+    activeTd = td;
+    if (!book) return;
+    var pinX = opts && opts.pinX;
+    var shown = td ? revealAt(td, false) : false;
+    renderBody(true);
+    if (td && flatView()) scrollFlatToActive();
+    else if (shown) clearOfPins(td, pinX);
+    // Opened as the page loads (a link to the comment), the grid may still
+    // be taking its final width: once it has, the cell is brought in again
+    // if it is not in view.
+    if (td) [300, 900].forEach(function (ms) {
+      setTimeout(function () {
+        if (activeTd !== td || flatView()) return;
+        var at = locate(td);
+        var cell = at && at.t === book.active && at.r != null ? proxyCell(at) : null;
+        if (!cell || !ui.grid) return;
+        var r = cell.getBoundingClientRect(), g = ui.grid.getBoundingClientRect();
+        if (r.left >= g.left - 1 && r.right <= g.right + 1) return;
+        if (revealAt(td, false)) clearOfPins(td, pinX);
+      }, ms);
+    });
   };
+  // The pins and the open card sit from the reading column's right edge on;
+  // on a sheet wider than the column that is over the grid. Scroll the grid
+  // so the marked cell ends left of them, as far as its frozen columns allow.
+  function clearOfPins(td, pinX) {
+    if (!(pinX > 0) || !ui.grid) return;
+    var at = locate(td), tab = cur();
+    if (!at || at.c == null || at.t !== book.active || at.c < S.frozenCount(tab)) return;
+    var cell = proxyCell(at);
+    if (!cell) return;
+    var r = cell.getBoundingClientRect(), g = ui.grid.getBoundingClientRect();
+    var over = r.right - (pinX - 8);
+    if (over <= 0) return;
+    var minLeft = g.left + numW() + S.frozenW(tab) + 4;
+    var room = r.left - minLeft;
+    var by = Math.min(over, Math.max(0, room));
+    if (by > 0) { ui.grid.scrollLeft += by; renderBody(true); }
+  }
+  function proxyCell(at) {
+    var i = cur().pos[at.r];
+    return at.head ? ui.head.querySelector('.ts-h[data-c="' + at.c + '"]') : (i >= 0 ? cellAt(i, at.c) : null);
+  }
+  function scrollFlatToActive() {
+    var fc = ui.flat && ui.flat.querySelector('.is-comment-on');
+    if (fc && fc.scrollIntoView) fc.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
   var commented = new Map();
   document.addEventListener('tdoc:anchors-resolved', function (e) {
     var d = e.detail || {};

@@ -79,6 +79,8 @@ async function startServer(worker, env) {
 
   const open = async (slug, { phone = false } = {}) => {
     const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, hasTouch: true } : { viewport: { width: 1280, height: 800 } });
+    // Dev mode turns modelessEdit on; these cases are about Comment mode's composer and Edit mode's Save.
+    await ctx.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), modelessEdit: false }; });
     await ctx.addCookies([{ name: 'tdoc_sid', value: sid, domain: '127.0.0.1', path: '/' }]);
     await ctx.route(/api\.github\.com/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' }));
     const page = await ctx.newPage();

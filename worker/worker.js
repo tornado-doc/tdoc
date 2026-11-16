@@ -184,7 +184,7 @@ const LLMS_TXT = `# tdoc
 
 ## Connect
 
-tdoc is a remote MCP server: \`https://tdoc.dev/mcp\` (Streamable HTTP). You sign in with OAuth the first time an app connects; there is no API key to paste. An app that cannot do OAuth can send an existing tdoc account token as \`Authorization: Bearer tdoc_...\`. Tools: get_writing_guide, create_doc, update_doc, edit_doc, create_upload, commit_upload, get_doc, list_docs, get_comments, reply_to_comment, resolve_comment, answer_question, share_doc, create_feedback_space (a private comment space for a website, returned with the one-line <script> to embed).
+tdoc is a remote MCP server: \`https://tdoc.dev/mcp\` (Streamable HTTP). You sign in with OAuth the first time an app connects; there is no API key to paste. An app that cannot do OAuth can send an existing tdoc account token as \`Authorization: Bearer tdoc_...\`. Tools: get_writing_guide, create_doc, update_doc, edit_doc, create_upload, commit_upload, get_doc, list_docs, get_comments, reply_to_comment, resolve_comment, report_progress, answer_question, share_doc, create_feedback_space (a private comment space for a website, returned with the one-line <script> to embed).
 
 Add tdoc feedback to a project ("add tdoc feedback to my project"): call create_feedback_space with the site's origins (production and local dev, e.g. \`https://app.example.com\`, \`http://localhost:3000\`; optional \`team\` you are an admin of), or run \`tdoc-feedback init --site <origin> [--site ...] [--write index.html]\` with the CLI. Add the returned \`<script src="https://tdoc.dev/feedback.js" data-tdoc-space="<slug>" async></script>\` before \`</head>\` in the project's HTML entry (or set \`TDOC_FEEDBACK_SPACE=<slug>\` where the app reads it, \`--env\`). The space is private (you and people you invite, or the team); comments people leave on the site come back through get_comments. Over HTTP: \`POST https://tdoc.dev/api/feedback/spaces\` with \`{"origins": [...]}\` and a tdoc account token.
 
@@ -4228,11 +4228,11 @@ async function noteHandoffReply(env, slug, commentId, at) {
 // doc". Only stamped when the publisher can be named (a verified agent claim
 // or a team agent): an unattributed upload says nothing about whose work it
 // was, and a resolved handoff needs no clock.
-// With the progress line on (`progress`, agentProgressAllowed),
+// With `progress` (every publish since agentProgress graduated, 2026-11-16),
 // `last_version` / `last_version_at` follow every later version the same
 // agent publishes while the handoff is still open, so the card's progress
-// line can say "Published v3" for the newest one, not the first. Off, a
-// handoff is written once, for its first version, as before.
+// line can say "Published v3" for the newest one, not the first. Without
+// it, a handoff is written once, for its first version.
 async function noteHandoffVersion(env, slug, { actor, target, at, version = null, progress = false }) {
   if (!env || !env.META || !slug || !at) return;
   const teamAgentId = actor && actor.team_agent ? actor.team_agent.id : null;
@@ -4248,6 +4248,9 @@ async function noteHandoffVersion(env, slug, { actor, target, at, version = null
       || (key && h.recipient && notifyKey(h.recipient) === key);
     if (!mine || !handoffOpen(h)) return h;
     if (h.first_version_at && !(Number.isInteger(n) && n > 0)) return h;
+    // Already the newest version on record (a re-upload, an older version
+    // published again): nothing changes, nothing is written.
+    if (h.first_version_at && Number.isInteger(h.last_version) && n <= h.last_version) return h;
     changed = true;
     const rec = {
       ...h,
@@ -4264,15 +4267,6 @@ async function noteHandoffVersion(env, slug, { actor, target, at, version = null
 // A handoff still has a comment nobody marked handled.
 function handoffOpen(h) {
   return !!h && (h.comment_ids || []).some((id) => !(h.resolved_ids || []).includes(id));
-}
-
-// The agent progress line (shell flag agentProgress) is dev mode only in
-// production and on for everyone on a PR preview, held on the server the
-// same way as its MCP tool report_progress (a devMode tool): the status
-// route 404s and the extra handoff bookkeeping below is not written for a
-// caller outside it.
-function agentProgressAllowed(env, actor) {
-  return askEditV2Allowed(env, actor).catch(() => false);
 }
 
 // Suggestions (propose_edits / tdoc-propose) sent for a handed-off comment:
@@ -4301,6 +4295,10 @@ async function noteHandoffSuggestions(env, slug, commentIds, count, at, scope) {
     const sets = Object.fromEntries(Object.entries(had).filter(([k]) => !overlaps(k)));
     const dropped = Object.keys(sets).length !== Object.keys(had).length;
     if (h === target && credit) {
+      // The same count for the same comment set already stored, nothing
+      // else replaced: no write.
+      const replaced = Object.keys(had).filter((k) => overlaps(k));
+      if (replaced.length === 1 && replaced[0] === key && had[key] === count && h.first_suggested_at) return h;
       changed = true;
       if (!h.first_suggested_at) firstFor = h;
       return { ...h, suggested_sets: { ...sets, [key]: count }, suggested_at: at, first_suggested_at: h.first_suggested_at || at };
@@ -4311,20 +4309,6 @@ async function noteHandoffSuggestions(env, slug, commentIds, count, at, scope) {
   });
   if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
   if (firstFor) agentTiming({ ...firstFor, first_suggested_at: at }, 'suggested', { now: Date.parse(at) });
-}
-
-// Suggestions sent for a handed-off comment while the progress line is off:
-// an agent_timing `suggested` line only, nothing stored (the earliest line
-// per handoff is its first suggestion). One read; the proposer's scope is
-// asked only when a handoff carries these comments. Same target and credit
-// rule as noteHandoffSuggestions.
-async function logHandoffSuggestion(env, slug, commentIds, at, scopeOf) {
-  if (!env || !env.META || !slug || !Array.isArray(commentIds) || !commentIds.length) return;
-  const target = (await loadHandoffs(env, slug))
-    .filter((h) => h && handoffOpen(h) && Array.isArray(h.comment_ids) && h.comment_ids.some((id) => commentIds.includes(id)))
-    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))[0];
-  if (!target || target.first_suggested_at || !handoffInScope(target, await scopeOf())) return;
-  agentTiming(target, 'suggested', { now: Date.parse(at) });
 }
 
 function handoffSuggestedEdits(h) {
@@ -10171,7 +10155,12 @@ function blankDocSlug(bytes) {
 // scratch", shared with the feedback space that /api/feedback/connect makes
 // on the person's behalf. Ownership, quota and slug rules are the ones the
 // create-from-scratch path always had; `meta` and `version` are what differs.
-async function createDocForSession(env, req, session, { html, meta, version, team = null }) {
+// What createDocForSession would refuse that is known before any HTML is
+// written: the team's plan, a host closed to account creates, the account
+// store, and the doc quota. Run alone by callers that do expensive work
+// first (Write with tdoc AI runs the model only after this passes).
+// -> { ok: true, actor, ownerCreate } | { ok: false, response }
+async function createDocPreflight(env, req, session, team = null) {
   if (team) {
     const blocked = await teamPlanBlocksDocs(env, await loadTeam(env, team), 1);
     if (blocked) return { ok: false, response: json(blocked, { status: 402 }) };
@@ -10204,14 +10193,22 @@ async function createDocForSession(env, req, session, { html, meta, version, tea
     return { ok: false, response: json({ error: 'hosted_account_unavailable' }, { status: 503 }) };
   }
   // else: BYOK operator with no hosted registry keeps the old unlimited path.
+  if (actor.kind === 'hosted') {
+    const limit = await hostedMaxDocsFor(env, actor.account_id);
+    const used = await countHostedDocs(env, actor.account_id);
+    if (used >= limit) return { ok: false, response: json(quotaDocsPayload(env, limit, used), { status: 403 }) };
+  }
+  return { ok: true, actor, ownerCreate };
+}
 
+async function createDocForSession(env, req, session, { html, meta, version, team = null }) {
+  const pre = await createDocPreflight(env, req, session, team);
+  if (!pre.ok) return pre;
+  const { actor } = pre;
   if (actor.kind === 'hosted') {
     const maxBytes = hostedMaxUploadBytes(env, html);
     const size = utf8ByteLength(html);
     if (size > maxBytes) return { ok: false, response: json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 }) };
-    const limit = await hostedMaxDocsFor(env, actor.account_id);
-    const used = await countHostedDocs(env, actor.account_id);
-    if (used >= limit) return { ok: false, response: json(quotaDocsPayload(env, limit, used), { status: 403 }) };
   }
 
   // Opaque ids don't collide in practice; the loop is here so that when one
@@ -10708,9 +10705,12 @@ async function createFeedbackSiteSpace(env, req, session, { origins, team, title
 // them loses them when dev mode is turned off). Only flags the widget reads,
 // never the person's dev-mode status as such: the page holding the token
 // can read this answer. UI only -- nothing the server allows depends on it.
-const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['feedbackAreaSelect', 'feedbackDocFramePick', 'agentProgress']);
+// feedbackAreaSelect, feedbackDocFramePick and agentProgress graduated
+// (default: true, 2026-11-16), so none is left here; a new dev-mode flag the
+// widget reads goes on this list.
+const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze([]);
 async function feedbackDevFlags(env, session) {
-  if (!session) return [];
+  if (!session || !FEEDBACK_WIDGET_DEV_FLAGS.length) return [];
   let dev = null;
   try { dev = await devModeState(env, session); } catch { return []; }
   return dev && dev.on ? [...FEEDBACK_WIDGET_DEV_FLAGS] : [];
@@ -16084,11 +16084,22 @@ function applyInboxEvent(inbox, ev) {
 // Needs you, marking a doc's item done). `slug` + `seen` (thread id -> ms):
 // only the rows of those threads that the person has seen up to -- what they
 // read on the doc page needs nobody's attention in the bell any more.
-function markInboxRead(inbox, { ids, comment_id, slug, seen } = {}) {
+// `slug` + `seen` + `viewed` (thread id -> ms the person looked at it, sent
+// by the page only for a thread it actually showed them -- opened, in view,
+// Mark as read -- never for marks it re-syncs): a reaction row on one of
+// those threads from before that moment goes too. A reaction is not thread
+// activity, so no seen stamp ever reaches its time; the thread being looked
+// at after it came is what says it was seen.
+// `ids_at` (row id -> its `at`): those rows, but only while they still say
+// what was looked at -- a row that took a newer event since (a grouped row
+// moves its `at`) stays unread (reconcileInboxSeen decides outside the lane).
+function markInboxRead(inbox, { ids, comment_id, slug, seen, viewed, ids_at } = {}) {
+  const viewedAt = viewed && typeof viewed === 'object' && !Array.isArray(viewed) ? viewed : null;
   const items = (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
     if (!i) return i;
     if (Array.isArray(ids) && ids.includes(i.id)) return { ...i, read: true };
     if (comment_id && i.comment_id === comment_id) return { ...i, read: true };
+    if (ids_at && typeof ids_at === 'object' && !i.read && typeof ids_at[i.id] === 'string' && ids_at[i.id] === i.at) return { ...i, read: true };
     if (slug && !i.read && i.slug === slug && DOC_ACTIVITY_INBOX_KINDS.has(i.kind)) {
       if (!seen) return { ...i, read: true };
       // Read only when every thread the row covers has been seen up to its
@@ -16097,27 +16108,249 @@ function markInboxRead(inbox, { ids, comment_id, slug, seen } = {}) {
       const threads = inboxRowThreads(i);
       if (threads && threads.every(([id, ms]) => (Number(seen[id]) || 0) >= ms)) return { ...i, read: true };
     }
+    if (slug && viewedAt && !i.read && i.slug === slug && i.kind === 'reaction') {
+      const lookedAt = Number(viewedAt[i.thread_id || i.comment_id]) || 0;
+      if (lookedAt && (Date.parse(i.at) || Infinity) <= lookedAt) return { ...i, read: true };
+    }
     return i;
   });
-  return { items };
+  // Whatever else the inbox keeps (its reconcile state) stays.
+  return { ...(inbox && typeof inbox === 'object' ? inbox : {}), items };
 }
 
 // The rows of a doc's threads this person has now seen go read, in every
 // inbox they have (loadViewerInboxes), through each inbox's lane. Only an
-// inbox that holds such a row is written.
-async function markInboxSeen(env, session, slug, seen) {
+// inbox that holds such a row is written. `viewed`: thread id -> when the
+// person looked at it (their reaction rows go too, markInboxRead).
+async function markInboxSeen(env, session, slug, seen, viewed = null) {
   if (!seen || !Object.keys(seen).length) return;
+  const base = { slug, seen, ...(viewed && Object.keys(viewed).length ? { viewed } : {}) };
   for (const part of await loadViewerInboxes(env, session)) {
-    const next = markInboxRead(part.inbox, { slug, seen });
+    // A row here that does not know its threads is decided only by
+    // reconcileInboxSeen: this doc is taken off the round's done list so the
+    // next pass checks it again -- only this doc, not the whole round.
+    const undecided = part.inbox && part.inbox.seen_checked && (part.inbox.items || []).some((i) => i && !i.read
+      && i.slug === slug && DOC_ACTIVITY_INBOX_KINDS.has(i.kind) && !inboxRowThreads(i));
+    const mark = undecided ? { ...base, recheck: slug } : base;
+    const next = applyInboxRead(part.inbox, mark);
     if (JSON.stringify(next) === JSON.stringify(part.inbox)) continue;
-    await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark: { slug, seen } });
+    await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark });
   }
 }
 
 // `mark`: { all } (Mark all read) or markInboxRead's options.
 function applyInboxRead(inbox, mark) {
   if (mark && mark.all) return { items: (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => (i ? { ...i, read: true } : i)) };
-  return markInboxRead(inbox, mark || {});
+  const next = markInboxRead(inbox, mark || {});
+  // reconcileInboxSeen's progress, kept with the inbox it is about.
+  if (mark && mark.recheck && next.seen_checked) {
+    if (typeof mark.recheck === 'string') next.seen_checked = recheckSlug(next.seen_checked, mark.recheck);
+    else delete next.seen_checked;
+  }
+  if (mark && mark.checked && typeof mark.checked === 'object') next.seen_checked = mark.checked;
+  return next;
+}
+
+// The round's progress with one doc to be checked again: off the done list
+// (and its failed reads forgotten), the round not complete. Unchanged when
+// the doc is not done and the round is still open.
+function recheckSlug(checked, slug) {
+  const done = Array.isArray(checked.done) ? checked.done : [];
+  const failed = checked.failed && typeof checked.failed === 'object' ? checked.failed : null;
+  if (!done.includes(slug) && !checked.complete && !(failed && slug in failed)) return checked;
+  const out = { ...checked, done: done.filter((s) => s !== slug), complete: false };
+  if (failed) {
+    const rest = { ...failed };
+    delete rest[slug];
+    if (Object.keys(rest).length) out.failed = rest; else delete out.failed;
+  }
+  return out;
+}
+
+// ── One read state: bell <-> thread-seen ────────────────────────────────
+// The bell (inbox rows) and the doc's read state (thread-seen, comments
+// core) are two records of one thing: whether the person has seen a
+// thread's newest activity. Each side moves the other:
+//  - a thread marked seen (doc page, feedback widget, Needs you) reads its
+//    bell rows (markInboxSeen, from handleThreadSeen);
+//  - a bell row read (a click, Mark all read, Needs you's check) marks the
+//    threads it covers seen up to the activity it was about (bellThreadsRead
+//    + markThreadsSeenFromBell, from POST /api/notifications/read);
+//  - rows left unread although their thread was already seen -- read before
+//    either sync existed, or on another surface -- are found when the bell
+//    loads (reconcileInboxSeen) and go read then.
+
+// The threads the rows that `mark` turns read speak for: slug -> { thread
+// id -> newest ms }. Comment, reply and mention rows only: a reaction or an
+// access request is not a thread's activity. A row that does not know all
+// of its threads (inboxRowThreads null) still names its newest one.
+function bellThreadsRead(items, mark) {
+  const before = { items: (Array.isArray(items) ? items : []).filter(Boolean) };
+  const after = applyInboxRead(before, mark);
+  const out = new Map();
+  after.items.forEach((row, n) => {
+    const was = before.items[n];
+    if (!row || !was || was.read || !row.read || !DOC_ACTIVITY_INBOX_KINDS.has(row.kind) || !isValidSlug(row.slug)) return;
+    const threads = inboxRowThreads(row) || [[row.thread_id || row.comment_id, Date.parse(row.at) || 0]];
+    for (const [id, ms] of threads) {
+      if (typeof id !== 'string' || !THREAD_SEEN_ID_RE.test(id) || !(ms > 0)) continue;
+      if (!out.has(row.slug)) out.set(row.slug, {});
+      const map = out.get(row.slug);
+      map[id] = Math.max(Number(map[id]) || 0, ms);
+    }
+  });
+  return out;
+}
+
+// A bell read reaches the doc's read state: the person's thread-seen record
+// for each doc is raised (never lowered) to the activity the rows were about,
+// and My docs' agent-reply notes on those threads go with it (as a seen POST
+// would). Bounded: the newest BELL_SEEN_SYNC_SLUGS docs (Mark all read can
+// span many); per doc one read and at most one write, plus one read of the
+// person's agent-unread record(s) in all. Never fails the bell's request.
+const BELL_SEEN_SYNC_SLUGS = 20;
+async function markThreadsSeenFromBell(env, session, bySlug) {
+  if (!bySlug || !bySlug.size) return;
+  const who = await threadSeenWho(env, session);
+  if (!who) return;
+  const now = Date.now();
+  const raised = new Map();
+  for (const [slug, marks] of [...bySlug.entries()].slice(0, BELL_SEEN_SYNC_SLUGS)) {
+    const key = `thread-seen:${slug}:${who}`;
+    // The same lane as the doc page's seen POST: neither write loses the other.
+    let out = null;
+    try { out = await serialKvOp(env, key, 'thread_seen_raise', { key, marks: cleanThreadSeen(marks, { now }) }); } catch { continue; }
+    if (out && out.kept) raised.set(slug, out.kept);
+  }
+  try { await clearAgentUnreadMany(env, session, raised); } catch {}
+}
+
+// Rows still unread whose threads the person has already seen go read when
+// the bell loads (its list, and its polled count). Bounded per call: the
+// INBOX_RECONCILE_SLUGS docs with the newest unread comment/reply/mention
+// rows not yet checked this round -- one thread-seen read each, plus the
+// account lookup threadSeenWho makes -- and, for a grouped row that does not
+// know its threads in full (stored before rows kept them, or past the cap),
+// at most INBOX_RECONCILE_COMMENT_READS reads of a doc's comments.
+//
+// The round's progress is kept with the person's first inbox
+// (`seen_checked`: the newest unread row's `at` it is about, the docs done,
+// whether all are, until when). A doc whose rows were all decided -- read,
+// or still genuinely unread, or not decidable (a covered comment deleted) --
+// is done and not read again this round, so the next call moves on to the
+// docs after it; a doc skipped for the comment-read cap is not done and
+// comes first next time. Once every doc is done the inbox is not looked at
+// again (no read at all) until a new row arrives or INBOX_RECONCILE_TTL_MS
+// passes. Writes: one lane op per inbox whose rows change, and the progress
+// on the first inbox when it moves.
+const INBOX_RECONCILE_SLUGS = 10;
+const INBOX_RECONCILE_COMMENT_READS = 3;
+const INBOX_RECONCILE_TTL_MS = 6 * 3600 * 1000;
+const INBOX_RECONCILE_DONE_MAX = 200;
+// A doc whose comments could not be read is tried again on the next passes;
+// after this many failed reads in a round it counts as done (its legacy row
+// left to the bell), so one unreadable doc never keeps a round open.
+const INBOX_RECONCILE_READ_TRIES = 3;
+function unreadSeenRows(parts) {
+  return mergeInboxes(parts).items.filter((i) => i && !i.read && DOC_ACTIVITY_INBOX_KINDS.has(i.kind) && isValidSlug(i.slug));
+}
+async function reconcileInboxSeen(env, session, parts, { now = Date.now() } = {}) {
+  if (!parts.length) return parts;
+  const rows = unreadSeenRows(parts);
+  if (!rows.length) return parts;
+  const newest = rows[0].at || '';
+  const prior = parts[0].inbox && parts[0].inbox.seen_checked;
+  const current = prior && prior.at === newest && (Date.parse(prior.until) || 0) > now;
+  if (current && prior.complete) return parts;
+  const done = new Set(current && Array.isArray(prior.done) ? prior.done.filter((s) => typeof s === 'string') : []);
+  const failedBefore = current && prior.failed && typeof prior.failed === 'object' ? prior.failed : {};
+  const slugs = [];
+  for (const row of rows) {
+    if (done.has(row.slug) || slugs.includes(row.slug)) continue;
+    slugs.push(row.slug);
+    if (slugs.length >= INBOX_RECONCILE_SLUGS) break;
+  }
+  const who = slugs.length ? await threadSeenWho(env, session) : null;
+  if (slugs.length && !who) return parts;
+  const seenBySlug = new Map(await Promise.all(slugs.map(async (slug) => {
+    let seen = {};
+    try { seen = cleanThreadSeen(JSON.parse(await env.META.get(`thread-seen:${slug}:${who}`) || '{}')); } catch { seen = {}; }
+    return [slug, seen];
+  })));
+  const keys = actorKeys(session);
+  const commentReads = new Map();
+  const deferred = new Set();
+  const unreadable = new Set();
+  const idsAt = {};
+  for (const row of rows) {
+    if (!seenBySlug.has(row.slug)) continue;
+    const seen = seenBySlug.get(row.slug);
+    if (!Object.keys(seen).length) continue;
+    let threads = inboxRowThreads(row);
+    if (!threads && row.kind === 'comment') {
+      // The row covers the doc's `count` newest top-level comments by others
+      // up to its time. Checked against exactly those: one the person has
+      // not seen keeps it unread.
+      if (!commentReads.has(row.slug)) {
+        if (commentReads.size >= INBOX_RECONCILE_COMMENT_READS) { deferred.add(row.slug); continue; }
+        let list = [];
+        try { list = await readComments(env, row.slug); ensureMigrated(list); list = snapshotList(list, Infinity); } catch { list = null; }
+        commentReads.set(row.slug, list);
+      }
+      const list = commentReads.get(row.slug);
+      if (!list) { deferred.add(row.slug); unreadable.add(row.slug); continue; }
+      const upTo = Date.parse(row.at) || 0;
+      const count = Math.max(1, Math.floor(Number(row.count)) || 1);
+      const covered = list
+        .filter((c) => c && c.id && !authoredBy(keys, c) && (Date.parse(c.created) || 0) <= upTo)
+        .sort((a, b) => (Date.parse(b.created) || 0) - (Date.parse(a.created) || 0))
+        .slice(0, count);
+      // A covered comment is gone: not decidable here; left to the bell.
+      if (covered.length < count) continue;
+      threads = covered.map((c) => [c.id, Date.parse(c.created) || 0]);
+    }
+    if (threads && threads.every(([id, ms]) => (Number(seen[id]) || 0) >= ms)) idsAt[row.id] = row.at;
+  }
+  const readMark = Object.keys(idsAt).length ? { ids_at: idsAt } : null;
+  // The progress, about the inbox as it will be once these rows are read.
+  const after = readMark ? parts.map((part) => ({ ...part, inbox: markInboxRead(part.inbox, readMark) })) : parts;
+  const left = unreadSeenRows(after);
+  const afterNewest = left.length ? left[0].at || '' : '';
+  const nextDone = afterNewest === newest ? new Set(done) : new Set();
+  // Failed comment reads, counted per doc: at INBOX_RECONCILE_READ_TRIES the
+  // doc is done for this round instead of being deferred again.
+  const failed = {};
+  for (const [slug, n] of Object.entries(failedBefore)) if (Number(n) > 0) failed[slug] = Math.floor(Number(n));
+  for (const slug of unreadable) {
+    const n = (failed[slug] || 0) + 1;
+    if (n >= INBOX_RECONCILE_READ_TRIES) { delete failed[slug]; deferred.delete(slug); } else failed[slug] = n;
+  }
+  for (const slug of slugs) if (!deferred.has(slug)) nextDone.add(slug);
+  const remaining = left.filter((row) => !nextDone.has(row.slug));
+  // Kept only for docs that still have unread rows and are not done.
+  const stillOpen = new Set(remaining.map((row) => row.slug));
+  for (const slug of Object.keys(failed)) if (!stillOpen.has(slug)) delete failed[slug];
+  const checked = {
+    at: afterNewest,
+    done: [...nextDone].slice(-INBOX_RECONCILE_DONE_MAX),
+    complete: !remaining.length,
+    until: new Date(now + INBOX_RECONCILE_TTL_MS).toISOString(),
+    ...(Object.keys(failed).length ? { failed } : {}),
+  };
+  // `until` alone moving is no reason to write.
+  const sameProgress = prior && prior.at === checked.at && prior.complete === checked.complete
+    && JSON.stringify(prior.done || []) === JSON.stringify(checked.done)
+    && JSON.stringify(prior.failed || {}) === JSON.stringify(checked.failed || {}) && (Date.parse(prior.until) || 0) > now;
+  for (const [n, part] of parts.entries()) {
+    const mark = { ...(readMark || {}), ...(n === 0 && !sameProgress ? { checked } : {}) };
+    if (!mark.ids_at && !mark.checked) continue;
+    if (JSON.stringify(applyInboxRead(part.inbox, mark)) === JSON.stringify(part.inbox)) continue;
+    try {
+      const stored = await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark });
+      if (stored && Array.isArray(stored.items)) part.inbox = stored;
+    } catch {}
+  }
+  return parts;
 }
 
 // One person can be several actor keys -- a GitHub handle and the email
@@ -16891,10 +17124,19 @@ async function loadAgentUnread(env, session) {
 }
 // `seen`: thread id -> ms the person has seen it up to.
 async function clearAgentUnread(env, session, slug, seen) {
+  return clearAgentUnreadMany(env, session, new Map([[slug, seen]]));
+}
+// `bySlug`: slug -> seen, several docs in one pass (a bell read spanning
+// docs, markThreadsSeenFromBell): each record read once, written at most once.
+async function clearAgentUnreadMany(env, session, bySlug) {
+  if (!bySlug || !bySlug.size) return;
   for (const part of await loadAgentUnread(env, session)) {
-    // Written only when this person's record holds this doc.
-    if (!part.items.some((i) => i.slug === slug)) continue;
-    const kept = part.items.filter((i) => !(i.slug === slug && Number(seen[i.thread] || 0) >= Date.parse(i.at)));
+    // Written only when this person's record holds one of these docs.
+    if (!part.items.some((i) => bySlug.has(i.slug))) continue;
+    const kept = part.items.filter((i) => {
+      const seen = bySlug.get(i.slug);
+      return !(seen && Number(seen[i.thread] || 0) >= Date.parse(i.at));
+    });
     if (kept.length === part.items.length) continue;
     if (kept.length) await env.META.put(part.key, JSON.stringify({ items: kept }), { expirationTtl: AGENT_UNREAD_TTL_SECONDS });
     else await env.META.delete(part.key);
@@ -16959,6 +17201,29 @@ const SERIAL_KV_OPS = {
     if (JSON.stringify(next) === JSON.stringify(inbox)) return inbox;
     await env.META.put(key, JSON.stringify(next));
     return next;
+  },
+  // A person's thread-seen record for one doc is raised here, and only here
+  // (the seen POST, a bell read): two raises at once never lose one.
+  // `drop` (thread ids): ids the doc no longer holds, pruned. The caller
+  // works them out against the doc outside the lane, so what crosses into it
+  // is bounded by the record, never by the doc's thread count. (`allowed`,
+  // every thread id, is what an older caller sends; still honoured.) Newest
+  // marks kept past the cap. Throws when KV refuses the write.
+  async thread_seen_raise(env, { key, marks, drop = null, allowed = null }) {
+    let stored = {};
+    try { stored = cleanThreadSeen(JSON.parse(await env.META.get(key) || '{}')); } catch { stored = {}; }
+    const keep = Array.isArray(allowed) ? new Set(allowed) : null;
+    const next = cleanThreadSeen(stored, { allowed: keep });
+    if (Array.isArray(drop)) for (const id of drop) if (typeof id === 'string') delete next[id];
+    for (const [id, stamp] of Object.entries(cleanThreadSeen(marks))) {
+      if (keep && !keep.has(id)) continue;
+      if (stamp > (next[id] || 0)) next[id] = stamp;
+    }
+    const kept = Object.fromEntries(Object.entries(next).sort((a, b) => b[1] - a[1]).slice(0, THREAD_SEEN_MAX_ENTRIES));
+    const changed = Object.keys(kept).length !== Object.keys(stored).length
+      || Object.entries(kept).some(([id, stamp]) => stored[id] !== stamp);
+    if (changed) await env.META.put(key, JSON.stringify(kept), { expirationTtl: THREAD_SEEN_TTL_SECONDS });
+    return { kept, changed };
   },
   contacts_merge: (env, args) => mergeContacts(env, args),
   onboarding_stamp: (env, args) => stampOnboardingNow(env, args),
@@ -19445,6 +19710,18 @@ function cleanThreadSeen(raw, { now = Date.now(), allowed = null } = {}) {
   return out;
 }
 
+// What a seen POST says the person was shown, and when: `viewed` (thread
+// id -> ms), only for ids it also marks in `seen`. The page sends it for a
+// thread opened, in view or marked read -- not for marks it re-syncs (its
+// cache running ahead of the server), so a reaction that came after the
+// person last looked is never read by a re-sync.
+function viewedOf(body) {
+  const seen = cleanThreadSeen(body && body.seen);
+  const out = {};
+  for (const [id, ms] of Object.entries(cleanThreadSeen(body && body.viewed))) if (id in seen) out[id] = ms;
+  return out;
+}
+
 async function handleThreadSeen(env, req, url) {
   let body = null;
   if (req.method === 'POST') {
@@ -19489,8 +19766,10 @@ async function handleThreadSeen(env, req, url) {
     for (const [id, stamp] of Object.entries(cleanThreadSeen(body.seen))) upTo[id] = Math.max(stamp, Number(upTo[id]) || 0);
     try { await clearAgentUnread(env, session, slug, upTo); } catch {}
     // The bell's rows for those threads too: a comment read on the page is
-    // not still waiting in Needs you (Julie, 2026-11-14).
-    try { await markInboxSeen(env, session, slug, upTo); } catch {}
+    // not still waiting in Needs you (Julie, 2026-11-14). The threads the
+    // page says it showed the person (`viewed`: id -> when, never its
+    // re-sync of older marks) take their reaction rows with them.
+    try { await markInboxSeen(env, session, slug, upTo, viewedOf(body)); } catch {}
   };
   // Nothing newer than what is kept: no comment read, no write.
   const asked = Object.entries(cleanThreadSeen(body.seen)).filter(([id, stamp]) => stamp > (stored[id] || 0));
@@ -19507,32 +19786,26 @@ async function handleThreadSeen(env, req, url) {
   const list = await readComments(env, slug);
   ensureMigrated(list);
   const threads = new Set(snapshotList(list, Infinity).map((c) => c.id));
-  const next = cleanThreadSeen(stored, { allowed: threads });
   // Named back to the caller, who may read every thread id anyway: the ids
   // asked about that the doc does not hold, so its cache can drop them.
-  const unknown = [];
-  for (const [id, stamp] of asked) {
-    if (!threads.has(id)) { unknown.push(id); continue; }
-    if (stamp > (next[id] || 0)) next[id] = stamp;
+  const unknown = asked.map(([id]) => id).filter((id) => !threads.has(id));
+  // Raised in the record's lane (thread_seen_raise), where a bell read's
+  // raise also goes: read again there, newest marks first past the cap,
+  // written only if it changed. Only the asked ids the doc holds go in, with
+  // the stored ids it no longer holds to prune -- not the doc's every thread.
+  const marks = Object.fromEntries(asked.filter(([id]) => threads.has(id)));
+  const drop = Object.keys(stored).filter((id) => !threads.has(id));
+  let kept;
+  try {
+    ({ kept } = await serialKvOp(env, key, 'thread_seen_raise', { key, marks, ...(drop.length ? { drop } : {}) }));
+  } catch {
+    // KV refused (its own write limit): the browser keeps the mark and
+    // sends it again later.
+    return json({ error: 'seen_unavailable' }, { status: 503, headers: { ...headers, 'Retry-After': '60' } });
   }
-  // Newest marks first when there are more threads than the record keeps.
   // The ones asked about that fall past the cap are named (`capped`): the
   // caller keeps them locally and stops sending them.
-  const ordered = Object.entries(next).sort((a, b) => b[1] - a[1]);
-  const kept = Object.fromEntries(ordered.slice(0, THREAD_SEEN_MAX_ENTRIES));
   const capped = asked.map(([id]) => id).filter((id) => threads.has(id) && !(id in kept));
-  // Written only if what is kept differs from what was stored.
-  const changed = Object.keys(kept).length !== Object.keys(stored).length
-    || Object.entries(kept).some(([id, stamp]) => stored[id] !== stamp);
-  if (changed) {
-    try {
-      await env.META.put(key, JSON.stringify(kept), { expirationTtl: THREAD_SEEN_TTL_SECONDS });
-    } catch {
-      // KV refused (its own write limit): the browser keeps the mark and
-      // sends it again later.
-      return json({ error: 'seen_unavailable' }, { status: 503, headers: { ...headers, 'Retry-After': '60' } });
-    }
-  }
   await clearAgent(kept);
   return json({ ok: true, seen: kept, unknown, capped }, { headers });
 }
@@ -20251,6 +20524,12 @@ export class CommentsStore {
       let out = { ok: false, error: 'quota_unavailable' };
       try {
         await this.state.storage.transaction(async (txn) => {
+          if (op && (op.kind === 'lock' || op.kind === 'unlock')) {
+            const next = applyWriteLockOp(await txn.get('write_lock'), op);
+            if (next.changed) { if (next.lock) await txn.put('write_lock', next.lock); else await txn.delete('write_lock'); }
+            out = { ...next.result, used: 0 };
+            return;
+          }
           const next = applyAskQuotaOp(await txn.get('used'), op);
           if (next.changed) await txn.put('used', next.used);
           out = next.result;
@@ -21089,8 +21368,8 @@ async function handleAsk(env, req, url, slug) {
 // Without that Accept the answer is the one JSON body, as before.
 // One sentence from the New menu; tdoc AI (the Ask this doc model, the same
 // key and the same free allowance) drafts the doc and it is published as v1,
-// private, owned by the person who asked. Behind the shell flag
-// writeWithTdocAi and held here too: dev mode or a PR preview, else 404.
+// private, owned by the person who asked. The shell flag writeWithTdocAi
+// graduated (2026-11-16): open to every signed-in person in a browser.
 //
 // The model is asked for Markdown, never HTML, and what it returns is put
 // through mcpMarkdownToHtml, which escapes every character of it before any
@@ -21101,6 +21380,13 @@ async function handleAsk(env, req, url, slug) {
 const WRITE_AI_PROMPT_CHARS = 500;
 const WRITE_AI_RATE_LIMIT = 3;
 const WRITE_AI_RATE_WINDOW = 600;
+// One draft at a time per account (the allowance's Durable Object holds it):
+// longer than the longest a streamed draft may run, so a lock a crashed
+// request never released frees itself.
+const WRITE_AI_LOCK_MS = ASK_STREAM_TOTAL_MS + 60000;
+function writeAiLockToken() {
+  return [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 const WRITE_AI_MAX_TOKENS = 6000;
 // What one draft costs of the Ask allowance. A question is one unit and
 // answers in ASK_DEFAULT_MAX_TOKENS (4500) at most, usually far less; a
@@ -21141,9 +21427,7 @@ const WRITE_AI_PREVIEW_DOC = [
 
 async function writeWithAiAllowed(env, session) {
   if (env && env.TDOC_PREVIEW === '1') return true;
-  if (!session || session.feedback || session.team_agent) return false;
-  const dev = await devModeState(env, session).catch(() => null);
-  return Boolean(dev && dev.on);
+  return Boolean(session && !session.feedback && !session.team_agent);
 }
 
 // The title is the first "# " line the model wrote, else the sentence.
@@ -21198,15 +21482,38 @@ async function handleWriteWithAi(env, req, url, ctx) {
   if (team && !teamMember(await loadTeam(env, team), sessionInTeam(session, team) ? session.account_id : null)) {
     return json({ error: 'not_team_member' }, { status: 403 });
   }
+  // Whatever the create would refuse that is knowable now (team plan, a
+  // host closed to account creates, the account store, the doc quota) is
+  // refused before anything is charged or the model runs: a draft the
+  // create then turns away would be a free draft (it used to be refunded
+  // after streaming in full).
+  const pre = await createDocPreflight(env, req, session, team);
+  if (!pre.ok) return pre.response;
+  // One draft at a time per account, held in the allowance's Durable Object
+  // (atomic), so parallel requests cannot all pass the KV rate limit below
+  // before any of them counts. Released when the draft ends; it expires on
+  // its own after the longest a draft may run.
+  const lock = cfg.previewMock ? { ok: true, token: null } : await askQuotaOp(env, accountKey, { kind: 'lock', token: writeAiLockToken(), ttl_ms: WRITE_AI_LOCK_MS });
+  if (!lock.ok) {
+    if (lock.error === 'write_in_progress') return json({ error: 'write_in_progress', message: 'tdoc AI is already writing a draft for you. Wait for it to finish.' }, { status: 429 });
+    return json({ error: 'quota_unavailable' }, { status: 503 });
+  }
+  const unlock = async () => { if (lock.token) await askQuotaOp(env, accountKey, { kind: 'unlock', token: lock.token }).catch(() => null); };
+  // Counted only once the lock is held: a request refused for a draft in
+  // progress does not use up the window.
   if (await rateLimited(env, `write-ai:${accountKey}`, WRITE_AI_RATE_LIMIT, WRITE_AI_RATE_WINDOW)) {
+    await unlock();
     return json({ error: 'rate_limited', retry_after: WRITE_AI_RATE_WINDOW, message: 'A few drafts at a time: try again in a few minutes.' }, { status: 429 });
   }
   // The free allowance Ask this doc uses, charged before the model runs so a
-  // burst cannot spend more than it; a failure gives it back. A draft is up
-  // to WRITE_AI_MAX_TOKENS of output, so it costs WRITE_AI_ASK_UNITS
-  // questions, charged and given back as one.
+  // burst cannot spend more than it. It is given back only when nothing of
+  // the draft reached the person (the model failed before its first piece,
+  // or they left before it): once a piece was delivered the draft is spent,
+  // whatever happens after. A draft is up to WRITE_AI_MAX_TOKENS of output,
+  // so it costs WRITE_AI_ASK_UNITS questions, charged and given back as one.
   if (!cfg.previewMock) {
     const charged = await askQuotaOp(env, accountKey, { kind: 'charge', limit: cfg.limit, units: WRITE_AI_ASK_UNITS });
+    if (!charged.ok) await unlock();
     if (!charged.ok) {
       if (charged.error === 'ask_limit') {
         const left = Math.max(0, cfg.limit - (Number(charged.used) || 0));
@@ -21220,22 +21527,24 @@ async function handleWriteWithAi(env, req, url, ctx) {
       return json({ error: 'quota_unavailable' }, { status: 503 });
     }
   }
-  const refund = async () => { if (!cfg.previewMock) await askQuotaOp(env, accountKey, { kind: 'refund', units: WRITE_AI_ASK_UNITS }); };
+  const giveBack = async () => { if (!cfg.previewMock) await askQuotaOp(env, accountKey, { kind: 'refund', units: WRITE_AI_ASK_UNITS }); };
   const messages = [
     { role: 'system', content: WRITE_AI_SYSTEM_PROMPT },
     // An address typed into the sentence leaves the worker hidden, as in Ask.
     { role: 'user', content: `<request>\n${askFence(askNoEmails(rawPrompt)).replace(/<\/?\s*request\b[^>]*>/gi, '[tag removed]')}\n</request>` },
   ];
   const modelCfg = { ...cfg, maxTokens: Math.max(cfg.maxTokens, WRITE_AI_MAX_TOKENS) };
-  const job = { env, req, session, team, rawPrompt, accountKey, cfg, refund };
-
   // A client that asked for server-sent events watches the draft arrive.
   if (!(req.headers.get('accept') || '').includes('text/event-stream')) {
-    const timing = aiTimer('write_ai', modelCfg);
-    const out = cfg.previewMock ? { ok: true, answer: WRITE_AI_PREVIEW_DOC } : await callAskModel(modelCfg, messages, timing);
-    timing.done({ ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0 });
-    const done = await writeAiFinish(job, out);
-    return json(done.body, { status: done.status });
+    try {
+      const timing = aiTimer('write_ai', modelCfg);
+      const out = cfg.previewMock ? { ok: true, answer: WRITE_AI_PREVIEW_DOC } : await callAskModel(modelCfg, messages, timing);
+      timing.done({ ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0 });
+      // One JSON answer: nothing of the draft is delivered unless it is
+      // stored, so only a failed model run gives the request back.
+      const done = await writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, delivered: false, refund: giveBack }, out);
+      return json(done.body, { status: done.status });
+    } finally { await unlock(); }
   }
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
@@ -21244,6 +21553,10 @@ async function handleWriteWithAi(env, req, url, ctx) {
   const run = (async () => {
     let gone = false;
     let streamed = 0;
+    // Given back only while nothing the model wrote has been sent: no piece
+    // of the draft, and no reasoning text (up to WRITE_AI_REASONING_CHARS of
+    // it may go out as `thinking` events; elapsed-only beats do not count).
+    const refund = async () => { if (streamed === 0 && shownReasoning === 0) await giveBack(); };
     // One ai_timing line per call (server/ai-timing.js): the upstream's
     // headers, its first reasoning and first answer piece, the end, plus
     // whether reasoning text came, finish_reason, token usage and why a kept
@@ -21283,16 +21596,19 @@ async function handleWriteWithAi(env, req, url, ctx) {
         // Once the draft has begun the dialog has collapsed the thoughts.
         if (drafting || shownReasoning >= WRITE_AI_REASONING_CHARS) return;
         const piece = text.slice(0, WRITE_AI_REASONING_CHARS - shownReasoning);
-        shownReasoning += piece.length;
         await thinking(piece);
+        // Counted once it went out: a write to a reader who already left
+        // delivered nothing (the refund rule reads this).
+        shownReasoning += piece.length;
       },
     };
     // A write that fails means the reader went away: stop the model.
     const onDelta = async (text) => {
       if (!drafting) { drafting = true; if (cfg.previewMock) timer.mark('first_token'); }
       if (streamed >= WRITE_AI_MARKDOWN_CHARS) return false;
-      streamed += text.length;
       try { await send('delta', { text }); } catch { throw clientGone(); }
+      // Counted once it went out (as the reasoning above).
+      streamed += text.length;
       return streamed < WRITE_AI_MARKDOWN_CHARS;
     };
     let out;
@@ -21311,16 +21627,21 @@ async function handleWriteWithAi(env, req, url, ctx) {
     const timing = timer.done(out.clientGone || gone
       ? { ok: false, detail: 'client_gone', chars: streamed, extra }
       : { ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0, extra });
-    // Left before the end: nothing is created and the draft is given back.
+    // Left before the end: nothing is created; the request is given back
+    // only if they left before the first piece of the draft.
     if (out.clientGone || gone) {
       await refund();
-      console.log(JSON.stringify({ event: 'write_ai_abandoned' }));
+      await unlock();
+      console.log(JSON.stringify({ event: 'write_ai_abandoned', delivered_chars: streamed, reasoning_chars_sent: shownReasoning }));
       try { await writer.abort(); } catch {}
       return;
     }
     // The stream is over; v1 is being stored.
     if (out.ok) { try { await send('publishing', {}); } catch {} }
-    const done = await writeAiFinish(job, out);
+    let done;
+    try {
+      done = await writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, delivered: streamed > 0 || shownReasoning > 0, refund }, out);
+    } finally { await unlock(); }
     try {
       await send(done.status === 200 ? 'done' : 'error', { ...done.body, status: done.status, timing, ...(done.status === 200 ? { cutoff } : {}) });
       await writer.close();
@@ -21369,11 +21690,15 @@ async function writeAiPreviewStream(onDelta, hooks = {}) {
 
 // After the model: store the draft exactly one way for both responses.
 // -> { status, body }
-async function writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, refund }, out) {
+// `refund` gives the request back only when nothing was delivered (the
+// caller decides); `delivered` says whether part of the draft was sent.
+async function writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, refund, delivered = false }, out) {
   if (!out.ok) {
     await refund();
-    console.log(JSON.stringify({ event: 'write_ai_failed', status: out.status || null, detail: out.detail || null }));
-    return { status: 502, body: { error: 'write_failed', message: 'tdoc AI could not write it this time. Nothing was charged; try again.' } };
+    console.log(JSON.stringify({ event: 'write_ai_failed', status: out.status || null, detail: out.detail || null, delivered }));
+    return { status: 502, body: { error: 'write_failed', charged: delivered, message: delivered
+      ? 'tdoc AI stopped partway through this draft. Try again.'
+      : 'tdoc AI could not write it this time. Nothing was charged; try again.' } };
   }
   const markdown = writeAiMarkdown(out.answer);
   const title = writeAiTitle(markdown, rawPrompt);
@@ -21391,6 +21716,8 @@ async function writeAiFinish({ env, req, session, team, rawPrompt, accountKey, c
     version: { prompt: 'Written by tdoc AI from one sentence', ...(styled.style ? { style: styled.style } : {}) },
   });
   if (!made.ok) {
+    // The preflight passed, so this is rare (the size cap, a store error, a
+    // race to the doc quota). A draft already streamed is not given back.
     await refund();
     let body = null;
     try { body = await made.response.json(); } catch {}
@@ -21419,6 +21746,23 @@ function askQuotaUnits(op) {
   const n = Math.floor(Number(op && op.units));
   return Number.isFinite(n) && n >= 1 ? Math.min(n, 100) : 1;
 }
+// One draft at a time per account (Write with tdoc AI): the lock lives next
+// to the count in the same Durable Object, as { token, until }.
+//   { kind: 'lock', token, ttl_ms, now } -> { ok, token } | { ok: false, error: 'write_in_progress' }
+//   { kind: 'unlock', token }            -> { ok }  (only the holder's token frees it)
+function applyWriteLockOp(stored, op, now = Date.now()) {
+  const held = stored && typeof stored === 'object' && Number(stored.until) > now ? stored : null;
+  if (op.kind === 'lock') {
+    if (held) return { changed: false, lock: stored, result: { ok: false, error: 'write_in_progress' } };
+    const ttl = Math.min(Math.max(1000, Number(op.ttl_ms) || 0), 30 * 60 * 1000);
+    const token = String(op.token || '');
+    if (!token) return { changed: false, lock: stored, result: { ok: false, error: 'bad_quota_op' } };
+    return { changed: true, lock: { token, until: now + ttl }, result: { ok: true, token } };
+  }
+  if (held && held.token === String(op.token || '')) return { changed: true, lock: null, result: { ok: true } };
+  return { changed: false, lock: stored, result: { ok: true } };
+}
+
 function applyAskQuotaOp(stored, op) {
   const have = Math.max(0, Number(stored) || 0);
   const kv = Math.max(0, Number(op && op.kv) || 0);
@@ -21459,7 +21803,9 @@ async function askQuotaOp(env, accountKey, op) {
       return out;
     } catch { return { ok: false, error: 'quota_unavailable' }; }
   }
-  // A PR preview has no Durable Object: the KV count, read then written.
+  // A PR preview has no Durable Object: the KV count, read then written,
+  // and no draft lock (the preview runs a fixed draft, no model).
+  if (op.kind === 'lock' || op.kind === 'unlock') return env.TDOC_PREVIEW === '1' ? { ok: true, token: null, used: 0 } : { ok: false, error: 'quota_unavailable' };
   if (env.TDOC_PREVIEW === '1') {
     const next = applyAskQuotaOp(kv, { ...op, kv });
     if (next.changed) await env.META.put(usedKey, String(next.used));
@@ -23032,15 +23378,10 @@ async function handleProposeEdits(env, req, url, slug) {
   if (!added.ok) return suggestionsUnavailable();
   // The handoff these comments rode on learns how many edits are waiting,
   // for the progress line on its card. Never fails the suggestion.
-  // Only with the progress line on, and only for the agent it was handed to.
-  // Off, only an agent_timing line is logged (logHandoffSuggestion): no write.
+  // Only for the agent it was handed to (agentProgress, on for everyone).
   try {
-    if (await agentProgressAllowed(env, auth.actor)) {
-      const scope = await handoffAckScope(env, auth.actor, acting);
-      await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created, scope);
-    } else if (commentIds.length) {
-      await logHandoffSuggestion(env, slug, commentIds, set.created, () => handoffAckScope(env, auth.actor, acting));
-    }
+    const scope = await handoffAckScope(env, auth.actor, acting);
+    await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created, scope);
   } catch {}
   // The suggestions this handoff asked for have landed: for the comments they
   // name, or for all of it when they name none.
@@ -26360,9 +26701,7 @@ const MCP_TOOLS = {
 
   report_progress: {
     title: 'Say what you are working on',
-    // Dev mode only while the progress line is (shell flag agentProgress).
-    devMode: true,
-    description: 'While working on a comment handed to you, post one short line saying what you are doing now ("Editing the Pack section"); the person sees it under the current step in the progress steps on the comment. Optional; at most one every 10 seconds.',
+    description: 'Optional: one short line on what you are doing now on a comment handed to you ("Editing the Pack section"), shown in its progress steps. At most one per 10 s.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -29644,15 +29983,20 @@ const tdocHandlers = {
     if (p === '/api/notifications' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const parts = await loadViewerInboxes(env, s);
+      let parts = await loadViewerInboxes(env, s);
       if (!parts.length) return json({ error: 'sign_in_required' }, { status: 401 });
       const offset = Number(url.searchParams.get('offset') || 0);
+      // Opening the list: rows whose threads were already seen go read first.
+      if (!offset) {
+        try { parts = await reconcileInboxSeen(env, s, parts); } catch {}
+      }
       return json(await redactCommentEmails(pageInbox(mergeInboxes(parts), { offset }), await emailPrivacyFor(env, s, 'me:inbox', null)));
     }
     if (p === '/api/notifications/unread' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const parts = await loadViewerInboxes(env, s);
+      let parts = await loadViewerInboxes(env, s);
+      try { parts = await reconcileInboxSeen(env, s, parts); } catch {}
       return json({ unread: inboxUnread(mergeInboxes(parts)) });
     }
     if (p === '/api/notifications/read' && method === 'POST') {
@@ -29662,6 +30006,11 @@ const tdocHandlers = {
       }
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
+      // A feedback token (widget, site SDK) is the comment surface of one doc:
+      // it never reads the bell, and never writes its person's read state
+      // through it (handleThreadSeen refuses a site token that write too).
+      // The outer token wall already stops it; this one does not depend on it.
+      if (s.feedback) return json({ error: 'feedback_token_scope' }, { status: 403 });
       const parts = await loadViewerInboxes(env, s);
       if (!parts.length) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
@@ -29672,12 +30021,16 @@ const tdocHandlers = {
         comment_id: typeof body.comment_id === 'string' ? body.comment_id : undefined,
         ...(typeof body.slug === 'string' && isValidSlug(body.slug) ? { slug: body.slug } : {}),
       };
+      // The threads these rows were about, as they stand before the mark:
+      // reading them in the bell is seeing them (one read state).
+      const threadsRead = bellThreadsRead(mergeInboxes(parts).items, mark);
       for (const part of parts) {
         // Read first, outside the lane: most marks change nothing.
         if (JSON.stringify(applyInboxRead(part.inbox, mark)) === JSON.stringify(part.inbox)) continue;
         const stored = await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark });
         if (stored && Array.isArray(stored.items)) part.inbox = stored;
       }
+      try { await markThreadsSeenFromBell(env, s, threadsRead); } catch {}
       return json({ ok: true, unread: inboxUnread(mergeInboxes(parts)) });
     }
 
@@ -32359,9 +32712,6 @@ const tdocHandlers = {
     if (p === '/api/notify/progress' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
       if (!auth.ok) return auth.response;
-      // Dev mode / PR preview only, as report_progress is: anybody else
-      // finds no such route.
-      if (!(await agentProgressAllowed(env, auth.actor))) return new Response('Not found', { status: 404 });
       let body = {};
       try { body = await req.json(); } catch {}
       const slug = body && body.slug;
@@ -32402,7 +32752,17 @@ const tdocHandlers = {
       const n = Number.isInteger(prev.progress_n) ? prev.progress_n : 0;
       if (n >= HANDOFF_PROGRESS_MAX) return json({ error: 'too_many_progress', message: 'This handoff has had enough status updates; reply on the comment instead.' }, { status: 429 });
       const progress = { text, at: new Date(nowMs).toISOString() };
-      const rec = await putHandoff(env, slug, { ...prev, progress, progress_n: n + 1 });
+      // The same line again changes nothing: no write.
+      if (prev.progress && prev.progress.text === text) return json({ ok: true, handoff_id: prev.handoff_id, progress: prev.progress, unchanged: true });
+      // An optional status line: a refused KV write (its per-key write rate)
+      // is "try again shortly", never a 500 for the agent.
+      let rec;
+      try {
+        rec = await putHandoff(env, slug, { ...prev, progress, progress_n: n + 1 });
+      } catch (e) {
+        console.error('[notify/progress] handoff write refused (non-fatal):', (e && e.message) || String(e));
+        return json({ error: 'rate_limited', retry_after: Math.ceil(HANDOFF_PROGRESS_MIN_MS / 1000), message: 'Status not saved; try again shortly.' }, { status: 429, headers: { 'Retry-After': String(Math.ceil(HANDOFF_PROGRESS_MIN_MS / 1000)) } });
+      }
       return json({ ok: true, handoff_id: rec.handoff_id, progress });
     }
 
@@ -33589,7 +33949,7 @@ const tdocHandlers = {
           // the publish.
           await noteHandoffVersion(env, slug, {
             actor: auth.actor, target: publishingAgent, at: new Date().toISOString(), version: verNum,
-            progress: await agentProgressAllowed(env, auth.actor),
+            progress: true,
           });
         } catch (e) {
           console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));
