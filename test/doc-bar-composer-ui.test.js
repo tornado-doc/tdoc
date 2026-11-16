@@ -20,6 +20,7 @@ const fs = require('fs');
 const http = require('http');
 const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
 const { chooseMode, modeSelector } = require('./helpers/doc-mode');
+const { pickDocFilter } = require('./helpers/doc-filter');
 const { loadWorker, makeEnv, issue } = require('./helpers/worker-harness');
 const browserEdit = (env, slug, login) => {
   // A person's last edit in the browser (what the editor stamps), so the
@@ -408,11 +409,14 @@ async function dragSelect(page, phrase) {
       await page.locator('.tdoc-bar #tdoc-more-btn').click();
       if (await page.getByRole('menuitemradio', { name: 'Edit', exact: true }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from ⋯');
       await page.keyboard.press('Escape');
-      const filter = page.locator('.tdoc-comment-filter');
-      await filter.waitFor();
-      await filter.getByRole('radio', { name: /Resolved/ }).click();
+      // The filter is the Comment button's chevron menu; nothing floats over
+      // the comment column, and a choice other than Open names itself.
+      if (await page.locator('.tdoc-comment-filter-dock, .tdoc-comment-filter-row:not(.tdoc-cpanel-filterrow)').count()) throw new Error('a floating comment filter is back');
+      if (await page.locator('.tdoc-comment-refresh:not(.tdoc-cpanel .tdoc-comment-refresh)').count()) throw new Error('a floating Refresh is back');
+      await pickDocFilter(page, /^Resolved/);
       await page.waitForFunction(() => document.querySelectorAll('.tdoc-pin').length === 1);
-      await filter.getByRole('radio', { name: /All/ }).click();
+      if (!/· Resolved/.test(await page.locator('.tdoc-comments-toggle').innerText())) throw new Error('the Comment button does not name the filter');
+      await pickDocFilter(page, /^All/);
       await page.locator('.tdoc-bar .tdoc-space-trigger').click();
       await page.locator('.ui-menu-popup .tdoc-space-item-name', { hasText: 'Tdoc' }).waitFor();
       await shot(page, 'doc-bar-desktop.png');
@@ -689,7 +693,7 @@ async function dragSelect(page, phrase) {
         await openAskAi(page);
         const panel = page.getByRole('dialog', { name: 'Ask AI' });
         await panel.waitFor();
-        const filterBox = await page.locator('.tdoc-comment-filter').boundingBox();
+        const filterBox = await page.locator('.tdoc-comments-filter-menu').boundingBox();
         const panelBox = await panel.boundingBox();
         if (filterBox && panelBox && panelBox.y < filterBox.y + filterBox.height) throw new Error('Ask AI panel overlaps the comment filters');
         await shot(page, 'ask-ai-reader-empty.png');

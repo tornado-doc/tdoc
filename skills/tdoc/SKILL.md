@@ -36,7 +36,8 @@ is what the local agent daemon runs when someone sends a comment to this
 computer ("Send to agent"). Use it even when tdoc's MCP tools
 (`get_writing_guide`, `create_doc`, `update_doc`, `edit_doc`, `create_upload`,
 `commit_upload`, `get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
-`resolve_comment`, `answer_question`, `share_doc`, `create_feedback_space`, from
+`resolve_comment`, `report_progress`, `answer_question`, `share_doc`,
+`create_feedback_space`, from
 `https://tdoc.dev/mcp`,
 e.g. the tdoc Cloud plugin synced from claude.ai) are also connected, so one
 session does not switch between the two. Both must be the same tdoc account:

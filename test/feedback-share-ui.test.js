@@ -272,11 +272,21 @@ async function startServer(worker, env) {
             assert.equal(await row.locator('a.doc-info').getAttribute('href'), `/d/${w.slug}`);
             assert.equal(await page.locator('#pane-team-comments').count(), 1, 'the team comment stream is still there');
             // Not among the team's documents, as in My docs.
-            // The Docs tab, or Everything in the wide layout's sidebar.
-            await page.getByRole('tab', { name: 'Docs', exact: true }).or(page.getByRole('button', { name: /^Everything/ })).click();
-            await page.locator('.tm-loc').waitFor();
+            // The Docs tab, Everything in the wide layout's sidebar, or on a
+            // phone in layout A (myDocsA, on for everyone) the view menu.
+            const phoneViews = await page.locator('.mda-pview-btn').count();
+            const view = async (name) => { await page.locator('.mda-pview-btn').click(); await page.getByRole('menuitem', { name }).click(); };
+            if (phoneViews) {
+              await view(/^All docs/);
+              await page.locator('.mda-pbar').waitFor();
+              await page.waitForTimeout(300);
+            } else {
+              await page.getByRole('tab', { name: 'Docs', exact: true }).or(page.getByRole('button', { name: /^Everything/ })).click();
+              await page.locator('.tm-loc').waitFor();
+            }
             assert.equal(await page.locator(`a[href^="/d/${w.slug}"]`).count(), 0, 'the space is listed among the team docs');
-            await page.getByRole('tab', { name: 'Comments' }).click();
+            if (phoneViews) await view('Comments');
+            else await page.getByRole('tab', { name: 'Comments' }).click();
             await pane.waitFor();
             await noSideways(page);
             await shot(page, `${tag}-team-comments-feedback`);

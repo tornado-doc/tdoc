@@ -208,8 +208,10 @@ async function touchSelect(page, phrase) {
     const seq = states.map((s) => s.state).join(' → ');
     const waiting = states.find((s) => s.state === 'waiting');
     const received = states.find((s) => s.state === 'received');
-    if (!waiting || !/^Delivered to Claude \(demo\)/.test(waiting.title)) throw new Error(`no "Delivered to Claude (demo)": ${JSON.stringify(states)}`);
-    if (!received || !/^Claude \(demo\) is on it/.test(received.title)) throw new Error(`no "Claude (demo) is on it": ${JSON.stringify(states)}`);
+    // The agent progress line (agentProgress, on for everyone since
+    // 2026-11-16): "Sent to …", then "… is reading" while it works.
+    if (!waiting || !/^Sent to Claude \(demo\)/.test(waiting.title)) throw new Error(`no "Sent to Claude (demo)": ${JSON.stringify(states)}`);
+    if (!received || !/Claude \(demo\) is reading/.test(received.title)) throw new Error(`no "Claude (demo) is reading": ${JSON.stringify(states)}`);
     if (states[states.length - 1].state !== 'answered') throw new Error(`no reply: ${seq}`);
     // The reply is under the thread's "1 reply", as any agent reply is.
     await scope.locator('.tdoc-replies-toggle').first().click();

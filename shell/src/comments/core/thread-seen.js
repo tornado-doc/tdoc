@@ -9,6 +9,10 @@
 
 import { readStored, writeStored } from '../../safe-storage.js';
 
+// Fired on window once the server has taken a seen mark (comment-area); the
+// bell (use-notifications) counts again, since its rows went read with it.
+export const THREAD_SEEN_EVENT = 'tdoc:thread-seen';
+
 function storageKey(slug) {
   return `tdoc.thread-seen.${slug}`;
 }

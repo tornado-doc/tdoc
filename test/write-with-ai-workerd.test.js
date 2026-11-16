@@ -87,7 +87,7 @@ class R2 {
 }
 const fake = globalThis.__tdocFake || (globalThis.__tdocFake = { META: new KV(), DOCS: new R2(), PV: new KV(), PVDOCS: new R2() });
 const base = { TDOC_HOSTED_REGISTRATION: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', TDOC_EMAIL_ALIAS_SECRET: 'test-alias-secret' };
-const envFor = (env) => ({ ...base, META: fake.META, DOCS: fake.DOCS, COMMENTS: env.COMMENTS, TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test', ASK_API_KEY: 'test-key', ASK_API_BASE: 'https://model.test/v1', ASK_FREE_LIMIT: '9' });
+const envFor = (env) => ({ ...base, META: fake.META, DOCS: fake.DOCS, COMMENTS: env.COMMENTS, TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test', ASK_API_KEY: 'test-key', ASK_API_BASE: 'https://model.test/v1', ASK_FREE_LIMIT: '12' });
 // A PR preview: no Durable Object, no key.
 const previewEnv = () => ({ ...base, META: fake.PV, DOCS: fake.PVDOCS, TDOC_PREVIEW: '1' });
 export class TestStore extends CommentsStore { constructor(state, env) { super(state, envFor(env)); } }
@@ -172,7 +172,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     const docs = async () => (await (await fetch(origin + '/__docs')).json()).length;
 
     await t('streamed through the runtime: deltas as the model writes, then done with the stored v1', async () => {
-      assert.equal(await remaining(), 9);
+      assert.equal(await remaining(), 12);
       const t0 = Date.now();
       const res = await post('/api/write-with-ai', { prompt: 'a live plan' }, { Cookie: cookie, Accept: 'text/event-stream' });
       assert.equal(res.status, 200);
@@ -190,7 +190,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.ok(text.startsWith('# Live plan') && text.includes('<script>alert(1)</script>') && !text.includes('scratch'), text);
       assert.equal(done.data.title, 'Live plan');
       assert.equal(done.data.url, `/d/${done.data.slug}/v/1`);
-      assert.equal(done.data.remaining, 6, 'a draft is three of the allowance');
+      assert.equal(done.data.remaining, 9, 'a draft is three of the allowance');
       const model = await (await fetch(origin + '/__model')).json();
       assert.equal(model.last.stream, true);
       assert.ok(model.last.max_tokens >= 6000);
@@ -200,7 +200,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     });
 
-    await t('the client hangs up mid-stream: the model stops, the three are given back, nothing is created', async () => {
+    await t('the client hangs up mid-stream: the model stops, nothing is created; pieces were delivered, so the three stay charged', async () => {
       const before = await docs();
       const left = await remaining();
       const sentBefore = (await (await fetch(origin + '/__model')).json()).sentPieces;
@@ -208,9 +208,8 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       const res = await post('/api/write-with-ai', { prompt: 'leave early' }, { Cookie: cookie, Accept: 'text/event-stream' }, ctl.signal);
       await readEvents(res, Date.now(), 2);
       ctl.abort();
-      let now = null;
-      for (let i = 0; i < 60 && now !== left; i++) { now = await remaining(); if (now !== left) await new Promise((r) => setTimeout(r, 100)); }
-      assert.equal(now, left, 'not given back');
+      await new Promise((r) => setTimeout(r, STEP * 4));
+      assert.equal(await remaining(), left - 3, 'a delivered draft was given back');
       await new Promise((r) => setTimeout(r, STEP * 12));
       assert.equal(await docs(), before, 'a doc was created');
       const model = await (await fetch(origin + '/__model')).json();

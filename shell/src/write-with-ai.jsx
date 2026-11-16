@@ -14,8 +14,9 @@ import { AppTextarea } from './ui/textarea.jsx';
 // When the server has stored v1 it says so and the dialog opens it. The text
 // is rendered as React text nodes only (draftBlocks below): nothing the model
 // writes is ever HTML here, as nothing it writes is HTML on the stored page
-// (the server escapes it). Stop ends the request; the server gives the draft
-// back to the allowance and keeps nothing.
+// (the server escapes it). Stop ends the request and nothing is kept; the
+// server gives the request back to the allowance only if no piece of the
+// draft had arrived yet (once one has, the draft is spent).
 //
 // A reasoning model thinks before it writes, which can take tens of seconds.
 // The dialog is never blank meanwhile: "Starting…" at once, then, as the
@@ -398,7 +399,9 @@ export function WriteWithAiDialog({ team = '', onClose, navigate = (url) => { lo
     }
     if (result.body?.error === 'ask_limit' && Number.isInteger(result.body.remaining)) setRemaining(result.body.remaining);
     setError(result.stopped
-      ? { text: 'Stopped. Nothing was saved, and the request was not charged.' }
+      ? { text: drafting
+        ? 'Stopped. Nothing was saved; the draft still counts toward your free tdoc AI requests.'
+        : 'Stopped. Nothing was saved, and the request was not charged.' }
       : { text: writeAiErrorText(result.status, result.body), connect: result.body?.error === 'ask_limit' });
     setPhase('idle');
   };

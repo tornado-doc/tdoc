@@ -221,6 +221,9 @@ export function queryThreads(comments, {
 
 // The filter control's choices, with counts, the same on every surface.
 const FILTER_LABELS = { open: 'Open', replied: 'Replied', resolved: 'Resolved', all: 'All' };
+export function filterName(value) {
+  return FILTER_LABELS[value] || FILTER_LABELS[DEFAULT_FILTER];
+}
 export function filterOptions(counts = {}) {
   return COMMENT_FILTERS.map((value) => ({
     value, count: counts[value] || 0, label: `${FILTER_LABELS[value]} (${counts[value] || 0})`,

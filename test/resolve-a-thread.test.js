@@ -125,10 +125,14 @@ t('resolved visibility is a filter in the comments area (Open / Replied / Resolv
   const model = read('shell/src/comments/core/comment-area.js');
   assert(seg.includes('role="radiogroup"') && seg.includes('role="radio"'),
     'the filter should lean on the primitive for its semantics, not fake them');
-  assert(/className="tdoc-comment-filter"/.test(shell), 'there is no comments filter');
-  assert(shell.includes('options={filterOptions(commentArea.counts)') && /label: `\$\{FILTER_LABELS\[value\]\} \(\$\{counts\[value\] \|\| 0\}\)`/.test(query),
+  const panel = read('shell/src/comments/panel/comment-panel.jsx');
+  assert(/className="tdoc-comment-filter"/.test(panel), 'there is no comments filter');
+  assert(panel.includes('filterOptions(area.counts)') && /label: `\$\{FILTER_LABELS\[value\]\} \(\$\{counts\[value\] \|\| 0\}\)`/.test(query),
     'the filter should say how many each choice shows');
-  assert(/const commentFilterControl = comments\.comments\.length \? \(/.test(shell), 'the filter should appear when there are comments to filter');
+  // On a wide doc page it is the Comment button's chevron menu, shown when
+  // there are comments to filter; no filter row floats over the comments.
+  assert(/\{comments\.comments\.length \? \(\s*<CommentFilterMenu/.test(shell), 'the filter should appear when there are comments to filter');
+  assert(!/tdoc-comment-filter-dock/.test(shell), 'the floating filter row is back');
   assert(!/<AppSwitch\s*\n\s*id="tdoc-show-resolved"/.test(shell), 'the bar switch is back');
   // Open by default (resolved threads hidden); the choice is kept per doc.
   assert(query.includes("export const DEFAULT_FILTER = 'open';"), 'default Open');

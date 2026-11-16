@@ -1,5 +1,6 @@
 const assert = require('assert/strict');
 const { resolveTarget } = require('./helpers/fixture-server');
+const { closeDocFilterMenu, docFilterItem } = require('./helpers/doc-filter');
 const { chromium, webkit } = require('playwright');
 
 const resolvedText = 'Some prose so the article column has real height for layout tests.';
@@ -42,8 +43,8 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
         await page.waitForFunction(() => !document.querySelector('.tdoc-pin[data-id="resolved"],.tdoc-pin[data-id="element"],.tdoc-pin[data-id="moved"],.tdoc-pin[data-id="lost"]'));
       }
     };
-    // The filter (Open / Resolved / All) docks at the top of the comment
-    // column on a wide screen and heads the comments drawer on a phone.
+    // The filter (Open / Resolved / All) is the Comment button's chevron
+    // menu on a wide screen and heads the comments drawer on a phone.
     // The phone drawer slides in and out over 0.2s. While it slides out,
     // Base UI keeps the popup mounted with data-ending-style, so it still
     // counts as visible: acting on it then raced its unmount (the Enter was
@@ -52,11 +53,7 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     const sheet = page.locator('#tdoc-comment-layer');
     const filterRadio = async (name) => {
       const phone = await page.evaluate(() => innerWidth < 700);
-      if (!phone) {
-        const dock = page.locator('.tdoc-comment-filter-dock .tdoc-comment-filter');
-        await dock.waitFor();
-        return dock.getByRole('radio', { name });
-      }
+      if (!phone) return docFilterItem(page, name);
       await page.locator('#tdoc-comment-layer[data-ending-style]').waitFor({ state: 'detached' });
       if (!(await sheet.count())) await page.locator('.tdoc-fab').click();
       await page.locator('#tdoc-comment-layer[data-open]:not([data-starting-style])').waitFor();
@@ -64,7 +61,11 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
       await drawer.waitFor();
       return drawer.getByRole('radio', { name });
     };
-    const allShown = async () => (await filterRadio(/^All/)).getAttribute('aria-checked');
+    const allShown = async () => {
+      const checked = await (await filterRadio(/^All/)).getAttribute('aria-checked');
+      await closeDocFilterMenu(page);
+      return checked;
+    };
     const toggle = async () => {
       const on = (await allShown()) === 'true';
       // Keyboard activation keeps the selected card open until the filter
@@ -73,8 +74,12 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
       await control.focus();
       await page.keyboard.press('Enter');
       // The filter took the choice before the drawer is closed over it.
+      // (the drawer's radio, or on a wide screen the name on the Comment button)
       await page.waitForFunction((want) => [...document.querySelectorAll('.tdoc-comment-filter [role="radio"]')]
-        .some((radio) => radio.getAttribute('aria-checked') === 'true' && radio.textContent.trim().startsWith(want)), on ? 'Open' : 'All');
+        .some((radio) => radio.getAttribute('aria-checked') === 'true' && radio.textContent.trim().startsWith(want))
+        || (innerWidth >= 700 && !document.querySelector('.tdoc-comments-filter-popup')
+          && (want === 'Open' ? !document.querySelector('.tdoc-comments-toggle-filter')
+            : document.querySelector('.tdoc-comments-toggle-filter')?.textContent.includes(want))), on ? 'Open' : 'All');
       if (await sheet.count()) {
         await page.keyboard.press('Escape');
         await sheet.waitFor({ state: 'detached' });
@@ -83,6 +88,7 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     // Open is the default on every comment surface: resolved threads hidden.
     assert.equal(await allShown(), 'false', 'fresh document defaults to Open');
     assert.equal(await (await filterRadio(/^Open/)).getAttribute('aria-checked'), 'true', 'Open is the default');
+    await closeDocFilterMenu(page);
     await settled(false);
     await toggle();
     await settled(true);

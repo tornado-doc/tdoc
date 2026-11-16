@@ -90,6 +90,7 @@ const OFFLINE = [
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
   'me-rows.test.js',            // My docs rows: doc/sheet/slides, sharing (own docs only), unread comments + agent replies without per-row reads, Recent/Starred dates, checklist on Docs below 3 docs
+  'notification-read-unify.test.js', // One read state: a seen thread reads its bell rows (reactions too), a bell read marks the thread seen, stale rows reconcile when the bell loads (bounded reads)
   'shell-scan-cap.test.js',     // big docs: the page scans only the head (Cloudflare 1102)
   'inline-media.test.js',       // base64 video/audio refused at publish: link it instead
   'catalog-index.test.js',      // My docs costs what the viewer owns, not the platform (1102)
@@ -226,6 +227,7 @@ const OFFLINE = [
 const BROWSER = [
   'diagram-controls-ui.test.js', // authored map SVG sizing cannot stretch provider controls
   'reply-activity-ui.test.js', // v2 receives v3 reply status without navigation or pulsing
+  'modeless-edit-ui.test.js', // modelessEdit: type with no Edit mode, autosave -> version in place, bubble + "/" menu, table cells, commenter unchanged, two-editor conflict notice, newer version swapped in without reload (marked, reduced motion), phone, flag off unchanged
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
   'version-history-ui.test.js', // Edited opens the history panel: grouped rows, Show changes on/off remembered, Share this version, Restore, phone drawer, dev-mode numbers, suggestions row, flag off, earlier-version comment
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
@@ -241,6 +243,7 @@ const BROWSER = [
   'table-fit-ui.test.js', // standard tables fit the reader: page width beside the column, wrap, held first column, phone cards; author-laid-out tables, print and the stored HTML untouched; data-tdoc-wide
   'table-scroll-ui.test.js', // wide tables draw a scrollbar and scroll sideways in their own box (bar, wheel, swipe), page still scrolls over them, desktop + phone
   'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior
+  'comment-filter-menu-ui.test.js', // the doc page's filter is the Comment button's chevron menu: no floating row or Refresh over the cards, counts, named on the button, phone drawer keeps its filter
   'custom-design-theme.test.js', // custom palettes opt out of house styles and theme inversion
   'visual-viewer.test.js', // visual expansion preserves interactive state and reading mode
   'slides-scale.test.js', // slide view scales cards once: cqw type the same in WebKit and Chromium, desktop and phone
@@ -250,6 +253,7 @@ const BROWSER = [
   'doc-download-ui.test.js', // ⋯ → Download & copy: PDF / Word / Markdown for prose, CSV (this tab) / Excel for sheets, each a file of its type; desktop + phone; flag off unchanged
   'slide-controls-ui.test.js', // Edit-mode slide bar: Add slide (Title / Bullets / Big number), Duplicate, Move up/down, Delete + Undo, image by http(s) link; whole slides only, ids follow their slides, nothing of the bar saved; desktop hover + phone tap
   'create-menu-ui.test.js', // My docs New: type tiles (Doc · Sheet · Slides) then methods pushed in place, New folder in the menu, Blank deck edits + saves slide text, agent lines per type, keyboard, drop import; desktop + phone, sheets flag on/off
+  'sheet-comment-anchor-ui.test.js', // a sheet cell comment lands on its cell (row id + key): wide sheet with frozen columns, pin opens and marks it clear of the pin; sorted/filtered/hidden-column sheet doc; embed → sheet; row without id; phone link
   'sheet-embed-ui.test.js', // a sheet embedded in a page: live view (saved view, comment count, Open), no-access state with nothing of the sheet, keyless frames and requests get nothing, flag off is the link, desktop + phone
   'sheets-ui.test.js', // data-tdoc-sheet: grid, search/filter/sort/tags, view in #hash, cell comments, Edit + Save, CSV/XLSX import, CLI, 10k rows, phone
   'sheets-structure-ui.test.js', // group/collapse/expand rows + columns, hide/unhide, drag + Alt-arrow reorder, freeze (menu, grip, reader's own), tab rename/reorder/duplicate/colour/delete+undo, comments keep cells, flat view + phone cards summary rows, 10k rows grouped; desktop + phone
@@ -273,6 +277,7 @@ const BROWSER = [
   'write-with-agent-ui.test.js', // New › Write it with your agent (flag writeWithAgent): Send to your agent opens the new doc on the sent request; no agent: why + Connect an agent; flag off: copy line only; agentProgress off: plain Sent line, no progress pill; desktop + phone
   'agent-progress-ui.test.js', // agent progress line on the comment card (flag agentProgress): steps, current step + elapsed always shown, agent status via the poll; desktop + phone; flag off = On it
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
+  'bell-read-unify-ui.test.js', // one read state: a thread seen on the doc page drops that page's bell count at once (no poll); a bell row read marks its thread seen; opening the doc marks nothing
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
   'ask-send-switch-ui.test.js', // Ask AI: quiet Ask ▾ / Edit ▾ mode picker in the input row (instruction input, N comments included · Choose, Send to <agent>, instruction-only becomes a whole-document comment handed off, mode remembered), long agent name on a 320/390 phone stays one row, one row per team agent, team agent answers in public; no phone paper-plane
   'comment-selection-ui.test.js', // one selection engine: old cssPath anchors resolve, slide comments follow reordered slides across versions, area boxes on charts, + Comment picks (whole doc on nothing), widget quotes and page comments; desktop + phone
@@ -280,6 +285,7 @@ const BROWSER = [
   'comment-one-behaviour-ui.test.js', // doc page, feedback space and widget draw one card: reply prefill rule, one agent-list height, a reply draft per thread, floating card fits the screen, panel drag width
   'ask-edit-feedback-ui.test.js', // Ask/Edit v2 feedback: @agent in a comment or reply asks for suggestions (phone drawer, ⌘⇧Enter), nothing changes outside dev mode, a reply box is not held by delivery, rewrites read as blocks, edits stay text
   'suggest-accept-ui.test.js', // a suggestion's Accept in the real shell: readable refusals, decided rows leave silently, the list stays true without a refresh, Accept lands on /v/N
+  'suggest-overlap-ui.test.js', // pending suggestions on the same words (copies, overlapping finds) show once each, never one inside another; Reject takes exact copies; the held-back one then shows; Accept publishes
   'ask-edit-v2-gate-ui.test.js', // Ask/Edit v2 is dev-mode only: not on the list (desktop + phone), flag pinned, switch off -> Ask AI and comments exactly as before, no suggestions request; dev mode on is the control
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
   'comment-overflow-ask-dismiss-ui.test.js', // a long markdown reply (inline code, paths, a code block) never scrolls a comment card, its thread or an Ask AI answer sideways; Ask AI closes on a click in the document or Escape and keeps the draft; V1 + V2, desktop + phone

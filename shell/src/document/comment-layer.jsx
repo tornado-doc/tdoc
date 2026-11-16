@@ -15,7 +15,7 @@ import { isDocumentComment, TOP_BAR_HEIGHT } from './model.js';
 
 // The list header pieces live with the shared panel; re-exported for the
 // doc's compact dock beside its pins.
-export { CommentListControls, CommentListQuery } from '../comments/panel/comment-panel.jsx';
+export { CommentFilterMenu, CommentListQuery } from '../comments/panel/comment-panel.jsx';
 
 function Pin({
   cluster, top, left, frameTop, commentsById, seenMap, currentUser, handoffViewer = currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,

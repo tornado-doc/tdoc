@@ -4,9 +4,10 @@
 //   - the account menu's "Dev mode" switch: allow-listed only, flips the
 //     server-side setting; onboarding controls live in a submenu, not a bar
 //   - exiting through the Dev mode row needs two presses, like replay
-//   - flagged features (shell/src/feature-flags.js) show only in dev mode:
-//     doc thumbnails in the My docs grid and on /@handle cards; off, the
-//     cards are text (title, excerpt, date) and the menu says what dev mode adds
+//   - the menu says what dev mode adds (the default-off flags); grid and
+//     /@handle cards are text (title, excerpt, date), never the share card
+//     (the docThumbnails flag is gone), dev mode or not; layout A's card is
+//     the doc's first page
 //   - an account not on the list has no switch and the API refuses it
 //   - Sign out -> Sign in on the landing page brings a connected account back
 //     to My docs, not to "Connect your agent"
@@ -193,12 +194,12 @@ async function startServer(worker, env) {
         await context.close();
       });
 
-      await t(`${label}: doc thumbnails show only in dev mode; off, grid and profile cards are text`, async () => {
+      await t(`${label}: grid and profile cards are text, never the share card; the menu lists what dev mode adds`, async () => {
         const context = await newContext(JULIE);
         await context.route('**/thumbs/*.png', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: THUMB }));
         const page = await context.newPage();
-        // This is the one-column grid's DocRow card: myDocsA (on in dev mode)
-        // is pinned off here; layout A's card is checked at the end.
+        // This is the one-column grid's DocRow card: myDocsA (on for
+        // everyone) is pinned off here; layout A's card is checked below.
         await page.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), myDocsA: false }; });
         const errors = [];
         page.on('pageerror', (e) => errors.push(e.message));
@@ -209,8 +210,7 @@ async function startServer(worker, env) {
         await page.locator('.doc-row[data-slug="julie-notes"]').waitFor();
         assert.equal(await call('/api/me/handle', { handle: 'julie' }), 200);
         assert.equal(await call('/api/me/profile/pin', { slug: 'julie-notes', pinned: true }), 200);
-        // Give every doc a card again: pinning and the My docs backfill
-        // rewrite the preview, and the harness has no card renderer.
+        // Every doc has a share card: the cards still show none of it.
         const thumbs = async () => {
           for (const slug of ['julie-notes', 'tornado-doc']) {
             const meta = JSON.parse(await env.META.get(`meta:${slug}`));
@@ -227,23 +227,38 @@ async function startServer(worker, env) {
         const card = (slug) => page.locator(`.doc-list.is-grid .doc-row[data-slug="${slug}"]`);
         const gridShot = async (name) => {
           if (!SHOTS) return;
-          await page.waitForFunction(() => [...document.images].every((img) => img.complete));
           await page.screenshot({ path: path.join(SHOTS, `${label}-${name}.png`), fullPage: true });
         };
+        const textCards = async (tag) => {
+          assert.equal(await page.locator('.doc-list.is-grid img').count(), 0, `${tag}: no picture in the grid`);
+          assert.ok(await card('julie-notes').evaluate((el) => el.classList.contains('is-text-card')), `${tag}: a text card`);
+          const excerpt = card('julie-notes').locator('.doc-preview-excerpt');
+          assert.equal(await excerpt.isVisible(), true, `${tag}: the excerpt shows`);
+          assert.match(await excerpt.innerText(), /prompt-native documents/i);
+          assert.equal(await card('julie-notes').locator('.doc-meta').isVisible(), true, `${tag}: and the date`);
+        };
+        const profileText = async (tag) => {
+          await thumbs();
+          await page.goto(`${base}/@julie`);
+          await page.locator('.profile-pick-card').first().waitFor();
+          assert.equal(await page.locator('.profile-pick-card img').count(), 0, `${tag}: no profile picture`);
+          assert.equal(await page.locator('.profile-pick-excerpt').first().isVisible(), true, `${tag}: profile card keeps its excerpt`);
+        };
 
-        // Off: no picture box, the excerpt is back, the menu says nothing extra.
+        // Dev mode off, then on: the same text cards.
         await env.META.put('dev-mode:julie@example.com', 'off');
         await grid();
-        assert.equal(await page.locator('.doc-list.is-grid img, .doc-list.is-grid .doc-card-preview').count(), 0, 'no thumbnail while off');
-        assert.ok(await card('julie-notes').evaluate((el) => el.classList.contains('is-text-card')));
-        const excerpt = card('julie-notes').locator('.doc-preview-excerpt');
-        assert.equal(await excerpt.isVisible(), true, 'the excerpt shows on a text card');
-        assert.match(await excerpt.innerText(), /prompt-native documents/i);
-        assert.equal(await card('julie-notes').locator('.doc-meta').isVisible(), true, 'and the date');
+        await textCards('dev mode off');
         await gridShot('grid-devmode-off');
+        await profileText('dev mode off');
+        await env.META.delete('dev-mode:julie@example.com');
+        await grid();
+        await textCards('dev mode on');
+        await gridShot('grid-devmode-on');
         await openAccountMenu(page);
         await devItem(page).waitFor();
-        assert.match(await page.locator('.tdoc-dev-mode-flags').innerText(), /Dev mode shows: Doc thumbnails/);
+        assert.match(await page.locator('.tdoc-dev-mode-flags').innerText(), /Dev mode shows: .*Ask AI edits the doc/);
+        assert.doesNotMatch(await page.locator('.tdoc-dev-mode-flags').innerText(), /thumbnails|New My docs layout/i);
         const menuWidth = await page.locator('.ui-menu-popup').filter({ has: page.locator('.tdoc-dev-mode-flags') }).evaluate((el) => el.getBoundingClientRect().width);
         assert.ok(menuWidth < 320, `the flags note wraps and does not stretch the menu (${menuWidth}px)`);
         await shot(page, 'menu-flags');
@@ -254,22 +269,9 @@ async function startServer(worker, env) {
         await devItem(page).waitFor();
         assert.match(await page.locator('.tdoc-dev-mode-flags').innerText(), /Dev mode shows:/);
         await page.keyboard.press('Escape');
-        await page.goto(`${base}/me`);
-        await thumbs();
-        await page.goto(`${base}/@julie`);
-        await page.locator('.profile-pick-card').first().waitFor();
-        assert.equal(await page.locator('.profile-pick-card.has-image, .profile-pick-media').count(), 0, 'no profile thumbnail while off');
-        assert.equal(await page.locator('.profile-pick-excerpt').first().isVisible(), true, 'profile card keeps its excerpt');
-
-        // On: the picture is there, in the grid and on the profile.
-        await env.META.delete('dev-mode:julie@example.com');
-        await grid();
-        await card('julie-notes').locator('.doc-card-preview img').waitFor();
-        assert.equal(await page.locator('.doc-list.is-grid .is-text-card').count(), 0);
-        assert.equal(await card('julie-notes').locator('.doc-card-preview img').getAttribute('src'), '/thumbs/julie-notes.png');
-        await gridShot('grid-devmode-on');
+        await profileText('dev mode on');
         if (!phone) {
-          // Layout A's card (myDocsA, on in dev mode) shows the doc's first
+          // Layout A's card (myDocsA, on for everyone) shows the doc's first
           // page as text, Google Docs style, not the link-share picture.
           const wide = await context.newPage();
           await wide.goto(`${base}/me`);
@@ -279,10 +281,6 @@ async function startServer(worker, env) {
           assert.equal(await wide.locator('.mda-card[data-slug="julie-notes"] img').count(), 0);
           await wide.close();
         }
-        await thumbs();
-        await page.goto(`${base}/@julie`);
-        await page.locator('.profile-pick-card').first().waitFor();
-        await page.locator('.profile-pick-card.has-image .profile-pick-media img').first().waitFor();
         assert.deepEqual(errors, []);
         await context.close();
       });

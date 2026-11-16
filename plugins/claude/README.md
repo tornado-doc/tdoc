@@ -18,8 +18,9 @@ plugin.
 - Publish a document and its local images from files through signed upload
   URLs (`create_upload`, `commit_upload`)
 - Read a document, or list yours (`get_doc`, `list_docs`)
-- Read comments, reply to them, mark them handled (`get_comments`,
-  `reply_to_comment`, `resolve_comment`)
+- Read comments, reply to them, mark them handled, say what you are doing
+  on one handed to you (`get_comments`, `reply_to_comment`,
+  `resolve_comment`, `report_progress`)
 - Answer a reader's question about a document (`answer_question`)
 - Change who can open a document (`share_doc`)
 - Set up product feedback on a website: a private comment space and the one

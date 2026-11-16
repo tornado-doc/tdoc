@@ -875,7 +875,7 @@ const APP = 'http://localhost:3000';
     });
   }
 
-  await t('the widget learns its viewer\'s dev flags: dev mode on gets area select, everyone else none', async () => {
+  await t('the widget learns its viewer\'s dev flags: always a list, empty while no widget flag is dev-only', async () => {
     const env = makeEnv(mod.CommentsStore);
     env.TDOC_DEBUG_ACCOUNTS = 'dev@tdoc.test,off@tdoc.test';
     const cookieFor = async (login, email) => {
@@ -895,25 +895,24 @@ const APP = 'http://localhost:3000';
       assert(!('devMode' in body) && !('dev_mode' in body) && !('debug' in body), 'the dev-mode status itself is sent to the page');
       return body.dev_flags;
     };
+    // feedbackAreaSelect, feedbackDocFramePick and agentProgress graduated
+    // (2026-11-16): on for everyone from feature-flags.js, so no session
+    // names them, dev mode or not.
     const dev = await cookieFor('devy', 'dev@tdoc.test');
-    assert((await flagsOf(dev)).includes('feedbackAreaSelect'), 'dev mode on did not get area select');
-    assert((await flagsOf(dev)).includes('feedbackDocFramePick'), 'dev mode on did not get picking inside a tdoc doc');
+    assert((await flagsOf(dev)).length === 0, 'dev mode on still gets graduated flags');
     const off = await cookieFor('offy', 'off@tdoc.test');
     await env.META.put('dev-mode:off@tdoc.test', 'off');
-    assert((await flagsOf(off)).length === 0, 'dev mode switched off still got flags');
+    assert((await flagsOf(off)).length === 0, 'dev mode switched off got flags');
     assert((await flagsOf(await cookieFor('plain', 'plain@tdoc.test'))).length === 0, 'an account not on the list got flags');
     assert((await flagsOf(await putSession(env, 'julie'))).length === 0, 'a session without an address got flags');
-    // Turned off later: the next session answer drops them.
-    const c = await connect(env, dev);
-    await env.META.put('dev-mode:dev@tdoc.test', 'off');
-    const after = await (await worker.fetch(req('/api/feedback/session', { token: c.body.token }), env, {})).json();
-    assert(Array.isArray(after.dev_flags) && after.dev_flags.length === 0, `still on after switching off: ${JSON.stringify(after.dev_flags)}`);
     // Anonymous: no token, no session answer at all.
     const anon = await worker.fetch(req('/api/feedback/session'), env, {});
     assert(anon.status === 401 && !('dev_flags' in await anon.json()), 'anonymous got a session answer');
-    // The names are real dev-only flags of the shell.
+    // The widget reads them from the registry: default true.
     const flags = fs.readFileSync(path.join(ROOT, 'shell/src/feature-flags.js'), 'utf8');
-    assert(/feedbackAreaSelect: Object\.freeze\(\{[^}]*default: false/.test(flags), 'feedbackAreaSelect is no longer a dev-only flag');
+    for (const name of ['feedbackAreaSelect', 'feedbackDocFramePick', 'agentProgress']) {
+      assert(new RegExp(`${name}: Object\\.freeze\\(\\{[^}]*default: true`).test(flags), `${name} is not on for everyone`);
+    }
   });
 
   await t('a bad /feedback/join link is the ordinary status page, not a page of its own', async () => {
