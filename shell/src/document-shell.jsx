@@ -1753,16 +1753,34 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     }
   };
 
+  // The bar's star: optimistic, put back if the server refuses. The same
+  // POST /api/star as My docs, and the same 'tdoc-doc-state' message, so an
+  // open My docs tab (and this doc in another tab) follows along.
   const toggleStar = async () => {
     const next = !starred;
     setStarred(next);
     try {
       await setDocumentStar(config.slug, next);
       showToast(next ? 'Starred - find it in My docs' : 'Star removed');
-    } catch {
+      try {
+        new BroadcastChannel('tdoc-doc-state').postMessage({ type: 'star', slug: config.slug, starred: next });
+      } catch {
+        // Other tabs catch up on their next load.
+      }
+    } catch (error) {
       setStarred(!next);
+      showToast(error?.message || (next ? 'Could not star this doc' : 'Could not remove the star'), true);
     }
   };
+  useEffect(() => {
+    if (!config.viewerStar || typeof BroadcastChannel !== 'function') return undefined;
+    const channel = new BroadcastChannel('tdoc-doc-state');
+    channel.onmessage = (event) => {
+      const data = event.data || {};
+      if (data.type === 'star' && data.slug === config.slug) setStarred(Boolean(data.starred));
+    };
+    return () => channel.close();
+  }, [config.viewerStar, config.slug]);
 
   const openMoveDocument = async () => {
     setDialog({ type: 'move-document' });
@@ -2474,8 +2492,6 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         overflowActions={config.isLanding ? null : (
           <DocumentOverflowActions
             config={config}
-            starred={starred}
-            onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
             onShare={() => setDialog({ type: 'share' })}
             onCopyMarkdown={copyMarkdown}
@@ -2521,6 +2537,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           config={config}
           title={title}
           onRename={renameDoc}
+          starred={starred}
+          onToggleStar={toggleStar}
         />
       </TopBar>
       {teamGuestsEnabled && config.teamManage?.guest ? <div className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>

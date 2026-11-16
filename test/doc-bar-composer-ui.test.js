@@ -372,7 +372,7 @@ async function dragSelect(page, phrase) {
       await page.locator('.tdoc-bar .tdoc-space-trigger', { hasText: 'My docs' }).waitFor();
       if (await page.locator('.tdoc-crumbs, .tdoc-crumb').count()) throw new Error('space / folder crumbs are back');
       if (!(await page.locator('.tdoc-bar-left .doc-title').isVisible())) throw new Error('no title on the left');
-      if (await page.locator('#tdoc-show-resolved, #tdoc-theme-btn, #tdoc-star-btn').count()) throw new Error('an old bar control is back');
+      if (await page.locator('#tdoc-show-resolved, #tdoc-theme-btn').count()) throw new Error('an old bar control is back');
       // One comment entry in the bar (Julie, 2026-11-10): "Comment" with the
       // open count, opening the comment list. No mode dropdown beside it.
       if (await page.locator('.tdoc-bar .tdoc-mode-trigger').count()) throw new Error('the mode switch is back in the bar beside Comment');

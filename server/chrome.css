@@ -93,11 +93,13 @@
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
   .tdoc-bar button:hover { background: #f0f1f4; color: #1a1a1a; }
-  /* flex-shrink 0: when the narrow bar squeezes the title into its ellipsis,
-     the star must keep its full hit target rather than collapse. */
-  .tdoc-bar button.tdoc-star-btn { font-size: 15px; padding: 4px 7px; color: #b9bfca; line-height: 1; flex-shrink: 0; }
-  .tdoc-bar button.tdoc-star-btn:hover { color: #f5a623; background: #f0f1f4; }
-  .tdoc-bar button.tdoc-star-btn.is-starred { color: #f5a623; }
+  /* The star after the title (AppButton icon: it owns the size). Colours are
+     My docs' star (docs-hub.css .star-btn): muted outline, #f5a623 filled.
+     flex-shrink 0: when the bar squeezes the title into its ellipsis, the
+     star keeps its full hit target rather than collapse. */
+  .tdoc-bar .ui-btn.ui-btn-icon.tdoc-star-btn { color: var(--td-muted); flex-shrink: 0; }
+  .tdoc-bar .ui-btn.ui-btn-icon.tdoc-star-btn:hover:not(:disabled),
+  .tdoc-bar .ui-btn.ui-btn-icon.tdoc-star-btn.is-starred { color: #f5a623; }
   .tdoc-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
   .tdoc-bar button svg { flex-shrink: 0; }
 
@@ -859,14 +861,15 @@
     .tdoc-bar .tdoc-ask-ai-label { display: none; }
     .tdoc-bar .tdoc-send-agent-action { width: 44px; padding: 0; }
     .tdoc-version-wrap, .tdoc-bar #tdoc-version-toggle { display: none; }
-    .tdoc-bar .doc-title { flex: 1 1 auto; font-size: 13px; }
+    /* Hugs its text (as on desktop) so the star sits right after it; the
+       right cluster's margin-left:auto still pins the actions to the edge. */
+    .tdoc-bar .doc-title { flex: 0 1 auto; font-size: 13px; }
     /* The 44px touch-target rule above centres every button in the bar, which
        is right for icons and wrong for the title: the title is a button too
        (it is editable in place), so it drifted to the middle of the bar and
        read as a centred page header. text-align cannot fix it — the button is
        a flex box, so justify-content is what places the text. */
     .tdoc-bar button.doc-title-edit { justify-content: flex-start; }
-    .tdoc-bar #tdoc-star-btn,
     .tdoc-bar #tdoc-publish-btn,
     .tdoc-bar .tdoc-switch,
     .tdoc-bar .tdoc-account-trigger { display: none; }

@@ -1359,6 +1359,8 @@ a.ui-menu-item:visited {
 @media (max-width: 700px) {
   .tdoc-modal .ui-btn.ui-btn-m, .docs-hub .ui-btn.ui-btn-m, .tdoc-notif-prompt .ui-btn.ui-btn-m { height: auto; min-height: 44px; }
   .tdoc-modal .ui-btn.ui-btn-icon, .docs-hub .ui-btn.ui-btn-icon { width: 44px; height: 44px; }
+  /* The doc bar's star after the title: a thumb target like the bar's other icons. */
+  .tdoc-bar .ui-btn.ui-btn-icon.tdoc-star-btn { width: 44px; height: 44px; min-height: 44px; }
 }
 
 /* CodeBlock (shell/src/ui/code-block.jsx). Selectors are doubled so the

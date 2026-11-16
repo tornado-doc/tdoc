@@ -164,6 +164,18 @@ export function useDocsHub({ boot, onUnauthorized }) {
     return true;
   }, [run]);
 
+  // A doc page's bar star posts the same message: an open My docs tab
+  // repaints that row (and Starred) without a reload.
+  useEffect(() => {
+    if (typeof BroadcastChannel !== 'function') return undefined;
+    const channel = new BroadcastChannel('tdoc-doc-state');
+    channel.onmessage = (event) => {
+      const data = event.data || {};
+      if (data.type === 'star' && data.slug) paintStar(data.slug, Boolean(data.starred));
+    };
+    return () => channel.close();
+  }, [paintStar]);
+
   const toggleStar = useCallback(async (slug, on) => {
     paintStar(slug, on);
     const ok = await run(() => setDocumentStar(slug, on));
