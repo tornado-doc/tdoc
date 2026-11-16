@@ -20470,7 +20470,11 @@ function askConfig(env) {
   const limit = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : ASK_DEFAULT_FREE_LIMIT;
   const rawMax = Number(env && env.ASK_MAX_TOKENS);
   const maxTokens = Number.isFinite(rawMax) && rawMax > 0 ? Math.floor(rawMax) : ASK_DEFAULT_MAX_TOKENS;
-  return { available: Boolean(key) || previewMock, previewMock, key, base, model, limit, maxTokens };
+  // ASK_STREAM_TOTAL_MS: the whole-draft limit for a streamed answer, when
+  // set lower than the default (tests; an operator tightening it).
+  const rawTotal = Number(env && env.ASK_STREAM_TOTAL_MS);
+  const streamTotalMs = Number.isFinite(rawTotal) && rawTotal > 0 && rawTotal < ASK_STREAM_TOTAL_MS ? Math.floor(rawTotal) : 0;
+  return { available: Boolean(key) || previewMock, previewMock, key, base, model, limit, maxTokens, streamTotalMs };
 }
 
 const ASK_PREVIEW_ANSWER = [
@@ -20641,29 +20645,69 @@ async function askAttempt(cfg, headers, payload, timing = AI_TIMER_NONE) {
 // the answer is handed to `onDelta` as it arrives; awaiting it is the
 // backpressure, and a throw from it (the reader went away) stops the call.
 // `onDelta` returning false stops it too, keeping what came (a length cap).
-// Only `delta.content` counts: a reasoning model's `reasoning` /
-// `reasoning_content` is its scratchpad and never reaches the reader.
+// Only `delta.content` counts toward the answer: a reasoning model's
+// `reasoning` / `reasoning_content` / `reasoning_details[].text` is its
+// scratchpad and is never part of it. A caller that wants to show the model
+// at work passes `hooks.onReasoning(text)` (awaited, like onDelta; a throw
+// stops the call) and `hooks.onHeaders()` (the upstream answered).
 // An endpoint that ignores `stream` and answers with one JSON body is read
 // the way askAttempt reads it. One retry, only on a 5xx before any text.
 // The time limit is between pieces (ASK_TIMEOUT_MS), not for the whole
 // draft, and the whole draft is held to ASK_STREAM_TOTAL_MS.
 const ASK_STREAM_TOTAL_MS = 300000;
-async function streamAskModel(cfg, messages, onDelta, timing = AI_TIMER_NONE) {
+// Token usage is asked for (`stream_options.include_usage`); a provider
+// that refuses the option (a 400/422 before any text) is asked again
+// without it. The result also carries `finishReason` (the last one the
+// provider gave), `usage` ({ prompt_tokens, completion_tokens,
+// reasoning_tokens }, when sent), `refusal` (a delta.refusal came) and
+// `timeLimit` (ASK_STREAM_TOTAL_MS ended it after some text, kept).
+// `timing` is the call's ai_timing timer; `hooks` (onHeaders, onReasoning)
+// let a caller show the model at work.
+async function streamAskModel(cfg, messages, onDelta, timing = AI_TIMER_NONE, hooks = {}) {
   const headers = { ...askHeaders(cfg), Accept: 'text/event-stream' };
-  const payload = JSON.stringify({ model: cfg.model, max_tokens: cfg.maxTokens, messages, stream: true });
-  let out = await askStreamAttempt(cfg, headers, payload, onDelta, timing);
-  if (!out.ok && out.status >= 500 && !out.sent) out = await askStreamAttempt(cfg, headers, payload, onDelta, timing);
+  const base = { model: cfg.model, max_tokens: cfg.maxTokens, messages, stream: true };
+  let payload = JSON.stringify({ ...base, stream_options: { include_usage: true } });
+  let out = await askStreamAttempt(cfg, headers, payload, onDelta, timing, hooks);
+  if (!out.ok && (out.status === 400 || out.status === 422) && !out.sent) {
+    payload = JSON.stringify(base);
+    out = await askStreamAttempt(cfg, headers, payload, onDelta, timing, hooks);
+  }
+  if (!out.ok && out.status >= 500 && !out.sent) out = await askStreamAttempt(cfg, headers, payload, onDelta, timing, hooks);
   return out;
 }
 
-async function askStreamAttempt(cfg, headers, payload, onDelta, timing = AI_TIMER_NONE) {
+function askUsage(u) {
+  if (!u || typeof u !== 'object') return null;
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const details = u.completion_tokens_details || {};
+  return { prompt_tokens: n(u.prompt_tokens), completion_tokens: n(u.completion_tokens), reasoning_tokens: n(details.reasoning_tokens ?? u.reasoning_tokens) };
+}
+
+// The reasoning text in one streamed delta, whichever field the provider
+// uses (OpenRouter `reasoning` / `reasoning_details`, DeepSeek-style
+// `reasoning_content`). '' when there is none.
+function askReasoningText(delta) {
+  if (!delta) return '';
+  if (typeof delta.reasoning === 'string' && delta.reasoning) return delta.reasoning;
+  if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) return delta.reasoning_content;
+  if (Array.isArray(delta.reasoning_details)) {
+    return delta.reasoning_details.map((d) => (d && typeof d.text === 'string' ? d.text : d && typeof d.summary === 'string' ? d.summary : '')).join('');
+  }
+  return '';
+}
+
+async function askStreamAttempt(cfg, headers, payload, onDelta, timing = AI_TIMER_NONE, hooks = {}) {
   const ctl = new AbortController();
   let idle = null;
   const arm = () => { if (idle) clearTimeout(idle); idle = setTimeout(() => ctl.abort('timeout'), ASK_TIMEOUT_MS); };
-  const total = setTimeout(() => ctl.abort('timeout'), ASK_STREAM_TOTAL_MS);
+  const total = setTimeout(() => ctl.abort('total'), cfg.streamTotalMs || ASK_STREAM_TOTAL_MS);
   let answer = '';
   let sent = false;
   let stopped = false;
+  let finishReason = null;
+  let usage = null;
+  let refusal = false;
+  const extra = () => ({ finishReason, usage, refusal });
   const give = async (text) => {
     if (!text || stopped) return;
     if (!sent) timing.mark('first_token');
@@ -20676,6 +20720,7 @@ async function askStreamAttempt(cfg, headers, payload, onDelta, timing = AI_TIME
     arm();
     const res = await fetch(`${cfg.base}/chat/completions`, { method: 'POST', headers, body: payload, signal: ctl.signal });
     timing.mark('upstream_headers');
+    if (hooks.onHeaders) hooks.onHeaders();
     const type = res.headers.get('content-type') || '';
     if (!res.ok || !type.includes('text/event-stream') || !res.body) {
       let body = null;
@@ -20688,10 +20733,15 @@ async function askStreamAttempt(cfg, headers, payload, onDelta, timing = AI_TIME
         const errStatus = !res.ok ? res.status : (body && body.error && Number(body.error.code) >= 500 ? Number(body.error.code) : res.status);
         return { ok: false, status: errStatus, detail: msg ? String(msg).slice(0, 200) : `http_${res.status}` };
       }
+      const ch = body && Array.isArray(body.choices) && body.choices[0];
+      if (ch && ch.finish_reason) finishReason = String(ch.finish_reason);
+      usage = askUsage(body && body.usage);
       await give(text.trim());
-      return { ok: true, answer: answer.trim(), sent };
+      return { ok: true, answer: answer.trim(), sent, ...extra() };
     }
     const reader = res.body.getReader();
+    // A limit that fires mid-read ends the read too, whatever the body does.
+    ctl.signal.addEventListener('abort', () => { try { reader.cancel(); } catch {} }, { once: true });
     const decoder = new TextDecoder();
     let buf = '';
     let done = false;
@@ -20715,23 +20765,37 @@ async function askStreamAttempt(cfg, headers, payload, onDelta, timing = AI_TIME
           try { reader.cancel(); } catch {}
           return { ok: false, status: Number(ev.error.code) >= 500 ? Number(ev.error.code) : 502, detail: msg ? String(msg).slice(0, 200) : 'stream_error', sent };
         }
-        const delta = ev && Array.isArray(ev.choices) && ev.choices[0] && ev.choices[0].delta;
+        if (ev && ev.usage) usage = askUsage(ev.usage);
+        const choice = ev && Array.isArray(ev.choices) && ev.choices[0];
+        if (choice && choice.finish_reason) finishReason = String(choice.finish_reason);
+        const delta = choice && choice.delta;
+        if (delta && typeof delta.refusal === 'string' && delta.refusal) refusal = true;
         const c = delta && delta.content;
         await give(typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => (p && typeof p.text === 'string' ? p.text : '')).join('') : '');
+        // After the answer piece: a delta carrying both is past the thinking.
+        const thought = askReasoningText(delta);
+        if (thought) timing.mark('first_reasoning');
+        if (thought && hooks.onReasoning && !stopped) await hooks.onReasoning(thought);
       }
     }
     if (!stopped) { try { reader.cancel(); } catch {} }
+    if (!stopped && ctl.signal.aborted) {
+      if (ctl.signal.reason === 'total' && answer.trim()) return { ok: true, answer: answer.trim(), sent, timeLimit: true, ...extra() };
+      return { ok: false, status: 0, detail: 'timeout', sent, ...extra() };
+    }
   } catch (e) {
-    if (stopped) return { ok: true, answer: answer.trim(), sent };
+    if (stopped) return { ok: true, answer: answer.trim(), sent, ...extra() };
     if (e && e.tdocClientGone) return { ok: false, status: 0, detail: 'client_gone', sent, clientGone: true };
-    const timeout = ctl.signal.aborted && ctl.signal.reason === 'timeout';
+    // The whole-draft limit after some text: keep what was written.
+    if (ctl.signal.aborted && ctl.signal.reason === 'total' && answer.trim()) return { ok: true, answer: answer.trim(), sent, timeLimit: true, ...extra() };
+    const timeout = ctl.signal.aborted && (ctl.signal.reason === 'timeout' || ctl.signal.reason === 'total');
     return { ok: false, status: 0, detail: timeout || (e && e.name === 'AbortError') ? 'timeout' : 'network', sent };
   } finally {
     if (idle) clearTimeout(idle);
     clearTimeout(total);
   }
-  if (!answer.trim()) return { ok: false, status: 502, detail: 'empty', sent };
-  return { ok: true, answer: answer.trim(), sent };
+  if (!answer.trim()) return { ok: false, status: 502, detail: 'empty', sent, ...extra() };
+  return { ok: true, answer: answer.trim(), sent, ...extra() };
 }
 
 // ─────────────────── one door: edit, or ask only ───────────────────
@@ -20995,6 +21059,17 @@ const WRITE_AI_ASK_UNITS = 3;
 const WRITE_AI_MARKDOWN_CHARS = 60000;
 // The preview's fixed draft arrives a couple of lines at a time.
 const WRITE_AI_PREVIEW_STEP_MS = 350;
+// While a reasoning model thinks: an elapsed-time `thinking` event at about
+// this pace when no reasoning text came, and at most this much reasoning
+// text sent to the dialog (the rest is only counted).
+const WRITE_AI_THINKING_BEAT_MS = 1000;
+const WRITE_AI_REASONING_CHARS = 20000;
+// The preview's fixed reasoning, so the thinking view can be tried there.
+const WRITE_AI_PREVIEW_REASONING = [
+  'The person wants a short doc from one sentence. ',
+  'Lead with the answer, then a few sections. ',
+  'Keep facts I do not know as placeholders.',
+];
 const WRITE_AI_SYSTEM_PROMPT = [
   'You are tdoc AI on tdoc.dev. A person typed one sentence describing a document; write that document.',
   'Reply with the document only, as Markdown: one "# " title line first, then "## " sections, short paragraphs, "- " lists, and Markdown tables where a comparison helps. No HTML tags, no code fences around the whole answer, no preamble or sign-off.',
@@ -21118,25 +21193,73 @@ async function handleWriteWithAi(env, req, url, ctx) {
   const run = (async () => {
     let gone = false;
     let streamed = 0;
+    // One ai_timing line per call (server/ai-timing.js): the upstream's
+    // headers, its first reasoning and first answer piece, the end, plus
+    // whether reasoning text came, finish_reason, token usage and why a kept
+    // draft ended early. The same record is sent with `done`. No prompt, no
+    // account. The preview (no model) is timed too, for `done`, but logs
+    // nothing.
+    const engine = globalThis.TdocAiTiming;
+    const timer = cfg.previewMock && engine
+      ? engine.start('write_ai', { model: 'preview', stream: true, log: () => {} })
+      : aiTimer('write_ai', modelCfg, { stream: true });
+    const t0 = Date.now();
+    const since = () => Date.now() - t0;
+    let drafting = false;
+    let reasoningText = false;
+    let reasoningChars = 0;
+    const clientGone = () => { gone = true; const e = new Error('client gone'); e.tdocClientGone = true; return e; };
+    // Before the first answer piece the dialog would be blank while a
+    // reasoning model thinks: `thinking` events carry its reasoning text as
+    // it comes (never stored), and a heartbeat with the elapsed time only
+    // (about once a second) when there is no text to show.
+    let lastThinking = 0;
+    let shownReasoning = 0;
+    const thinking = async (text) => {
+      lastThinking = Date.now();
+      try { await send('thinking', text ? { text, elapsed_ms: since() } : { elapsed_ms: since() }); } catch { throw clientGone(); }
+    };
+    const beat = setInterval(() => {
+      if (drafting || gone || Date.now() - lastThinking < WRITE_AI_THINKING_BEAT_MS) return;
+      thinking('').catch(() => {});
+    }, WRITE_AI_THINKING_BEAT_MS);
+    const hooks = {
+      onHeaders: () => { if (cfg.previewMock) timer.mark('upstream_headers'); },
+      onReasoning: async (text) => {
+        if (cfg.previewMock) timer.mark('first_reasoning');
+        reasoningText = true;
+        reasoningChars += text.length;
+        // Once the draft has begun the dialog has collapsed the thoughts.
+        if (drafting || shownReasoning >= WRITE_AI_REASONING_CHARS) return;
+        const piece = text.slice(0, WRITE_AI_REASONING_CHARS - shownReasoning);
+        shownReasoning += piece.length;
+        await thinking(piece);
+      },
+    };
     // A write that fails means the reader went away: stop the model.
     const onDelta = async (text) => {
+      if (!drafting) { drafting = true; if (cfg.previewMock) timer.mark('first_token'); }
       if (streamed >= WRITE_AI_MARKDOWN_CHARS) return false;
       streamed += text.length;
-      try { await send('delta', { text }); } catch { gone = true; const e = new Error('client gone'); e.tdocClientGone = true; throw e; }
+      try { await send('delta', { text }); } catch { throw clientGone(); }
       return streamed < WRITE_AI_MARKDOWN_CHARS;
     };
     let out;
-    const timing = aiTimer('write_ai', modelCfg, { stream: true });
     try {
       await writer.write(enc.encode(': writing\n\n'));
-      out = cfg.previewMock ? await writeAiPreviewStream(onDelta) : await streamAskModel(modelCfg, messages, onDelta, timing);
+      out = cfg.previewMock ? await writeAiPreviewStream(onDelta, hooks) : await streamAskModel(modelCfg, messages, onDelta, timer, hooks);
     } catch (e) {
       gone = gone || Boolean(e && e.tdocClientGone);
       out = { ok: false, status: 0, detail: gone ? 'client_gone' : 'stream', clientGone: gone };
+    } finally {
+      clearInterval(beat);
     }
-    timing.done(out.clientGone || gone
-      ? { ok: false, detail: 'client_gone', chars: streamed }
-      : { ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0 });
+    // Ended early but with a draft: published all the same, and said so.
+    const cutoff = out.ok && !(out.clientGone || gone) ? writeAiCutoff(out, streamed) : null;
+    const extra = { reasoning_text: reasoningText, reasoning_chars: reasoningChars, finish_reason: out.finishReason || null, usage: out.usage || null, cutoff: cutoff ? cutoff.reason : null };
+    const timing = timer.done(out.clientGone || gone
+      ? { ok: false, detail: 'client_gone', chars: streamed, extra }
+      : { ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0, extra });
     // Left before the end: nothing is created and the draft is given back.
     if (out.clientGone || gone) {
       await refund();
@@ -21144,9 +21267,11 @@ async function handleWriteWithAi(env, req, url, ctx) {
       try { await writer.abort(); } catch {}
       return;
     }
+    // The stream is over; v1 is being stored.
+    if (out.ok) { try { await send('publishing', {}); } catch {} }
     const done = await writeAiFinish(job, out);
     try {
-      await send(done.status === 200 ? 'done' : 'error', { ...done.body, status: done.status });
+      await send(done.status === 200 ? 'done' : 'error', { ...done.body, status: done.status, timing, ...(done.status === 200 ? { cutoff } : {}) });
       await writer.close();
     } catch {}
   })();
@@ -21162,16 +21287,33 @@ async function handleWriteWithAi(env, req, url, ctx) {
   });
 }
 
+// A draft that ended before the model finished, kept and published: the
+// provider's length limit or ours (WRITE_AI_MARKDOWN_CHARS), the whole-draft
+// time limit (ASK_STREAM_TOTAL_MS), or a content filter / refusal.
+// -> { reason, message } | null
+function writeAiCutoff(out, streamed) {
+  const fr = String(out.finishReason || '');
+  if (fr === 'content_filter' || out.refusal) return { reason: 'filter', message: 'tdoc AI stopped this draft.' };
+  if (fr === 'length' || streamed >= WRITE_AI_MARKDOWN_CHARS) return { reason: 'length', message: 'Stopped early: hit the length limit. The end may be cut off.' };
+  if (out.timeLimit) return { reason: 'time', message: 'Stopped early: hit the time limit. The end may be cut off.' };
+  return null;
+}
+
 // The PR preview has no model key: its fixed draft, a line or two at a time,
 // so the live view can be tried there.
-async function writeAiPreviewStream(onDelta) {
+async function writeAiPreviewStream(onDelta, hooks = {}) {
+  if (hooks.onHeaders) hooks.onHeaders();
+  for (const piece of WRITE_AI_PREVIEW_REASONING) {
+    if (hooks.onReasoning) await hooks.onReasoning(piece);
+    await new Promise((r) => setTimeout(r, WRITE_AI_PREVIEW_STEP_MS));
+  }
   const lines = WRITE_AI_PREVIEW_DOC.split('\n');
   for (let i = 0; i < lines.length; i += 2) {
     const piece = lines.slice(i, i + 2).join('\n') + (i + 2 < lines.length ? '\n' : '');
     if ((await onDelta(piece)) === false) break;
     await new Promise((r) => setTimeout(r, WRITE_AI_PREVIEW_STEP_MS));
   }
-  return { ok: true, answer: WRITE_AI_PREVIEW_DOC };
+  return { ok: true, answer: WRITE_AI_PREVIEW_DOC, finishReason: 'stop' };
 }
 
 // After the model: store the draft exactly one way for both responses.

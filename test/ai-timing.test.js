@@ -36,6 +36,24 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(rec.ok === true && rec.status === 200 && rec.error === null && rec.out_chars === 321 && rec.attempts === 1, lines[0]);
   });
 
+  await t('extra (Write with tdoc AI): only the known fields, coerced; first_reasoning is the first one', async () => {
+    const lines = [];
+    const tm = AiTiming.start('write_ai', { model: 'm', stream: true, now: clock([0, 100, 300, 500, 900, 1200]), log: (l) => lines.push(l) });
+    tm.attempt().mark('upstream_headers').mark('first_reasoning').mark('first_reasoning').mark('first_token');
+    const rec = tm.done({ ok: true, chars: 10, extra: {
+      reasoning_text: 1, reasoning_chars: '42', finish_reason: 'length <script>', cutoff: 'length',
+      usage: { prompt_tokens: 12, completion_tokens: '30', reasoning_tokens: -1, secret: 'x' },
+      prompt: 'never logged', account: 'acct-1',
+    } });
+    assert(rec.first_reasoning_ms === 300 && rec.first_token_ms === 500 && rec.total_ms === 900, lines[0]);
+    assert(rec.reasoning_text === true && rec.reasoning_chars === 42 && rec.finish_reason === 'lengthscript' && rec.cutoff === 'length', lines[0]);
+    assert(JSON.stringify(rec.usage) === JSON.stringify({ prompt_tokens: 12, completion_tokens: 30, reasoning_tokens: null }), lines[0]);
+    assert(!/never logged|acct-1|secret/.test(lines[0]) && lines.length === 1, lines[0]);
+    // Without extra, the line is as before: no extra keys.
+    const plain = AiTiming.start('ask_answer', { now: clock([0, 1]), log: () => {} }).done({ ok: true, chars: 1 });
+    assert(!('first_reasoning_ms' in plain) && !('usage' in plain), JSON.stringify(plain));
+  });
+
   await t('done is once: a second done or a late mark changes nothing', async () => {
     const lines = [];
     const tm = AiTiming.start('ask_answer', { now: clock([0, 10, 20, 30]), log: (l) => lines.push(l) });

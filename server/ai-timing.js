@@ -12,6 +12,14 @@
 // only), done (total_ms). A retried attempt starts its marks over, so they
 // describe the attempt that answered; `attempts` counts them.
 //
+// A caller with more to say passes `extra` to done(): only these keys, each
+// coerced to a number, a boolean or a short token, ever reach the line:
+//   reasoning_text (any reasoning text came), reasoning_chars,
+//   finish_reason, cutoff (why a kept answer ended early: length | time |
+//   filter), usage { prompt_tokens, completion_tokens, reasoning_tokens }.
+// With `extra`, the line also has first_reasoning_ms (the first_reasoning
+// mark: the first reasoning text of the attempt that answered).
+//
 // What it never carries: the prompt, the doc, the answer, a slug, an account
 // or a session. Only the route name, the model id, sizes, times and a short
 // error code from a fixed list (an upstream's own error message is dropped:
@@ -25,7 +33,8 @@
 })(typeof window === 'object' ? window : globalThis, function () {
   'use strict';
   var EVENT = 'ai_timing';
-  var MARKS = ['upstream_headers', 'first_token'];
+  var MARKS = ['upstream_headers', 'first_token', 'first_reasoning'];
+  var ONCE = ['first_token', 'first_reasoning'];
   var ERRORS = ['timeout', 'network', 'empty', 'client_gone', 'stream', 'stream_error', 'create_failed', 'reply_failed'];
 
   function errorCode(detail, status) {
@@ -35,6 +44,9 @@
     var s = Number(status);
     return s > 0 ? 'http_' + Math.floor(s) : 'error';
   }
+
+  function count(v) { var n = Number(v); return n >= 0 ? Math.floor(n) : 0; }
+  function countOrNull(v) { if (v == null) return null; var n = Number(v); return n >= 0 ? Math.floor(n) : null; }
 
   function short(s, n) {
     var t = String(s == null ? '' : s).replace(/[^\w.:\/@+-]/g, '').slice(0, n);
@@ -60,7 +72,7 @@
         if (finished || MARKS.indexOf(name) === -1) return timer;
         // first_token is the first text of the attempt that answered: a
         // later piece does not move it.
-        if (name === 'first_token' && marks.first_token != null) return timer;
+        if (ONCE.indexOf(name) !== -1 && marks[name] != null) return timer;
         marks[name] = Math.max(0, now() - t0);
         return timer;
       },
@@ -83,6 +95,16 @@
           total_ms: Math.max(0, now() - t0),
           out_chars: Number(res.chars) >= 0 ? Math.floor(Number(res.chars)) : 0,
         };
+        if (res.extra && typeof res.extra === 'object') {
+          var x = res.extra;
+          finished.first_reasoning_ms = marks.first_reasoning != null ? marks.first_reasoning : null;
+          finished.reasoning_text = Boolean(x.reasoning_text);
+          finished.reasoning_chars = count(x.reasoning_chars);
+          finished.finish_reason = x.finish_reason == null ? null : short(x.finish_reason, 40);
+          finished.cutoff = x.cutoff == null ? null : short(x.cutoff, 20);
+          var u = x.usage && typeof x.usage === 'object' ? x.usage : null;
+          finished.usage = u ? { prompt_tokens: countOrNull(u.prompt_tokens), completion_tokens: countOrNull(u.completion_tokens), reasoning_tokens: countOrNull(u.reasoning_tokens) } : null;
+        }
         try { log(JSON.stringify(finished)); } catch (e) {}
         return finished;
       },

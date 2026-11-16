@@ -7,6 +7,10 @@
 // worker routes (in-process harness, the response streamed through) and the
 // real built shell in Chromium; only the model is stubbed, streaming its
 // answer a piece at a time. Desktop and phone.
+// A reasoning model first: "Starting…" at once, then "Thinking… Ns" with its
+// reasoning streaming below as text (never elements, never in the doc), then
+// folded to "Thought for Ns" once the draft begins, a click opening it. No
+// reasoning text: the elapsed-time line alone.
 //
 // TDOC_TEST_SCREENSHOTS=<dir> writes the menu, the dialog, the live draft
 // mid-stream and the landed doc per viewport.
@@ -119,7 +123,7 @@ async function startServer(worker, env) {
     '## Food\n\n',
     'Huts sell little; carry five days of lunches.\n',
   ];
-  const model = { fail: false, step: 450, calls: 0 };
+  const model = { fail: false, step: 450, calls: 0, thoughts: [], wait: 0, finish: null };
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const u = typeof input === 'string' ? input : input.url;
@@ -130,14 +134,26 @@ async function startServer(worker, env) {
       const pieces = model.fail ? DRAFT.slice(0, 3) : DRAFT;
       const fail = model.fail;
       const step = model.step;
+      const thoughts = model.thoughts;
+      const wait = model.wait;
+      const finish = model.finish;
       const body = new ReadableStream({
         async start(c) {
           try {
+            // Silence first (a reasoning model that sends nothing), then its
+            // reasoning-only deltas, then the answer.
+            if (wait) await new Promise((r) => setTimeout(r, wait));
+            for (const th of thoughts) {
+              await new Promise((r) => setTimeout(r, step));
+              if (signal && signal.aborted) return;
+              c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: '', reasoning: th } }] })}\n\n`));
+            }
             for (const p of pieces) {
               await new Promise((r) => setTimeout(r, step));
               if (signal && signal.aborted) return;
               c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: p } }] })}\n\n`));
             }
+            if (finish && !fail) c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finish }] })}\n\n`));
             c.enqueue(enc.encode(fail ? `data: ${JSON.stringify({ error: { message: 'overloaded', code: 502 } })}\n\n` : 'data: [DONE]\n\n'));
             c.close();
           } catch {}
@@ -199,6 +215,142 @@ async function startServer(worker, env) {
         await dialog.waitFor();
         return dialog;
       };
+      // A reasoning model: its thinking streams before the draft.
+      // A long stretch first (more than the 2,000 characters the dialog
+      // keeps), then lines the test looks for.
+      const FILLER = Array.from({ length: 30 }, (_, i) => `Early thought ${i} about the trail, the huts and the weather in late summer. `).join('');
+      const THOUGHTS = [
+        FILLER,
+        'The sentence asks for a packing list. ',
+        'Lead with the conditions: rain, wind, cold nights.\n',
+        'Sections: clothes, gear, food.\n',
+        'Use a table for gear <b>not markup</b>.\n',
+        'Huts: check what they sell.\n',
+        'Keep it short.\n',
+        'Placeholders for dates.\n',
+        'One more line to scroll.\n',
+      ];
+      const fresh = async () => {
+        for (const k of (await env.META.list({ prefix: 'rl:write-ai:' })).keys) await env.META.delete(k.name);
+        env.ASK_FREE_LIMIT = '30';
+        await page.goto(`${base}/me`);
+        await page.locator('.doc-row[data-slug="q4-roadmap"]').waitFor();
+      };
+      // Cut short by the length limit: published all the same; Publishing…
+      // while v1 is stored (slowed here so it can be seen), then one quiet
+      // line says why before the doc opens.
+      const cutoffTest = async () => {
+      await t(`${label}: cut off at the length limit: Publishing…, then a quiet line says so, then the doc opens`, async () => {
+        await fresh();
+        model.finish = 'length';
+        const step = model.step;
+        model.step = 120;
+        const put = env.DOCS.put.bind(env.DOCS);
+        env.DOCS.put = async (k, ...rest) => { if (/\/v1\/index\.html$/.test(String(k))) await new Promise((r) => setTimeout(r, 1500)); return put(k, ...rest); };
+        try {
+          const dialog = await openDialog();
+          await dialog.getByRole('textbox').fill('A list that runs long');
+          await press(dialog.getByRole('button', { name: 'Write it', exact: true }));
+          const status = dialog.locator('.mk-write-status');
+          await status.getByText('Publishing…', { exact: true }).waitFor({ timeout: 15000 });
+          assert.equal(await dialog.locator('.mk-write-caret').count(), 0, 'the caret stays while publishing');
+          await shot('publishing');
+          const note = dialog.locator('.mk-write-cutoff');
+          await note.waitFor({ timeout: 10000 });
+          assert.equal(await note.innerText(), 'Stopped early: hit the length limit. The end may be cut off.');
+          assert.match(await status.innerText(), /^Published v1 · Opening the doc…/);
+          assert.match(page.url(), /\/me$/, 'opened before the line could be read');
+          await shot('cutoff');
+          await page.waitForURL(/\/d\/[a-z0-9-]+\/v\/1$/, { timeout: 15000 });
+        } finally { model.finish = null; model.step = step; env.DOCS.put = put; }
+      });
+      };
+      // Run after the others: they spend the allowance a set way.
+      const thinkingTests = async () => {
+      await t(`${label}: a reasoning model: Starting…, then Thinking… with its reasoning as text, folded to Thought for Ns when the draft begins`, async () => {
+        await fresh();
+        model.thoughts = THOUGHTS;
+        model.wait = 900;
+        const step = model.step;
+        model.step = 250;
+        try {
+          const dialog = await openDialog();
+          await dialog.getByRole('textbox').fill('A packing list, thought through');
+          await press(dialog.getByRole('button', { name: 'Write it', exact: true }));
+          const paper = dialog.locator('.mk-write-paper');
+          // Never blank: Starting… with the caret before anything arrives.
+          await paper.locator('.mk-write-starting', { hasText: 'Starting…' }).waitFor({ timeout: 3000 });
+          assert.equal(await paper.locator('.mk-write-caret').count(), 1);
+          await shot('starting');
+          const head = paper.locator('.mk-think .mk-think-head');
+          await head.waitFor({ timeout: 5000 });
+          assert.match(await head.innerText(), /^Thinking… \d+s$/);
+          assert.equal(await dialog.locator('.mk-write-status').count(), 0, 'a footer status while thinking');
+          // The latest three lines only, each on one line (ellipsis), older
+          // ones faded at the top; no box, no scrollbar.
+          const lines = paper.locator('.mk-think-lines');
+          await lines.getByText(/Early thought 29/).waitFor({ timeout: 8000 });
+          await shot('thinking');
+          await lines.getByText(/Placeholders for dates/).waitFor({ timeout: 8000 });
+          assert.ok(await paper.locator('.mk-think-line').count() <= 3);
+          assert.equal(await lines.getByText(/The sentence asks/).count(), 0, 'older lines still shown');
+          const look = await lines.evaluate((el) => {
+            const cs = getComputedStyle(el);
+            const line = getComputedStyle(el.firstElementChild);
+            return { mask: cs.maskImage || cs.webkitMaskImage, overflow: cs.overflowY, border: cs.borderLeftWidth, ws: line.whiteSpace, to: line.textOverflow };
+          });
+          assert.ok(/gradient/.test(look.mask) && look.overflow === 'hidden' && look.border === '0px' && look.ws === 'nowrap' && look.to === 'ellipsis', JSON.stringify(look));
+          assert.equal(await lines.locator('b').count(), 0, 'reasoning markup became an element');
+          // The draft begins: the thinking folds to one line.
+          await paper.getByRole('heading', { name: 'Iceland packing list', level: 1 }).waitFor({ timeout: 10000 });
+          const folded = paper.getByRole('button', { name: /^Thought for \d+s$/ });
+          await folded.waitFor();
+          assert.equal(await folded.getAttribute('aria-expanded'), 'false');
+          assert.equal(await paper.locator('.mk-think-lines, .mk-think-full').count(), 0);
+          // The paper follows the draft, so the line moves: a direct click.
+          await folded.dispatchEvent('click');
+          const full = paper.locator('.mk-think-full');
+          await full.getByText(/Sections: clothes/).waitFor();
+          assert.equal(await folded.getAttribute('aria-expanded'), 'true');
+          // The last 2,000 characters, marked as cut at the start.
+          const kept = await full.innerText();
+          assert.ok(kept.startsWith('…') && kept.length <= 2001 && /<b>not markup<\/b>/.test(kept), kept.slice(0, 80));
+          await shot('thought');
+          await page.waitForURL(/\/d\/[a-z0-9-]+\/v\/1$/, { timeout: 30000 });
+          const slug = page.url().match(/\/d\/([a-z0-9-]+)\/v\/1$/)[1];
+          const html = await (await env.DOCS.get(`docs/${slug}/v1/index.html`)).text();
+          assert.ok(!html.includes('Huts: check what they sell') && !html.includes('not markup'), 'reasoning stored in the doc');
+          assert.deepEqual(errors, []);
+        } finally { model.thoughts = []; model.wait = 0; model.step = step; }
+      });
+      if (phone) { await cutoffTest(); return; }
+      await t(`${label}: no reasoning text: Thinking… with the time alone, then Thought for Ns (not a button)`, async () => {
+        await fresh();
+        model.wait = 2600;
+        const step = model.step;
+        model.step = 150;
+        try {
+          const dialog = await openDialog();
+          await dialog.getByRole('textbox').fill('A quiet model');
+          await press(dialog.getByRole('button', { name: 'Write it', exact: true }));
+          const paper = dialog.locator('.mk-write-paper');
+          await paper.locator('.mk-write-starting').waitFor({ timeout: 3000 });
+          const head = paper.locator('.mk-think .mk-think-head');
+          await head.waitFor({ timeout: 5000 });
+          assert.match(await head.innerText(), /^Thinking… \d+s$/);
+          assert.equal(await paper.locator('.mk-think-lines').count(), 0);
+          // One status only: the paper's line, not a second in the footer.
+          assert.equal(await dialog.locator('.mk-write-status').count(), 0, 'a footer status while thinking');
+          assert.equal(await dialog.locator('.mk-foot').count(), 0, 'a footer line while thinking');
+          await shot('thinking-no-text');
+          await paper.getByRole('heading', { name: 'Iceland packing list', level: 1 }).waitFor({ timeout: 10000 });
+          await paper.locator('p.mk-think-head', { hasText: /^Thought for \d+s$/ }).waitFor();
+          assert.equal(await paper.locator('button.mk-think-toggle').count(), 0);
+          await page.waitForURL(/\/d\/[a-z0-9-]+\/v\/1$/, { timeout: 30000 });
+        } finally { model.wait = 0; model.step = step; }
+      });
+      await cutoffTest();
+      };
       const remaining = () => page.evaluate(async () => (await (await fetch('/api/write-with-ai')).json()).remaining);
       await t(`${label}: Doc → Write it with tdoc AI → one sentence → the draft appears live → the new doc's v1`, async () => {
         const dialog = await openDialog();
@@ -239,7 +391,7 @@ async function startServer(worker, env) {
         assert.equal(await page.evaluate(() => window.__xss), undefined, 'model markup ran');
         assert.deepEqual(errors, []);
       });
-      if (phone) return;
+      if (phone) { await thinkingTests(); return; }
       await t(`${label}: Stop mid-stream: no doc, no navigation, the requests given back`, async () => {
         await page.goto(`${base}/me`);
         await page.locator('.doc-row[data-slug="q4-roadmap"]').waitFor();
@@ -279,6 +431,7 @@ async function startServer(worker, env) {
           await shot('failed');
         } finally { model.fail = false; }
       });
+      await thinkingTests();
     } finally {
       await context.close();
       server.close();
