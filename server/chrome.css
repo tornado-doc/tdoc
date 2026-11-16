@@ -598,6 +598,9 @@
   .tdoc-handoff-line code { flex: 1 1 auto; min-width: 0; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: #111; word-break: break-word; }
   .tdoc-handoff-status { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; font-size: 12px; line-height: 1.5; color: #555; }
   .tdoc-handoff-status .tdoc-wait-dot { flex: 0 0 auto; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--td-accent); animation: tdoc-pulse 1.2s ease-in-out infinite; }
+  /* The owner with no agent connected: one line of text, its link in the accent. */
+  .tdoc-handoff-connect { display: block; }
+  .tdoc-handoff-connect a { color: var(--td-accent); font-weight: 650; }
   .tdoc-reply-to { color: #888; font-weight: 500; font-size: 11px; margin: 0 0 4px; }
   /* Past the indent cap a thread continues at one level (#365). The rail stays
      — these are still replies inside the thread — but the width stops being

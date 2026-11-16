@@ -422,6 +422,14 @@ export function sendToAgentSetup({ canSendToAgent = false, may = false, notifyOn
   return { setupHref, disabledReason };
 }
 
+// The Connect link's target: an absolute address is tdoc seen from another
+// page (the feedback widget passes `${base}/me/agents?tab=send`), so it opens
+// in a new tab rather than navigating the app the widget sits on away. A
+// tdoc path stays in this tab.
+export function setupLinkProps(href) {
+  return /^https?:\/\//i.test(String(href || '')) ? { target: '_blank', rel: 'noopener noreferrer' } : {};
+}
+
 // Why the server would not hand this doc's comments to an agent, in the
 // words the control's tooltip uses. null where the answer is "connect one".
 export function notifyHandoffReasonText(reason) {
