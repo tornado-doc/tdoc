@@ -92,11 +92,12 @@
 .mda-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
 .mda-chips { display: flex; align-items: center; gap: 4px; }
 .mda-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px; border: 0; border-radius: 999px; background: transparent; color: var(--td-muted); font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
-.mda-chip:hover { background: var(--td-surface-2); color: var(--td-ink); }
-.mda-chip.is-on { background: var(--td-ink); color: #fff; }
-.mda-chip-n { font-size: 11px; font-weight: 600; opacity: .7; font-variant-numeric: tabular-nums; }
-.mda-chip.is-needs .mda-chip-n { opacity: 1; padding: 1px 6px; border-radius: 999px; background: var(--td-accent); color: #fff; }
-.mda-chip.is-needs.is-on .mda-chip-n { background: #fff; color: var(--td-ink); }
+/* Apple-quiet: the chosen view is a soft grey pill with ink text, the rest
+   muted words; counts are plain numbers (Needs you's in the accent). */
+.mda-chip:hover { color: var(--td-ink); }
+.mda-chip.is-on { background: var(--td-surface-2); color: var(--td-ink); font-weight: 600; }
+.mda-chip-n { font-size: 12px; font-weight: 500; color: var(--td-muted); font-variant-numeric: tabular-nums; }
+.mda-chip.is-needs .mda-chip-n { color: var(--td-accent); font-weight: 600; }
 .mda-tools { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: 0 1 420px; min-width: 0; justify-content: flex-end; }
 .mda-search { flex: 1 1 220px; max-width: 300px; }
 .mda-search input[type="search"] { width: 100%; height: 32px; box-sizing: border-box; padding: 0 10px 0 32px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); font: inherit; font-size: 13px; }
@@ -117,7 +118,7 @@
 .mda-thumb { position: relative; display: block; aspect-ratio: 7 / 6; overflow: hidden; border-bottom: 1px solid var(--td-line); background: var(--td-surface-2); container-type: inline-size; }
 .mda-thumb.is-page { background: #fff; }
 .mda-card .doc-info { min-width: 0; padding: 14px 40px 14px 16px; }
-.mda-card .doc-title-line { display: flex; align-items: baseline; gap: 5px; }
+.mda-card .doc-title-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
 :where(.docs-hub) .mda-card .doc-title { font-size: 15px; line-height: 22px; font-weight: 500; color: var(--td-ink); }
 .mda-card .doc-meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 8px; font-size: 13px; line-height: 20px; color: var(--td-muted); }
 /* The type as a quiet grey tile: the shape Google Docs uses, without the
@@ -131,7 +132,10 @@
 .mda-card .row-actions { position: absolute; right: 6px; bottom: 12px; margin: 0; }
 .mda-card .row-menu-btn { color: var(--td-muted); }
 /* Unread on the drawing's top-right corner, the star on its top-left. */
-.mda-card .doc-activity { position: absolute; top: 8px; right: 8px; z-index: 1; box-shadow: 0 0 0 2px #fff; }
+/* Unread on a card: an 8px accent dot before the title, as Mail marks an
+   unread message; how many and of what is its label and tooltip. */
+:where(.docs-hub) .mda-card .doc-activity { flex: none; align-self: center; width: 8px; min-width: 0; height: 8px; padding: 0; margin-right: 2px; border-radius: 50%; overflow: hidden; font-size: 0; color: transparent; }
+:where(.docs-hub) .mda-card .doc-activity:hover { color: transparent; }
 .mda-card .star-btn { position: absolute; top: 6px; left: 6px; z-index: 1; opacity: 0; }
 .mda-card .star-btn.is-starred, .mda-card:hover .star-btn, .mda-card .star-btn:focus-visible { opacity: 1; }
 .mda-card:hover .star-btn:not(.is-starred) { color: var(--td-muted); background: rgba(255,255,255,.85); }

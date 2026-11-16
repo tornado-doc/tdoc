@@ -126,8 +126,8 @@ function PageLines({ h }) {
 
 // One card, as on Google Docs' home: one bordered card, the page on top, a
 // rule, then the title, the type icon and the row's own meta line (when, who
-// can open it). Unread sits on the page's corner, the star on the other, ⋯
-// beside the title.
+// can open it). Unread is a small dot before the title (its count in the
+// label), the star on the page's corner, ⋯ on the meta row.
 export function DocCard({ doc, meta, path, starrable = true, onToggleStar, menuItems = [], dragSlugs, data = {} }) {
   const dataAttrs = Object.fromEntries(Object.entries(data).map(([key, value]) => [`data-${key}`, value]));
   return (
@@ -135,10 +135,10 @@ export function DocCard({ doc, meta, path, starrable = true, onToggleStar, menuI
       <a className={`mda-thumb${isPageType(docTypeOf(doc)) ? ' is-page' : ''}`} href={docHref(doc)} tabIndex={-1} aria-hidden="true" draggable={false}>
         <DocThumb doc={doc} />
       </a>
-      <ActivityBadge doc={doc} />
       {starrable ? <StarButton doc={doc} onToggle={onToggleStar} /> : null}
       <div className="doc-info">
         <div className="doc-title-line">
+          <ActivityBadge doc={doc} />
           {path ? <span className="doc-path" title={path}>{path} ›</span> : null}
           <a className="doc-title" href={docHref(doc)} draggable={false}>{doc.title}</a>
         </div>

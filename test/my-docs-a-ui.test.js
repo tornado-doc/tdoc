@@ -214,12 +214,15 @@ async function startServer(worker, env) {
         // Every item has the check.
         assert.equal(await needs.locator('.mda-need').count(), await needs.locator('.mda-need .mda-need-done').count());
         assert.equal(await page.getByRole('tab', { name: /Needs you/ }).locator('.mda-chip-n').textContent(), '3');
-        // The card's unread: one blue circle with one number on the drawing's corner.
+        // The card's unread: a small blue dot before the title, as Mail marks
+        // an unread message; how many and of what is its label.
         const unread = card(page, 'launch-deck').locator('.doc-activity');
-        assert.equal((await unread.textContent()).trim(), '1');
         assert.equal(await unread.getAttribute('aria-label'), '1 agent reply');
         assert.equal(await unread.locator('svg').count(), 0, 'no robot glyph');
-        assert.equal((await unread.boundingBox()).height, 20);
+        const [dot, title] = [await unread.boundingBox(), await card(page, 'launch-deck').locator('.doc-title').boundingBox()];
+        assert.ok(dot.width === 8 && dot.height === 8, `dot is ${dot.width}x${dot.height}`);
+        assert.ok(dot.x + dot.width <= title.x, 'the dot is before the title');
+        assert.ok(Math.abs((dot.y + dot.height / 2) - (title.y + title.height / 2)) <= 2, 'on the title line');
       });
 
       await t('1440: Mark done reads the bell rows on the server, and the card stays gone after a reload', async () => {
