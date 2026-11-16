@@ -63,6 +63,43 @@ export default defineConfig({ plugins: [react()], logLevel: 'error', build: { ou
         console.log(`  ✓ ${id}: an allowed picture is still shown`);
       } catch (error) { failed++; console.log(`  ✗ ${id}\n    ${error.message}`); }
     }
+    // tdoc AI wears one face everywhere: tdoc's strokes with the Ask AI star
+    // on an accent badge, drawn inline (nothing for a host CSP to block).
+    // An agent reply tdoc cannot name gets it too; a real provider keeps
+    // its own mark.
+    for (const id of ['card-tdoc-ai', 'card-ask-ai', 'card-unknown-agent', 'pin-tdoc-ai']) {
+      try {
+        const mark = page.locator(`#${id} .tdoc-agent-provider-mark.is-tdoc-ai svg.tdoc-ai-mark`);
+        await mark.waitFor({ timeout: 5000 });
+        assert.equal(await page.locator(`#${id} img`).count(), 0, `${id} draws a picture`);
+        assert.equal(await mark.locator('path[stroke], g[stroke] path').count(), 5, 'the five tdoc strokes');
+        const box = await mark.boundingBox();
+        assert.ok(box.width >= 18 && box.width <= 28 && box.width === box.height, `${id}: ${JSON.stringify(box)}`);
+        console.log(`  ✓ ${id}: tdoc AI's mark`);
+      } catch (error) { failed++; console.log(`  ✗ ${id}\n    ${error.message}`); }
+    }
+    try {
+      assert.equal(await page.locator('#card-claude .tdoc-agent-provider-mark svg[viewBox="0 0 248 248"]').count(), 1);
+      assert.equal(await page.locator('#card-claude .tdoc-ai-mark').count(), 0);
+      console.log('  ✓ card-claude: an agent with provider info keeps its own mark');
+    } catch (error) { failed++; console.log(`  ✗ card-claude\n    ${error.message}`); }
+    try {
+      for (const size of [16, 32]) {
+        const fit = await page.locator(`#face-${size} .tdoc-notif-avatar`).evaluate((el) => {
+          const svg = el.querySelector('.tdoc-ai-mark');
+          const badge = svg.querySelector(':scope > circle');
+          const a = el.getBoundingClientRect(); const b = badge.getBoundingClientRect();
+          const r = a.width / 2; const cx = a.left + r; const cy = a.top + r;
+          // The badge's far edge stays inside the round face it is cropped to.
+          const far = Math.hypot(b.left + b.width / 2 - cx, b.top + b.height / 2 - cy) + b.width / 2;
+          return { face: a.width, mark: svg.getBoundingClientRect().width, far, r, right: b.left > cx, bottom: b.top > cy };
+        });
+        assert.equal(fit.mark, size, `${size}px: the mark fills the face`);
+        assert.ok(fit.right && fit.bottom, `${size}px: the badge is in the bottom-right`);
+        assert.ok(fit.far <= fit.r + 0.5, `${size}px: the badge is cropped by the circle ${JSON.stringify(fit)}`);
+      }
+      console.log('  ✓ 16px and 32px: the mark fills the face, badge bottom-right inside the circle');
+    } catch (error) { failed++; console.log(`  ✗ sizes\n    ${error.message}`); }
   } finally {
     await browser.close();
     server.close();

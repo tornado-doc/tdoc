@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bot, Check, MessageSquareText } from 'lucide-react';
+import { Check, MessageSquareText } from 'lucide-react';
 import { AppButton } from '../ui/button.jsx';
 import { listNotifications, markDocNotificationsRead, markNotificationsRead, postThreadSeen } from '../document/api.js';
 import { actorName, notificationTarget } from '../notification-text.js';
@@ -180,11 +180,11 @@ export function needsCards({ inbox, docs, inSpace }) {
 // Whose item it is, drawn as the comment thread draws its author
 // (AuthorAvatar): a person's photo or initial; an agent's reply, the agent's
 // own mark (Claude, Codex, Raft, ...). An agent reply noted before the
-// server kept who wrote it, the generic agent mark.
+// server kept who wrote it: tdoc AI's mark, as AuthorAvatar draws any agent
+// it cannot name.
 function NeedAvatar({ card }) {
-  const author = card.kind === 'agent' ? card.author : card.kind === 'comments' ? null : (card.actor || { name: card.who });
+  const author = card.kind === 'agent' ? (card.author || { kind: 'agent' }) : card.kind === 'comments' ? null : (card.actor || { name: card.who });
   if (author) return <span className={`mda-need-avatar is-face${author.kind === 'agent' ? ' is-agent' : ''}`}><AuthorAvatar author={author} size={0} /></span>;
-  if (card.kind === 'agent') return <span className="mda-need-avatar is-mark" aria-hidden="true"><Bot size={15} /></span>;
   return <span className="mda-need-avatar is-mark" aria-hidden="true"><MessageSquareText size={14} /></span>;
 }
 

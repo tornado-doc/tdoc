@@ -4,8 +4,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Terminal, Webhook } from 'lucide-react';
-import { AskIcon } from '../ui/ask-icon.jsx';
-import { ClaudeMark, OpenAIMark, RaftMark } from '../agent-marks.jsx';
+import { ClaudeMark, OpenAIMark, RaftMark, TdocAiMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppButton } from '../ui/button.jsx';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
@@ -86,7 +85,8 @@ function sinceText(iso) {
 }
 
 export function ProviderMark({ target, size = 18 }) {
-  if (target && target.tdoc_ai) return <AskIcon size={size} />;
+  // tdoc AI wears the face its answers are signed with (author-face.jsx).
+  if (target && target.tdoc_ai) return <TdocAiMark size={size} />;
   const meta = providerMeta(target);
   if (meta.mark === 'raft') return <RaftMark size={size} />;
   if (meta.mark === 'webhook') return <Webhook size={size} aria-hidden="true" />;
