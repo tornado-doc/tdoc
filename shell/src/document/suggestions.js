@@ -115,7 +115,9 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
     },
     'tdoc:suggestShown': (message) => {
       const next = {};
-      for (const r of message.results || []) next[r.id] = { ok: r.ok === true, docY: Number(r.docY) || 0 };
+      // conflict: another pending suggestion holds the same words (the one
+      // it names shows; this one comes up once that is decided).
+      for (const r of message.results || []) next[r.id] = { ok: r.ok === true, docY: Number(r.docY) || 0, conflict: r.conflict ? String(r.conflict) : null };
       setShown(next);
       if (activeNow.current && next[activeNow.current]?.ok) send({ type: 'tdoc:suggestFocus', id: activeNow.current, scroll: false });
     },
@@ -144,6 +146,13 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
     setDeciding(true);
     decidingNow.current = true;
     listRead.current++;
+    // Rejecting one rejects its exact copies waiting behind it (the same
+    // edit proposed again), so the same words do not come straight back.
+    if (decision === 'reject') {
+      const same = (a, b) => a.edit.find === b.edit.find && a.edit.replace === b.edit.replace;
+      const picked = pending.filter((p) => keys.includes(p.key));
+      keys = [...keys, ...pending.filter((p) => !keys.includes(p.key) && shown[p.key]?.conflict && picked.some((q) => same(p, q))).map((p) => p.key)];
+    }
     const bySet = new Map();
     for (const key of keys) {
       const p = pending.find((x) => x.key === key);
@@ -262,7 +271,7 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
 
   // Suggestions this page cannot show because a newer version has their text:
   // the review bar offers that version.
-  const unplaced = pending.filter((p) => shown[p.key] && !shown[p.key].ok).length;
+  const unplaced = pending.filter((p) => shown[p.key] && !shown[p.key].ok && !shown[p.key].conflict).length;
   const elsewhere = !ordered.length && unplaced && latestSeen > version ? { count: unplaced, version: latestSeen } : null;
 
   return {
