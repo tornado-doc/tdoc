@@ -22,6 +22,7 @@ const http = require('http');
 const path = require('path');
 const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
 const { loadWorker, makeEnv } = require('./helpers/worker-harness');
+const { pickDocFilter } = require('./helpers/doc-filter');
 const { loadRuntimeAssets } = require('../server/runtime-assets');
 
 const pw = requirePlaywrightOrSkip('comment-one-behaviour-ui.test.js');
@@ -568,8 +569,12 @@ async function startServer(worker, env) {
       const ctx = await contextFor(julie);
       const page = await tracked(ctx, { pollMs: 500 });
       await surfaces.doc.open(page);
+      // The filter: the drawer's on a phone, the Comment button's menu on a wide screen.
+      const show = async (name) => (phone
+        ? page.getByRole('radio', { name: new RegExp(`^${name}`) }).first().click()
+        : pickDocFilter(page, name));
       if (phone) await page.locator('.tdoc-fab').click();
-      await page.getByRole('radio', { name: /^Open/ }).first().click();
+      await show('Open');
       if (phone && !(await page.locator('#tdoc-comment-layer').isVisible().catch(() => false))) await page.locator('.tdoc-fab').click();
       const { card, box } = await openBox(surfaces.doc, page, id);
       await box.fill(DRAFT);
@@ -577,8 +582,8 @@ async function startServer(worker, env) {
       assert.equal(done.status, 200, JSON.stringify(done.body));
       await card.locator('.tdoc-resolved-chip').waitFor();
       assert.equal(await box.inputValue(), DRAFT);
-      await page.getByRole('radio', { name: /^Resolved/ }).first().click();
-      await page.getByRole('radio', { name: /^Open/ }).first().click();
+      await show('Resolved');
+      await show('Open');
       await page.waitForTimeout(300);
       assert.equal(await page.locator(`#tdoc-comment-layer [data-comment-id="${id}"], .tdoc-floating-open[data-comment-id="${id}"]`).count(), 0, 'it stayed after the viewer changed tab');
       assert.deepEqual(page.errors, []);
