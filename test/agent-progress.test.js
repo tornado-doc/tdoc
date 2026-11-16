@@ -322,6 +322,70 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
     });
   }
 
+  // ---- handoffs:<slug> is read-modify-written: only real changes write --------
+  {
+    const env3 = makeEnv(mod.CommentsStore);
+    const owner3 = await issue(worker, env3, 'owner3');
+    const call3 = async (p, opts) => { const r = await worker.fetch(req(p, opts), env3, {}); let b = null; try { b = await r.json(); } catch {} return { status: r.status, body: b }; };
+    await call3('/api/upload', { method: 'POST', token: owner3.token, body: { slug: 'rmw', version: 1, html: '<h1>d</h1><p>a sentence to comment on</p><p>another line here</p>' } });
+    await env3.META.put(`account-notify:${owner3.account_id}`, JSON.stringify([LOCAL_CLAUDE]));
+    const reader3 = await putSession(env3, 'reader3');
+    const c = await call3('/api/comments', { method: 'POST', cookie: reader3, body: { slug: 'rmw', version: 1, text: 'fix', anchor: { kind: 'text', text: 'a sentence' } } });
+    const h = await call3('/api/notify/handoff', { method: 'POST', token: owner3.token, body: { slug: 'rmw', comment_ids: [c.body.id], recipient: LOCAL_CLAUDE, instruction: 'fix it' } });
+    const writes = [];
+    const put = env3.META.put.bind(env3.META);
+    let refuse = false;
+    env3.META.put = (k, ...rest) => {
+      if (k === 'handoffs:rmw') { if (refuse) return Promise.reject(new Error('KV PUT failed: 429 Too Many Requests')); writes.push(k); }
+      return put(k, ...rest);
+    };
+    const count = () => writes.length;
+
+    await t('a re-upload of the newest version (or an older one) writes nothing to the handoff', async () => {
+      assert(c.status === 200 && h.status === 200, `setup ${c.status} ${h.status}`);
+      const up2 = await call3('/api/upload', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body: { slug: 'rmw', version: 2, html: '<h1>d2</h1><p>a sentence to comment on</p>' } });
+      assert(up2.status === 200, `v2 ${up2.status}`);
+      const after2 = count();
+      assert(after2 === 1, `first version: ${after2} writes`);
+      const again = await call3('/api/upload', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body: { slug: 'rmw', version: 2, html: '<h1>d2</h1><p>a sentence to comment on</p>' } });
+      assert(again.status === 200 || again.status === 409, `re-upload ${again.status}`);
+      assert(count() === after2, `re-upload wrote the handoff (${count()})`);
+      const up3 = await call3('/api/upload', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body: { slug: 'rmw', version: 3, html: '<h1>d3</h1><p>a sentence to comment on</p>' } });
+      assert(up3.status === 200 && count() === after2 + 1, `a newer version: ${count()} writes`);
+    });
+
+    await t('the same suggestion set twice writes the handoff once', async () => {
+      env3.TDOC_PREVIEW = '1'; // propose_edits is dev-mode only (askEditV2); a preview has it for everyone
+      try {
+        const before = count();
+        const body = { comment_ids: [c.body.id], edits: [{ find: 'a sentence to comment on', replace: 'one sentence' }] };
+        const a = await call3('/api/docs/rmw/suggestions', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body });
+        assert(a.status === 200, `suggest ${a.status} ${JSON.stringify(a.body)}`);
+        assert(count() === before + 1, `first set: ${count() - before} writes`);
+        const b = await call3('/api/docs/rmw/suggestions', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body });
+        assert(b.status === 200, `suggest again ${b.status} ${JSON.stringify(b.body)}`);
+        assert(count() === before + 1, `the same set wrote again: ${count() - before} writes`);
+      } finally { delete env3.TDOC_PREVIEW; }
+    });
+
+    await t('/api/notify/progress: the same line writes nothing; a refused KV write is 429, not 500', async () => {
+      const progress3 = (text) => call3('/api/notify/progress', { method: 'POST', token: owner3.token, headers: AS_CLAUDE, body: { slug: 'rmw', comment_id: c.body.id, text } });
+      const first = await progress3('Working on it');
+      assert(first.status === 200, `progress ${first.status} ${JSON.stringify(first.body)}`);
+      const before = count();
+      // Past the per-handoff rate window, the same words: no write.
+      const list = JSON.parse(await env3.META.get('handoffs:rmw'));
+      await put('handoffs:rmw', JSON.stringify(list.map((x) => (x.progress ? { ...x, progress: { ...x.progress, at: '2026-01-01T00:00:00Z' } } : x))));
+      const same = await progress3('Working on it');
+      assert(same.status === 200 && same.body.unchanged === true && count() === before, `same line: ${same.status} ${JSON.stringify(same.body)} writes ${count() - before}`);
+      refuse = true;
+      try {
+        const r = await progress3('Something new');
+        assert(r.status === 429 && r.body.error === 'rate_limited' && r.body.retry_after > 0, `${r.status} ${JSON.stringify(r.body)}`);
+      } finally { refuse = false; }
+    });
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
