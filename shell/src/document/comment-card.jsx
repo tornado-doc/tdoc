@@ -604,7 +604,7 @@ function ReplyCard({
 // A comment left on an app (feedback overlay) points at a page and an element
 // of that app, not at anything in this document. Without this line the card,
 // seen on the doc page, says what is wrong but not where.
-function ProductWhere({ anchor, origin }) {
+function ProductWhere({ anchor, origin, onGoTo = null }) {
   if (!anchor || anchor.kind !== 'product' || !anchor.url) return null;
   const webUrl = productPageUrl(anchor.url);
   const safeUrl = productPageUrl(anchor.url, origin);
@@ -621,8 +621,18 @@ function ProductWhere({ anchor, origin }) {
     st.tabs && st.tabs.length ? `tab ${st.tabs.join(' › ')}` : '',
   ].filter(Boolean).join(' · ');
   const label = <>{path}{inState ? ` · ${inState}` : ''}{what ? ` · ${what}` : ''}</>;
+  // The line is the card's Go to, as the ⋯ menu's: the surface's own way
+  // there when it has one (the widget opens the element in place), else the
+  // app page in a new tab. Only the words are a target, never the row, so a
+  // click meant for the card does not leave the page (Julie, 2026-11-16).
+  if (onGoTo) {
+    return (
+      <button type="button" className="tdoc-product-where" title={`Go to comment${safeUrl ? ` · ${safeUrl}` : ''}`}
+        onClick={(event) => { event.stopPropagation(); onGoTo(); }}>{label}</button>
+    );
+  }
   return safeUrl
-    ? <a className="tdoc-product-where" href={safeUrl} target="_blank" rel="noopener noreferrer" title={safeUrl}>{label}</a>
+    ? <a className="tdoc-product-where" href={safeUrl} target="_blank" rel="noopener noreferrer" title={`Go to comment · ${safeUrl}`}>{label}</a>
     : <span className="tdoc-product-where">{label}</span>;
 }
 
@@ -654,7 +664,15 @@ export function CommentCard({
   canSendToAgent = false,
   // Owner with no agent connected: @agent stays visible and leads to setup.
   agentSetupHref = null,
+  // A press on a list card selects its thread: replies and the reply box
+  // open, nothing scrolls or navigates. Going to where the comment is lives
+  // in ⋯ (Go to comment) and on the quoted anchor line, not on the whole
+  // card, which was too easy to set off (Julie, 2026-11-16).
   onActivate,
+  // Go to comment: the surface's way to the comment's place (scroll to its
+  // words and flash them, open its app page). null: a comment on an app
+  // still goes to that page (a new tab); anything else has nowhere to go.
+  onGoTo = null,
   onReply,
   onReact,
   onDelete,
@@ -690,7 +708,11 @@ export function CommentCard({
   const [replyTarget, setReplyTargetNow] = useState(savedParent || null);
   // Restored rather than asked for: see ReplyForm's takeFocus.
   const reopenedBox = useRef(Boolean(savedDraft));
-  const setReplyTarget = (next) => { reopenedBox.current = false; setReplyTargetNow(next); };
+  // Opened by a press on the card, the box waits to be clicked: it does not
+  // take the caret (or raise a phone's keyboard) from a reader who only
+  // picked the thread.
+  const quietBox = useRef(false);
+  const setReplyTarget = (next) => { reopenedBox.current = false; quietBox.current = false; setReplyTargetNow(next); };
   // One record at a time is being rewritten — this card's comment or any reply
   // under it — the same way one reply form is open at a time.
   const [editTarget, setEditTarget] = useState(null);
@@ -767,11 +789,21 @@ export function CommentCard({
   const canDelete = mayDelete(comment, currentUser, isOwner);
   const canMutate = mayMutate(comment, currentUser, isOwner, handoffViewer);
   const createdAt = formatCreated(comment.created);
+  const productUrl = comment.anchor?.kind === 'product' ? productPageUrl(comment.anchor.url, productLinkOrigin) : null;
+  const goTo = onGoTo ? () => onGoTo(comment.id)
+    : productUrl && !floating ? () => { window.open(productUrl, '_blank', 'noopener,noreferrer'); } : null;
+  // Select this thread (list cards only): open its replies and its reply box.
+  const activate = () => {
+    if (!onActivate) return;
+    setRepliesOpen(true);
+    if (!replyTarget && !comment.deleted) { quietBox.current = true; reopenedBox.current = false; setReplyTargetNow(comment.id); }
+    onActivate(comment.id);
+  };
   const replies = comment.replies || [];
   // The reply being answered was deleted: the box and its words move to the thread.
   const replyTo = replyTarget && replyTarget !== comment.id && !replies.some((r) => r.id === replyTarget && !r.deleted)
     ? comment.id : replyTarget;
-  const replyFocus = !reopenedBox.current || floating || selected;
+  const replyFocus = !quietBox.current && (!reopenedBox.current || floating || selected);
   const footTarget = floating ? replies.find((r) => r.id === replyTo) : null;
   // Orphans — their parent reply was deleted — still show under the root
   // rather than vanishing with it.
@@ -855,6 +887,15 @@ export function CommentCard({
       data-comment-id={comment.id}
       style={floatingStyle}
       onPointerDown={(event) => event.stopPropagation()}
+      // A list card is one stop for the keyboard: Enter or Space selects it,
+      // as a press does; Go to comment is in its ⋯ menu.
+      tabIndex={onActivate ? 0 : undefined}
+      aria-current={onActivate && selected ? 'true' : undefined}
+      onKeyDown={onActivate ? (event) => {
+        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        activate();
+      } : undefined}
       onClick={(event) => {
         if (!onActivate) return;
         // [role="menuitem"] belongs on this list: the card's ⋯ menu renders
@@ -866,7 +907,7 @@ export function CommentCard({
         // same, or ticking it closed the phone drawer.
         if (event.target instanceof Element
           && event.target.closest('button, a, input, textarea, select, label, [role="button"], [role="menuitem"], [role="checkbox"]')) return;
-        onActivate(comment.id);
+        activate();
       }}
     >
       <div className="tdoc-cc-body">
@@ -914,7 +955,7 @@ export function CommentCard({
               <Check size={16} />
             </button>
           ) : null}
-          {isMine || canDelete || canMutate ? (
+          {isMine || canDelete || canMutate || goTo ? (
             <AppMenu
               trigger={(
                 <button type="button" className="tdoc-cc-icon" title="More" aria-label="More actions">
@@ -922,6 +963,11 @@ export function CommentCard({
                 </button>
               )}
             >
+              {goTo ? (
+                <AppMenuItem className="tdoc-goto-comment" onClick={goTo}>
+                  Go to comment
+                </AppMenuItem>
+              ) : null}
               {isMine ? (
                 <AppMenuItem
                   className="tdoc-edit-toggle"
@@ -952,7 +998,7 @@ export function CommentCard({
           ) : null}
         </div>
       </header>
-      <ProductWhere anchor={comment.anchor} origin={productLinkOrigin} />
+      <ProductWhere anchor={comment.anchor} origin={productLinkOrigin} onGoTo={onGoTo ? goTo : null} />
       {earlierVersion ? <p className="tdoc-cc-earlier">Commented on an earlier version</p> : null}
       {editTarget === comment.id ? (
         <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />

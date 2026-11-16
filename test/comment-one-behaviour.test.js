@@ -78,5 +78,31 @@ t('the floating card measures itself in the visual viewport, in the card, for ev
   assert.doesNotMatch(read('feedback/src/main.jsx'), /tdoc-floating-open \{[^}]*max-height/, 'the widget has its own height again');
 });
 
+t('a press on a list card only selects; Go to comment is in ⋯ and on the place line, on every surface', () => {
+  // Julie, 2026-11-16: a press anywhere on a card jumped to its place.
+  const card = read(CARD);
+  assert.match(card, /<AppMenuItem className="tdoc-goto-comment" onClick=\{goTo\}>\s*Go to comment/, 'the card has no Go to comment in ⋯');
+  assert.match(card, /isMine \|\| canDelete \|\| canMutate \|\| goTo \?/, '⋯ is missing when Go to comment is all there is');
+  assert.match(card, /onGoTo=\{onGoTo \? goTo : null\}/, 'the place line is not the card\'s Go to');
+  // The press handler selects (activate) and nothing else.
+  const press = card.slice(card.indexOf('onClick={(event) => {\n        if (!onActivate) return;'), card.indexOf('<div className="tdoc-cc-body">\n      {demo'));
+  assert.match(press, /activate\(\);/, 'a press does not select');
+  assert.doesNotMatch(press, /onGoTo|goTo\(|location|scroll/, 'a press on the card navigates again');
+  assert.match(card, /tabIndex=\{onActivate \? 0 : undefined\}/, 'a list card is not a keyboard stop');
+  const list = read('shell/src/document/comment-thread-list.jsx');
+  assert.match(list, /onActivate=\{onSelect\}/);
+  assert.doesNotMatch(read('shell/src/comments/panel/comment-panel.jsx'), /onNavigate/, 'the panel still takes a navigate-on-press handler');
+  // Every surface hands the panel a select and (where it has a place) a go-to.
+  const shell = read('shell/src/document-shell.jsx');
+  assert.equal((shell.match(/onGoTo=\{\(id\) => focusComment\(id, \{ scroll: true/g) || []).length, 2, 'the doc side list and phone drawer do not both go to with a scroll');
+  assert.equal((shell.match(/onSelect=\{\(id\) => \(isDocumentComment\(commentsById\.get\(id\)\) \? setOpenCommentId\(id\) : focusComment\(id\)\)\}/g) || []).length, 2, 'a press in the doc lists scrolls or closes the drawer');
+  assert.match(read('shell/src/document/comment-layer.jsx'), /onSelect=\{onSelect\}\s*onGoTo=\{onGoTo\}/);
+  const widget = read('feedback/src/main.jsx');
+  assert.match(widget, /onSelect=\{onSelect\}\s*\n\s*onGoTo=/, 'the widget list does not separate select from go to');
+  assert.match(widget, /className="tdoc-cpanel-context" title="Go to comment"/);
+  assert.match(read('shell/src/feedback-space.jsx'), /onSelect=\{\(id\) => setOpenId\(id\)\}/);
+  for (const file of SURFACES) assert.doesNotMatch(read(file), /\bonNavigate=/, `${file} still navigates on a press`);
+});
+
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exit(failed ? 1 : 0);

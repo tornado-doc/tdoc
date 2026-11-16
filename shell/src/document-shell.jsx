@@ -2710,9 +2710,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
           onResendHandoff={canNotify ? resendHandoff : null}
           onSendHandoffElsewhere={canNotify ? sendHandoffElsewhere : null}
-          onNavigate={(id) => isDocumentComment(commentsById.get(id))
-            ? setOpenCommentId(id)
-            : focusComment(id, { scroll: true, closeDrawer: true })}
+          // A tap on a card selects it in the drawer (its words are marked
+          // behind it, nothing scrolls); Go to comment closes the drawer and
+          // scrolls to them.
+          onSelect={(id) => (isDocumentComment(commentsById.get(id)) ? setOpenCommentId(id) : focusComment(id))}
+          onGoTo={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
+          canGoTo={(comment) => !isDocumentComment(comment) && pinIds.has(comment.id)}
         />
       </>) : (
         <DesktopCommentLayer
@@ -2780,9 +2783,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
             selectedId={openCommentId}
             expandReplies
             isAnchored={(comment) => isDocumentComment(comment) || pinIds.has(comment.id)}
-            onNavigate={(id) => (isDocumentComment(commentsById.get(id))
-              ? setOpenCommentId(id)
-              : focusComment(id, { scroll: true }))}
+            // A press on a card selects it and marks its words where they
+            // are, without scrolling the doc; Go to comment (⋯) scrolls to
+            // them and flashes them.
+            onSelect={(id) => (isDocumentComment(commentsById.get(id)) ? setOpenCommentId(id) : focusComment(id))}
+            onGoTo={(id) => focusComment(id, { scroll: true })}
+            canGoTo={(comment) => !isDocumentComment(comment) && pinIds.has(comment.id)}
             cardProps={{
               currentUser: config.identity?.login || 'anon',
               handoffViewer,

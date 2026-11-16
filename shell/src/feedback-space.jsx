@@ -251,7 +251,9 @@ export function FeedbackSpace({ boot }) {
             }))}
             empty={<p className="tdoc-cpanel-empty">{filter === 'all' ? 'No comments yet.' : `Nothing ${filter}.`}</p>}
             selectedId={openId}
-            onNavigate={(id) => setOpenId(id)}
+            // A press on a card selects it; Go to comment (⋯, or the line
+            // naming the app page) opens that page in a new tab.
+            onSelect={(id) => setOpenId(id)}
             cardProps={{
               currentUser: (identity && identity.login) || 'anon',
               handoffViewer: viewerKeys,
