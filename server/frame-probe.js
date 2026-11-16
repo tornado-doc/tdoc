@@ -86,6 +86,13 @@
     });
   }
   var interactionMode = 'read';
+  // Modeless editing (flag modelessEdit): the shell sends mode 'edit' with
+  // modeless:true to someone who may edit. The page is editable AND keeps
+  // what Comment mode does for them (highlights, a click on one opens its
+  // thread, a click elsewhere dismisses); a selection asks the shell for the
+  // bubble toolbar instead of opening a composer.
+  var modeless = false;
+  function modelessEdit() { return modeless && interactionMode === 'edit'; }
   // The mode is this script's to set, never the document's: a page saved or
   // published with data-tdoc-interaction-mode="edit" on <html> must not open
   // in Edit mode's chrome (the slide bar, edit-only styles) for its readers.
@@ -176,7 +183,9 @@
       'html[data-tdoc-site] [data-tdoc-diagram-tools]{display:none!important;}' +
       // No frame around the editable area: the caret and the editor bar say
       // it is Edit mode (a blue box around the page read as a selection).
-      'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}';
+      'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
+      // Modeless: a table looks as it reads; only the cell being typed in is ringed.
+      'html[data-tdoc-editing] [data-tdoc-cell-caret]{outline:2px solid ' + COMMENT_ACCENT + ';outline-offset:-2px;}';
     (document.head || document.documentElement).appendChild(s);
   })();
 
@@ -448,7 +457,7 @@
     var dragSelection = window.getSelection();
     if (dragSelection && !dragSelection.isCollapsed
       && (Math.abs(e.clientX - pointerStartX) > 4 || Math.abs(e.clientY - pointerStartY) > 4)) return;
-    var commentId = interactionMode === 'comment' ? anchorIdAtPoint(e.clientX, e.clientY) : null;
+    var commentId = interactionMode === 'comment' || modelessEdit() ? anchorIdAtPoint(e.clientX, e.clientY) : null;
     if (commentId) {
       e.preventDefault(); e.stopPropagation();
       setActiveAnchor(commentId, false);
@@ -515,6 +524,7 @@
       post({ type: 'tdoc:cleared' });
       return;
     }
+    if (modelessEdit()) { setTimeout(reportBubble, 0); return; }
     setTimeout(reportSelection, 0);
   }, true);
   // A tap on highlighted text. iOS Safari sends no click (and no mouse
@@ -599,7 +609,7 @@
     // edit through while something is open is the whole change — the selection
     // painting further down is still gated on comment mode, and the swallow
     // only preventDefaults our own pill and links, so a caret still lands.
-    if (interactionMode === 'edit' && !shellUiOpen) return;
+    if (interactionMode === 'edit' && !modelessEdit() && !shellUiOpen) return;
     // Clicking our own comment pill must not fire the clear (it opens the
     // composer) — everything else in the doc clears the shell's open UI.
     // The pill is our own UI, so a click on it normally opens the composer
@@ -1127,7 +1137,7 @@
     post({ type: 'tdoc:anchorHover', id: id });
   }
   document.addEventListener('pointermove', function (event) {
-    if (event.pointerType === 'touch' || interactionMode === 'edit') return;
+    if (event.pointerType === 'touch' || (interactionMode === 'edit' && !modelessEdit())) return;
     _hoverPoint = { x: event.clientX, y: event.clientY };
     if (_hoverTimer) return;
     _hoverTimer = setTimeout(function () {
@@ -1374,6 +1384,10 @@
   // native interaction or internal structure should be isolated from the
   // surrounding editing host; authors can opt other widgets out explicitly.
   var ATOMIC = 'img,svg,canvas,video,audio,pre,iframe,table,[data-tdoc-edit-atomic],[data-tdoc-excalidraw]';
+  // Modeless editing types into an ordinary table's cells (click a cell and
+  // type). A sheet keeps its own viewer, so it stays atomic.
+  var ATOMIC_MODELESS = 'img,svg,canvas,video,audio,pre,iframe,table[data-tdoc-sheet],[data-tdoc-edit-atomic],[data-tdoc-excalidraw]';
+  function atomicSelector() { return modeless ? ATOMIC_MODELESS : ATOMIC; }
   function findEditRoot() {
     if (editRoot && document.contains(editRoot)) return editRoot;
     var children = document.body ? document.body.children : [];
@@ -1402,6 +1416,7 @@
       } catch (e) {}
       return;
     }
+    if (modelessEdit()) { scheduleBubble(); markCaretCell(); }
     if (interactionMode !== 'edit' || !selectionInsideRoot()) return;
     try { savedRange = window.getSelection().getRangeAt(0).cloneRange(); } catch (e) {}
     markCaretLine();
@@ -1451,6 +1466,9 @@
     Array.prototype.push.apply(roots, root.querySelectorAll('[data-tdoc-editor-root]'));
     Array.prototype.forEach.call(root.querySelectorAll('[data-tdoc-caret]'), function (node) {
       node.removeAttribute('data-tdoc-caret');
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-tdoc-cell-caret]'), function (node) {
+      node.removeAttribute('data-tdoc-cell-caret');
     });
     if (root.removeAttribute) root.removeAttribute('data-tdoc-caret');
     roots.forEach(function (node) {
@@ -1530,7 +1548,7 @@
     reportDraft();
   });
   function markdownCtx() {
-    return { root: findEditRoot(), atomicSelector: ATOMIC + ',[data-tdoc-editor-atomic]' };
+    return { root: findEditRoot(), atomicSelector: atomicSelector() + ',[data-tdoc-editor-atomic]' };
   }
   function onEditInput(event) {
     var md = window.tdocEditMarkdown;
@@ -1541,6 +1559,7 @@
     // settles baseline equality after the input burst.
     setDirty(true, true);
     reportDraft();
+    if (modelessEdit()) { lastTypedAt = Date.now(); hideBubble(); splitIds(); checkSlash(); }
   }
   function onEditBeforeInput(event) {
     var md = window.tdocEditMarkdown;
@@ -1550,6 +1569,10 @@
     } catch (e) {}
   }
   function onEditKeydown(event) {
+    if (modelessEdit() && event.key === 'Tab' && !event.altKey && !event.metaKey && !event.ctrlKey && tableTab(event.shiftKey)) {
+      event.preventDefault();
+      return;
+    }
     var md = window.tdocEditMarkdown;
     if (md) {
       try {
@@ -1580,7 +1603,7 @@
       root.setAttribute('data-tdoc-editor-original-editable', root.hasAttribute('contenteditable') ? root.getAttribute('contenteditable') : '__missing__');
     }
     root.setAttribute('contenteditable', 'true');
-    Array.prototype.forEach.call(root.querySelectorAll(ATOMIC), function (node) {
+    Array.prototype.forEach.call(root.querySelectorAll(atomicSelector()), function (node) {
       node.setAttribute('data-tdoc-editor-atomic', '');
       if (!node.hasAttribute('data-tdoc-editor-original-editable')) {
         node.setAttribute('data-tdoc-editor-original-editable', node.hasAttribute('contenteditable') ? node.getAttribute('contenteditable') : '__missing__');
@@ -1598,7 +1621,12 @@
     // here with nothing on the page — swallows the first thing you type until
     // you think to click. The caret goes to the first placeholder line (the
     // heading of a blank doc) and an existing selection is left alone.
-    try {
+    // Modeless: the page is editable from the moment it opens, for reading
+    // as much as writing. Taking focus there would put a caret (and, on a
+    // phone, the keyboard) in front of someone who came to read; only a
+    // blank doc, whose placeholder asks to be typed into, gets the caret.
+    var focusRoot = !modeless || !!root.querySelector('[data-tdoc-placeholder]');
+    if (focusRoot) try {
       if (!selectionInsideRoot()) {
         var caretAt = root.querySelector('[data-tdoc-placeholder]') || root;
         var caret = document.createRange();
@@ -1625,14 +1653,21 @@
   function setInteractionMode(mode, opts) {
     var next = /^(read|comment|edit)$/.test(mode) ? mode : 'read';
     if (interactionMode === 'edit' && next !== 'edit') disableEditing();
+    var wasEdit = interactionMode === 'edit';
     interactionMode = next;
     if (opts && typeof opts.elementComment === 'boolean') elementComment = opts.elementComment;
     if (opts && typeof opts.areaSelect === 'boolean') areaSelect = opts.areaSelect;
+    var wasModeless = modeless;
+    modeless = next === 'edit' && !!(opts && opts.modeless === true);
+    // Atomic blocks differ between the two (tables are typed into here), so
+    // switching between them re-marks the page.
+    if (wasEdit && next === 'edit' && wasModeless !== modeless) disableEditing();
     if (next === 'edit') endPick(true);
+    if (!modeless) hideBubble();
     document.documentElement.setAttribute('data-tdoc-interaction-mode', next);
     clearSelectingCursor();
     if (HL) {
-      if (next === 'comment') {
+      if (next === 'comment' || modeless) {
         CSS.highlights.set('tdoc-anchor', _anchorHighlight);
         CSS.highlights.set('tdoc-anchor-moved', _movedHighlight);
         // A mode message may arrive while the mobile drawer is closing after
@@ -1690,6 +1725,376 @@
       }
       onEditInput();
     } catch (e) {}
+  }
+
+  // --- modeless editing: bubble toolbar, "/" menu, publish, live swap --------
+  // (flag modelessEdit; only while the shell has sent mode 'edit' with
+  // modeless:true). The toolbar and the menu are the shell's own components;
+  // this side says where the selection or the caret is, and applies what was
+  // chosen through the same execCommand path as the editor bar.
+  //   frame -> shell: tdoc:bubble { rect|null, marks:{bold,italic} }
+  //                   tdoc:slash { rect }              ("/" typed on an empty line)
+  //   shell -> frame: tdoc:bubbleComment                (comment on the selection)
+  //                   tdoc:blockApply { command, value, at:'slash'|'selection' }
+  //                   tdoc:slashCancel
+  //                   tdoc:editCommitted { bodyHtml }   (that body is a version now)
+  //                   tdoc:swapBody { bodyHtml, shape } (a newer version, in place)
+  var bubbleShown = false, bubbleTimer = null, lastTypedAt = 0, slashBlock = null, pointerIsDown = false;
+  document.addEventListener('pointerdown', function () { pointerIsDown = true; }, true);
+  document.addEventListener('pointerup', function () { pointerIsDown = false; }, true);
+  document.addEventListener('pointercancel', function () { pointerIsDown = false; }, true);
+  function markCaretCell() {
+    var cell = null;
+    try {
+      var sel = window.getSelection();
+      var n = sel && sel.rangeCount && sel.isCollapsed ? sel.anchorNode : null;
+      var el = n && (n.nodeType === 1 ? n : n.parentElement);
+      cell = el && el.closest ? el.closest('td,th') : null;
+      if (cell && !findEditRoot().contains(cell)) cell = null;
+    } catch (e) {}
+    Array.prototype.forEach.call(document.querySelectorAll('[data-tdoc-cell-caret]'), function (node) {
+      if (node !== cell) node.removeAttribute('data-tdoc-cell-caret');
+    });
+    if (cell && !cell.hasAttribute('data-tdoc-cell-caret')) cell.setAttribute('data-tdoc-cell-caret', '');
+  }
+  function hideBubble() {
+    clearTimeout(bubbleTimer);
+    if (!bubbleShown) return;
+    bubbleShown = false;
+    post({ type: 'tdoc:bubble', rect: null });
+  }
+  function scheduleBubble() {
+    clearTimeout(bubbleTimer);
+    // While a drag is still selecting, wait for its mouseup (reportBubble is
+    // called from there); a keyboard or touch selection settles on a timer.
+    bubbleTimer = setTimeout(function () { if (!pointerIsDown) reportBubble(); }, 220);
+  }
+  function reportBubble() {
+    if (!modelessEdit()) { hideBubble(); return; }
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !selectionInsideRoot() || !String(sel.toString()).trim()) { hideBubble(); return; }
+    var marks = {};
+    try { marks.bold = document.queryCommandState('bold'); marks.italic = document.queryCommandState('italic'); } catch (e) {}
+    // Which level the block the selection starts in is: Text / H1 / H2 / H3.
+    var startBlock = editBlockOf(sel.getRangeAt(0).startContainer);
+    var tag = startBlock ? startBlock.tagName.toLowerCase() : 'p';
+    var inList = startBlock && startBlock.closest('ul,ol');
+    var inQuote = startBlock && startBlock.closest('blockquote');
+    marks.block = /^h[1-3]$/.test(tag) ? tag : inList ? (inList.tagName === 'OL' ? 'ol' : 'ul') : inQuote ? 'quote' : 'p';
+    bubbleShown = true;
+    post({ type: 'tdoc:bubble', rect: selectionRect(sel.getRangeAt(0)), marks: marks });
+  }
+  function bubbleComment() {
+    if (!modelessEdit()) return;
+    var sel = window.getSelection();
+    var range = sel && !sel.isCollapsed && sel.rangeCount ? sel.getRangeAt(0) : savedRange;
+    var text = range ? String(range.toString()).trim() : '';
+    hideBubble();
+    if (range && text) postTextSelection(range, text);
+  }
+  function editBlockOf(node) {
+    var root = findEditRoot();
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    while (el && el !== root) {
+      if (/^(P|DIV|H[1-6]|LI|BLOCKQUOTE)$/.test(el.tagName) && el.parentElement) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+  // Enter splits a block into two that both carry its id (the browser copies
+  // the attributes). An id names one place (comment anchors, links), so it
+  // stays with the half that kept the text.
+  function splitIds() {
+    var sel = window.getSelection();
+    var block = sel && sel.rangeCount ? editBlockOf(sel.anchorNode) : null;
+    if (!block || !block.id) return;
+    [block.previousElementSibling, block.nextElementSibling].forEach(function (twin) {
+      if (!twin || twin.id !== block.id || !block.id) return;
+      var drop = String(twin.textContent).trim().length >= String(block.textContent).trim().length ? block : twin;
+      drop.removeAttribute('id');
+    });
+  }
+  function checkSlash() {
+    var sel = window.getSelection();
+    if (!sel || !sel.isCollapsed || !sel.rangeCount) return;
+    var block = editBlockOf(sel.anchorNode);
+    if (!block || block.closest('td,th') || String(block.textContent) !== '/') return;
+    slashBlock = block;
+    var caret = sel.getRangeAt(0).cloneRange();
+    var rect = selectionRect(caret);
+    if (!rect.height) {
+      var b = block.getBoundingClientRect();
+      rect = { top: b.top, left: b.left, bottom: b.bottom, right: b.left, width: 0, height: b.height };
+    }
+    post({ type: 'tdoc:slash', rect: rect });
+  }
+  function caretInto(node, atEnd) {
+    try {
+      var r = document.createRange();
+      r.selectNodeContents(node);
+      r.collapse(!atEnd);
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      savedRange = r.cloneRange();
+    } catch (e) {}
+  }
+  function markAtomic(node) {
+    node.setAttribute('data-tdoc-editor-atomic', '');
+    node.setAttribute('data-tdoc-editor-original-editable', '__missing__');
+    node.setAttribute('contenteditable', 'false');
+  }
+  function slashCancel() {
+    var block = slashBlock;
+    slashBlock = null;
+    if (!block || !document.contains(block)) return;
+    findEditRoot().focus({ preventScroll: true });
+    caretInto(block, true);
+  }
+  // One block command from the registry (shell block-commands.js), on the
+  // "/" line (at 'slash': the line is cleared, then turned or replaced) or
+  // on the selection's block (at 'selection': turned in place; an insert
+  // goes in after it).
+  var TURN_INTO = { p: 'p', h1: 'h1', h2: 'h2', h3: 'h3', quote: 'blockquote' };
+  function blockApply(command, value, at) {
+    if (!modelessEdit()) return;
+    var root = findEditRoot();
+    var block = null;
+    if (at === 'slash') {
+      block = slashBlock;
+      slashBlock = null;
+      if (!block || !document.contains(block)) return;
+      root.focus({ preventScroll: true });
+      // The "/" that opened the menu goes.
+      if (String(block.textContent) === '/') block.innerHTML = '<br>';
+      caretInto(block, false);
+    } else {
+      root.focus({ preventScroll: true });
+      restoreSelection();
+      var live = window.getSelection();
+      block = live && live.rangeCount ? editBlockOf(live.getRangeAt(0).startContainer) : null;
+      if (!block) return;
+      if (!TURN_INTO[command] && command !== 'ul' && command !== 'ol') {
+        // An insert goes after the top-level block the selection is in.
+        var top = block;
+        while (top.parentElement && top.parentElement !== root) top = top.parentElement;
+        var line = document.createElement('p');
+        line.innerHTML = '<br>';
+        top.parentNode.insertBefore(line, top.nextSibling);
+        block = line;
+        caretInto(block, false);
+      }
+    }
+    var after = function (node) {
+      var p = document.createElement('p');
+      p.innerHTML = '<br>';
+      node.parentNode.insertBefore(p, node.nextSibling);
+      return p;
+    };
+    try {
+      var list = block.closest('ul,ol');
+      if (TURN_INTO[command]) {
+        // Out of a list first: formatBlock inside an <li> nests instead.
+        if (list) document.execCommand(list.tagName === 'OL' ? 'insertOrderedList' : 'insertUnorderedList', false, null);
+        document.execCommand('formatBlock', false, TURN_INTO[command]);
+      } else if (command === 'ul' || command === 'ol') {
+        var want = command === 'ol' ? 'OL' : 'UL';
+        if (!list || list.tagName !== want) document.execCommand(command === 'ol' ? 'insertOrderedList' : 'insertUnorderedList', false, null);
+      } else if (command === 'divider') {
+        var hr = document.createElement('hr');
+        block.parentNode.replaceChild(hr, block);
+        caretInto(after(hr), false);
+      } else if (command === 'table') {
+        var table = document.createElement('table');
+        table.innerHTML = '<thead><tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr></thead>'
+          + '<tbody><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr></tbody>';
+        // In the reader's own scroll wrapper from the start (table-layout.js
+        // would add it later by moving the table, and the caret with it).
+        var scroll = document.createElement('div');
+        scroll.className = 'tdoc-table-scroll';
+        scroll.appendChild(table);
+        block.parentNode.replaceChild(scroll, block);
+        after(scroll);
+        refreshTableLayout();
+        caretInto(table.querySelector('th'), true);
+      } else if (command === 'image') {
+        if (!/^(https?:\/\/|\/(?!\/))/i.test(value)) return;
+        var img = document.createElement('img');
+        img.setAttribute('src', value);
+        img.setAttribute('alt', '');
+        block.parentNode.replaceChild(img, block);
+        markAtomic(img);
+        caretInto(after(img), false);
+      } else return;
+    } catch (e) {}
+    onEditInput();
+  }
+  // Tab / Shift+Tab inside a table: the next / previous cell, all its text
+  // selected, as in a spreadsheet; Tab in the last cell adds a row.
+  function tableTab(back) {
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    var cell = sel.anchorNode && (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement);
+    cell = cell && cell.closest ? cell.closest('td,th') : null;
+    var table = cell && cell.closest('table');
+    if (!table || table.matches('[data-tdoc-sheet]') || !findEditRoot().contains(table)) return false;
+    var cells = Array.prototype.slice.call(table.querySelectorAll('td,th'));
+    var i = cells.indexOf(cell) + (back ? -1 : 1);
+    if (i < 0) return true;
+    if (i >= cells.length) {
+      var lastRow = cell.parentElement;
+      var row = document.createElement('tr');
+      for (var c = 0; c < lastRow.children.length; c++) row.appendChild(document.createElement('td')).innerHTML = '<br>';
+      (table.tBodies[0] || lastRow.parentElement).appendChild(row);
+      cells = Array.prototype.slice.call(table.querySelectorAll('td,th'));
+      onEditInput();
+    }
+    var next = cells[i];
+    try {
+      var r = document.createRange();
+      r.selectNodeContents(next);
+      sel.removeAllRanges(); sel.addRange(r);
+      savedRange = r.cloneRange();
+    } catch (e) {}
+    return true;
+  }
+  // The shell published this body as a version: it is the baseline now.
+  // Anything typed while the request was out stays a (smaller) draft.
+  function editCommitted(bodyHtml) {
+    if (typeof bodyHtml !== 'string' || interactionMode !== 'edit') return;
+    editBaselineHtml = bodyHtml;
+    var current = draftBodyHtml();
+    var dirty = current !== editBaselineHtml;
+    setDirty(dirty, false);
+    post({ type: 'tdoc:editSnapshot', bodyHtml: current, dirty: dirty });
+  }
+  // What a body swap must agree on: the same styles and the same content
+  // root. A version that changed either is opened the old way instead.
+  function swapShape() {
+    var head = document.head ? document.head.cloneNode(true) : null;
+    var sig = '';
+    if (head) {
+      Array.prototype.forEach.call(head.querySelectorAll('[data-tdoc-provider],script,[nonce]'), function (n) { n.remove(); });
+      sig = head.innerHTML.replace(/\s+/g, ' ');
+    }
+    var root = findEditRoot();
+    return {
+      head: htmlSig(sig),
+      root: root === document.body ? 'body' : root.tagName + '.' + root.className.replace(/\s+/g, '.'),
+      live: !!document.querySelector('table[data-tdoc-sheet],[data-tdoc-slide],[data-tdoc-embed]'),
+    };
+  }
+  function htmlSig(value) {
+    var hash = 5381;
+    for (var i = 0; i < value.length; i++) hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0;
+    return (hash >>> 0).toString(16) + ':' + value.length;
+  }
+  // A newer version, shown without reloading the page: the content root's
+  // HTML is replaced (as a draft restore does), the scroll stays where it
+  // was, and comments re-anchor. The shell only asks when nobody is typing.
+  function swapBody(d) {
+    var root = findEditRoot();
+    var shape = d && d.shape;
+    var mine = swapShape();
+    var ok = !!(root && typeof d.bodyHtml === 'string' && shape && shape.head === mine.head && shape.root === mine.root && !shape.live && !mine.live);
+    if (ok) {
+      var x = window.scrollX || 0, y = window.scrollY || 0;
+      var editing = interactionMode === 'edit';
+      var beforeBlocks = swapBlocks(root).map(function (b) { return b.model; });
+      if (editing) disableEditing();
+      hideBubble();
+      root.innerHTML = d.bodyHtml;
+      prepareDiagrams();
+      editBaselineHtml = null;
+      if (editing) enableEditing();
+      refreshTableLayout();
+      _view = null; _rangeCache = {};
+      reportPins(_lastComments);
+      window.scrollTo(x, y);
+      try { markSwapChanges(beforeBlocks, swapBlocks(root)); } catch (e) {}
+    }
+    post({ type: 'tdoc:swapped', requestId: d && d.requestId, ok: ok });
+  }
+  // What changed, shown for a moment the way the version compare marks an
+  // insertion (version-diff.js: the same block matching, word parts and
+  // colour), painted as a CSS highlight so nothing is written into the
+  // page (it is editable and saved). Fades after ~3 s; with reduced motion
+  // it just clears.
+  var SWAP_BLOCKS = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,td,th,figcaption,dt,dd,caption';
+  function swapBlocks(root) {
+    return Array.prototype.filter.call(root.querySelectorAll(SWAP_BLOCKS), function (el) {
+      return !el.closest('[data-tdoc-provider]') && !el.querySelector(SWAP_BLOCKS);
+    }).map(function (el) {
+      var text = String(el.textContent || '');
+      return { el: el, model: { kind: el.tagName.toLowerCase(), key: el.id || '', fingerprint: text.replace(/\s+/g, ' ').trim(), text: text } };
+    });
+  }
+  function textRangeIn(el, start, end) {
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), at = 0, range = document.createRange(), started = false;
+    while (walker.nextNode()) {
+      var node = walker.currentNode, len = node.data.length;
+      if (!started && start <= at + len) { range.setStart(node, start - at); started = true; }
+      if (started && end <= at + len) { range.setEnd(node, end - at); return range; }
+      at += len;
+    }
+    return null;
+  }
+  var swapMarkTimers = [];
+  function markSwapChanges(before, afterBlocks) {
+    var engine = window.TdocVersionDiff;
+    if (!HL || !engine) return;
+    var after = afterBlocks.map(function (b) { return b.model; });
+    var ranges = [];
+    engine.align(before, after).forEach(function (pair) {
+      if (pair.after === null) return;
+      var next = afterBlocks[pair.after];
+      var old = pair.before === null ? null : before[pair.before];
+      if (old && old.fingerprint === next.model.fingerprint) return;
+      if (!next.model.fingerprint) return;
+      var parts = old ? engine.textParts(old.text, next.model.text) : null;
+      if (!parts || engine.isRewrite(parts)) {
+        var whole = document.createRange();
+        whole.selectNodeContents(next.el);
+        ranges.push(whole);
+        return;
+      }
+      var at = 0;
+      parts.forEach(function (part) {
+        if (part.after && part.kind !== 'equal' && part.after.trim()) {
+          var r = textRangeIn(next.el, at, at + part.after.length);
+          if (r) ranges.push(r);
+        }
+        at += part.after.length;
+      });
+    });
+    swapMarkTimers.forEach(clearTimeout);
+    swapMarkTimers = [];
+    if (!ranges.length) return;
+    var color = (/\.tdoc-diff-ins\{[^}]*background:rgba\(([\d\s,]+),\s*([\d.]+)\)/.exec(engine.markCss) || []);
+    var rgb = color[1] || '37,168,91', alpha = Number(color[2]) || 0.16;
+    var st = document.getElementById('tdoc-provider-swap-mark');
+    if (!st) {
+      st = document.createElement('style');
+      st.id = 'tdoc-provider-swap-mark';
+      st.setAttribute('data-tdoc-provider', '');
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var paint = function (a) { st.textContent = '::highlight(tdoc-swap-ins){background-color:rgba(' + rgb + ',' + a + ')}'; };
+    paint(alpha);
+    var highlight = new Highlight();
+    ranges.forEach(function (r) { highlight.add(r); });
+    CSS.highlights.set('tdoc-swap-ins', highlight);
+    document.documentElement.setAttribute('data-tdoc-swap-marked', String(ranges.length));
+    var clear = function () {
+      CSS.highlights.delete('tdoc-swap-ins');
+      document.documentElement.removeAttribute('data-tdoc-swap-marked');
+    };
+    var reduce = false;
+    try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+    if (reduce) { swapMarkTimers.push(setTimeout(clear, 3000)); return; }
+    for (var step = 1; step <= 8; step++) {
+      (function (k) {
+        swapMarkTimers.push(setTimeout(function () { if (k === 8) clear(); else paint((alpha * (8 - k) / 8).toFixed(3)); }, 3000 + k * 90));
+      })(step);
+    }
   }
   function serializeDocument() {
     var clone = document.documentElement.cloneNode(true);
@@ -2129,6 +2534,11 @@
     else if (d.type === 'tdoc:diagramApply') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!applyDiagram(d) });
     else if (d.type === 'tdoc:diagramInsert') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!insertDiagram(d) });
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
+    else if (d.type === 'tdoc:bubbleComment') bubbleComment();
+    else if (d.type === 'tdoc:blockApply') blockApply(String(d.command || ''), typeof d.value === 'string' ? d.value : '', d.at === 'selection' ? 'selection' : 'slash');
+    else if (d.type === 'tdoc:slashCancel') slashCancel();
+    else if (d.type === 'tdoc:editCommitted') editCommitted(d.bodyHtml);
+    else if (d.type === 'tdoc:swapBody') swapBody(d);
     else if (d.type === 'tdoc:editRestore') {
       var restoreRoot = findEditRoot();
       if (restoreRoot && typeof d.bodyHtml === 'string') {
@@ -2148,7 +2558,7 @@
       post({ type: 'tdoc:exportHtml', requestId: d.requestId, html: serializeDocument() });
     }
     else if (d.type === 'tdoc:editSerialize') {
-      post({ type: 'tdoc:editDocument', requestId: d.requestId, html: serializeDocument() });
+      post({ type: 'tdoc:editDocument', requestId: d.requestId, html: serializeDocument(), bodyHtml: draftBodyHtml(), shape: swapShape() });
     }
     // A version saved without Edit mode (a sheet's column width): it is the
     // page now, so the next Edit mode measures its changes from it.
@@ -2344,7 +2754,7 @@
   var ticking = false;
   window.addEventListener('scroll', function () {
     if (ticking) return; ticking = true;
-    requestAnimationFrame(function () { ticking = false; reportScroll(); });
+    requestAnimationFrame(function () { ticking = false; reportScroll(); if (bubbleShown) reportBubble(); });
   }, { passive: true });
 
   // What Download offers: a sheet doc (only sheet tables, a title and a
@@ -2360,6 +2770,6 @@
   }
   prepareDiagrams();
   var shape = docShape();
-  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, supportsTheme: supportsTheme, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null, sheets: shape.sheets, sheetDoc: shape.sheetDoc });
+  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, supportsTheme: supportsTheme, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null, sheets: shape.sheets, sheetDoc: shape.sheetDoc, slides: document.querySelectorAll('[data-tdoc-slide]').length });
   reportScroll(); // initial position so the shell can evaluate at-bottom for short docs
 })();

@@ -207,13 +207,17 @@ export function duplicateDocument(slug, version) {
   });
 }
 
-export function saveDocumentVersion(slug, baseVersion, html) {
+export function saveDocumentVersion(slug, baseVersion, html, { keepalive = false } = {}) {
   // The slug rides in the query too: the server checks the edit right
   // before it reads a body that may be a multi-megabyte sheet.
+  const body = JSON.stringify({ slug, baseVersion, html });
   return request(`/api/doc/versions?slug=${encodeURIComponent(slug)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slug, baseVersion, html }),
+    body,
+    // A publish as the tab goes away (modeless editing) outlives the page
+    // when it can: browsers cap a keepalive body at 64 KB.
+    ...(keepalive && body.length < 60_000 ? { keepalive: true } : {}),
   });
 }
 
