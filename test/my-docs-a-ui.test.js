@@ -5,8 +5,9 @@
 // its sections. On a phone (390, 430): one column of rows, Needs you as a
 // strip to swipe, the views and the type / folder filters as chip rows, ⋯
 // with Star, Select for batch actions, Settings as a list of sections. Layout
-// A is behind the myDocsA flag (on in dev mode): with it off, My docs keeps
-// the one-column layout at every width. Real worker routes (in-process
+// A is on for everyone (myDocsA graduated 2026-11-16; unpinned here, as
+// every account gets it); the flag pinned off, the off switch, keeps the
+// one-column layout at every width. Real worker routes (in-process
 // harness) behind a local HTTP server, real built shell runtime, real Chromium.
 //
 // TDOC_SHOTS_DIR=<dir> also writes screenshots (1440, 1280, dark, 390, 430).
@@ -127,7 +128,7 @@ async function startServer(worker, env) {
   const env = makeEnv(mod.CommentsStore);
   await seed(env);
   const { server, base } = await startServer(worker, env);
-  const open = async (viewport, { flags = { myDocsA: true }, dark = false } = {}) => {
+  const open = async (viewport, { flags = null, dark = false } = {}) => {
     const context = await browser.newContext({
       viewport,
       ...(viewport.width < 600 ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}),
@@ -756,8 +757,8 @@ async function startServer(worker, env) {
       } finally { await ctx.close(); }
     });
 
-    await t('myDocsA off (everybody outside dev mode): the one-column layout with its tabs, on a wide screen', async () => {
-      const { context: ctx, page: p, errors: errs } = await open({ width: 1440, height: 900 }, { flags: null });
+    await t('myDocsA pinned off (the off switch): the one-column layout with its tabs, on a wide screen', async () => {
+      const { context: ctx, page: p, errors: errs } = await open({ width: 1440, height: 900 }, { flags: { myDocsA: false } });
       try {
         await p.goto(`${base}/me`);
         await p.locator('.tabs').waitFor();
@@ -768,10 +769,10 @@ async function startServer(worker, env) {
       } finally { await ctx.close(); }
     });
 
-    // Flag off (everybody outside dev mode): a phone keeps today's layout.
+    // Flag pinned off (the off switch): a phone keeps the one-column layout.
     for (const width of [390, 430]) {
       await t(`phone ${width}, flag off: the one-column layout as before (tabs, folders as rows, select all)`, async () => {
-        const { context: ctx, page: p, errors: errs } = await open({ width, height: 844 }, { flags: null });
+        const { context: ctx, page: p, errors: errs } = await open({ width, height: 844 }, { flags: { myDocsA: false } });
         try {
           await p.goto(`${base}/me`);
           await p.locator('.tabs').waitFor();

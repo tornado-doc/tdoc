@@ -194,6 +194,9 @@ async function t(name, fn) {
       const page = await browser.newPage({ viewport: { width: 900, height: 900 } });
       const errors = [];
       page.on('pageerror', (e) => errors.push(e.message));
+      // The plain status words: agentProgress (on for everyone since
+      // 2026-11-16, its pill covered by agent-progress-ui) pinned off.
+      await page.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), agentProgress: false }; });
       await page.goto(`${base}/?view=status`);
       const line = (id) => page.locator(`[data-comment-id="${id}"] .tdoc-handoff-status-text`);
       await line('queued').waitFor();

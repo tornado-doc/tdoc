@@ -98,6 +98,17 @@ async function startServer(worker, env) {
   return { server, base: `http://127.0.0.1:${server.address().port}` };
 }
 
+// A My docs view: a tab (the one-column layout, layout A's wide sidebar)
+// or, on a phone in layout A (myDocsA, on for everyone), the view menu.
+async function goView(page, name) {
+  if (await page.locator('.mda-pview-btn').count()) {
+    await page.locator('.mda-pview-btn').click();
+    await page.getByRole('menuitem', { name: typeof name === 'string' ? new RegExp(`^${name}`) : name }).click();
+  } else {
+    await page.getByRole('tab', { name }).click();
+  }
+}
+
 (async () => {
   console.log('My docs rows UI');
   const mod = await loadWorker();
@@ -174,26 +185,27 @@ async function startServer(worker, env) {
       });
 
       await t(`${label}: Recent and Starred say when [the bug]`, async () => {
-        await page.getByRole('tab', { name: 'Recent' }).click();
+        await goView(page, 'Recent');
         await row(page, 'bobs-doc').waitFor();
         await shot(page, 'recent');
         assert.match(await row(page, 'bobs-doc').locator('.doc-meta').textContent(), /^bob · visited 5h ago$/);
         assert.match(await row(page, 'q4-plan').locator('.doc-meta').textContent(), /visited 1d ago/);
         assert.ok(await row(page, 'bobs-doc').locator('time').getAttribute('title'), 'no full date on hover');
         assert.equal(await row(page, 'bobs-doc').locator('.doc-sharing').count(), 0, 'somebody else\'s doc shows its sharing');
-        await page.getByRole('tab', { name: 'Starred' }).click();
+        await goView(page, 'Starred');
         await row(page, 'launch-deck').waitFor();
         assert.match(await row(page, 'launch-deck').locator('.doc-meta').textContent(), /starred 2d ago/);
       });
 
       await t(`${label}: ⋯ Share opens the doc page's Share dialog`, async () => {
-        await page.getByRole('tab', { name: /^(Docs|All docs)/ }).click();
+        await goView(page, /^(Docs|All docs)/);
         await row(page, 'q4-plan').hover();
         await row(page, 'q4-plan').getByRole('button', { name: 'More actions' }).click();
         await page.getByRole('menuitem').first().waitFor();
         await shot(page, 'row-menu');
         const items = await page.getByRole('menuitem').allTextContents();
-        assert.equal(items[0], 'Share', `menu: ${items.join(', ')}`);
+        // Layout A's phone rows (myDocsA) put Star in ⋯ first; Share leads the rest.
+        assert.equal(items.filter((item) => item !== 'Star')[0], 'Share', `menu: ${items.join(', ')}`);
         await page.getByRole('menuitem', { name: 'Share' }).click();
         await page.waitForURL(/\/d\/q4-plan/);
         const dialog = page.getByRole('dialog', { name: 'Share' });
@@ -223,7 +235,7 @@ async function startServer(worker, env) {
         await p.locator('.onb-card').waitFor();
         await shot(p, 'newbie-docs');
         for (const tab of ['Recent', 'Starred', 'Comments', 'Trash', 'Settings']) {
-          await p.getByRole('tab', { name: tab }).click();
+          await goView(p, tab);
           await p.waitForTimeout(100);
           assert.equal(await p.locator('.onb-card, .onb-chip').count(), 0, `setup card on ${tab}`);
         }

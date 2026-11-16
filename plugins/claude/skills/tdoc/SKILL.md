@@ -54,6 +54,7 @@ Short answers and edits to files in a repository do not need tdoc.
 - `get_comments`: comments on a doc, with anchors and status.
 - `reply_to_comment`: reply with a status.
 - `resolve_comment`: mark a comment handed to you as handled.
+- `report_progress`: optional, while working on a comment handed to you, one short line saying what you are doing now (shown in the comment's progress steps).
 - `answer_question`: answer a reader's Ask AI question by `ask_id`.
 - `share_doc`: set visibility (`private`, `unlisted`, `public`) and invite people.
 - `create_feedback_space`: a private product-feedback space for a website

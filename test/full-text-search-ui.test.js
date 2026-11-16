@@ -101,8 +101,9 @@ async function startServer(worker, env, waits) {
   };
 
   const run = async (label, viewport) => {
-    // The text results ship behind the fullTextSearch flag: dev mode only.
-    const env = makeEnv(mod.CommentsStore, { TDOC_SEARCH_CACHE_MS: '0', TDOC_DEBUG_ACCOUNTS: 'alice@example.com' });
+    // fullTextSearch is on for everyone (graduated 2026-11-16): alice is a
+    // plain account, no dev mode; the flag pinned off is the off switch.
+    const env = makeEnv(mod.CommentsStore, { TDOC_SEARCH_CACHE_MS: '0' });
     await seed(env);
     const waits = [];
     // A folder, so results show where a doc lives. (Folder records are cached
@@ -120,6 +121,13 @@ async function startServer(worker, env, waits) {
       ...(viewport.width < 600 ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}),
     });
     await context.addCookies([{ name: 'tdoc_sid', value: SID, url: base }]);
+    // Pinned off until the test unpins it (sessionStorage), then the default.
+    await context.addInitScript(() => {
+      if (window !== window.top) return;
+      let unpinned = false;
+      try { unpinned = sessionStorage.getItem('fts-default') === '1'; } catch {}
+      if (!unpinned) window.__TDOC_FLAGS__ = Object.assign({}, window.__TDOC_FLAGS__, { fullTextSearch: false });
+    });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
@@ -134,14 +142,13 @@ async function startServer(worker, env, waits) {
     };
     const results = page.locator('.text-search-row');
     try {
-      await env.META.put('dev-mode:alice@example.com', 'off');
       await page.goto(`${base}/me`);
       await page.locator('.doc-row[data-slug="launch-retro"]').waitFor();
       // Opening My docs queued every unindexed doc; the store's alarm reads them.
       while (waits.length) await Promise.all(waits.splice(0));
       await env.COMMENTS.runAlarms();
 
-      await t(`${label}: with the flag off (dev mode off) there are no text results`, async () => {
+      await t(`${label}: with the flag pinned off there are no text results`, async () => {
         let asked = 0;
         page.on('request', (r) => { if (r.url().includes('/api/search')) asked++; });
         await input.fill('budget');
@@ -150,7 +157,8 @@ async function startServer(worker, env, waits) {
         assert.equal(await page.locator('.text-search').count(), 0, 'text results shown with the flag off');
         assert.equal(asked, 0, 'the hub asked /api/search with the flag off');
       });
-      await env.META.delete('dev-mode:alice@example.com');
+      // Unpinned: the default, what every signed-in person gets.
+      await page.evaluate(() => sessionStorage.setItem('fts-default', '1'));
       await page.reload();
       await page.locator('.doc-row[data-slug="launch-retro"]').waitFor();
 

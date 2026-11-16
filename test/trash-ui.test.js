@@ -78,6 +78,17 @@ async function startServer(worker, env) {
   return { server, base: `http://127.0.0.1:${server.address().port}` };
 }
 
+// A My docs view: a tab (the one-column layout, layout A's wide sidebar)
+// or, on a phone in layout A (myDocsA, on for everyone), the view menu.
+async function goView(page, name) {
+  if (await page.locator('.mda-pview-btn').count()) {
+    await page.locator('.mda-pview-btn').click();
+    await page.getByRole('menuitem', { name: typeof name === 'string' ? new RegExp(`^${name}`) : name }).click();
+  } else {
+    await page.getByRole('tab', { name }).click();
+  }
+}
+
 (async () => {
   console.log('Trash UI');
   const mod = await loadWorker();
@@ -144,7 +155,7 @@ async function startServer(worker, env) {
       await pause(1200);
 
       await page.goto(`${base}/me`);
-      await page.getByRole('tab', { name: 'Trash' }).click();
+      await goView(page, 'Trash');
       const trashed = page.locator('.trash-row[data-slug="q4-roadmap"]');
       await trashed.waitFor();
       assert.match(await trashed.textContent(), /Q4 roadmap/);
@@ -167,7 +178,7 @@ async function startServer(worker, env) {
       await page.goto(`${base}/me`);
       await deleteFromList('q4-roadmap');
       await toast.getByText('Moved 1 doc to Trash').waitFor();
-      await page.getByRole('tab', { name: 'Trash' }).click();
+      await goView(page, 'Trash');
       await trashed.waitFor();
       await pause(600);
       await trashed.getByRole('button', { name: 'More actions for Q4 roadmap' }).click();
@@ -243,7 +254,7 @@ async function startServer(worker, env) {
         const toast = page.locator('.tdoc-toast');
         await toast.getByText('Moved “Planning” and 1 doc to Trash').waitFor();
         assert.equal(await folderRow.count(), 0, 'folder still listed');
-        await page.getByRole('tab', { name: 'Trash' }).click();
+        await goView(page, 'Trash');
         const entry = page.locator(`.trash-row[data-folder-id="${fid}"]`);
         await entry.waitFor();
         assert.match(await entry.textContent(), /Folder · 1 doc/);
