@@ -1539,6 +1539,10 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
 .tdoc-bar .tdoc-edited:hover { background: #f0f1f4; color: #1a1a1a; }
 .tdoc-bar .tdoc-edited[aria-expanded="true"] { background: var(--td-surface, #f0f0ee); color: var(--td-ink, #1a1a1a); }
 .tdoc-bar .tdoc-edited:disabled { cursor: default; opacity: .6; }
+/* A newer version just replaced the page in place (modelessEdit): "Edited
+   just now" lights up for a moment, then settles. */
+.tdoc-bar .tdoc-edited[data-just-updated] { background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); transition: background-color .6s ease, color .6s ease; }
+@media (prefers-reduced-motion: reduce) { .tdoc-bar .tdoc-edited[data-just-updated] { transition: none; } }
 /* A viewer who may not list the history: when, in words, and nothing to open. */
 .tdoc-bar .tdoc-edited.is-static { display: inline-flex; align-items: center; cursor: default; }
 .tdoc-bar .tdoc-edited.is-static:hover { background: transparent; color: #8a8a8f; }

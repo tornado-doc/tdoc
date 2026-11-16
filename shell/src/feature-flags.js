@@ -104,6 +104,14 @@ export const FLAGS = Object.freeze({
   // Dev mode and PR previews only; the server holds the same line
   // (writeWithAiAllowed), so pinning the flag shows a row that 404s.
   writeWithTdocAi: Object.freeze({ label: 'Write with tdoc AI (New menu)', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
+  // No Edit mode for people who may edit a prose doc: click and type. A
+  // selection brings up the editor bar's tools (and Comment), "/" on an empty
+  // line the block menu, plain tables are typed into cell by cell. Drafts
+  // stay in the browser and publish as a version after a pause or on leaving
+  // (never over a newer version: the conflict dialog). A version published
+  // while the doc is open replaces the page in place, once nobody is typing.
+  // Sheets and slides keep their modes. Readers and commenters: unchanged.
+  modelessEdit: Object.freeze({ label: 'Edit without Edit mode (autosave)', owner: 'julie', added: '2026-11-16', default: false, preview: true }),
   sheetEmbeds: Object.freeze({ label: 'Sheets embedded in pages (live, by reference)', owner: 'julie', added: '2026-11-11', default: false, preview: true }),
 });
 

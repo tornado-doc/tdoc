@@ -11,6 +11,7 @@ import {
   Italic,
   Link,
   List,
+  MoreHorizontal,
   ListOrdered,
   Pencil,
   Quote,
@@ -89,9 +90,12 @@ export function DocumentModeControl({ mode, canComment, canEdit, onChange, signI
   );
 }
 
-function ToolButton({ label, icon, command, value, onFormat }) {
+function ToolButton({ label, icon, command, value, onFormat, pressed, keepFocus = false }) {
   return (
-    <button type="button" title={label} aria-label={label} onClick={() => onFormat(command, value)}>
+    <button type="button" title={label} aria-label={label} aria-pressed={pressed === undefined ? undefined : String(Boolean(pressed))}
+      // Over a selection the doc keeps focus: a press must not take it first.
+      onMouseDown={keepFocus ? (event) => event.preventDefault() : undefined}
+      onClick={() => onFormat(command, value)}>
       {icon}
     </button>
   );
@@ -161,7 +165,145 @@ export function StaleDraftDialog({ draft, currentVersion, onRestore, onKeep }) {
   );
 }
 
+// Modeless editing (flag modelessEdit) -------------------------------------
+// No Edit mode, no bar: the formatting tools come up over a selection (the
+// same buttons and commands as the editor bar above), "/" on an empty line
+// opens the block menu (AppMenu), and the bar's status text says where the
+// draft is. Both menus are built from one registry (block-commands.js). The
+// frame says where (tdoc:bubble / tdoc:slash rects, in its own viewport);
+// `frameBox` moves them into the page's.
+const BUBBLE_HEIGHT = 40;
+// Half its width, to keep it on a phone's screen.
+const BUBBLE_HALF_WIDTH = 170;
+
+function CommandItem({ item, current, onPick }) {
+  const { Icon } = item;
+  return (
+    <AppMenuItem className={`tdoc-mode-item${current ? ' current' : ''}`}
+      {...(current === undefined ? {} : { role: 'menuitemradio', 'aria-checked': current })}
+      onClick={() => onPick(item)}>
+      {Icon ? <Icon size={15} /> : null}
+      <span>{item.label}</span>
+      {current ? <Check className="tdoc-mode-check" size={14} /> : null}
+    </AppMenuItem>
+  );
+}
+
+// [Text ▾] · B · I · link · Comment · [···]: the dropdown turns the block
+// into another kind (the registry's turnInto items), ··· holds the rest
+// (its insert items).
+export function SelectionToolbar({ rect, frameBox, marks = {}, narrow = false, commands, onFormat, onCommand, onComment }) {
+  if (!rect || !frameBox) return null;
+  const top = frameBox.top + rect.top;
+  const bottom = frameBox.top + rect.bottom;
+  // Above the selection on a computer; below it on a phone, where the
+  // system's own copy / paste menu takes the space above.
+  const below = narrow || top - BUBBLE_HEIGHT - 8 < frameBox.top;
+  const y = below ? bottom + 8 : top - BUBBLE_HEIGHT - 8;
+  if (y < frameBox.top - BUBBLE_HEIGHT || y > window.innerHeight - BUBBLE_HEIGHT) return null;
+  const center = frameBox.left + rect.left + rect.width / 2;
+  const turnInto = commands.filter((item) => item.kind === 'turnInto');
+  const more = commands.filter((item) => item.kind === 'insert');
+  const current = turnInto.find((item) => item.id === marks.block) || turnInto[0];
+  return (
+    <div className="tdoc-editor-toolbar tdoc-editor-bubble" role="toolbar" aria-label="Format selection"
+      style={{ top: y, left: Math.max(8 + BUBBLE_HALF_WIDTH, Math.min(window.innerWidth - 8 - BUBBLE_HALF_WIDTH, center)) }}
+      onPointerDown={(event) => event.stopPropagation()}>
+      <div className="tdoc-editor-tools">
+        <AppMenu
+          align="start"
+          popupClassName="tdoc-block-menu tdoc-turn-into-menu"
+          trigger={(
+            <button type="button" className="tdoc-block-level" aria-label={`Turn into: ${current?.label || 'Text'}`} title="Turn into">
+              <span>{current?.short || 'Text'}</span>
+              <ChevronDown size={13} />
+            </button>
+          )}
+        >
+          {turnInto.map((item) => <CommandItem key={item.id} item={item} current={item.id === current?.id} onPick={onCommand} />)}
+        </AppMenu>
+        <span className="tdoc-editor-divider" />
+        <ToolButton keepFocus label="Bold" icon={<Bold size={16} />} command="bold" pressed={marks.bold} onFormat={onFormat} />
+        <ToolButton keepFocus label="Italic" icon={<Italic size={16} />} command="italic" pressed={marks.italic} onFormat={onFormat} />
+        <ToolButton keepFocus label="Add link" icon={<Link size={16} />} command="createLink" onFormat={onFormat} />
+        <span className="tdoc-editor-divider" />
+        <button type="button" className="tdoc-bubble-comment" title="Comment" aria-label="Comment" onMouseDown={(event) => event.preventDefault()} onClick={onComment}>
+          <CommentIcon size={15} outline /> <span>Comment</span>
+        </button>
+        {more.length ? (
+          <AppMenu
+            align="end"
+            popupClassName="tdoc-block-menu tdoc-insert-menu"
+            trigger={(
+              <button type="button" className="tdoc-block-more" aria-label="More blocks" title="More">
+                <MoreHorizontal size={16} />
+              </button>
+            )}
+          >
+            {more.map((item) => <CommandItem key={item.id} item={item} onPick={onCommand} />)}
+          </AppMenu>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// AppMenu, opened at the caret, with every registry item. Arrow keys, Enter,
+// Esc and type-to-find are the menu's own; closing without a choice puts the
+// caret back after "/".
+export function SlashMenu({ rect, frameBox, commands, onPick, onCancel }) {
+  const open = Boolean(rect && frameBox);
+  const picked = React.useRef(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    picked.current = false;
+    // The caret is in the doc's frame; the keys (arrows, Enter, Esc,
+    // type-to-find) belong to the menu while it is open.
+    const timer = window.setTimeout(() => document.querySelector('.tdoc-slash-menu')?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [open, rect]);
+  if (!open) return null;
+  return (
+    <AppMenu
+      open
+      // A pick closes the menu too, and may report the close first.
+      onOpenChange={(next) => { if (!next) window.setTimeout(() => { if (!picked.current) onCancel(); }, 0); }}
+      align="start"
+      popupClassName="tdoc-block-menu tdoc-slash-menu"
+      trigger={<span className="tdoc-slash-anchor" aria-hidden="true"
+        style={{ top: frameBox.top + rect.top, left: frameBox.left + rect.left, height: rect.height || 18 }} />}
+    >
+      {commands.map((item) => (
+        <CommandItem key={item.id} item={item} onPick={(chosen) => { picked.current = true; onPick(chosen); }} />
+      ))}
+    </AppMenu>
+  );
+}
+
+// The one status line beside "Edited …" in the bar: where the draft is.
+// Once it is published the slot is empty again and "Edited just now" lights
+// up (flashEdited, modeless-edit.jsx). No version numbers here.
+const SAVE_STATES = {
+  typing: { text: 'Saving…' },
+  publishing: { text: 'Saving…' },
+  draft: { text: 'Draft · only you can see', title: 'Publishes after 2 min idle or when you leave' },
+  conflict: { text: 'Draft · not published', title: 'Someone else just edited this doc. Your changes are kept in this browser.' },
+  error: { text: 'Draft · not published yet', title: 'Publishing failed; it tries again shortly. Your changes are kept in this browser.' },
+};
+
+export function EditorSaveStatus({ status }) {
+  const state = SAVE_STATES[status];
+  if (!state) return null;
+  return (
+    <span className="tdoc-editor-status tdoc-editor-autosave" role="status" title={state.title} data-state={status}>
+      {state.text}
+    </span>
+  );
+}
+
 export function SaveConflictDialog({ conflict, onClose }) {
+  // Modeless editing says it in the "was just published" strip instead.
+  if (conflict?.modeless) return null;
   return (
     <AppDialog
       open={Boolean(conflict)}
@@ -239,7 +381,7 @@ export function SaveNoticeDialog({ open, onOpenChange, onConfirm }) {
   );
 }
 
-export function LinkDialog({ open, onOpenChange, onSubmit }) {
+export function LinkDialog({ open, onOpenChange, onSubmit, title = 'Add link', submitLabel = 'Add link' }) {
   const [url, setUrl] = useState('https://');
 
   useEffect(() => {
@@ -257,11 +399,11 @@ export function LinkDialog({ open, onOpenChange, onSubmit }) {
     <AppDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Add link"
+      title={title}
       actions={(
         <>
           <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
-          <AppButton variant="primary" className="primary" onClick={addLink}>Add link</AppButton>
+          <AppButton variant="primary" className="primary" onClick={addLink}>{submitLabel}</AppButton>
         </>
       )}
     >
