@@ -4183,19 +4183,24 @@ function handoffInScope(h, scope) {
 
 // Mark the handoffs addressed to the pulling agent as picked up — and only
 // those. First ack wins, as on the ack route.
-async function ackOpenHandoffs(env, slug, actor, agentTarget = null) {
+// `via` (pull | mcp_poll) is only for the agent_timing line.
+async function ackOpenHandoffs(env, slug, actor, agentTarget = null, via = 'pull') {
   const list = await loadHandoffs(env, slug);
   const scope = await handoffAckScope(env, actor, agentTarget);
   const at = new Date().toISOString();
-  let changed = false;
+  const acked = [];
   const next = list.map((h) => {
     if (!h || h.acked_at || (h.delivery && h.delivery.status === 'failed') || h.resolved_at) return h;
     if (!handoffInScope(h, scope)) return h;
-    changed = true;
-    return { ...h, acked_at: at };
+    const rec = { ...h, acked_at: at };
+    acked.push(rec);
+    return rec;
   });
-  if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
-  return changed;
+  if (acked.length) {
+    await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+    for (const h of acked) agentTiming(h, 'picked_up', { via });
+  }
+  return acked.length > 0;
 }
 
 // The first agent reply on a handed-off thread, stamped on the handoff
@@ -4205,13 +4210,17 @@ async function ackOpenHandoffs(env, slug, actor, agentTarget = null) {
 async function noteHandoffReply(env, slug, commentId, at) {
   if (!env || !env.META || !slug || !commentId) return;
   const list = await loadHandoffs(env, slug);
-  let changed = false;
+  const replied = [];
   const next = list.map((h) => {
     if (!h || h.first_reply_at || !Array.isArray(h.comment_ids) || !h.comment_ids.includes(commentId)) return h;
-    changed = true;
-    return { ...h, first_reply_at: at };
+    const rec = { ...h, first_reply_at: at };
+    replied.push(rec);
+    return rec;
   });
-  if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+  if (replied.length) {
+    await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+    for (const h of replied) agentTiming(h, 'first_reply', { now: Date.parse(at) });
+  }
 }
 
 // The first version an agent published while a handoff addressed to it was
@@ -4232,6 +4241,7 @@ async function noteHandoffVersion(env, slug, { actor, target, at, version = null
   const list = await loadHandoffs(env, slug);
   const n = progress ? Number(version) : NaN;
   let changed = false;
+  const firsts = [];
   const next = list.map((h) => {
     if (!h || (!progress && h.first_version_at)) return h;
     const mine = (teamAgentId && h.team_agent && h.team_agent.id === teamAgentId)
@@ -4239,13 +4249,16 @@ async function noteHandoffVersion(env, slug, { actor, target, at, version = null
     if (!mine || !handoffOpen(h)) return h;
     if (h.first_version_at && !(Number.isInteger(n) && n > 0)) return h;
     changed = true;
-    return {
+    const rec = {
       ...h,
       first_version_at: h.first_version_at || at,
       ...(Number.isInteger(n) && n > 0 ? { last_version: n, last_version_at: at } : {}),
     };
+    if (!h.first_version_at) firsts.push(rec);
+    return rec;
   });
   if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+  for (const h of firsts) agentTiming(h, 'new_version', { now: Date.parse(at) });
 }
 
 // A handoff still has a comment nobody marked handled.
@@ -4281,6 +4294,7 @@ async function noteHandoffSuggestions(env, slug, commentIds, count, at, scope) {
   const credit = !!(target && handoffInScope(target, scope));
   const key = [...commentIds].sort().join(',');
   let changed = false;
+  let firstFor = null;
   const next = list.map((h) => {
     if (!h) return h;
     const had = h.suggested_sets && typeof h.suggested_sets === 'object' ? h.suggested_sets : {};
@@ -4288,13 +4302,33 @@ async function noteHandoffSuggestions(env, slug, commentIds, count, at, scope) {
     const dropped = Object.keys(sets).length !== Object.keys(had).length;
     if (h === target && credit) {
       changed = true;
-      return { ...h, suggested_sets: { ...sets, [key]: count }, suggested_at: at };
+      if (!h.first_suggested_at) firstFor = h;
+      return { ...h, suggested_sets: { ...sets, [key]: count }, suggested_at: at, first_suggested_at: h.first_suggested_at || at };
     }
     if (!dropped) return h;
     changed = true;
     return { ...h, suggested_sets: sets };
   });
   if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+  if (firstFor) agentTiming({ ...firstFor, first_suggested_at: at }, 'suggested', { now: Date.parse(at) });
+}
+
+// The first suggestions an agent sent for a handed-off comment, for the
+// agent_timing metrics (`first_suggested_at`, written once) when the progress
+// line (noteHandoffSuggestions, which keeps it too) is off. Changes nothing
+// anybody sees. Same target and credit rule: the
+// newest open handoff carrying one of these comments, if it was addressed to
+// the proposer.
+async function noteHandoffFirstSuggestion(env, slug, commentIds, at, scope) {
+  if (!env || !env.META || !slug || !Array.isArray(commentIds) || !commentIds.length) return;
+  const list = await loadHandoffs(env, slug);
+  const target = list
+    .filter((h) => h && handoffOpen(h) && Array.isArray(h.comment_ids) && h.comment_ids.some((id) => commentIds.includes(id)))
+    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))[0];
+  if (!target || target.first_suggested_at || !handoffInScope(target, scope)) return;
+  const rec = { ...target, first_suggested_at: at };
+  await env.META.put(`handoffs:${slug}`, JSON.stringify(list.map((h) => (h === target ? rec : h))));
+  agentTiming(rec, 'suggested', { now: Date.parse(at) });
 }
 
 function handoffSuggestedEdits(h) {
@@ -19109,6 +19143,24 @@ function withTargetOwner(resolved, owner, scope) {
 // ─────────────────────────── handoffs ───────────────────────────
 const HANDOFF_MAX = 50;
 
+// How long agents take with a handoff (server/agent-timing.js, inlined by
+// bin/tdoc-bundle): one `agent_timing` log line per milestone (delivered,
+// picked_up, first_reply, suggested, new_version, outcome), read with
+// `wrangler tail --search agent_timing` and summed up weekly by
+// scripts/agent-metrics.mjs. The opaque handoff id, kinds, counts and seconds
+// only; never a comment, the instruction, a slug, an agent's name or an
+// account. Never fails the request it rides on.
+/* __TDOC_AGENT_TIMING__ */
+function agentTiming(h, milestone, opts = {}) {
+  const engine = globalThis.TdocAgentTiming;
+  if (!engine || !h) return null;
+  try { return engine.emit(h, milestone, opts); } catch { return null; }
+}
+function handoffDocKind(meta) {
+  const engine = globalThis.TdocAgentTiming;
+  try { return engine ? engine.docKind(meta, docTypeOfMeta(meta)) : null; } catch { return null; }
+}
+
 async function loadHandoffs(env, slug) {
   try {
     const raw = await env.META.get(`handoffs:${slug}`);
@@ -19192,7 +19244,10 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
     ...(teamAgent ? { team_agent: { id: teamAgent.id, name: teamAgent.name } } : {}),
     ...(sentBy ? { sent_by: sentBy } : {}),
     ...(viaFeedback ? { via_feedback: true } : {}),
+    // doc | sheet | slides | feedback, for the agent_timing lines.
+    ...(handoffDocKind(meta) ? { doc_kind: handoffDocKind(meta) } : {}),
   });
+  agentTiming(rec, 'delivered');
   // A local agent is not pushed to; the daemon finds the work in its
   // account's pending index.
   if (target && target.provider === 'local') await localPendingAdd(env, meta, slug, rec);
@@ -22982,10 +23037,14 @@ async function handleProposeEdits(env, req, url, slug) {
   // The handoff these comments rode on learns how many edits are waiting,
   // for the progress line on its card. Never fails the suggestion.
   // Only with the progress line on, and only for the agent it was handed to.
+  // Off, only the first suggestions' time is kept, for the handoff's
+  // agent_timing metrics (noteHandoffSuggestions keeps it too when on).
   try {
+    const scope = await handoffAckScope(env, auth.actor, acting);
     if (await agentProgressAllowed(env, auth.actor)) {
-      const scope = await handoffAckScope(env, auth.actor, acting);
       await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created, scope);
+    } else {
+      await noteHandoffFirstSuggestion(env, slug, commentIds, set.created, scope);
     }
   } catch {}
   // The suggestions this handoff asked for have landed: for the comments they
@@ -31212,7 +31271,7 @@ const tdocHandlers = {
               // only handoffs addressed to it flip to "on it".
               const claimed = agentAuth.actor.kind === 'hosted'
                 ? await actingAgent(env, req, agentAuth.actor) : null;
-              await ackOpenHandoffs(env, slug, agentAuth.actor, claimed);
+              await ackOpenHandoffs(env, slug, agentAuth.actor, claimed, MCP_INTERNAL_REQUESTS.has(req) ? 'mcp_poll' : 'pull');
             }
           } catch {}
         }
@@ -32222,7 +32281,9 @@ const tdocHandlers = {
       if (woke) await settleSuggestLocks(env, slug, { comment_ids: prev.comment_ids || [], except: prev.handoff_id });
       // A resend after a failed local run is a fresh turn for the daemon,
       // queued by whoever pressed Resend (the owner, per the check above).
-      const { run: _run, reply_as: _replyAs, ...keep } = prev;
+      // A resend is a fresh try: an earlier outcome (run failed, access lost)
+      // no longer holds.
+      const { run: _run, reply_as: _replyAs, outcome: _outcome, outcome_at: _outcomeAt, ...keep } = prev;
       const rec = await putHandoff(env, slug, {
         // `at` stays the original send; delivery.at moves to this attempt and
         // delivery.first_at keeps the first time the provider took it.
@@ -32231,6 +32292,7 @@ const tdocHandlers = {
         // is (ownerRecordedAgent reads `by`): only a local run changes hands.
         ...(viaTeamAgent ? { sent_by: caller.accountId } : localDriver && (gate.meta?.workspace_id || isLocalTarget(target)) ? { by: localDriver } : {}),
       });
+      agentTiming(rec, 'delivered', { resend: true });
       if (target && target.provider === 'local') await localPendingAdd(env, gate.meta, slug, rec);
       return json({ ok: true, handoff_id: rec.handoff_id, sent: prev.comment_ids.length, delivery: rec.delivery, ...(replyAs ? { reply_as: replyAs } : {}) });
     }
@@ -32267,6 +32329,7 @@ const tdocHandlers = {
         return json({ ok: true, handoff_id: prev.handoff_id, acked_at: prev.acked_at, already: true });
       }
       const rec = await putHandoff(env, slug, { ...prev, acked_at: new Date().toISOString() });
+      agentTiming(rec, 'picked_up', { via: 'ack' });
       return json({ ok: true, handoff_id: rec.handoff_id, acked_at: rec.acked_at, already: false });
     }
 
@@ -32345,7 +32408,15 @@ const tdocHandlers = {
       const resolvedIds = asked && asked.length
         ? [...new Set([...(prev.resolved_ids || []), ...asked.filter(id => prev.comment_ids.includes(id))])]
         : [...prev.comment_ids];
-      const rec = await putHandoff(env, slug, { ...prev, resolved_ids: resolvedIds });
+      // The handoff's last open comment marked handled is its outcome: stamped
+      // once (`outcome`, `outcome_at`) for the agent_timing metrics.
+      const closing = handoffOpen(prev)
+        && prev.comment_ids.every((id) => resolvedIds.includes(id));
+      const rec = await putHandoff(env, slug, {
+        ...prev, resolved_ids: resolvedIds,
+        ...(closing ? { outcome: 'resolved', outcome_at: new Date().toISOString() } : {}),
+      });
+      if (closing) agentTiming(rec, 'outcome', { outcome: 'resolved' });
       await settleSuggestLocks(env, slug, { handoff_id: prev.handoff_id, comment_ids: resolvedIds });
       if (prev.recipient && prev.recipient.provider === 'local' && localHandoffDone(rec)) {
         await localPendingRemove(env, writeGate.meta, prev);
@@ -32476,7 +32547,11 @@ const tdocHandlers = {
             } catch { keep.push(e); continue; }
           }
           const accessLost = async () => {
-            await putHandoff(env, e.slug, { ...h, delivery: handoffDelivery({ status: 'failed', error: 'access_lost' }, h.delivery) });
+            const lost = await putHandoff(env, e.slug, {
+              ...h, delivery: handoffDelivery({ status: 'failed', error: 'access_lost' }, h.delivery),
+              outcome: 'access_lost', outcome_at: new Date().toISOString(),
+            });
+            agentTiming(lost, 'outcome', { outcome: 'access_lost' });
             await releaseAnswerLock(env, e.slug, h.handoff_id);
           };
           if (!cache.get(`seat:${e.slug}`)) { await accessLost(); continue; }
@@ -32547,7 +32622,9 @@ const tdocHandlers = {
         ...prev,
         delivery: handoffDelivery({ status: 'failed', error: 'agent_run_failed' }, prev.delivery),
         run: { status: 'failed', at, error: String(body.error || '').slice(0, 300) },
+        outcome: 'run_failed', outcome_at: at,
       });
+      agentTiming(rec, 'outcome', { outcome: 'run_failed' });
       await localPendingRemove(env, writeGate.meta, prev);
       await releaseAnswerLock(env, slug, prev.handoff_id);
       return json({ ok: true, handoff_id: rec.handoff_id, delivery: rec.delivery });
