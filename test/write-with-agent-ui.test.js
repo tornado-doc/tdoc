@@ -3,7 +3,9 @@
 // doc, hands the sentence to that agent and opens the doc on the request
 // comment, whose line says it was sent. With none, the dialog says why
 // (chat apps cannot be sent to) and links to Connect an agent; the copy line
-// stays. Flag off: the copy line only. Real worker routes behind a local HTTP
+// stays. Flag off: the copy line only. With agentProgress off (still dev
+// mode) the doc opens the same, on the plain Sent / Delivered line with no
+// progress pill. Real worker routes behind a local HTTP
 // server, real built shell, Chromium; desktop and phone.
 //
 // TDOC_TEST_SCREENSHOTS=<dir> writes the dialog and the opened doc per viewport.
@@ -111,11 +113,10 @@ async function startServer(worker, env) {
     try { await fn(); passed++; console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.stack || error.message}`); }
   };
 
-  const run = async (label, viewport, { agents, flag = true, failSend = false }) => {
+  const run = async (label, viewport, { agents, flag = true, failSend = false, progress = true }) => {
     const env = makeEnv(mod.CommentsStore);
-    // The routes are dev mode only in production; a PR preview has them for
-    // everyone (writeWithAgentAllowed). Flag off is production.
-    if (flag) env.TDOC_PREVIEW = '1';
+    // Production config: the routes are open to every signed-in person
+    // (writeWithAgentAllowed); the shell flag decides whether Send shows.
     withEtags(env.DOCS);
     await seed(env);
     if (failSend) {
@@ -128,14 +129,14 @@ async function startServer(worker, env) {
     const phone = viewport.width < 600;
     const context = await browser.newContext({ viewport, ...(phone ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}) });
     await context.addCookies([{ name: 'tdoc_sid', value: SID, url: base }]);
-    await context.addInitScript((on) => {
+    await context.addInitScript(({ on, progressOn }) => {
       try { localStorage.setItem('tdoc-save-notice-dismissed', '1'); } catch {}
-      if (window === window.top) window.__TDOC_FLAGS__ = Object.assign({}, window.__TDOC_FLAGS__, { writeWithAgent: on, agentProgress: on });
-    }, flag);
+      if (window === window.top) window.__TDOC_FLAGS__ = Object.assign({}, window.__TDOC_FLAGS__, { writeWithAgent: on, agentProgress: progressOn });
+    }, { on: flag, progressOn: flag && progress });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
-    const tag = `${label}, ${flag ? (agents ? (failSend ? 'send fails' : 'an agent') : 'no agent') : 'flag off'}`;
+    const tag = `${label}, ${flag ? (agents ? (failSend ? 'send fails' : 'an agent') : 'no agent') : 'flag off'}${progress ? '' : ', agentProgress off'}`;
     const shot = async (name) => {
       if (!SHOTS) return;
       fs.mkdirSync(SHOTS, { recursive: true });
@@ -205,7 +206,12 @@ async function startServer(worker, env) {
           await chip.waitFor({ timeout: 20000 });
           assert.match(await chip.innerText(), /Sent|Delivered/);
           await page.getByText('a packing list for Iceland in March').first().waitFor();
-          await shot('doc');
+          if (!progress) {
+            // No progress pill, no empty step list: the plain status line.
+            assert.equal(await page.locator('[data-handoff-progress]').count(), 0, 'a progress pill with agentProgress off');
+            assert.ok((await chip.innerText()).trim().length > 0, 'an empty status chip');
+          }
+          await shot(progress ? 'doc' : 'doc-no-progress');
         });
       }
       assert.deepEqual(errors, []);
@@ -221,6 +227,8 @@ async function startServer(worker, env) {
   }
   await run('desktop', { width: 1280, height: 860 }, { agents: true, flag: false });
   await run('desktop', { width: 1280, height: 860 }, { agents: true, failSend: true });
+  await run('desktop', { width: 1280, height: 860 }, { agents: true, progress: false });
+  await run('phone', { width: 390, height: 844 }, { agents: true, progress: false });
   await browser.close();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

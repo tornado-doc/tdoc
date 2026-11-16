@@ -28,9 +28,8 @@ const OTHERS = { provider: 'local', device: 'evilbox', cli: 'codex' };
   const mod = await loadWorker();
   const worker = mod.default;
   const env = makeEnv(mod.CommentsStore);
-  // Dev mode only in production (writeWithAgentAllowed); a PR preview has it
-  // for everyone. The flag-off case is at the end.
-  env.TDOC_PREVIEW = '1';
+  // Production config (no TDOC_PREVIEW): the routes are open to every
+  // signed-in person (writeWithAgentAllowed), not dev mode only.
   const call = async (p, o = {}) => { const r = await worker.fetch(req(p, o), env, {}); let b = null; try { b = await r.json(); } catch {} return { status: r.status, body: b }; };
   const julie = await issue(worker, env, 'julie');
   const mallory = await issue(worker, env, 'mallory');
@@ -127,15 +126,15 @@ const OTHERS = { provider: 'local', device: 'evilbox', cli: 'codex' };
     assert(last.status === 429 && last.body.error === 'rate_limited', `${last.status} ${JSON.stringify(last.body)}`);
   });
 
-  await t('flag off (no dev mode, not a preview): both routes are not found', async () => {
+  await t('production, no dev mode: a signed-in account uses both routes', async () => {
     const env2 = makeEnv(mod.CommentsStore);
-    const call2 = async (p, o = {}) => { const r = await worker.fetch(req(p, o), env2, {}); return r.status; };
+    const call2 = async (p, o = {}) => { const r = await worker.fetch(req(p, o), env2, {}); let b = null; try { b = await r.json(); } catch {} return { status: r.status, body: b }; };
     const ann = await issue(worker, env2, 'ann');
     await env2.META.put(`account-notify:${ann.account_id}`, JSON.stringify([LOCAL]));
-    assert((await call2('/api/write-with-agent/agents', { cookie: ann.cookie })) === 404, 'GET agents');
-    assert((await call2('/api/write-with-agent', { method: 'POST', cookie: ann.cookie, headers: ORIGIN, body: { prompt: 'x', recipient: LOCAL_PICK } })) === 404, 'POST');
-    const docs = (await env2.META.list({ prefix: 'handoffs:' })).keys || [];
-    assert(!docs.length, 'a handoff was made with the flag off');
+    const list = await call2('/api/write-with-agent/agents', { cookie: ann.cookie });
+    assert(list.status === 200 && list.body.agents.length === 1, `GET agents ${list.status}`);
+    const made = await call2('/api/write-with-agent', { method: 'POST', cookie: ann.cookie, headers: ORIGIN, body: { prompt: 'a packing list', recipient: LOCAL_PICK } });
+    assert(made.status === 200 && made.body.ok && made.body.sent === true, `POST ${made.status} ${JSON.stringify(made.body)}`);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
