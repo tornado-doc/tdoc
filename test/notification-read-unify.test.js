@@ -307,6 +307,103 @@ function eq(a, b, m) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Er
     eq(left, [slugs[4]], 'docs past the cap were starved');
   });
 
+  // Spy on (and optionally break) what reaches the Durable Objects: the
+  // serial lane's op args, and a doc's comment read.
+  function tapDurable(env, { failRead = null } = {}) {
+    const lane = [];
+    const get = env.COMMENTS.get.bind(env.COMMENTS);
+    env.COMMENTS.get = (id) => {
+      const stub = get(id);
+      return {
+        fetch: async (url, init = {}) => {
+          let body = null;
+          try { body = JSON.parse(init.body || 'null'); } catch {}
+          if (String(url).endsWith('/serial') && body && body.op) lane.push(body.op);
+          if (failRead && String(url).endsWith('/read') && body && failRead.has(body.slug)) throw new Error('comments unavailable');
+          return stub.fetch(url, init);
+        },
+      };
+    };
+    return lane;
+  }
+  const stripThreads = async (env, login) => {
+    const inbox = JSON.parse(await env.META.get(`inbox:${login}`));
+    for (const i of inbox.items) { delete i.thread_at; delete i.threads_capped; }
+    await env.META.put(`inbox:${login}`, JSON.stringify(inbox));
+  };
+
+  console.log('follow-ups: lane payload, recheck, unreadable docs');
+
+  await t('a seen POST sends the lane only the asked ids and the stale ones to prune, never every thread id', async () => {
+    const { env, owner } = await seed();
+    const reader = await putSession(env, 'reader');
+    const made = [];
+    for (let n = 0; n < 6; n++) made.push(await comment(env, reader, 'u-doc', `point ${n}`));
+    const gone = await comment(env, reader, 'u-doc', 'to delete');
+    const del = await call(env, `/api/comments?slug=u-doc&id=${gone.id}`, { method: 'DELETE', cookie: reader });
+    assert(del.status === 200, `delete ${del.status} ${del.text}`);
+    await putSeen(env, 'u-doc', 'owner', { [gone.id]: Date.parse(gone.created), [made[1].id]: Date.parse(made[1].created) });
+    const lane = tapDurable(env);
+    const r = await postSeen(env, owner, { seen: { [made[0].id]: Date.parse(made[0].created) } });
+    eq(r.status, 200, `seen ${r.text}`);
+    const raises = lane.filter((op) => op.kind === 'thread_seen_raise');
+    eq(raises.length, 1, 'one raise');
+    const args = raises[0].args;
+    eq('allowed' in args, false, 'every thread id crossed into the lane');
+    eq(Object.keys(args.marks), [made[0].id]);
+    eq(args.drop, [gone.id]);
+    eq(Object.keys(await seenOf(env, owner, 'u-doc')).sort(), [made[0].id, made[1].id].sort(), 'stale id kept or live id lost');
+  });
+
+  await t('a recheck takes only its own doc off the round, not the whole round', async () => {
+    const { env, owner } = await seed(['u-x', 'u-y']);
+    const alice = await putSession(env, 'alice');
+    const bob = await putSession(env, 'bob');
+    const x = [await comment(env, alice, 'u-x', 'one'), await comment(env, bob, 'u-x', 'two')];
+    const y = [await comment(env, alice, 'u-y', 'one'), await comment(env, bob, 'u-y', 'two')];
+    await stripThreads(env, 'owner');
+    await putSeen(env, 'u-x', 'owner', { [x[1].id]: Date.parse(x[1].created) });
+    await putSeen(env, 'u-y', 'owner', { [y[1].id]: Date.parse(y[1].created) });
+    eq((await bell(env, owner)).unread, 2, 'both legacy rows half seen');
+    const first = JSON.parse(await env.META.get('inbox:owner')).seen_checked;
+    assert(first && first.complete, `round not complete: ${JSON.stringify(first)}`);
+    eq([...first.done].sort(), ['u-x', 'u-y']);
+    await call(env, '/api/comments/seen', { method: 'POST', cookie: owner, body: { slug: 'u-x', seen: { [x[0].id]: Date.parse(x[0].created) } } });
+    const after = JSON.parse(await env.META.get('inbox:owner')).seen_checked;
+    assert(after, 'the whole round was dropped');
+    eq(after.done, ['u-y'], 'done list after recheck');
+    eq(after.complete, false);
+    env.META.gets.length = 0;
+    eq((await bell(env, owner)).unread, 1, 'u-x now fully seen');
+    eq(env.META.gets.filter((k) => k.startsWith('thread-seen:')), [await seenKey(env, 'u-x', 'owner')], 'more than the rechecked doc re-read');
+  });
+
+  await t('a doc whose comments cannot be read stops holding the round open after a few tries', async () => {
+    const { env, owner } = await seed(['u-bad', 'u-ok']);
+    const alice = await putSession(env, 'alice');
+    const bob = await putSession(env, 'bob');
+    // Two comments: a grouped row, which needs the doc's comments to decide.
+    const bad = [await comment(env, alice, 'u-bad', 'unreadable'), await comment(env, bob, 'u-bad', 'also')];
+    const ok = await comment(env, alice, 'u-ok', 'fine');
+    await stripThreads(env, 'owner');
+    await putSeen(env, 'u-bad', 'owner', Object.fromEntries(bad.map((c) => [c.id, Date.parse(c.created)])));
+    await putSeen(env, 'u-ok', 'owner', { [ok.id]: Date.parse(ok.created) });
+    tapDurable(env, { failRead: new Set(['u-bad']) });
+    const rounds = [];
+    for (let n = 0; n < 3; n++) {
+      await call(env, '/api/notifications/unread', { cookie: owner });
+      rounds.push(JSON.parse(await env.META.get('inbox:owner')).seen_checked);
+    }
+    eq(rounds.map((c) => c.complete), [false, false, true], 'round completion per pass');
+    eq(rounds[1].failed, { 'u-bad': 2 });
+    eq(rounds[2].failed, undefined, 'failure count kept after giving up');
+    assert(rounds[2].done.includes('u-bad'), 'the unreadable doc is not done');
+    env.META.gets.length = 0;
+    await call(env, '/api/notifications/unread', { cookie: owner });
+    eq(env.META.gets.filter((k) => k.startsWith('thread-seen:')).length, 0, 'a finished round was read again');
+    eq((await unreadRows(env, owner)).map((i) => i.slug), ['u-bad'], 'only the unreadable doc stays unread');
+  });
+
   console.log('authorization');
 
   await t('a feedback token can neither read the bell nor write read state through it', async () => {
