@@ -285,6 +285,7 @@ async function startServer(worker, env) {
           const head = paper.locator('.mk-think .mk-think-head');
           await head.waitFor({ timeout: 5000 });
           assert.match(await head.innerText(), /^Thinking… \d+s$/);
+          assert.equal(await dialog.locator('.mk-write-status').count(), 0, 'a footer status while thinking');
           // The latest three lines only, each on one line (ellipsis), older
           // ones faded at the top; no box, no scrollbar.
           const lines = paper.locator('.mk-think-lines');
@@ -338,7 +339,9 @@ async function startServer(worker, env) {
           await head.waitFor({ timeout: 5000 });
           assert.match(await head.innerText(), /^Thinking… \d+s$/);
           assert.equal(await paper.locator('.mk-think-lines').count(), 0);
-          assert.match(await dialog.locator('.mk-write-status').innerText(), /^Thinking · \d+ s$/);
+          // One status only: the paper's line, not a second in the footer.
+          assert.equal(await dialog.locator('.mk-write-status').count(), 0, 'a footer status while thinking');
+          assert.equal(await dialog.locator('.mk-foot').count(), 0, 'a footer line while thinking');
           await shot('thinking-no-text');
           await paper.getByRole('heading', { name: 'Iceland packing list', level: 1 }).waitFor({ timeout: 10000 });
           await paper.locator('p.mk-think-head', { hasText: /^Thought for \d+s$/ }).waitFor();

@@ -406,7 +406,9 @@ export function WriteWithAiDialog({ team = '', onClose, navigate = (url) => { lo
 
   const count = words(draft);
   const status = phase === 'writing'
-    ? `${draft ? 'Writing' : thinking ? 'Thinking' : 'Starting'} · ${seconds(now - startedAt)}${count ? ` · ${count} ${count === 1 ? 'word' : 'words'}` : ''}`
+    // While thinking the paper's "Thinking… 12s" line is the status: no
+    // second one down here.
+    ? thinking && !draft ? '' : `${draft ? 'Writing' : 'Starting'} · ${seconds(now - startedAt)}${count ? ` · ${count} ${count === 1 ? 'word' : 'words'}` : ''}`
     : phase === 'publishing' ? 'Publishing…'
       : phase === 'opening' ? 'Published v1 · Opening the doc…' : '';
 
@@ -463,7 +465,7 @@ export function WriteWithAiDialog({ team = '', onClose, navigate = (url) => { lo
             {error.connect ? <> <a href="/start">Connect your agent</a></> : null}
           </p>
         ) : null}
-        {!status && !error ? (
+        {!busy && !error ? (
           <p className="mk-foot">
             {tooLong
               ? `Keep it to one sentence (${WRITE_AI_PROMPT_CHARS} characters at most).`
