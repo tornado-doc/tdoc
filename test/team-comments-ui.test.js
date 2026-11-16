@@ -28,7 +28,7 @@ const rows = [
   { id: 'c_sky', thread_id: 'c_sky', kind: 'comment', reply_count: 1, slug: 'daily-report', title: 'Daily report', version: 4, text: 'This table needs more context.', anchor: 'Paid conversion by country', created: '2026-10-15T23:30:00Z', resolved: false, author: { key: 'sky', name: 'Sky', avatar_url: '', kind: 'human' } },
   { id: 'r_claire', thread_id: 'c_sky', parent_id: 'c_sky', kind: 'reply', reply_count: 1, slug: 'daily-report', title: 'Daily report', version: 4, text: 'Added the missing comparison.', anchor: 'Paid conversion by country', created: '2026-10-15T23:40:00Z', resolved: false, author: { key: 'claire', name: 'Claire', avatar_url: '', kind: 'human' } },
   { id: 'c_waiting', thread_id: 'c_waiting', kind: 'comment', reply_count: 0, slug: 'daily-report', title: 'Daily report', version: 4, text: 'Can someone check the source?', anchor: 'Weekly revenue', created: '2026-10-15T22:30:00Z', resolved: false, author: { key: 'sky', name: 'Sky', avatar_url: '', kind: 'human' } },
-  { id: 'c_ai', thread_id: 'c_ai', kind: 'comment', reply_count: 0, slug: 'daily-report', title: 'Daily report', version: 4, text: 'Automated review note.', anchor: 'Summary', created: '2026-10-15T21:30:00Z', resolved: false, author: { key: 'codex', name: 'Codex', avatar_url: '', kind: 'agent' } },
+  { id: 'c_ai', thread_id: 'c_ai', kind: 'comment', reply_count: 0, slug: 'daily-report', title: 'Daily report', version: 4, text: 'Automated review note.', anchor: 'Summary', created: '2026-10-15T21:30:00Z', resolved: false, author: { key: 'codex', name: 'Codex', avatar_url: '', kind: 'agent', login: 'codex', provider: 'local', cli: 'codex' } },
   { id: 'c_done', thread_id: 'c_done', kind: 'comment', reply_count: 0, slug: 'onboarding', title: 'Onboarding choices', version: 2, text: 'Fixed in the new copy.', anchor: 'Choose your goal', created: '2026-09-01T10:00:00Z', resolved: true, author: { key: 'julie', name: 'Julie', avatar_url: '', kind: 'human' } },
 ];
 
@@ -80,6 +80,10 @@ async function t(name, fn) {
       assert.match(await page.locator('.tm-comment-row').first().getAttribute('href'), /^\/d\/daily-report\?comment=r_claire$/);
       assert.match(await page.locator('.tm-comment-row').first().textContent(), /Claire.*replied in.*Daily report.*Unresolved/);
       assert.match(await page.locator('.tm-comment-anchor').first().textContent(), /Paid conversion by country/);
+      // An agent wears its program's mark, as on its comment card (AuthorAvatar).
+      const ai = page.locator('.tm-comment-row[href*="comment=c_ai"]');
+      assert.equal(await ai.locator('.tm-comment-avatar .tdoc-agent-provider-mark svg').count(), 1);
+      assert.equal(await page.locator('.tm-comment-row').first().locator('.tm-comment-avatar .tdoc-avatar-fallback').textContent(), 'C', 'a person with no photo: the initial');
       if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'team-comments-desktop.png'), fullPage: true }); }
       await context.close();
     });

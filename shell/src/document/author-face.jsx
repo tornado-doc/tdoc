@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { ProviderMark } from './notify-handoff.jsx';
+import { avatarFor, avatarInitial } from './model.js';
 
 // A comment author's picture, or `fallback` (their initial) when it cannot be
 // shown. The picture is a URL on somebody else's host (GitHub, Clerk's
@@ -12,4 +14,26 @@ export function AuthorFace({ src, style, fallback }) {
   const [failed, setFailed] = useState(null);
   if (!src || failed === src) return fallback;
   return <img src={src} alt="" width="24" height="24" style={style} onError={() => setFailed(src)} />;
+}
+
+const faceSize = (size) => (size ? { width: size, height: size, maxWidth: size, maxHeight: size } : undefined);
+
+// Whoever wrote a comment or reply, as its card shows them (comment-card.jsx
+// Author): an agent with a provider wears its program's mark (Claude, Codex,
+// Raft, ...), anyone else their picture (avatarFor: an older agent reply's
+// runtime logo, tdoc's mark) or their initial. Every surface that names a
+// comment's author -- the thread, My docs' Needs you, the notifications
+// list, a team's comments -- draws them with this. `size`: px for the
+// picture; 0 leaves the size to the surface's stylesheet (which always sizes
+// the mark: .tdoc-agent-provider-mark).
+export function AuthorAvatar({ author, size = 24 }) {
+  if (author && author.kind === 'agent' && author.provider) {
+    return (
+      <span className="tdoc-agent-provider-mark" aria-hidden="true">
+        <ProviderMark target={author} size={18} />
+      </span>
+    );
+  }
+  const initial = <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(author)}</span>;
+  return <AuthorFace src={avatarFor(author)} style={faceSize(size)} fallback={initial} />;
 }

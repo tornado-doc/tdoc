@@ -7515,11 +7515,15 @@ function teamCommentAuthor(author, { agentVerdict = false } = {}) {
   const email = login.startsWith('email:') ? normalizeEmail(login.slice(6)) : null;
   const kind = a.kind === 'agent' || agentVerdict ? 'agent'
     : (typeof a.kind === 'string' && a.kind && a.kind !== 'human' ? a.kind : 'human');
+  // An agent also carries what its face reads (agentFaceAuthor): the
+  // program's mark, as on the reply in the thread.
+  const face = kind === 'agent' ? agentFaceAuthor({ ...a, kind }) : null;
   return {
     key: normalizeActorKey(login) || login,
     name: String(a.name || (email ? email.split('@')[0] : login) || 'Someone').slice(0, 100),
     avatar_url: typeof a.avatar_url === 'string' ? a.avatar_url : '',
     kind,
+    ...(face ? { login: face.login, ...['handle', 'provider', 'cli', 'owner', 'team_agent', 'tdoc_ai'].reduce((o, k) => (face[k] ? { ...o, [k]: face[k] } : o), {}) } : {}),
     ...(a.imported ? { imported: true } : {}),
     ...(typeof a.account_id === 'string' && a.account_id ? { account_id: a.account_id } : {}),
     ...(typeof a.github_id === 'string' && a.github_id ? { github_id: a.github_id } : {}),
@@ -16740,7 +16744,8 @@ async function viewerDocActivity(env, session) {
       threads.add(id);
       const entry = forSlug(item.slug);
       entry.agent += 1;
-      entry.threads.push({ thread: item.thread, at: item.at });
+      const author = agentFaceAuthor(item.author);
+      entry.threads.push({ thread: item.thread, at: item.at, ...(author ? { author } : {}) });
     }
   }
   return out;
@@ -16777,11 +16782,35 @@ function agentUnreadItems(raw) {
   return items.filter((i) => i && isValidSlug(i.slug) && typeof i.thread === 'string'
     && THREAD_SEEN_ID_RE.test(i.thread) && Date.parse(i.at) > cutoff);
 }
-async function noteAgentUnread(env, who, { slug, thread, at }) {
+// An agent reply's author as My docs shows it (Needs you, a team's
+// comments): only what its face and its "name · owner" line read (shell
+// AuthorAvatar / authorLine), a subset of the author the thread itself shows
+// whoever can read it. Never where it runs, its scope, the owner's actor key
+// or an address. null for anything that is not an agent.
+function agentFaceAuthor(author) {
+  if (!author || typeof author !== 'object' || author.kind !== 'agent') return null;
+  const str = (v, max = 100) => {
+    const t = typeof v === 'string' ? v.trim() : '';
+    if (!t || /^email:/i.test(t) || BARE_EMAIL_RE.test(t.replace(/^@/, ''))) return '';
+    return t.slice(0, max);
+  };
+  const avatar = typeof author.avatar_url === 'string' && author.avatar_url.length <= 500
+    && (/^https:\/\/[^\s]+$/i.test(author.avatar_url) || /^\/[^/\s][^\s]*$/.test(author.avatar_url)) ? author.avatar_url : '';
+  const out = { kind: 'agent', login: str(author.login, 120), name: str(author.name), avatar_url: avatar };
+  for (const field of ['handle', 'provider', 'cli']) if (str(author[field])) out[field] = str(author[field]);
+  const owner = str(author.owner && author.owner.display);
+  if (owner) out.owner = { display: owner };
+  const team = str(author.team_agent && author.team_agent.name);
+  if (team) out.team_agent = { name: team };
+  if (author.tdoc_ai === true) out.tdoc_ai = true;
+  return out;
+}
+async function noteAgentUnread(env, who, { slug, thread, at, author = null }) {
   const key = agentUnreadKey(who);
   if (!key || !isValidSlug(slug) || !THREAD_SEEN_ID_RE.test(String(thread || ''))) return;
   const items = agentUnreadItems(await env.META.get(key)).filter((i) => !(i.slug === slug && i.thread === thread));
-  items.unshift({ slug, thread, at });
+  const face = agentFaceAuthor(author);
+  items.unshift({ slug, thread, at, ...(face ? { author: face } : {}) });
   await env.META.put(key, JSON.stringify({ items: items.slice(0, AGENT_UNREAD_MAX) }), { expirationTtl: AGENT_UNREAD_TTL_SECONDS });
 }
 const AGENT_UNREAD_WRITES_PER_HOUR = 60;
@@ -16814,12 +16843,13 @@ function agentReplyRecipient(thread, { skip = [] } = {}) {
 }
 // Notes an agent's reply for its recipient. Never fails the reply; a person
 // flooded with agent replies is noted at most 60 times an hour.
-async function noteAgentReply(env, thread, { slug, at, skip = [], ctx = null }) {
+// `author`: the reply's author, so My docs can show who answered.
+async function noteAgentReply(env, thread, { slug, at, author = null, skip = [], ctx = null }) {
   const who = agentReplyRecipient(thread, { skip });
   if (!who || !thread || !thread.root) return;
   const work = (async () => {
     if (await rateLimited(env, `agent-unread:${who}`, AGENT_UNREAD_WRITES_PER_HOUR, 3600)) return;
-    await noteAgentUnread(env, who, { slug, thread: thread.root.id, at });
+    await noteAgentUnread(env, who, { slug, thread: thread.root.id, at, author });
   })().catch((error) => {
     console.error('[agent-unread] note failed:', error && error.message ? error.message : error);
   });
@@ -20791,7 +20821,7 @@ async function postThreadAnswer(env, slug, { thread, parentId, agent, text, vers
   if (res.status === 409) return { duplicate: true };
   if (res.status === 202 && res.body && res.body.skipped) return { skipped: true, reason: res.body.reason };
   // The asker sees the answer on the doc's row in My docs until they open it.
-  if (res.status === 200) await noteAgentReply(env, thread, { slug, at: now });
+  if (res.status === 200) await noteAgentReply(env, thread, { slug, at: now, author: agent });
   return res.status === 200 ? { reply: res.body } : { failed: res.status };
 }
 
@@ -22656,7 +22686,7 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
         applied.push(cid);
         // Whoever accepted has just seen it; anybody else waiting on the
         // thread sees it on the doc's row in My docs.
-        await noteAgentReply(env, thread, { slug, at: now, skip: actorKeys(session).map(normalizeActorKey).filter(Boolean) });
+        await noteAgentReply(env, thread, { slug, at: now, author: agent, skip: actorKeys(session).map(normalizeActorKey).filter(Boolean) });
       }
     }
   }
@@ -32536,7 +32566,7 @@ const tdocHandlers = {
       }
       // The person waiting on this thread sees it on the doc's row in My
       // docs until they open the thread. Never fails the reply.
-      if (res.status === 200) await noteAgentReply(env, thread, { slug, at: now, ctx });
+      if (res.status === 200) await noteAgentReply(env, thread, { slug, at: now, author: agent, ctx });
       // And the handoff that carried these comments learns when the first
       // agent reply landed, so its history can say sent → delivered → on it
       // → replied → published instead of stopping at "On it".

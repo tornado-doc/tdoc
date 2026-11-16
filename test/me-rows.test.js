@@ -251,8 +251,16 @@ const PROSE_WITH_SHEET = `<h1>Runs and plan</h1><p>What we ran, and what is next
     const reply = await call(env, '/api/agent/reply', { method: 'POST', token, body: { slug: 'q-deck', parent_id: c.body.id, text: 'Which part?', status: 'question', agent_login: 'claude' } });
     assert(reply.status === 200 && reply.body.id, `reply ${reply.status} ${reply.text}`);
     let data = await me(env, owner);
-    // The thread rides along, so Needs you can open it and mark it seen.
-    const waiting = { comments: 0, agent: 1, agent_threads: [{ thread: c.body.id, at: reply.body.created }] };
+    // The thread rides along, so Needs you can open it and mark it seen, and
+    // so does who answered: the face and "name · owner" its reply card shows.
+    const author = row(data.docs, 'q-deck').activity.agent_threads[0].author;
+    eq(author.kind, 'agent');
+    eq(author.login, reply.body.author.login);
+    eq(author.name, reply.body.author.name);
+    eq(author.avatar_url, reply.body.author.avatar_url);
+    for (const k of ['principal', 'location', 'scope']) assert(!(k in author), `${k} rode along: ${JSON.stringify(author)}`);
+    assert(!author.owner || Object.keys(author.owner).join() === 'display', `owner: ${JSON.stringify(author.owner)}`);
+    const waiting = { comments: 0, agent: 1, agent_threads: [{ thread: c.body.id, at: reply.body.created, author }] };
     eq(row(data.docs, 'q-deck').activity, waiting);
     eq(row(data.starred, 'q-deck').activity, waiting, 'the same doc in Starred');
     // An older mark does not clear it.
@@ -282,6 +290,24 @@ const PROSE_WITH_SHEET = `<h1>Runs and plan</h1><p>What we ran, and what is next
     const again = await call(env, '/api/comments/seen', { method: 'POST', cookie: owner, body: { slug: 'q-doc', seen: { [c.body.id]: stamp } } });
     assert(again.status === 200, `seen ${again.status} ${again.text}`);
     assert(!('activity' in row((await me(env, owner)).docs, 'q-doc')), 'not cleared by a mark the server already had');
+  });
+
+  await t('an agent reply\'s author on the row is only what its face and name line read', async () => {
+    const { env, owner } = fixture;
+    const at = new Date().toISOString();
+    await env.META.put('agent-unread:owner', JSON.stringify({ items: [{ slug: 'q-doc', thread: 'c_face', at, author: {
+      kind: 'agent', login: 'claude', name: 'Claude Code', avatar_url: 'https://cdn.simpleicons.org/claude/d97757',
+      provider: 'local', cli: 'claude', location: 'Julies-MacBook', scope: 'personal',
+      owner: { key: 'email:julie@example.com', display: 'julie@example.com' },
+      principal: { display: '@julie', terminal: 'Claude Code' }, handle: 'ops@example.com',
+    } }] }));
+    eq(row((await me(env, owner)).docs, 'q-doc').activity.agent_threads[0].author, {
+      kind: 'agent', login: 'claude', name: 'Claude Code', avatar_url: 'https://cdn.simpleicons.org/claude/d97757', provider: 'local', cli: 'claude',
+    });
+    // A person is never carried as an agent.
+    await env.META.put('agent-unread:owner', JSON.stringify({ items: [{ slug: 'q-doc', thread: 'c_face', at, author: { login: 'bob', name: 'Bob', avatar_url: 'https://x.test/b.png' } }] }));
+    eq(row((await me(env, owner)).docs, 'q-doc').activity.agent_threads[0], { thread: 'c_face', at });
+    await env.META.delete('agent-unread:owner');
   });
 
   await t('no per-row reads: one inbox and one agent record per load, never a read-state key', async () => {

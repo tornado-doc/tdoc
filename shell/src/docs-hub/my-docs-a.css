@@ -71,6 +71,14 @@
 .mda-need .mda-need-done:hover .mda-need-ring svg, .mda-need .mda-need-done:focus-visible .mda-need-ring svg { opacity: 1; }
 .mda-need-avatar { width: 28px; height: 28px; align-self: center; border-radius: 50%; object-fit: cover; display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--td-accent); background: var(--td-accent-tint); box-shadow: 0 0 0 1px var(--td-line); }
 .mda-need-avatar.is-mark { color: var(--td-muted); background: var(--td-surface-2); }
+/* The author as the comment thread draws them (AuthorAvatar), sized to the item. */
+.mda-need-avatar.is-face { overflow: hidden; background: var(--td-ground); }
+.mda-need-avatar.is-face > img,
+.mda-need-avatar.is-face > .tdoc-avatar-fallback,
+.mda-need-avatar.is-face > .tdoc-agent-provider-mark { width: 100%; height: 100%; border-radius: 50%; }
+.mda-need-avatar.is-face > img { object-fit: cover; }
+.mda-need-avatar.is-agent > img { object-fit: contain; }
+.mda-need-avatar.is-face > .tdoc-avatar-fallback { font-size: 12px; }
 .mda-need-body { min-width: 0; padding: 11px 0 12px; border-bottom: 1px solid var(--td-line); }
 .mda-need:last-child .mda-need-body { border-bottom: 0; }
 .mda-need-line { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.4; color: var(--td-muted); }

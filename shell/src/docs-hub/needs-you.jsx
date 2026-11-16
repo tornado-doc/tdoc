@@ -5,6 +5,8 @@ import { listNotifications, markDocNotificationsRead, markNotificationsRead, pos
 import { actorName, notificationTarget } from '../notification-text.js';
 import { absoluteTime, relativeTime } from './row-meta.js';
 import { docHref } from './rows.jsx';
+import { AuthorAvatar } from '../document/author-face.jsx';
+import { authorLine } from '../document/comment-card.jsx';
 
 // "Needs you" on My docs: what is waiting on this person, from the data the
 // rows' unread badges already come from -- the bell's unread comment, reply
@@ -140,6 +142,7 @@ export function needsCards({ inbox, docs, inSpace }) {
         const card = cards.get(`n:${doc.slug}:${row.thread}`);
         if (card) {
           card.agent = true;
+          if (!card.agentAuthor && row.author) card.agentAuthor = row.author;
           card.threads.push(row.thread);
           card.threadAt = { ...(card.threadAt || {}), [row.thread]: row.at };
         } else rest.push(row);
@@ -150,6 +153,8 @@ export function needsCards({ inbox, docs, inSpace }) {
         cards.set(`a:${doc.slug}`, {
           key: `a:${doc.slug}`, kind: 'agent', slug: doc.slug, doc, count: left,
           action: agentAction(left),
+          // Who answered (the newest reply's agent), as the thread shows it.
+          author: newest?.author || null,
           quote: '',
           at: newest?.at || '',
           href: newest ? `/d/${encodeURIComponent(doc.slug)}?comment=${encodeURIComponent(newest.thread)}` : docHref(doc),
@@ -172,13 +177,15 @@ export function needsCards({ inbox, docs, inSpace }) {
   return [...cards.values()].sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
 }
 
-// Whose item it is: the person's photo (their initial without one); an
-// agent's reply, the agent mark.
+// Whose item it is, drawn as the comment thread draws its author
+// (AuthorAvatar): a person's photo or initial; an agent's reply, the agent's
+// own mark (Claude, Codex, Raft, ...). An agent reply noted before the
+// server kept who wrote it, the generic agent mark.
 function NeedAvatar({ card }) {
+  const author = card.kind === 'agent' ? card.author : card.kind === 'comments' ? null : (card.actor || { name: card.who });
+  if (author) return <span className={`mda-need-avatar is-face${author.kind === 'agent' ? ' is-agent' : ''}`}><AuthorAvatar author={author} size={0} /></span>;
   if (card.kind === 'agent') return <span className="mda-need-avatar is-mark" aria-hidden="true"><Bot size={15} /></span>;
-  if (card.kind === 'comments') return <span className="mda-need-avatar is-mark" aria-hidden="true"><MessageSquareText size={14} /></span>;
-  if (card.actor?.avatar_url) return <img className="mda-need-avatar" src={card.actor.avatar_url} alt="" />;
-  return <span className="mda-need-avatar" aria-hidden="true">{String(card.who || '?').slice(0, 1).toUpperCase()}</span>;
+  return <span className="mda-need-avatar is-mark" aria-hidden="true"><MessageSquareText size={14} /></span>;
 }
 
 // One to-do, as in Apple's Reminders: a round check on the left marks it
@@ -187,6 +194,9 @@ function NeedAvatar({ card }) {
 function NeedCard({ card, onDone }) {
   const when = relativeTime(card.at);
   const more = card.kind !== 'comment' || card.threadsCount === 1 ? card.count - 1 : 0;
+  // The agent by name and whose it is ("name · owner"), as on its reply.
+  const by = card.kind === 'agent' && card.author ? authorLine(card.author) : '';
+  const agentNote = card.agentAuthor ? `${authorLine(card.agentAuthor)} replied` : 'an agent replied';
   return (
     <div className="mda-need" data-slug={card.slug} data-kind={card.kind}>
       <a className="mda-need-link" href={card.href} aria-label={`${card.action} in ${card.doc.title}`} />
@@ -200,12 +210,13 @@ function NeedCard({ card, onDone }) {
           <span className="mda-need-in"> in </span>
           <span className="mda-need-title">{card.doc.title}</span>
         </span>
-        {card.quote || when || more > 0 || card.agent ? (
+        {card.quote || by || when || more > 0 || card.agent ? (
           <span className="mda-need-sub">
+            {by ? <span className="mda-need-by">{by}</span> : null}
             {card.quote ? <q className="mda-need-quote">{card.quote}</q> : null}
-            {more > 0 ? <>{card.quote ? ' · ' : ''}<span className="mda-need-more">{`+${more} more`}</span></> : null}
-            {card.agent ? <>{card.quote || more > 0 ? ' · ' : ''}<span className="mda-need-note">an agent replied</span></> : null}
-            {when ? <>{card.quote || more > 0 || card.agent ? ' · ' : ''}<time className="mda-need-when" dateTime={card.at} title={absoluteTime(card.at)}>{when}</time></> : null}
+            {more > 0 ? <>{card.quote || by ? ' · ' : ''}<span className="mda-need-more">{`+${more} more`}</span></> : null}
+            {card.agent ? <>{card.quote || by || more > 0 ? ' · ' : ''}<span className="mda-need-note">{agentNote}</span></> : null}
+            {when ? <>{card.quote || by || more > 0 || card.agent ? ' · ' : ''}<time className="mda-need-when" dateTime={card.at} title={absoluteTime(card.at)}>{when}</time></> : null}
           </span>
         ) : null}
       </div>

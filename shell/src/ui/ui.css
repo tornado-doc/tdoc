@@ -449,8 +449,17 @@ a.ui-menu-item:visited {
 .tdoc-modal button.tdoc-notif-open:hover, button.tdoc-notif-open:hover { background: var(--td-surface-2, #f7f7f5); }
 .tdoc-notif-row.unread button.tdoc-notif-open:hover { background: color-mix(in srgb, var(--td-accent) 10%, transparent); }
 .tdoc-notif-actions { display: flex; gap: 8px; padding: 0 12px 12px 50px; }
-.tdoc-notif-avatar { flex: none; width: 30px; height: 30px; border-radius: 50%; object-fit: cover; }
-.tdoc-notif-avatar--anon { display: grid; place-items: center; background: #8a93a2; color: #fff; font-size: 12px; font-weight: 600; }
+/* The actor as their comment card draws them (AuthorAvatar), filling the
+   circle; the initial is drawn here too, since the feedback overlay does not
+   load docs-hub.css. My docs' Needs you and a team's comments use the same. */
+.tdoc-notif-avatar { flex: none; display: grid; width: 30px; height: 30px; border-radius: 50%; overflow: hidden; }
+.tdoc-notif-avatar > img,
+.tdoc-notif-avatar > .tdoc-agent-provider-mark,
+.tdoc-notif-avatar > .tdoc-avatar-fallback { width: 100%; height: 100%; border-radius: 50%; }
+.tdoc-notif-avatar > img { object-fit: cover; }
+.tdoc-notif-avatar.is-agent > img { object-fit: contain; background: #fff; }
+.tdoc-notif-avatar > .tdoc-agent-provider-mark { box-shadow: inset 0 0 0 1px var(--td-line); }
+.tdoc-notif-avatar > .tdoc-avatar-fallback { display: grid; place-items: center; background: var(--td-accent); color: #fff; font-size: 12px; font-weight: 600; }
 .tdoc-notif-main { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
 .tdoc-notif-line { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .tdoc-notif-line strong { font-weight: 600; }
