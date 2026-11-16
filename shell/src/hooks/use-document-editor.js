@@ -49,6 +49,12 @@ function storeMode(config, mode) {
   } catch {}
 }
 
+// Modeless editing (flag modelessEdit): how long the page waits after the
+// last keystroke before the draft becomes a version. Tests shorten it.
+const MODELESS_IDLE_MS = () => Number((typeof window !== 'undefined' && window.__TDOC_MODELESS_IDLE_MS) || 0) || 2 * 60 * 1000;
+// "Saving…" until the draft has settled in this browser.
+const MODELESS_SETTLE_MS = 1200;
+
 export function useDocumentEditor({
   boot,
   config,
@@ -56,6 +62,12 @@ export function useDocumentEditor({
   send,
   showToast,
   onDisableCommentSelection,
+  // Someone who may edit, on a prose doc, with modelessEdit on: no modes,
+  // the page is always editable, drafts publish themselves (see below).
+  modeless = false,
+  // Called with the save's result after a modeless publish (the page stays
+  // and becomes that version).
+  onPublished = null,
 }) {
   const requests = useRef(new Map());
   // Set for the save's own navigation, so the unload warning below can tell a
@@ -89,13 +101,23 @@ export function useDocumentEditor({
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(null);
   const [staleDraft, setStaleDraft] = useState(null);
+  const effectiveMode = modeless ? 'edit' : mode;
+  const modeMessage = useCallback(() => ({
+    type: 'tdoc:mode',
+    mode: effectiveMode,
+    modeless,
+    elementComment: !config.isLanding,
+    areaSelect: !config.isLanding && isFeatureOn('feedbackAreaSelect'),
+  }), [effectiveMode, modeless, config.isLanding]);
 
   useEffect(() => {
-    send({ type: 'tdoc:mode', mode, elementComment: !config.isLanding, areaSelect: !config.isLanding && isFeatureOn('feedbackAreaSelect') });
-  }, [mode, send, config.isLanding]);
+    send(modeMessage());
+  }, [modeMessage, send]);
 
   useEffect(() => {
-    if (!dirty) return undefined;
+    // Modeless: every keystroke is already in this browser's draft store, and
+    // leaving publishes it (below); a "leave site?" prompt would only nag.
+    if (!dirty || modeless) return undefined;
     const warn = (event) => {
       // A save commits the draft server-side and then navigates to the version
       // it just created. Warning about unsaved work there is a lie, and it put
@@ -109,6 +131,7 @@ export function useDocumentEditor({
   }, [dirty]);
 
   const changeMode = useCallback((nextMode) => {
+    if (modeless) return;
     if (nextMode === 'edit' && !config.canEdit) return;
     if (nextMode === 'comment' && !config.canComment && !config.signInToComment) return;
     if (nextMode === 'comment' && dirty) {
@@ -118,19 +141,20 @@ export function useDocumentEditor({
     if (nextMode !== 'comment') onDisableCommentSelection();
     setMode(nextMode);
     storeMode(config, nextMode);
-  }, [config, dirty, onDisableCommentSelection, showToast, storeKey]);
+  }, [config, dirty, modeless, onDisableCommentSelection, showToast, storeKey]);
 
-  const requestDocument = useCallback(() => new Promise((resolve, reject) => {
+  const requestDocumentMessage = useCallback(() => new Promise((resolve, reject) => {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const timer = window.setTimeout(() => {
       requests.current.delete(requestId);
       reject(new Error('The editor did not respond'));
     }, 5_000);
     requests.current.set(requestId, {
-      resolve: (html) => { window.clearTimeout(timer); resolve(html); },
+      resolve: (message) => { window.clearTimeout(timer); resolve(message); },
     });
     send({ type: 'tdoc:editSerialize', requestId });
   }), [send]);
+  const requestDocument = useCallback(() => requestDocumentMessage().then((message) => message.html), [requestDocumentMessage]);
 
   const save = useCallback(async () => {
     if (!dirty || checking || saving) return;
@@ -229,8 +253,107 @@ export function useDocumentEditor({
     });
   }, [legacyKey, restoreDraft, storeKey]);
 
+  // --- modeless: autosave -> version -------------------------------------
+  // Every keystroke lands in this browser's draft store at once (editDraft
+  // below), as in Edit mode. Readers never see a draft: it becomes a version
+  // after MODELESS_IDLE_MS without typing, when the tab is hidden, or when
+  // the page goes away, through the same save as Save (baseVersion checked
+  // server-side, so a version someone else published meanwhile is a 409 and
+  // the conflict dialog, never an overwrite). The page stays put and becomes
+  // the new version (onPublished); the frame rebases on what was sent.
+  //   status: idle | typing | draft | publishing | published | conflict | error
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const [activity, setActivity] = useState(0);
+  const dirtyRef = useRef(false);
+  const publishingRef = useRef(null);
+  const pausedRef = useRef(false);
+  const baseRef = useRef(Number(config.version) || 0);
+  const lastTypedRef = useRef(0);
+  const onPublishedRef = useRef(onPublished);
+  onPublishedRef.current = onPublished;
+  useEffect(() => { baseRef.current = Math.max(baseRef.current, Number(config.version) || 0); }, [config.version]);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+
+  // `force` (the tab going away): the last keystrokes may not have reached
+  // the dirty flag yet, so the frame's own body decides.
+  const publish = useCallback(async ({ keepalive = false, force = false } = {}) => {
+    if (!modeless) return false;
+    if (publishingRef.current) return publishingRef.current;
+    if (pausedRef.current || (!dirtyRef.current && !force)) return false;
+    const run = (async () => {
+      try {
+        const doc = await requestDocumentMessage();
+        if (typeof doc.bodyHtml === 'string' && publishedHtml.current != null && doc.bodyHtml === publishedHtml.current) return false;
+        setSaveStatus('publishing');
+        const result = await saveDocumentVersion(config.slug, baseRef.current, doc.html, { keepalive });
+        const n = Number(result?.version) || 0;
+        if (n) baseRef.current = n;
+        // Drafts from here on are measured against what was just published.
+        if (typeof doc.bodyHtml === 'string') publishedHtml.current = doc.bodyHtml;
+        onPublishedRef.current?.(result);
+        send({ type: 'tdoc:editCommitted', bodyHtml: doc.bodyHtml });
+        setSaveStatus('published');
+        return true;
+      } catch (error) {
+        if (error.status === 409 && error.body?.error === 'version_conflict') {
+          // Someone (a person or an agent) published meanwhile. Stop
+          // publishing; the draft stays in this browser for the next visit.
+          pausedRef.current = true;
+          const latestVersion = Number(error.body.latestVersion);
+          setConflict({ latestVersion, latestUrl: `/d/${encodeURIComponent(config.slug)}/v/${latestVersion}`, modeless: true });
+          setSaveStatus('conflict');
+        } else if (error.status === 409 && error.body?.error === 'save_in_progress') {
+          setSaveStatus('draft');
+          window.setTimeout(() => setActivity((n) => n + 1), 5_000);
+        } else {
+          setSaveStatus('error');
+          window.setTimeout(() => setActivity((n) => n + 1), 30_000);
+        }
+        return false;
+      } finally {
+        publishingRef.current = null;
+      }
+    })();
+    publishingRef.current = run;
+    return run;
+  }, [config.slug, modeless, requestDocumentMessage, send]);
+  const publishRef = useRef(publish);
+  publishRef.current = publish;
+
+  // Typing: "Saving…" while the draft settles, "Saved" once it has; the
+  // version follows after the idle wait.
+  useEffect(() => {
+    if (!modeless || !activity) return undefined;
+    const settle = window.setTimeout(() => {
+      setSaveStatus((current) => (current === 'typing' ? 'draft' : current));
+    }, MODELESS_SETTLE_MS);
+    const idle = window.setTimeout(() => { publishRef.current(); }, MODELESS_IDLE_MS());
+    return () => { window.clearTimeout(settle); window.clearTimeout(idle); };
+  }, [activity, modeless]);
+
+  useEffect(() => {
+    if (!modeless) return undefined;
+    const away = () => { publishRef.current({ keepalive: true, force: true }); };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') away(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', away);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', away);
+    };
+  }, [modeless]);
+
+  const noteTyping = () => {
+    if (!modeless) return;
+    lastTypedRef.current = Date.now();
+    setSaveStatus((current) => (current === 'conflict' ? current : 'typing'));
+    setActivity((n) => n + 1);
+  };
+
   const frameHandlers = {
     editState(message) {
+      // Read at once by a publish as the tab hides, before React renders.
+      dirtyRef.current = Boolean(message.dirty);
       setDirty(Boolean(message.dirty));
       setChecking(Boolean(message.checking));
     },
@@ -242,6 +365,7 @@ export function useDocumentEditor({
     },
     editDraft(message) {
       if (typeof message.bodyHtml !== 'string') return;
+      noteTyping();
       saveDraft(storeKey, message.bodyHtml, {
         baseHash: htmlHash(publishedHtml.current || ''),
         baseVersion: config.version,
@@ -252,6 +376,11 @@ export function useDocumentEditor({
       if (typeof message.bodyHtml !== 'string') return;
       const nextDirty = Boolean(message.dirty);
       setChecking(false);
+      if (nextDirty && modeless) {
+        // A restored draft never typed in this visit still has to publish.
+        setSaveStatus((current) => (current === 'idle' ? 'draft' : current));
+        setActivity((n) => n + 1);
+      }
       if (nextDirty) {
         saveDraft(storeKey, message.bodyHtml, {
           baseHash: htmlHash(publishedHtml.current || ''),
@@ -265,12 +394,18 @@ export function useDocumentEditor({
       const pending = requests.current.get(message.requestId);
       if (!pending) return;
       requests.current.delete(message.requestId);
-      pending.resolve(message.html);
+      pending.resolve(message);
     },
   };
 
   return {
-    mode,
+    mode: effectiveMode,
+    modeless,
+    modeMessage,
+    saveStatus,
+    publish,
+    // When the person last typed (modeless): a newer version waits for a pause.
+    lastTypedAt: () => lastTypedRef.current,
     dirty,
     checking,
     saving,

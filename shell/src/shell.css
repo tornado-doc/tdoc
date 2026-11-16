@@ -189,6 +189,25 @@ html:has(.tdoc-document-app[data-visual-open]) { filter: none !important; }
 .tdoc-editor-toolbar button:disabled { opacity: .45; cursor: default; }
 .tdoc-editor-divider { width: 1px; height: 20px; margin: 0 3px; background: #d9d9dc; flex: none; }
 .tdoc-editor-status { min-width: 112px; margin-right: 4px; color: #777; font-size: 12px; text-align: right; white-space: nowrap; }
+/* Modeless editing (flag modelessEdit): the editor bar's own tools, floating
+   over a selection; the "/" menu's invisible anchor at the caret; the status
+   text in the doc bar. */
+.tdoc-editor-toolbar.tdoc-editor-bubble {
+  position: fixed;
+  z-index: 60;
+  min-height: 40px;
+  padding: 4px;
+  border: 1px solid #e5e5e7;
+  border-radius: 10px;
+  background: #fff;
+  transform: translateX(-50%);
+  box-shadow: 0 14px 40px rgb(15 23 42 / 18%);
+}
+.tdoc-editor-bubble button[aria-pressed="true"] { border-color: #d9d9dc; background: #fff; color: var(--td-accent); }
+.tdoc-editor-bubble button span { margin-left: 4px; }
+.tdoc-slash-anchor { position: fixed; width: 1px; pointer-events: none; }
+.tdoc-live-swap-frame { position: fixed; left: -10000px; top: 0; width: 1024px; height: 600px; border: 0; visibility: hidden; pointer-events: none; }
+.tdoc-editor-status.tdoc-editor-autosave { min-width: 0; margin: 0 2px; }
 
 .tdoc-editor-link-field {
   display: grid;
@@ -218,6 +237,7 @@ html:has(.tdoc-document-app[data-visual-open]) { filter: none !important; }
   .tdoc-mode-chevron { display: none; }
   .tdoc-editor-toolbar { padding: 6px 8px; gap: 6px; }
   .tdoc-editor-status { display: none; }
+  .tdoc-editor-status.tdoc-editor-autosave { display: inline; }
   .tdoc-editor-toolbar button.primary { min-width: 32px; }
   .tdoc-editor-toolbar button.primary span { display: none; }
 }

@@ -8,9 +8,11 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  Image,
   Italic,
   Link,
   List,
+  Minus,
   ListOrdered,
   Pencil,
   Quote,
@@ -18,6 +20,7 @@ import {
   RotateCcw,
   Save,
   Shapes,
+  Table,
   Undo2,
 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
@@ -89,9 +92,12 @@ export function DocumentModeControl({ mode, canComment, canEdit, onChange, signI
   );
 }
 
-function ToolButton({ label, icon, command, value, onFormat }) {
+function ToolButton({ label, icon, command, value, onFormat, pressed, keepFocus = false }) {
   return (
-    <button type="button" title={label} aria-label={label} onClick={() => onFormat(command, value)}>
+    <button type="button" title={label} aria-label={label} aria-pressed={pressed === undefined ? undefined : String(Boolean(pressed))}
+      // Over a selection the doc keeps focus: a press must not take it first.
+      onMouseDown={keepFocus ? (event) => event.preventDefault() : undefined}
+      onClick={() => onFormat(command, value)}>
       {icon}
     </button>
   );
@@ -161,7 +167,127 @@ export function StaleDraftDialog({ draft, currentVersion, onRestore, onKeep }) {
   );
 }
 
+// Modeless editing (flag modelessEdit) -------------------------------------
+// No Edit mode, no bar: the formatting tools come up over a selection (the
+// same buttons and commands as the editor bar above), "/" on an empty line
+// opens the block menu (AppMenu), and the bar's status text says whether the
+// draft is saved. The frame says where (tdoc:bubble / tdoc:slash rects, in
+// its own viewport); `frameBox` moves them into the page's.
+const BUBBLE_HEIGHT = 40;
+// Half its width (five tools and Comment), to keep it on a phone's screen.
+const BUBBLE_HALF_WIDTH = 140;
+
+export function SelectionToolbar({ rect, frameBox, marks = {}, narrow = false, onFormat, onComment }) {
+  if (!rect || !frameBox) return null;
+  const top = frameBox.top + rect.top;
+  const bottom = frameBox.top + rect.bottom;
+  // Above the selection on a computer; below it on a phone, where the
+  // system's own copy / paste menu takes the space above.
+  const below = narrow || top - BUBBLE_HEIGHT - 8 < frameBox.top;
+  const y = below ? bottom + 8 : top - BUBBLE_HEIGHT - 8;
+  if (y < frameBox.top - BUBBLE_HEIGHT || y > window.innerHeight - BUBBLE_HEIGHT) return null;
+  const center = frameBox.left + rect.left + rect.width / 2;
+  return (
+    <div className="tdoc-editor-toolbar tdoc-editor-bubble" role="toolbar" aria-label="Format selection"
+      style={{ top: y, left: Math.max(8 + BUBBLE_HALF_WIDTH, Math.min(window.innerWidth - 8 - BUBBLE_HALF_WIDTH, center)) }}
+      onPointerDown={(event) => event.stopPropagation()}>
+      <div className="tdoc-editor-tools">
+        <ToolButton keepFocus label="Bold" icon={<Bold size={16} />} command="bold" pressed={marks.bold} onFormat={onFormat} />
+        <ToolButton keepFocus label="Italic" icon={<Italic size={16} />} command="italic" pressed={marks.italic} onFormat={onFormat} />
+        <ToolButton keepFocus label="Heading" icon={<Heading2 size={17} />} command="formatBlock" value="h2" onFormat={onFormat} />
+        <ToolButton keepFocus label="Add link" icon={<Link size={16} />} command="createLink" onFormat={onFormat} />
+        <span className="tdoc-editor-divider" />
+        <button type="button" title="Comment" aria-label="Comment" onMouseDown={(event) => event.preventDefault()} onClick={onComment}>
+          <CommentIcon size={15} outline /> <span>Comment</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export const SLASH_ITEMS = [
+  { command: 'h1', label: 'Heading 1', Icon: Heading1 },
+  { command: 'h2', label: 'Heading 2', Icon: Heading2 },
+  { command: 'h3', label: 'Heading 3', Icon: Heading3 },
+  { command: 'ul', label: 'Bulleted list', Icon: List },
+  { command: 'ol', label: 'Numbered list', Icon: ListOrdered },
+  { command: 'table', label: 'Table', Icon: Table },
+  { command: 'image', label: 'Image', Icon: Image },
+  { command: 'divider', label: 'Divider', Icon: Minus },
+];
+
+// AppMenu, opened at the caret. Arrow keys, Enter, Esc and type-to-find are
+// the menu's own; closing without a choice puts the caret back after "/".
+export function SlashMenu({ rect, frameBox, onPick, onCancel }) {
+  const open = Boolean(rect && frameBox);
+  const picked = React.useRef(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    picked.current = false;
+    // The caret is in the doc's frame; the keys (arrows, Enter, Esc,
+    // type-to-find) belong to the menu while it is open.
+    const timer = window.setTimeout(() => document.querySelector('.tdoc-slash-menu')?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [open, rect]);
+  if (!open) return null;
+  return (
+    <AppMenu
+      open
+      // A pick closes the menu too, and may report the close first.
+      onOpenChange={(next) => { if (!next) window.setTimeout(() => { if (!picked.current) onCancel(); }, 0); }}
+      align="start"
+      popupClassName="tdoc-slash-menu"
+      trigger={<span className="tdoc-slash-anchor" aria-hidden="true"
+        style={{ top: frameBox.top + rect.top, left: frameBox.left + rect.left, height: rect.height || 18 }} />}
+    >
+      {SLASH_ITEMS.map(({ command, label, Icon }) => (
+        <AppMenuItem key={command} className="tdoc-mode-item" onClick={() => { picked.current = true; onPick(command); }}>
+          <Icon size={15} />
+          <span>{label}</span>
+        </AppMenuItem>
+      ))}
+    </AppMenu>
+  );
+}
+
+const SAVE_STATUS_TEXT = {
+  typing: 'Saving…',
+  publishing: 'Saving…',
+  draft: 'Saved',
+  published: 'Saved',
+  conflict: 'Saved in this browser',
+  error: 'Not saved yet',
+};
+
+// The one status line beside "Edited …" in the bar.
+export function EditorSaveStatus({ status }) {
+  const text = SAVE_STATUS_TEXT[status];
+  if (!text) return null;
+  const title = status === 'draft' || status === 'typing'
+    ? 'Saved in this browser. It becomes a new version when you pause for a couple of minutes or leave the page.'
+    : status === 'published' ? 'Saved as a new version.' : undefined;
+  return <span className="tdoc-editor-status tdoc-editor-autosave" role="status" title={title}>{text}</span>;
+}
+
 export function SaveConflictDialog({ conflict, onClose }) {
+  if (conflict?.modeless) {
+    return (
+      <AppDialog
+        open
+        onOpenChange={(open) => !open && onClose()}
+        title="Someone published a new version"
+        description={`v${conflict.latestVersion} was published while you were editing, so your changes were not published over it. They are kept in this browser: open v${conflict.latestVersion} and you will be offered them back.`}
+        actions={(
+          <>
+            <AppButton onClick={onClose}>Not now</AppButton>
+            <AppButton variant="primary" className="primary" onClick={() => { location.href = conflict.latestUrl; }}>
+              Open v{conflict.latestVersion}
+            </AppButton>
+          </>
+        )}
+      />
+    );
+  }
   return (
     <AppDialog
       open={Boolean(conflict)}
@@ -239,7 +365,7 @@ export function SaveNoticeDialog({ open, onOpenChange, onConfirm }) {
   );
 }
 
-export function LinkDialog({ open, onOpenChange, onSubmit }) {
+export function LinkDialog({ open, onOpenChange, onSubmit, title = 'Add link', submitLabel = 'Add link' }) {
   const [url, setUrl] = useState('https://');
 
   useEffect(() => {
@@ -257,11 +383,11 @@ export function LinkDialog({ open, onOpenChange, onSubmit }) {
     <AppDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Add link"
+      title={title}
       actions={(
         <>
           <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
-          <AppButton variant="primary" className="primary" onClick={addLink}>Add link</AppButton>
+          <AppButton variant="primary" className="primary" onClick={addLink}>{submitLabel}</AppButton>
         </>
       )}
     >

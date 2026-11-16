@@ -50,7 +50,9 @@ import {
   SaveNoticeDialog,
   StaleDraftDialog,
   saveNoticeDismissed,
+  EditorSaveStatus,
 } from './document/editor-toolbar.jsx';
+import { useModelessEdit } from './document/modeless-edit.jsx';
 import {
   DeleteDocumentDialog,
   OwnerAccessDialog,
@@ -593,7 +595,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     showToast('Sheet embeds allowed on this page');
     if (bridge.frameRef.current) bridge.frameRef.current.src = embedFrameSrc(boot.frameSrc, true);
   }, [boot.frameSrc, showToast]);
+  const modelessRef = useRef(null);
   const bridge = useFrameBridge({
+    // Modeless editing (flag modelessEdit; document/modeless-edit.jsx).
+    'tdoc:bubble': (message) => modelessRef.current?.handlers['tdoc:bubble'](message),
+    'tdoc:slash': (message) => modelessRef.current?.handlers['tdoc:slash'](message),
+    'tdoc:swapped': (message) => modelessRef.current?.handlers['tdoc:swapped'](message),
     ...sheetHandlers,
     'tdoc:sheetEmbed': sheetEmbed,
     'tdoc:demoRewriteDone': (message) => {
@@ -641,13 +648,13 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     'tdoc:exportHtml': (message) => exportHtml.handle(message),
     'tdoc:ready': (message) => {
       setVisualOpen(false);
-      setDocShape({ sheets: Number(message.sheets) || 0, sheetDoc: message.sheetDoc === true });
+      setDocShape({ sheets: Number(message.sheets) || 0, sheetDoc: message.sheetDoc === true, slides: Number(message.slides) || 0 });
       setSupportsTheme(message.supportsTheme === true);
       const storedTheme = readStored('tdoc-theme');
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
       setTheme(nextTheme);
       if (message.supportsTheme === true) bridge.send({ type: 'tdoc:theme', theme: nextTheme });
-      bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding, areaSelect: !config.isLanding && isFeatureOn('feedbackAreaSelect') });
+      bridge.send(editorRef.current?.modeMessage?.() || { type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding, areaSelect: !config.isLanding && isFeatureOn('feedbackAreaSelect') });
       sendFooterInsetRef.current();
       comments.refresh();
       suggestRef.current?.frameHandlers['tdoc:ready']();
@@ -868,6 +875,22 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   });
   suggestRef.current = suggestions;
 
+  // The page is a version it published itself (modeless autosave) or was
+  // swapped to in place: as after a sheet's column width (ownVersion above).
+  const adoptVersion = useCallback((n) => {
+    if (!n || n <= ownVersionRef.current) return;
+    ownVersionRef.current = n;
+    setOwnVersion({ n, created: new Date().toISOString(), source: 'browser' });
+    // An address naming the old version would reopen it on reload.
+    if (/\/v\/\d+\/?$/.test(location.pathname)) {
+      history.replaceState(history.state, '', `/d/${encodeURIComponent(config.slug)}${location.search}${location.hash}`);
+    }
+  }, [config.slug]);
+  // Modeless editing (flag modelessEdit): someone who may edit a prose doc
+  // types into it; sheets and slides keep Read / Comment / Edit.
+  const modelessFlag = isFeatureOn('modelessEdit');
+  const modeless = modelessFlag && Boolean(config.canEdit) && !config.isLanding && !boot.oldVersion
+    && !docShape.sheets && !docShape.slides;
   const editor = useDocumentEditor({
     boot,
     config,
@@ -875,6 +898,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     send: bridge.send,
     showToast,
     onDisableCommentSelection: disableCommentSelection,
+    modeless,
+    onPublished: (result) => adoptVersion(Number(result?.version) || 0),
   });
   editorRef.current = editor;
 
@@ -1930,6 +1955,21 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // Connected-App handoffs still `sent` keep the comment feed at its base
   // pace (above); there is no second poll for them.
 
+  const modelessEdit = useModelessEdit({
+    enabled: editor.modeless,
+    liveSwap: modelessFlag && !boot.oldVersion,
+    config,
+    editor,
+    send: bridge.send,
+    frameRef: bridge.frameRef,
+    narrow,
+    busy: Boolean(composer || dialog || comparing || historyOpen || (narrow && drawerOpen) || editor.conflict || editor.staleDraft),
+    latest: liveLatest,
+    onAdoptVersion: adoptVersion,
+    onLink: () => setDialog({ type: 'link' }),
+  });
+  modelessRef.current = modelessEdit;
+
   const answered = comments.comments.filter((c) => c.status === 'applied').length;
   // Copied in this session: the banner stays, as the confirmation, so the
   // frame does not jump and the pins and the open card stay where they are.
@@ -2070,7 +2110,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   const sideInset = sidePanelOpen ? sidePanelSize.width : 0;
   const viewRight = window.innerWidth - sideInset;
   const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (showExitBanner ? exitBannerHeight : 0)
-    + (hintBar ? STEP_HINT_HEIGHT : 0) + (editor.mode === 'edit' ? 46 : 0);
+    + (hintBar ? STEP_HINT_HEIGHT : 0) + (editor.mode === 'edit' && !editor.modeless ? 46 : 0);
   const pinLeft = Math.min(
     (bridge.layout.articleRight || viewRight - 44) + 14,
     viewRight - 34,
@@ -2084,7 +2124,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   const mobileUnread = commentArea.unreadCount > 0;
   const startDocumentComment = (askAi = false) => {
     if (!config.canComment && !config.signInToComment) return;
-    if (editor.mode === 'edit' && editor.dirty) {
+    if (editor.mode === 'edit' && editor.dirty && !editor.modeless) {
       showToast('Save or discard the draft before commenting', true);
       return;
     }
@@ -2345,8 +2385,9 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
               config={config}
               onHistory={historyEnabled ? () => changeHistory(!historyOpen) : null}
               historyOpen={historyOpen}
-              disabled={editor.mode === 'edit' && editor.dirty}
+              disabled={editor.mode === 'edit' && editor.dirty && !editor.modeless}
             />
+            {editor.modeless ? <EditorSaveStatus status={editor.saveStatus} /> : null}
             {askAiAction}
             {!narrow && sidePanelAvailable ? (
               // One Comment button, its open count on it: it opens and closes
@@ -2400,7 +2441,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
             onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
             onHistory={historyEnabled ? () => changeHistory(true) : null}
-            mode={{ modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
+            mode={editor.modeless ? null : { modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
             onAllowEmbeds={embedsHeld ? () => setDialog({ type: 'allow-embeds' }) : null}
           />
         )}
@@ -2478,7 +2519,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       } : null)} />
 
       {/* /start: the no-terminal way in (remote MCP), behind remoteMcp. */}
-      {config.onboarding && config.slug === 'tdoc-start' && editor.mode !== 'edit' ? <ConnectAiAppsStrip /> : null}
+      {config.onboarding && config.slug === 'tdoc-start' && (editor.mode !== 'edit' || editor.modeless) ? <ConnectAiAppsStrip /> : null}
 
       {showExitBanner ? (
         <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
@@ -2491,7 +2532,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
 
       {/* Under the chrome, over the document, in flow: the step pushes the page
           down rather than floating in the corner the eye reaches last. */}
-      {editor.mode === 'edit' ? null : (
+      {editor.mode === 'edit' && !editor.modeless ? null : (
         <DocStepHint
           step={hintStep}
           agentState={handoff.state}
@@ -2505,7 +2546,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         />
       )}
 
-      {editor.mode === 'edit' ? (
+      {editor.mode === 'edit' && !editor.modeless ? (
         <EditorToolbar
           proseTools={!docShape.sheetDoc}
           dirty={editor.dirty}
@@ -2800,6 +2841,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         onOpenChange={setSaveNoticeOpen}
         onConfirm={editor.save}
       />
+      {modelessEdit.overlay}
       <SaveConflictDialog conflict={editor.conflict} onClose={editor.closeConflict} />
       <StaleDraftDialog
         draft={editor.staleDraft}
