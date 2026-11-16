@@ -33,6 +33,7 @@ const OFFLINE = [
   'sheet-format.test.js',      // sheets: cell formats are whitelisted attributes (hostile values read as none), number formats, Excel codes, merges read and kept through structural edits
   'version-history.test.js', // history rows: same writer within 30 min grouped, paged, what changed cached, access, Restore
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
+  'tdoc-ai-mark.test.js',      // tdoc AI's face: tdoc_logo.svg's strokes + the Ask AI star on an accent badge; tdoc AI and unnamed agents wear it
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'no-async-wait-for-function.test.js', // browser tests never waitForFunction(async ...): Playwright does not await the predicate's value
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
