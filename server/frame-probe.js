@@ -1151,6 +1151,7 @@
     reportAnchorHover(null);
   });
   window.addEventListener('scroll', function () { reportAnchorHover(null); }, { passive: true });
+  var _activeElement = null;
   function setActiveAnchor(id, scroll) {
     var target = id && _anchorTargets[id];
     if (_activeAnchorId !== (target ? id : null)) {
@@ -1159,6 +1160,17 @@
       if (HL) CSS.highlights.delete('tdoc-anchor-flash');
     }
     _activeAnchorId = target ? id : null;
+    // An element a viewer draws itself (a sheet's cell) has no text to paint:
+    // the viewer marks it, and brings it into its own view, when the comment
+    // on it opens, whatever opened it (its pin, its card, the list). Only on
+    // a change: the pins are re-reported on every layout change, and the
+    // reader may have scrolled the grid since.
+    var activeEl = (target && target.element) || null;
+    if (activeEl !== _activeElement) {
+      _activeElement = activeEl;
+      // Where the pins and the open card begin: the viewer keeps the cell left of it.
+      try { if (typeof elementHooks.activate === 'function') elementHooks.activate(activeEl, { pinX: articleRight() }); } catch (x) {}
+    }
     if (HL) CSS.highlights.delete('tdoc-anchor-active');
     if (!target) return;
     if (HL && target.range) CSS.highlights.set('tdoc-anchor-active', new Highlight(target.range));

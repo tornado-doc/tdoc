@@ -126,9 +126,22 @@ function SheetStructure(api) {
   }
   function colShown(tab, c) { return !tab.st || !tab.st.colShown || !!tab.st.colShown[c]; }
   function colW(tab, c) { return colShown(tab, c) ? tab.widths[c] : 0; }
-  function frozenCount(tab) {
+  // The frozen columns as set (the Freeze menu shows and toggles these).
+  function frozenSetting(tab) {
     var v = tab.ov && tab.ov.fc != null ? tab.ov.fc : tab.st.table.freezeCols;
     return Math.min(v, tab.data.columns.length);
+  }
+  // The frozen columns as drawn. On a grid too narrow for them (a phone),
+  // frozen columns would cover every column past them, so no other cell, nor
+  // the cell a comment is on, could ever be seen: only as many stay frozen
+  // as leave at least 40% of the grid to scroll.
+  function frozenCount(tab) {
+    var n = frozenSetting(tab);
+    var g = api.ui && api.ui.grid, gw = g ? g.clientWidth : 0;
+    if (!n || !gw) return n;
+    var w = api.numW ? api.numW() : 0, k = 0;
+    while (k < n && w + colW(tab, k) <= gw * 0.6) { w += colW(tab, k); k++; }
+    return k;
   }
   function frozenRows(tab) {
     var v = tab.ov && tab.ov.fr != null ? tab.ov.fr : tab.st.table.freezeRows;
@@ -423,7 +436,7 @@ function SheetStructure(api) {
     api.saveView();
   }
   function freezeItems(tab) {
-    var fr = tab.ov.fr != null ? tab.ov.fr : tab.st.table.freezeRows, fc = frozenCount(tab), sel = api.sel;
+    var fr = tab.ov.fr != null ? tab.ov.fr : tab.st.table.freezeRows, fc = frozenSetting(tab), sel = api.sel;
     var upR = Math.max(sel.r, sel.r2) + 1, upC = Math.max(sel.c, sel.c2) + 1;
     var items = [{ header: 'Freeze' }];
     [0, 1, 2].forEach(function (n) { items.push({ label: n ? n + (n === 1 ? ' row' : ' rows') : 'No rows', checked: fr === n, onSelect: function () { setFreeze(tab, n, undefined); } }); });
@@ -480,7 +493,7 @@ function SheetStructure(api) {
   }
   function columnItems(tab, c) {
     var items = [];
-    if (c + 1 <= O.MAX_FREEZE) items.push({ label: frozenCount(tab) === c + 1 ? 'Unfreeze columns' : 'Freeze up to this column', onSelect: function () { setFreeze(tab, undefined, frozenCount(tab) === c + 1 ? 0 : c + 1); } });
+    if (c + 1 <= O.MAX_FREEZE) items.push({ label: frozenSetting(tab) === c + 1 ? 'Unfreeze columns' : 'Freeze up to this column', onSelect: function () { setFreeze(tab, undefined, frozenSetting(tab) === c + 1 ? 0 : c + 1); } });
     return items;
   }
   // Hide: Edit mode only, near the top of the column menu (beside Insert and
