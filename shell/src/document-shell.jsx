@@ -936,6 +936,18 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     bridge.send({ type: 'tdoc:uiOpen', open });
   }, [bridge.send, composer, openClusterKey, openCommentId, reanchorId, narrow, drawerOpen, handoffDetailsOpen]);
 
+  // Whatever opened a comment (its pin, a link to it, an arrival, the list),
+  // the frame learns which one is open: it marks what the comment is on (a
+  // text highlight, a sheet's cell) and unmarks it once none is. An id the
+  // frame already has active changes nothing there, so focusComment's own
+  // message and this one do not repeat a scroll.
+  const openAnchorRef = useRef(null);
+  useEffect(() => {
+    if (openAnchorRef.current === openCommentId) return;
+    openAnchorRef.current = openCommentId;
+    bridge.send({ type: 'tdoc:focusAnchor', id: openCommentId || null });
+  }, [bridge.send, openCommentId]);
+
   const focusComment = useCallback((id, { scroll = false, closeDrawer = false } = {}) => {
     setOpenCommentId(id);
     setOpenClusterKey(null);
