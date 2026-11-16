@@ -71,6 +71,7 @@ const OFFLINE = [
   'write-with-ai.test.js',     // New -> Write it with tdoc AI: session + same-site only, dev/preview gate, sentence cap, rate limit, Ask allowance charged (3 units a draft)/refunded, model output escaped (no script/on*), v1 private to the caller; SSE: delta events then done/error, refund on failure or hang-up, JSON without Accept, preview streams its fixed draft
   'ask-doc.test.js',           // Ask this doc: off without a key, browser readers only, read gate, 5 per account, no address to the model
   'ai-timing.test.js',         // tdoc AI response times: one ai_timing log line per model call (Ask answer, Ask edit, Write with tdoc AI JSON/streamed), marks in ms, no prompt/doc/slug/account/upstream text
+  'agent-timing.test.js',      // agent reply metrics: one agent_timing log line per handoff milestone (delivered, picked_up, first_reply, suggested, new_version, outcome), stored times, weekly script; no comment/instruction/slug/agent name/account
   'reader-agent-ask.test.js',  // Send to my agent: a reader's own agents only, never anyone else's; the answer is the asker's alone
   'suggest-edits.test.js',     // Ask/Edit v2: tdoc AI suggests text edits; editors accept (publish) or reject; text only, no markup
   'suggest-handoff-lock.test.js', // Ask/Edit v2: a reply_as "suggestions" handoff refuses its agent's publish until it is dealt with or an hour passes; browser, other agents, non-dev and team docs untouched
