@@ -123,7 +123,7 @@ async function startServer(worker, env) {
     '## Food\n\n',
     'Huts sell little; carry five days of lunches.\n',
   ];
-  const model = { fail: false, step: 450, calls: 0, thoughts: [], wait: 0 };
+  const model = { fail: false, step: 450, calls: 0, thoughts: [], wait: 0, finish: null };
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const u = typeof input === 'string' ? input : input.url;
@@ -136,6 +136,7 @@ async function startServer(worker, env) {
       const step = model.step;
       const thoughts = model.thoughts;
       const wait = model.wait;
+      const finish = model.finish;
       const body = new ReadableStream({
         async start(c) {
           try {
@@ -152,6 +153,7 @@ async function startServer(worker, env) {
               if (signal && signal.aborted) return;
               c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: p } }] })}\n\n`));
             }
+            if (finish && !fail) c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finish }] })}\n\n`));
             c.enqueue(enc.encode(fail ? `data: ${JSON.stringify({ error: { message: 'overloaded', code: 502 } })}\n\n` : 'data: [DONE]\n\n'));
             c.close();
           } catch {}
@@ -214,7 +216,11 @@ async function startServer(worker, env) {
         return dialog;
       };
       // A reasoning model: its thinking streams before the draft.
+      // A long stretch first (more than the 2,000 characters the dialog
+      // keeps), then lines the test looks for.
+      const FILLER = Array.from({ length: 30 }, (_, i) => `Early thought ${i} about the trail, the huts and the weather in late summer. `).join('');
       const THOUGHTS = [
+        FILLER,
         'The sentence asks for a packing list. ',
         'Lead with the conditions: rain, wind, cold nights.\n',
         'Sections: clothes, gear, food.\n',
@@ -229,6 +235,35 @@ async function startServer(worker, env) {
         env.ASK_FREE_LIMIT = '30';
         await page.goto(`${base}/me`);
         await page.locator('.doc-row[data-slug="q4-roadmap"]').waitFor();
+      };
+      // Cut short by the length limit: published all the same; Publishing…
+      // while v1 is stored (slowed here so it can be seen), then one quiet
+      // line says why before the doc opens.
+      const cutoffTest = async () => {
+      await t(`${label}: cut off at the length limit: Publishing…, then a quiet line says so, then the doc opens`, async () => {
+        await fresh();
+        model.finish = 'length';
+        const step = model.step;
+        model.step = 120;
+        const put = env.DOCS.put.bind(env.DOCS);
+        env.DOCS.put = async (k, ...rest) => { if (/\/v1\/index\.html$/.test(String(k))) await new Promise((r) => setTimeout(r, 1500)); return put(k, ...rest); };
+        try {
+          const dialog = await openDialog();
+          await dialog.getByRole('textbox').fill('A list that runs long');
+          await press(dialog.getByRole('button', { name: 'Write it', exact: true }));
+          const status = dialog.locator('.mk-write-status');
+          await status.getByText('Publishing…', { exact: true }).waitFor({ timeout: 15000 });
+          assert.equal(await dialog.locator('.mk-write-caret').count(), 0, 'the caret stays while publishing');
+          await shot('publishing');
+          const note = dialog.locator('.mk-write-cutoff');
+          await note.waitFor({ timeout: 10000 });
+          assert.equal(await note.innerText(), 'Stopped early: hit the length limit. The end may be cut off.');
+          assert.match(await status.innerText(), /^Published v1 · Opening the doc…/);
+          assert.match(page.url(), /\/me$/, 'opened before the line could be read');
+          await shot('cutoff');
+          await page.waitForURL(/\/d\/[a-z0-9-]+\/v\/1$/, { timeout: 15000 });
+        } finally { model.finish = null; model.step = step; env.DOCS.put = put; }
+      });
       };
       // Run after the others: they spend the allowance a set way.
       const thinkingTests = async () => {
@@ -246,27 +281,39 @@ async function startServer(worker, env) {
           // Never blank: Starting… with the caret before anything arrives.
           await paper.locator('.mk-write-starting', { hasText: 'Starting…' }).waitFor({ timeout: 3000 });
           assert.equal(await paper.locator('.mk-write-caret').count(), 1);
+          await shot('starting');
           const head = paper.locator('.mk-think .mk-think-head');
           await head.waitFor({ timeout: 5000 });
           assert.match(await head.innerText(), /^Thinking… \d+s$/);
-          const text = paper.locator('.mk-think-text');
-          await text.getByText(/Huts: check what they sell/).waitFor({ timeout: 5000 });
-          assert.equal(await text.locator('b').count(), 0, 'reasoning markup became an element');
-          assert.match(await text.innerText(), /<b>not markup<\/b>/);
-          // About six lines visible; the rest scrolls, following the end.
-          const box = await text.evaluate((el) => ({ h: el.clientHeight, sh: el.scrollHeight, lh: parseFloat(getComputedStyle(el).lineHeight), top: el.scrollTop }));
-          assert.ok(box.h <= box.lh * 6.5, `${box.h}px for ${box.lh}px lines`);
+          // The latest three lines only, each on one line (ellipsis), older
+          // ones faded at the top; no box, no scrollbar.
+          const lines = paper.locator('.mk-think-lines');
+          await lines.getByText(/Early thought 29/).waitFor({ timeout: 8000 });
           await shot('thinking');
+          await lines.getByText(/Placeholders for dates/).waitFor({ timeout: 8000 });
+          assert.ok(await paper.locator('.mk-think-line').count() <= 3);
+          assert.equal(await lines.getByText(/The sentence asks/).count(), 0, 'older lines still shown');
+          const look = await lines.evaluate((el) => {
+            const cs = getComputedStyle(el);
+            const line = getComputedStyle(el.firstElementChild);
+            return { mask: cs.maskImage || cs.webkitMaskImage, overflow: cs.overflowY, border: cs.borderLeftWidth, ws: line.whiteSpace, to: line.textOverflow };
+          });
+          assert.ok(/gradient/.test(look.mask) && look.overflow === 'hidden' && look.border === '0px' && look.ws === 'nowrap' && look.to === 'ellipsis', JSON.stringify(look));
+          assert.equal(await lines.locator('b').count(), 0, 'reasoning markup became an element');
           // The draft begins: the thinking folds to one line.
           await paper.getByRole('heading', { name: 'Iceland packing list', level: 1 }).waitFor({ timeout: 10000 });
           const folded = paper.getByRole('button', { name: /^Thought for \d+s$/ });
           await folded.waitFor();
           assert.equal(await folded.getAttribute('aria-expanded'), 'false');
-          assert.equal(await paper.locator('.mk-think-text').count(), 0);
+          assert.equal(await paper.locator('.mk-think-lines, .mk-think-full').count(), 0);
           // The paper follows the draft, so the line moves: a direct click.
           await folded.dispatchEvent('click');
-          await paper.locator('.mk-think-text').getByText(/Sections: clothes/).waitFor();
+          const full = paper.locator('.mk-think-full');
+          await full.getByText(/Sections: clothes/).waitFor();
           assert.equal(await folded.getAttribute('aria-expanded'), 'true');
+          // The last 2,000 characters, marked as cut at the start.
+          const kept = await full.innerText();
+          assert.ok(kept.startsWith('…') && kept.length <= 2001 && /<b>not markup<\/b>/.test(kept), kept.slice(0, 80));
           await shot('thought');
           await page.waitForURL(/\/d\/[a-z0-9-]+\/v\/1$/, { timeout: 30000 });
           const slug = page.url().match(/\/d\/([a-z0-9-]+)\/v\/1$/)[1];
@@ -275,7 +322,7 @@ async function startServer(worker, env) {
           assert.deepEqual(errors, []);
         } finally { model.thoughts = []; model.wait = 0; model.step = step; }
       });
-      if (phone) return;
+      if (phone) { await cutoffTest(); return; }
       await t(`${label}: no reasoning text: Thinking… with the time alone, then Thought for Ns (not a button)`, async () => {
         await fresh();
         model.wait = 2600;
@@ -290,7 +337,7 @@ async function startServer(worker, env) {
           const head = paper.locator('.mk-think .mk-think-head');
           await head.waitFor({ timeout: 5000 });
           assert.match(await head.innerText(), /^Thinking… \d+s$/);
-          assert.equal(await paper.locator('.mk-think-text').count(), 0);
+          assert.equal(await paper.locator('.mk-think-lines').count(), 0);
           assert.match(await dialog.locator('.mk-write-status').innerText(), /^Thinking · \d+ s$/);
           await shot('thinking-no-text');
           await paper.getByRole('heading', { name: 'Iceland packing list', level: 1 }).waitFor({ timeout: 10000 });
@@ -299,6 +346,7 @@ async function startServer(worker, env) {
           await page.waitForURL(/\/d\/[a-z0-9-]+\/v\/1$/, { timeout: 30000 });
         } finally { model.wait = 0; model.step = step; }
       });
+      await cutoffTest();
       };
       const remaining = () => page.evaluate(async () => (await (await fetch('/api/write-with-ai')).json()).remaining);
       await t(`${label}: Doc → Write it with tdoc AI → one sentence → the draft appears live → the new doc's v1`, async () => {

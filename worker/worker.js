@@ -20440,7 +20440,11 @@ function askConfig(env) {
   const limit = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : ASK_DEFAULT_FREE_LIMIT;
   const rawMax = Number(env && env.ASK_MAX_TOKENS);
   const maxTokens = Number.isFinite(rawMax) && rawMax > 0 ? Math.floor(rawMax) : ASK_DEFAULT_MAX_TOKENS;
-  return { available: Boolean(key) || previewMock, previewMock, key, base, model, limit, maxTokens };
+  // ASK_STREAM_TOTAL_MS: the whole-draft limit for a streamed answer, when
+  // set lower than the default (tests; an operator tightening it).
+  const rawTotal = Number(env && env.ASK_STREAM_TOTAL_MS);
+  const streamTotalMs = Number.isFinite(rawTotal) && rawTotal > 0 && rawTotal < ASK_STREAM_TOTAL_MS ? Math.floor(rawTotal) : 0;
+  return { available: Boolean(key) || previewMock, previewMock, key, base, model, limit, maxTokens, streamTotalMs };
 }
 
 const ASK_PREVIEW_ANSWER = [
@@ -20607,12 +20611,30 @@ async function askAttempt(cfg, headers, payload) {
 // The time limit is between pieces (ASK_TIMEOUT_MS), not for the whole
 // draft, and the whole draft is held to ASK_STREAM_TOTAL_MS.
 const ASK_STREAM_TOTAL_MS = 300000;
+// Token usage is asked for (`stream_options.include_usage`); a provider
+// that refuses the option (a 400/422 before any text) is asked again
+// without it. The result also carries `finishReason` (the last one the
+// provider gave), `usage` ({ prompt_tokens, completion_tokens,
+// reasoning_tokens }, when sent), `refusal` (a delta.refusal came) and
+// `timeLimit` (ASK_STREAM_TOTAL_MS ended it after some text, kept).
 async function streamAskModel(cfg, messages, onDelta, hooks = {}) {
   const headers = { ...askHeaders(cfg), Accept: 'text/event-stream' };
-  const payload = JSON.stringify({ model: cfg.model, max_tokens: cfg.maxTokens, messages, stream: true });
+  const base = { model: cfg.model, max_tokens: cfg.maxTokens, messages, stream: true };
+  let payload = JSON.stringify({ ...base, stream_options: { include_usage: true } });
   let out = await askStreamAttempt(cfg, headers, payload, onDelta, hooks);
+  if (!out.ok && (out.status === 400 || out.status === 422) && !out.sent) {
+    payload = JSON.stringify(base);
+    out = await askStreamAttempt(cfg, headers, payload, onDelta, hooks);
+  }
   if (!out.ok && out.status >= 500 && !out.sent) out = await askStreamAttempt(cfg, headers, payload, onDelta, hooks);
   return out;
+}
+
+function askUsage(u) {
+  if (!u || typeof u !== 'object') return null;
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const details = u.completion_tokens_details || {};
+  return { prompt_tokens: n(u.prompt_tokens), completion_tokens: n(u.completion_tokens), reasoning_tokens: n(details.reasoning_tokens ?? u.reasoning_tokens) };
 }
 
 // The reasoning text in one streamed delta, whichever field the provider
@@ -20632,10 +20654,14 @@ async function askStreamAttempt(cfg, headers, payload, onDelta, hooks = {}) {
   const ctl = new AbortController();
   let idle = null;
   const arm = () => { if (idle) clearTimeout(idle); idle = setTimeout(() => ctl.abort('timeout'), ASK_TIMEOUT_MS); };
-  const total = setTimeout(() => ctl.abort('timeout'), ASK_STREAM_TOTAL_MS);
+  const total = setTimeout(() => ctl.abort('total'), cfg.streamTotalMs || ASK_STREAM_TOTAL_MS);
   let answer = '';
   let sent = false;
   let stopped = false;
+  let finishReason = null;
+  let usage = null;
+  let refusal = false;
+  const extra = () => ({ finishReason, usage, refusal });
   const give = async (text) => {
     if (!text || stopped) return;
     answer += text;
@@ -20658,10 +20684,15 @@ async function askStreamAttempt(cfg, headers, payload, onDelta, hooks = {}) {
         const errStatus = !res.ok ? res.status : (body && body.error && Number(body.error.code) >= 500 ? Number(body.error.code) : res.status);
         return { ok: false, status: errStatus, detail: msg ? String(msg).slice(0, 200) : `http_${res.status}` };
       }
+      const ch = body && Array.isArray(body.choices) && body.choices[0];
+      if (ch && ch.finish_reason) finishReason = String(ch.finish_reason);
+      usage = askUsage(body && body.usage);
       await give(text.trim());
-      return { ok: true, answer: answer.trim(), sent };
+      return { ok: true, answer: answer.trim(), sent, ...extra() };
     }
     const reader = res.body.getReader();
+    // A limit that fires mid-read ends the read too, whatever the body does.
+    ctl.signal.addEventListener('abort', () => { try { reader.cancel(); } catch {} }, { once: true });
     const decoder = new TextDecoder();
     let buf = '';
     let done = false;
@@ -20685,7 +20716,11 @@ async function askStreamAttempt(cfg, headers, payload, onDelta, hooks = {}) {
           try { reader.cancel(); } catch {}
           return { ok: false, status: Number(ev.error.code) >= 500 ? Number(ev.error.code) : 502, detail: msg ? String(msg).slice(0, 200) : 'stream_error', sent };
         }
-        const delta = ev && Array.isArray(ev.choices) && ev.choices[0] && ev.choices[0].delta;
+        if (ev && ev.usage) usage = askUsage(ev.usage);
+        const choice = ev && Array.isArray(ev.choices) && ev.choices[0];
+        if (choice && choice.finish_reason) finishReason = String(choice.finish_reason);
+        const delta = choice && choice.delta;
+        if (delta && typeof delta.refusal === 'string' && delta.refusal) refusal = true;
         const c = delta && delta.content;
         await give(typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => (p && typeof p.text === 'string' ? p.text : '')).join('') : '');
         // After the answer piece: a delta carrying both is past the thinking.
@@ -20694,17 +20729,23 @@ async function askStreamAttempt(cfg, headers, payload, onDelta, hooks = {}) {
       }
     }
     if (!stopped) { try { reader.cancel(); } catch {} }
+    if (!stopped && ctl.signal.aborted) {
+      if (ctl.signal.reason === 'total' && answer.trim()) return { ok: true, answer: answer.trim(), sent, timeLimit: true, ...extra() };
+      return { ok: false, status: 0, detail: 'timeout', sent, ...extra() };
+    }
   } catch (e) {
-    if (stopped) return { ok: true, answer: answer.trim(), sent };
+    if (stopped) return { ok: true, answer: answer.trim(), sent, ...extra() };
     if (e && e.tdocClientGone) return { ok: false, status: 0, detail: 'client_gone', sent, clientGone: true };
-    const timeout = ctl.signal.aborted && ctl.signal.reason === 'timeout';
+    // The whole-draft limit after some text: keep what was written.
+    if (ctl.signal.aborted && ctl.signal.reason === 'total' && answer.trim()) return { ok: true, answer: answer.trim(), sent, timeLimit: true, ...extra() };
+    const timeout = ctl.signal.aborted && (ctl.signal.reason === 'timeout' || ctl.signal.reason === 'total');
     return { ok: false, status: 0, detail: timeout || (e && e.name === 'AbortError') ? 'timeout' : 'network', sent };
   } finally {
     if (idle) clearTimeout(idle);
     clearTimeout(total);
   }
-  if (!answer.trim()) return { ok: false, status: 502, detail: 'empty', sent };
-  return { ok: true, answer: answer.trim(), sent };
+  if (!answer.trim()) return { ok: false, status: 502, detail: 'empty', sent, ...extra() };
+  return { ok: true, answer: answer.trim(), sent, ...extra() };
 }
 
 // ─────────────────── one door: edit, or ask only ───────────────────
@@ -21106,6 +21147,7 @@ async function handleWriteWithAi(env, req, url, ctx) {
       model: cfg.previewMock ? 'preview' : modelCfg.model,
       headers_ms: null, first_reasoning_ms: null, first_content_ms: null, done_ms: null,
       reasoning_text: false, reasoning_chars: 0, content_chars: 0, ok: false,
+      finish_reason: null, cutoff: null, usage: null,
     };
     const since = () => Date.now() - t0;
     const clientGone = () => { gone = true; const e = new Error('client gone'); e.tdocClientGone = true; return e; };
@@ -21155,6 +21197,11 @@ async function handleWriteWithAi(env, req, url, ctx) {
       clearInterval(beat);
     }
     timing.content_chars = streamed;
+    timing.finish_reason = out.finishReason || null;
+    timing.usage = out.usage || null;
+    // Ended early but with a draft: published all the same, and said so.
+    const cutoff = out.ok ? writeAiCutoff(out, streamed) : null;
+    timing.cutoff = cutoff ? cutoff.reason : null;
     timing.done_ms = since();
     timing.ok = Boolean(out.ok) && !(out.clientGone || gone);
     console.log(`[write-with-ai timing] ${JSON.stringify(timing)}`);
@@ -21165,9 +21212,11 @@ async function handleWriteWithAi(env, req, url, ctx) {
       try { await writer.abort(); } catch {}
       return;
     }
+    // The stream is over; v1 is being stored.
+    if (out.ok) { try { await send('publishing', {}); } catch {} }
     const done = await writeAiFinish(job, out);
     try {
-      await send(done.status === 200 ? 'done' : 'error', { ...done.body, status: done.status, timing });
+      await send(done.status === 200 ? 'done' : 'error', { ...done.body, status: done.status, timing, ...(done.status === 200 ? { cutoff } : {}) });
       await writer.close();
     } catch {}
   })();
@@ -21181,6 +21230,18 @@ async function handleWriteWithAi(env, req, url, ctx) {
       'X-Content-Type-Options': 'nosniff',
     },
   });
+}
+
+// A draft that ended before the model finished, kept and published: the
+// provider's length limit or ours (WRITE_AI_MARKDOWN_CHARS), the whole-draft
+// time limit (ASK_STREAM_TOTAL_MS), or a content filter / refusal.
+// -> { reason, message } | null
+function writeAiCutoff(out, streamed) {
+  const fr = String(out.finishReason || '');
+  if (fr === 'content_filter' || out.refusal) return { reason: 'filter', message: 'tdoc AI stopped this draft.' };
+  if (fr === 'length' || streamed >= WRITE_AI_MARKDOWN_CHARS) return { reason: 'length', message: 'Stopped early: hit the length limit. The end may be cut off.' };
+  if (out.timeLimit) return { reason: 'time', message: 'Stopped early: hit the time limit. The end may be cut off.' };
+  return null;
 }
 
 // The PR preview has no model key: its fixed draft, a line or two at a time,
@@ -21197,7 +21258,7 @@ async function writeAiPreviewStream(onDelta, hooks = {}) {
     if ((await onDelta(piece)) === false) break;
     await new Promise((r) => setTimeout(r, WRITE_AI_PREVIEW_STEP_MS));
   }
-  return { ok: true, answer: WRITE_AI_PREVIEW_DOC };
+  return { ok: true, answer: WRITE_AI_PREVIEW_DOC, finishReason: 'stop' };
 }
 
 // After the model: store the draft exactly one way for both responses.

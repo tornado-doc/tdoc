@@ -44,7 +44,9 @@ const ORIGIN = 'https://tdoc.dev';
     const sent = init.body ? JSON.parse(init.body) : null;
     calls.push({ url: u, body: sent });
     if (sent && sent.stream && streamReply) {
-      const { pieces = [], raw = null, delay = 5, status = 200, thoughts = [], field = 'reasoning', firstDelay = 0 } = streamReply();
+      const { pieces = [], raw = null, delay = 5, status = 200, thoughts = [], field = 'reasoning', firstDelay = 0, finish = null, usage = null, rejectOptions = false } = streamReply();
+      // A provider that does not know stream_options refuses the request.
+      if (rejectOptions && sent.stream_options) return new Response(JSON.stringify({ error: { message: 'unknown field stream_options' } }), { status: 400, headers: { 'Content-Type': 'application/json' } });
       if (status !== 200) return new Response(JSON.stringify({ error: { message: 'down' } }), { status, headers: { 'Content-Type': 'application/json' } });
       const enc = new TextEncoder();
       // `thoughts`: reasoning-only deltas first (in `field`), as a reasoning
@@ -54,6 +56,8 @@ const ORIGIN = 'https://tdoc.dev';
         ': OPENROUTER PROCESSING',
         ...thoughts.map((t) => `data: ${JSON.stringify({ choices: [{ delta: { content: '', [field]: t } }] })}`),
         ...pieces.map((p) => `data: ${JSON.stringify({ choices: [{ delta: { content: p, reasoning: 'scratch' } }] })}`),
+        ...(finish ? [`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finish }] })}`] : []),
+        ...(usage ? [`data: ${JSON.stringify({ choices: [], usage })}`] : []),
         'data: [DONE]',
       ];
       const signal = init.signal;
@@ -213,10 +217,11 @@ const ORIGIN = 'https://tdoc.dev';
     const r = await writeSse(dev, { prompt: 'a streamed plan' });
     assert(r.status === 200 && /^text\/event-stream/.test(r.type) && r.nosniff === 'nosniff', `${r.status} ${r.type} ${r.text}`);
     const kinds = r.events.map((e) => e.event);
-    assert(JSON.stringify(kinds) === JSON.stringify(['delta', 'delta', 'delta', 'done']), kinds.join(','));
+    assert(JSON.stringify(kinds) === JSON.stringify(['delta', 'delta', 'delta', 'publishing', 'done']), kinds.join(','));
     assert(r.events.slice(0, 3).map((e) => e.data.text).join('') === pieces.join(''), 'deltas are not the answer, in order');
     assert(!r.text.includes('scratch'), 'reasoning reached the reader');
-    const done = r.events[3].data;
+    const done = r.events[4].data;
+    assert(done.cutoff === null, JSON.stringify(done.cutoff));
     const tm = done.timing;
     assert(tm && tm.model && tm.headers_ms >= 0 && tm.first_content_ms >= tm.headers_ms && tm.done_ms >= tm.first_content_ms, JSON.stringify(tm));
     // The mock's 'scratch' rides on every answer piece: counted, never shown.
@@ -244,12 +249,12 @@ const ORIGIN = 'https://tdoc.dev';
       let r;
       try { r = await writeSse(dev, { prompt: 'a plan with private-words-xyz' }); } finally { console.log = log; }
       const kinds = r.events.map((e) => e.event);
-      assert(JSON.stringify(kinds) === JSON.stringify(['thinking', 'thinking', 'delta', 'delta', 'done']), kinds.join(','));
+      assert(JSON.stringify(kinds) === JSON.stringify(['thinking', 'thinking', 'delta', 'delta', 'publishing', 'done']), kinds.join(','));
       const th = r.events.filter((e) => e.event === 'thinking').map((e) => e.data);
       assert(th.map((d) => d.text).join('') === thoughts.join(''), JSON.stringify(th));
       assert(th.every((d) => Number.isInteger(d.elapsed_ms) && d.elapsed_ms >= 0), JSON.stringify(th));
       assert(!r.text.includes('scratch'), 'reasoning after the draft began reached the reader');
-      const done = r.events[4].data;
+      const done = r.events[5].data;
       const tm = done.timing;
       assert(tm.reasoning_text === true && tm.reasoning_chars === thoughts.join('').length + 'scratch'.length * 2, JSON.stringify(tm));
       assert(tm.first_reasoning_ms != null && tm.first_reasoning_ms <= tm.first_content_ms, JSON.stringify(tm));
@@ -276,6 +281,69 @@ const ORIGIN = 'https://tdoc.dev';
     const done = r.events[r.events.length - 1];
     assert(done.data.timing.reasoning_text === false && done.data.timing.reasoning_chars === 0, JSON.stringify(done.data.timing));
     assert(done.event === 'done' && done.data.timing.first_content_ms >= 2000, JSON.stringify(done.data.timing));
+  });
+
+  await t('streamed: usage is asked for; finish_reason and token counts land in timing (done and the log)', async () => {
+    env.ASK_FREE_LIMIT = '300';
+    await clearRate();
+    const logs = [];
+    const log = console.log;
+    console.log = (...a) => { logs.push(a.join(' ')); };
+    streamReply = () => ({ pieces: ['# Counted\n'], finish: 'stop', usage: { prompt_tokens: 120, completion_tokens: 900, completion_tokens_details: { reasoning_tokens: 700 } } });
+    let r;
+    try { r = await writeSse(dev, { prompt: 'counted' }); } finally { console.log = log; }
+    const sentBody = calls[calls.length - 1].body;
+    assert(sentBody.stream_options && sentBody.stream_options.include_usage === true, JSON.stringify(sentBody));
+    const tm = r.events[r.events.length - 1].data.timing;
+    assert(tm.finish_reason === 'stop' && tm.cutoff === null, JSON.stringify(tm));
+    assert(JSON.stringify(tm.usage) === JSON.stringify({ prompt_tokens: 120, completion_tokens: 900, reasoning_tokens: 700 }), JSON.stringify(tm.usage));
+    const logged = JSON.parse(logs.find((l) => l.startsWith('[write-with-ai timing] ')).slice(23));
+    assert(logged.finish_reason === 'stop' && logged.usage.reasoning_tokens === 700, JSON.stringify(logged));
+  });
+
+  await t('streamed: a provider that refuses stream_options is asked again without it', async () => {
+    await clearRate();
+    const n = calls.length;
+    streamReply = () => ({ rejectOptions: true, pieces: ['# Fallback\n'] });
+    const r = await writeSse(dev, { prompt: 'fallback' });
+    const done = r.events.find((e) => e.event === 'done');
+    assert(done && done.data.ok, r.text);
+    assert(calls.length === n + 2 && calls[n].body.stream_options && !calls[n + 1].body.stream_options, JSON.stringify(calls.slice(n).map((c) => c.body.stream_options || null)));
+    assert(done.data.timing.usage === null, 'usage without asking');
+  });
+
+  // Ended early, but with a draft: published all the same, and the dialog
+  // is told why in one line (done.cutoff, timing.cutoff).
+  for (const [name, reply, reason, message] of [
+    ['the provider hit its length limit', () => ({ pieces: ['# Long\n\nhalf a sen'], finish: 'length' }), 'length', /^Stopped early: hit the length limit\. The end may be cut off\.$/],
+    ['a content filter stopped it', () => ({ pieces: ['# Filtered\n\nsome'], finish: 'content_filter' }), 'filter', /^tdoc AI stopped this draft\.$/],
+    ['a refusal', () => ({ raw: [`data: ${JSON.stringify({ choices: [{ delta: { content: '# Refused\n' } }] })}`, `data: ${JSON.stringify({ choices: [{ delta: { refusal: 'I cannot help with that.' } }] })}`, 'data: [DONE]'] }), 'filter', /^tdoc AI stopped this draft\.$/],
+    ['our length cap (WRITE_AI_MARKDOWN_CHARS)', () => ({ pieces: ['# Huge\n\n', ...Array.from({ length: 7 }, () => 'x'.repeat(10000))] }), 'length', /length limit/],
+  ]) {
+    await t(`streamed, cut off: ${name}: published, done.cutoff says so`, async () => {
+      await clearRate();
+      const before = await docCount();
+      streamReply = reply;
+      const r = await writeSse(dev, { prompt: `cut ${reason}` });
+      const done = r.events[r.events.length - 1];
+      assert(done.event === 'done' && done.data.ok, r.text.slice(0, 300));
+      assert(done.data.cutoff && done.data.cutoff.reason === reason && message.test(done.data.cutoff.message), JSON.stringify(done.data.cutoff));
+      assert(done.data.timing.cutoff === reason, JSON.stringify(done.data.timing));
+      assert(r.events.some((e) => e.event === 'publishing'), 'no publishing event');
+      assert(await docCount() === before + 1, 'not published');
+    });
+  }
+
+  await t('streamed, cut off: the whole-draft time limit: what was written is published, done.cutoff time', async () => {
+    await clearRate();
+    env.ASK_STREAM_TOTAL_MS = '400';
+    try {
+      streamReply = () => ({ pieces: ['# Slow draft\n\n', 'line one\n', 'line two\n', 'line three\n', 'line four\n'], delay: 150 });
+      const r = await writeSse(dev, { prompt: 'too slow' });
+      const done = r.events[r.events.length - 1];
+      assert(done.event === 'done' && done.data.ok && done.data.cutoff && done.data.cutoff.reason === 'time', r.text.slice(-400));
+      assert(/time limit/.test(done.data.cutoff.message), done.data.cutoff.message);
+    } finally { delete env.ASK_STREAM_TOTAL_MS; }
   });
 
   await t('streamed: a <script> split across pieces is text in the stored doc', async () => {

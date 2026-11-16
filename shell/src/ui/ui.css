@@ -715,23 +715,27 @@ a.ui-menu-item:visited {
 }
 @keyframes mk-write-blink { to { visibility: hidden; } }
 @media (prefers-reduced-motion: reduce) { .mk-write-caret { animation: none; } }
-/* The model thinking before it writes: a quiet grey line, its reasoning in
-   small muted type below (about six lines, following the end), folded to
-   "Thought for 23s" once the draft begins. */
-.mk-think { margin: 0 0 14px; }
-.mk-think-head {
-  display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0;
-  border: 0; background: none; color: var(--td-muted); font: inherit; font-size: 13px; line-height: 1.5;
-}
+/* The model thinking before it writes: one quiet line and, under it, the
+   latest three lines of its reasoning in small muted type, older lines
+   fading out at the top; each line cut with an ellipsis. Folded to one
+   "Thought for 23s" line once the draft begins. No boxes, no new colours. */
+.mk-think { margin: 0 0 12px; }
+.mk-think-head { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--td-muted); font-size: 13px; line-height: 1.5; }
 .tdoc-modal p.mk-think-head { margin: 0; color: var(--td-muted); font-size: 13px; }
 .mk-think-toggle.ui-btn { gap: 6px; }
 .mk-think-caret { transition: transform 120ms ease; }
 .mk-think-caret[data-open] { transform: rotate(180deg); }
-.mk-think-text {
-  max-height: calc(6 * 1.5em); margin-top: 4px; padding-left: 10px; overflow-y: auto;
-  border-left: 2px solid var(--td-line); color: var(--td-muted); font-size: 12.5px; line-height: 1.5;
-  white-space: pre-wrap; overflow-wrap: anywhere;
+.mk-think-lines {
+  margin-top: 2px; color: var(--td-muted); font-size: 12.5px; line-height: 1.5; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.5em);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 1.5em);
 }
+.mk-think-line { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mk-think-full {
+  max-height: calc(12 * 1.5em); margin-top: 2px; overflow-y: auto;
+  color: var(--td-muted); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.mk-write-cutoff { display: block; margin-top: 2px; color: var(--td-muted); }
 .mk-write-starting { margin: 0 0 6px; }
 .mk-foot.mk-write-error { color: var(--td-danger); }
 .mk-foot.mk-write-error a { color: inherit; text-decoration: underline; }
