@@ -108,7 +108,7 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
           scrollWidth: document.documentElement.scrollWidth,
           innerWidth: window.innerWidth,
           visible: ['.tdoc-bar-mark', '#tdoc-more-btn'].map(measure),
-          secondary: ['#tdoc-version-toggle', '#tdoc-star-btn', '#tdoc-publish-btn', '.tdoc-account-trigger'].map(measure),
+          secondary: ['#tdoc-version-toggle', '#tdoc-publish-btn', '.tdoc-account-trigger'].map(measure),
           straySeparator: Boolean(document.querySelector('.crumb-sep-slug')?.getClientRects().length),
         };
       });

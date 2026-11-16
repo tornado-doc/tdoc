@@ -23,6 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
+import { AppButton } from '../ui/button.jsx';
 import { AskIcon } from '../ui/ask-icon.jsx';
 import { usePortalContainer } from '../ui/portal.js';
 
@@ -96,11 +97,37 @@ export function editedAgo(iso, now = Date.now()) {
 // The bar's left side after the logo: the document's title, renameable by its
 // owner. No space or folder crumbs (they led nowhere -- there is no sidebar
 // behind them); the space is the switcher chip on the right, as on My docs.
-// Version and star moved: the version is behind "Edited …" on the right, the
-// star in ⋯.
-export function DocumentBreadcrumbs({ config, title, onRename }) {
+// The version is behind "Edited …" on the right. The star sits right after
+// the title, Google Docs style (Julie, 2026-11-16: "need a star here for
+// saved?"): outline = not starred, filled = starred. It is the same star as
+// My docs (POST /api/star), so a doc starred here is under My docs › Starred.
+// Only a signed-in viewer gets one (the server boots config.viewerStar for
+// them alone), so a logged-out reader sees just the title.
+export function DocumentBreadcrumbs({ config, title, onRename, starred = false, onToggleStar = null }) {
   if (config.isLanding) return null;
-  return <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />;
+  return (
+    <>
+      <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />
+      {config.viewerStar && onToggleStar ? <DocumentStar starred={starred} onToggle={onToggleStar} /> : null}
+    </>
+  );
+}
+
+export function DocumentStar({ starred, onToggle }) {
+  const label = starred ? 'Starred' : 'Star';
+  return (
+    <AppButton
+      variant="icon"
+      id="tdoc-star-btn"
+      className={`tdoc-star-btn${starred ? ' is-starred' : ''}`}
+      aria-pressed={starred}
+      aria-label={label}
+      title={label}
+      onClick={onToggle}
+    >
+      <Star size={16} fill={starred ? 'currentColor' : 'none'} aria-hidden="true" />
+    </AppButton>
+  );
 }
 
 // "Edited 3m ago", muted, on the right: when the version on screen was made.
@@ -253,8 +280,6 @@ export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenC
 
 export function DocumentOverflowActions({
   config,
-  starred,
-  onToggleStar,
   onPublish,
   onShare,
   onCopyMarkdown,
@@ -323,12 +348,6 @@ export function DocumentOverflowActions({
           <Share2 size={15} /> Share
         </AppMenuItem>
       )}
-      {config.viewerStar ? (
-        <AppMenuItem className="tdoc-action-menu-item" data-action="star" onClick={onToggleStar}>
-          <Star size={15} fill={starred ? 'currentColor' : 'none'} />
-          {starred ? 'Remove from starred' : 'Add to starred'}
-        </AppMenuItem>
-      ) : null}
       {/* Four groups: what this doc is, how to take a copy of it, the app, the
           account. Thirteen flat rows made every one of them cost a read. The
           separator carries tdoc-mobile-overflow-only because everything above

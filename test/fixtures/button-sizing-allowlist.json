@@ -6,7 +6,6 @@
  "server/chrome.css :: .tdoc-bar button",
  "server/chrome.css :: .tdoc-bar button.doc-title-edit",
  "server/chrome.css :: .tdoc-bar button.primary",
- "server/chrome.css :: .tdoc-bar button.tdoc-star-btn",
  "server/chrome.css :: .tdoc-comment-filter.tdoc-seg button",
  "server/chrome.css :: .tdoc-connect-agent button",
  "server/chrome.css :: .tdoc-emoji-picker button",

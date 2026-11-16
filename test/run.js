@@ -292,6 +292,7 @@ const BROWSER = [
   'comment-overflow-ask-dismiss-ui.test.js', // a long markdown reply (inline code, paths, a code block) never scrolls a comment card, its thread or an Ask AI answer sideways; Ask AI closes on a click in the document or Escape and keeps the draft; V1 + V2, desktop + phone
   'phone-ask-ai-scroll-ui.test.js', // WebKit + Chromium phone: a long Ask AI answer scrolls to its end in the drawer, the document scrolls after closing
   'doc-bar-composer-ui.test.js', // the doc bar (title, space chip, Edited, quiet Share, mode switch in the bar, comments filter) and the composer's @agent pill / Ask only (off, or ticked and locked; ticked = a held question) / Only me, desktop + phone, team docs
+  'doc-bar-star-ui.test.js', // the star after the title (doc, sheet, slides; desktop + phone): POST /api/star like My docs, optimistic with rollback, signed-in viewers only
   'reply-agent-ui.test.js',    // the reply box's @agent = the composer's: pill at the caret, pill dropdown (Mine / Team / tdoc AI), Ask only (locked where it may not edit), Only me in a reply; the @ list shows every agent
   'phone-top-bar-ui.test.js', // signed in on a phone: ⋯ stays on screen, spaces under ⋯ → Switch space
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
