@@ -414,11 +414,37 @@ const ORIGIN = 'https://tdoc.dev';
     assert(next.events[next.events.length - 1].event === 'done', next.text);
   });
 
-  await t('streamed: the reader leaves before the first piece (while it thinks): given back', async () => {
+  await t('streamed: reasoning text was sent, then the reader leaves before the first piece: still charged', async () => {
     await clearRate();
     const before = await docCount();
     const left = await remainingOf(dev);
-    streamReply = () => ({ thoughts: ['Planning the list. '], pieces: ['# Late\n'], firstDelay: 400 });
+    streamReply = () => ({ thoughts: ['Planning the list. ', 'Clothes first, then gear. '], pieces: ['# Late\n'], delay: 200 });
+    const r = await worker.fetch(req('/api/write-with-ai', { method: 'POST', cookie: dev, headers: { Origin: ORIGIN, Accept: 'text/event-stream' }, body: { prompt: 'leave after reasoning' } }), env, {});
+    const reader = r.body.getReader();
+    let seen = '';
+    while (!/event: thinking\ndata: \{"text"/.test(seen)) seen += new TextDecoder().decode((await reader.read()).value);
+    assert(!seen.includes('event: delta'), 'a draft piece came before the test left');
+    await reader.cancel();
+    await new Promise((res) => setTimeout(res, 800));
+    assert(await remainingOf(dev) === left - 3, `given back after reasoning text was sent: ${await remainingOf(dev)} vs ${left}`);
+    assert(await docCount() === before, 'a doc was created');
+  });
+
+  await t('streamed: the model fails after reasoning text, before any piece: still charged', async () => {
+    await clearRate();
+    const left = await remainingOf(dev);
+    streamReply = () => ({ raw: [`data: ${JSON.stringify({ choices: [{ delta: { content: '', reasoning: 'Thinking about it. ' } }] })}`, `data: ${JSON.stringify({ error: { message: 'overloaded', code: 502 } })}`] });
+    const r = await writeSse(dev, { prompt: 'fails after thinking' });
+    const last = r.events[r.events.length - 1];
+    assert(r.events.some((e) => e.event === 'thinking' && e.data.text) && last.event === 'error' && last.data.charged === true, r.text);
+    assert(await remainingOf(dev) === left - 3, 'given back after reasoning text was sent');
+  });
+
+  await t('streamed: the reader leaves before anything the model wrote was sent: given back', async () => {
+    await clearRate();
+    const before = await docCount();
+    const left = await remainingOf(dev);
+    streamReply = () => ({ pieces: ['# Late\n'], firstDelay: 400 });
     const r = await worker.fetch(req('/api/write-with-ai', { method: 'POST', cookie: dev, headers: { Origin: ORIGIN, Accept: 'text/event-stream' }, body: { prompt: 'leave while thinking' } }), env, {});
     const reader = r.body.getReader();
     await reader.read();

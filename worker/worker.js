@@ -21216,11 +21216,8 @@ async function handleWriteWithAi(env, req, url, ctx) {
   // after streaming in full).
   const pre = await createDocPreflight(env, req, session, team);
   if (!pre.ok) return pre.response;
-  if (await rateLimited(env, `write-ai:${accountKey}`, WRITE_AI_RATE_LIMIT, WRITE_AI_RATE_WINDOW)) {
-    return json({ error: 'rate_limited', retry_after: WRITE_AI_RATE_WINDOW, message: 'A few drafts at a time: try again in a few minutes.' }, { status: 429 });
-  }
   // One draft at a time per account, held in the allowance's Durable Object
-  // (atomic), so parallel requests cannot all pass the KV rate limit above
+  // (atomic), so parallel requests cannot all pass the KV rate limit below
   // before any of them counts. Released when the draft ends; it expires on
   // its own after the longest a draft may run.
   const lock = cfg.previewMock ? { ok: true, token: null } : await askQuotaOp(env, accountKey, { kind: 'lock', token: writeAiLockToken(), ttl_ms: WRITE_AI_LOCK_MS });
@@ -21229,6 +21226,12 @@ async function handleWriteWithAi(env, req, url, ctx) {
     return json({ error: 'quota_unavailable' }, { status: 503 });
   }
   const unlock = async () => { if (lock.token) await askQuotaOp(env, accountKey, { kind: 'unlock', token: lock.token }).catch(() => null); };
+  // Counted only once the lock is held: a request refused for a draft in
+  // progress does not use up the window.
+  if (await rateLimited(env, `write-ai:${accountKey}`, WRITE_AI_RATE_LIMIT, WRITE_AI_RATE_WINDOW)) {
+    await unlock();
+    return json({ error: 'rate_limited', retry_after: WRITE_AI_RATE_WINDOW, message: 'A few drafts at a time: try again in a few minutes.' }, { status: 429 });
+  }
   // The free allowance Ask this doc uses, charged before the model runs so a
   // burst cannot spend more than it. It is given back only when nothing of
   // the draft reached the person (the model failed before its first piece,
@@ -21277,8 +21280,10 @@ async function handleWriteWithAi(env, req, url, ctx) {
   const run = (async () => {
     let gone = false;
     let streamed = 0;
-    // Given back only while no piece of the draft has been sent.
-    const refund = async () => { if (streamed === 0) await giveBack(); };
+    // Given back only while nothing the model wrote has been sent: no piece
+    // of the draft, and no reasoning text (up to WRITE_AI_REASONING_CHARS of
+    // it may go out as `thinking` events; elapsed-only beats do not count).
+    const refund = async () => { if (streamed === 0 && shownReasoning === 0) await giveBack(); };
     // One ai_timing line per call (server/ai-timing.js): the upstream's
     // headers, its first reasoning and first answer piece, the end, plus
     // whether reasoning text came, finish_reason, token usage and why a kept
@@ -21318,16 +21323,19 @@ async function handleWriteWithAi(env, req, url, ctx) {
         // Once the draft has begun the dialog has collapsed the thoughts.
         if (drafting || shownReasoning >= WRITE_AI_REASONING_CHARS) return;
         const piece = text.slice(0, WRITE_AI_REASONING_CHARS - shownReasoning);
-        shownReasoning += piece.length;
         await thinking(piece);
+        // Counted once it went out: a write to a reader who already left
+        // delivered nothing (the refund rule reads this).
+        shownReasoning += piece.length;
       },
     };
     // A write that fails means the reader went away: stop the model.
     const onDelta = async (text) => {
       if (!drafting) { drafting = true; if (cfg.previewMock) timer.mark('first_token'); }
       if (streamed >= WRITE_AI_MARKDOWN_CHARS) return false;
-      streamed += text.length;
       try { await send('delta', { text }); } catch { throw clientGone(); }
+      // Counted once it went out (as the reasoning above).
+      streamed += text.length;
       return streamed < WRITE_AI_MARKDOWN_CHARS;
     };
     let out;
@@ -21351,7 +21359,7 @@ async function handleWriteWithAi(env, req, url, ctx) {
     if (out.clientGone || gone) {
       await refund();
       await unlock();
-      console.log(JSON.stringify({ event: 'write_ai_abandoned', delivered_chars: streamed }));
+      console.log(JSON.stringify({ event: 'write_ai_abandoned', delivered_chars: streamed, reasoning_chars_sent: shownReasoning }));
       try { await writer.abort(); } catch {}
       return;
     }
@@ -21359,7 +21367,7 @@ async function handleWriteWithAi(env, req, url, ctx) {
     if (out.ok) { try { await send('publishing', {}); } catch {} }
     let done;
     try {
-      done = await writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, delivered: streamed > 0, refund }, out);
+      done = await writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, delivered: streamed > 0 || shownReasoning > 0, refund }, out);
     } finally { await unlock(); }
     try {
       await send(done.status === 200 ? 'done' : 'error', { ...done.body, status: done.status, timing, ...(done.status === 200 ? { cutoff } : {}) });
