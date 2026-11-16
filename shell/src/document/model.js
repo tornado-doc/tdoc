@@ -97,7 +97,19 @@ function upstreamAvatarFor(author) {
   if (key.includes('grok') || key.includes('xai')) return '/grok_logo.svg';
   if (key.includes('gemini')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
   if (key.includes('cursor')) return 'https://cdn.simpleicons.org/cursor/000000';
-  return 'https://github.com/openai.png';
+  if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
+    return 'https://github.com/openai.png';
+  }
+  // An agent tdoc cannot name: no picture here. AuthorAvatar draws tdoc
+  // AI's mark (agent-marks.jsx TdocAiMark), not a guess at someone's logo.
+  return '';
+}
+
+// tdoc AI itself: its answers in a thread (the worker signs them login
+// tdoc-ai) and in Ask AI (the TDOC_AI target, tdoc_ai: true).
+export function isTdocAiAuthor(author) {
+  if (!author) return false;
+  return author.tdoc_ai === true || String(author.login || '').toLowerCase() === 'tdoc-ai';
 }
 
 // A sheet cell's identity beside its selector: table name, row id, column

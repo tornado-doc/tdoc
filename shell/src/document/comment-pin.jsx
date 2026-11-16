@@ -1,5 +1,6 @@
 import React from 'react';
-import { avatarFor, avatarInitial } from './model.js';
+import { avatarFor, avatarInitial, isTdocAiAuthor } from './model.js';
+import { TdocAiMark } from '../agent-marks.jsx';
 import { AuthorFace } from './author-face.jsx';
 import { canSeeHandoff, handoffPinBadge, handoffWaitState, isHandoffInFlight } from '../comments/core/handoff-state.js';
 import { isThreadUnread } from '../comments/core/thread-seen.js';
@@ -25,10 +26,12 @@ export function CommentPinFace({ comment, author = null, state, clusterCount = n
   if (!comment) return clusterCount;
   const who = author || comment.author || comment;
   const avatar = avatarFor(who);
+  // tdoc AI, or an agent tdoc cannot name: tdoc AI's mark, as on its card.
+  const tdocAi = isTdocAiAuthor(who) || (who.kind === 'agent' && !who.provider && !avatar);
   return <>
-    <AuthorFace src={avatar} style={PIN_FACE_SIZE} fallback={who.login || who.name
+    {tdocAi ? <span className="tdoc-agent-provider-mark is-tdoc-ai" aria-hidden="true"><TdocAiMark size={18} /></span> : <AuthorFace src={avatar} style={PIN_FACE_SIZE} fallback={who.login || who.name
       ? <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(who)}</span>
-      : <span className="tdoc-pin-anon" />} />
+      : <span className="tdoc-pin-anon" />} />}
     {state?.badge ? <span className={`tdoc-pin-handoff-badge is-${state.badge}`} aria-hidden="true">{BADGE_TEXT[state.badge]}</span> : null}
     {state?.unread ? <span className="tdoc-pin-unread-dot" aria-hidden="true" /> : null}
   </>;

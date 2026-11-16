@@ -352,6 +352,10 @@
   .tdoc-agent-provider-mark { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #fff; flex-shrink: 0; }
   .tdoc-reply .tdoc-agent-provider-mark { width: 18px; height: 18px; }
   .tdoc-agent-provider-mark svg { width: 72%; height: 72%; }
+  /* tdoc AI (agent-marks.jsx TdocAiMark): the mark and its corner badge fill the face; ink strokes on every surface. */
+  .tdoc-agent-provider-mark.is-tdoc-ai { color: var(--td-ink, #1a1a1a); }
+  .tdoc-agent-provider-mark.is-tdoc-ai svg { width: 100%; height: 100%; }
+  .tdoc-pin .tdoc-agent-provider-mark.is-tdoc-ai { width: 100%; height: 100%; }
   /* Hover card on an agent's name: the five facts its one-line label leaves out. */
   .tdoc-agent-name { cursor: default; }
   .tdoc-agent-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); font: 12px/1.4 system-ui, sans-serif; color: #111; max-width: 280px; }
