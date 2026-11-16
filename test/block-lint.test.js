@@ -211,6 +211,26 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     assert((env.DOCS.map.get('docs/lint-legacy/v3/index.html').match(/\/\* House blocks/g) || []).length === 1, 'idempotent on re-publish');
   });
 
+  await t('loose text is any drawn character: spaces, no-break spaces and blank entities are not', () => {
+    const quiet = lint(page('<div class="tdoc-tiles"> \u00a0&nbsp;&#160;&zwj;\n\t</div>'));
+    assert(quiet.loose_text === 0, `blank run counted: ${quiet.loose_text}`);
+    const ideographic = lint(page('<div class="tdoc-tiles">\u3000</div>'));
+    assert(ideographic.loose_text === 0, 'an ideographic space is white space');
+    for (const run of ['x', '&nbsp;x', '&amp;', '中', ' \u00a0y']) {
+      assert(lint(page(`<div class="tdoc-tiles">${run}</div>`)).loose_text === 1, `not counted: ${JSON.stringify(run)}`);
+    }
+  });
+
+  await t('a page of unclosed tag openers is read once, not once per opener', () => {
+    const openers = '<section>' + '<h1'.repeat(500000) + '</section>';
+    const none = '<h1'.repeat(500000);
+    const quoted = '<a title="' + '<b '.repeat(300000) + '">x</a>';
+    for (const [name, html] of [['openers', openers], ['no >', none], ['quoted', quoted]]) {
+      const took = ms(() => lint(html));
+      assert(took < (process.env.CI ? 300 : 150), `${name}: ${took.toFixed(1)} ms`);
+    }
+  });
+
   await t('the CLI prints the server\'s block warning after a successful upload', () => {
     const src = read('bin/tdoc-publish');
     assert(/json_get block_warning/.test(src) && /printf '%s\\n' "\$block_warning" \| sed 's\/\^\/\[tdoc\] \/' >&2/.test(src), 'tdoc-publish prints block_warning to stderr');
