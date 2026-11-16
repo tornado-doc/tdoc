@@ -65,6 +65,7 @@ const OFFLINE = [
   'push-sw.test.js',           // #771 the shipped service worker: show, click opens the comment, no fetch handler
   'web-push.test.js',          // #771 a comment pushes to subscribed browsers (RFC 8291/8292, decrypted)
   'access-request-actions.test.js', // access requests answered from the notification: approve / ignore
+  'page-thumb.test.js',        // a doc card's page picture (thumb.svg): text blocks only, nothing runs or fetches, gated like the doc
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated

@@ -1939,6 +1939,17 @@ const server = http.createServer(async (req, res) => {
   // Author document frame (shell mode). Served under a CSP `sandbox` (opaque
   // origin), gated on Sec-Fetch-Dest: iframe like widgets, so it can only be
   // loaded inside the shell — never top-level.
+  // A doc card's page thumbnail, as the worker serves it.
+  const thumbMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/thumb\.svg$/);
+  if (thumbMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+    const slug = safeSlug(thumbMatch[1]);
+    if (!slug) return send(res, 400, 'invalid slug');
+    const file = path.join(ROOT, slug, `v${thumbMatch[2]}`, 'index.html');
+    if (!fs.existsSync(file)) return send(res, 404, 'Not found');
+    const svg = req.method === 'HEAD' ? '' : SHELL.pageThumbSvg(fs.readFileSync(file, 'utf8').slice(0, 192 * 1024));
+    return send(res, 200, svg, { ...SHELL.PAGE_THUMB_HEADERS, 'Cache-Control': 'private, max-age=604800' });
+  }
+
   const frameMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/frame\/?$/);
   if (frameMatch) {
     if (req.method !== 'GET' && req.method !== 'HEAD') {

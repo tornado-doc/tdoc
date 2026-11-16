@@ -869,7 +869,78 @@ agentBodyHtml(d) +
       '</body></html>';
   }
 
+  // A doc card's thumbnail: the top of the page as a small static picture,
+  // the way Google Docs shows one. Built from the plain blocks above (never
+  // the author's markup), so it carries no script, link or remote resource,
+  // and a card loads a few KB instead of the whole document.
+  const THUMB_W = 816;
+  const THUMB_H = 700;
+  const THUMB_CSS =
+    '.pg{box-sizing:border-box;width:' + THUMB_W + 'px;height:' + THUMB_H + 'px;overflow:hidden;padding:64px 76px 0;' +
+    'font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif;color:#3c4043;background:#fff}' +
+    '.pg *{margin:0;box-sizing:border-box}' +
+    '.pg h1{font-size:30px;line-height:1.25;font-weight:600;color:#202124;margin:0 0 14px}' +
+    '.pg h2{font-size:22px;line-height:1.3;font-weight:600;color:#202124;margin:22px 0 8px}' +
+    '.pg h3,.pg h4,.pg h5,.pg h6{font-size:17px;line-height:1.35;font-weight:600;color:#202124;margin:16px 0 6px}' +
+    '.pg p{margin:0 0 10px}' +
+    '.pg ul{margin:0 0 10px;padding:0 0 0 22px}' +
+    '.pg li{margin:0 0 4px}' +
+    '.pg table{border-collapse:collapse;width:100%;margin:4px 0 12px;font-size:13px;line-height:1.4}' +
+    '.pg td{border:1px solid #dadce0;padding:5px 7px;vertical-align:top}' +
+    '.pg tr:first-child td{font-weight:600;background:#f8f9fa}' +
+    '.pg pre{font:13px/1.5 ui-monospace,Menlo,monospace;background:#f8f9fa;padding:8px 10px;margin:0 0 10px;white-space:pre-wrap}';
+  // XML (the SVG) refuses control characters that HTML lets through.
+  function thumbText(s) {
+    return esc(String(s || '').replace(/\[image: [^\]]*\]/g, ' ').replace(/ \(https?:\/\/[^\s)]*\)/g, '')
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]/g, '').replace(/\s+/g, ' ').trim());
+  }
+  function pageThumbSvg(html) {
+    const r = agentBlocksFromHtml(typeof html === 'string' ? html : '', 2400, { scanBytes: 192 * 1024 });
+    let out = '';
+    let open = '';
+    const close = () => { if (open) out += '</' + open + '>'; open = ''; };
+    let shown = 0;
+    for (const b of r.blocks) {
+      if (shown >= 40) break;
+      if (b.t === 'row') {
+        const cells = (b.cells || []).slice(0, 6).map(thumbText);
+        if (!cells.some(Boolean)) continue;
+        if (open !== 'table') { close(); out += '<table>'; open = 'table'; }
+        out += '<tr>' + cells.map((c) => '<td>' + c + '</td>').join('') + '</tr>';
+        shown++;
+        continue;
+      }
+      const text = thumbText(b.text).slice(0, 600);
+      if (!text) continue;
+      if (b.t === 'li') {
+        if (open !== 'ul') { close(); out += '<ul>'; open = 'ul'; }
+        out += '<li>' + text + '</li>';
+      } else {
+        close();
+        if (b.t === 'h') { const lv = Math.min(6, Math.max(1, Number(b.level) || 2)); out += '<h' + lv + '>' + text + '</h' + lv + '>'; }
+        else if (b.t === 'code') out += '<pre>' + text + '</pre>';
+        else out += '<p>' + text + '</p>';
+      }
+      shown++;
+    }
+    close();
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + THUMB_W + '" height="' + THUMB_H + '" viewBox="0 0 ' + THUMB_W + ' ' + THUMB_H + '">' +
+      '<rect width="100%" height="100%" fill="#fff"/>' +
+      '<foreignObject x="0" y="0" width="' + THUMB_W + '" height="' + THUMB_H + '">' +
+      '<div xmlns="http://www.w3.org/1999/xhtml" class="pg"><style>' + THUMB_CSS + '</style>' + out + '</div>' +
+      '</foreignObject></svg>';
+  }
+  // Served as an image only: nothing in it may run or fetch, even if someone
+  // opens the URL on its own.
+  const PAGE_THUMB_HEADERS = {
+    'Content-Type': 'image/svg+xml; charset=utf-8',
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    'X-Content-Type-Options': 'nosniff',
+  };
+
   var api = {
+    pageThumbSvg: pageThumbSvg,
+    PAGE_THUMB_HEADERS: PAGE_THUMB_HEADERS,
     shellHtml: shellHtml,
     appHtml: appHtml,
     excerptFromHtml: excerptFromHtml,

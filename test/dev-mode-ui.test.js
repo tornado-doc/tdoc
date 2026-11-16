@@ -269,14 +269,17 @@ async function startServer(worker, env) {
         assert.equal(await card('julie-notes').locator('.doc-card-preview img').getAttribute('src'), '/thumbs/julie-notes.png');
         await gridShot('grid-devmode-on');
         if (!phone) {
-          // Layout A's card (myDocsA, on in dev mode) shows the doc's first
-          // page as text, Google Docs style, not the link-share picture.
+          // Layout A's card (myDocsA, on in dev mode) shows a picture of the
+          // doc's first page (the worker's thumb.svg), Google Docs style, not
+          // the link-share picture.
           const wide = await context.newPage();
           await wide.goto(`${base}/me`);
           const pageThumb = wide.locator('.mda-card[data-slug="julie-notes"] .mda-th-page');
           await pageThumb.waitFor();
-          assert.match(await pageThumb.locator('.mda-th-text').textContent(), /prompt-native documents/i);
-          assert.equal(await wide.locator('.mda-card[data-slug="julie-notes"] img').count(), 0);
+          const pic = pageThumb.locator('img.mda-th-pic');
+          assert.match(await pic.getAttribute('src'), /^\/d\/julie-notes\/v\/\d+\/thumb\.svg\?r=\d+$/);
+          await wide.locator('.mda-card[data-slug="julie-notes"] .mda-th-page.is-pic').waitFor();
+          assert.equal(await wide.locator('.mda-card[data-slug="julie-notes"] img').count(), 1, 'only the page picture');
           await wide.close();
         }
         await thumbs();

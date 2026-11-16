@@ -27819,6 +27819,25 @@ const tdocHandlers = {
       return serveRawDocVersion(env, req, slug, Number(vStr));
     }
 
+    // A doc card's page thumbnail (My docs): a few KB of static SVG built
+    // from the top of the stored page, not the whole document in a frame.
+    const thumbMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/thumb\.svg$/);
+    if (thumbMatch && (method === 'GET' || method === 'HEAD')) {
+      const [, slug, vStr] = thumbMatch;
+      if (!isValidSlug(slug)) return text('invalid slug', { status: 400 });
+      if (!SHELL || typeof SHELL.pageThumbSvg !== 'function') return text('Not found', { status: 404 });
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return text('Not found', { status: 404 });
+      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`, { range: { offset: 0, length: 192 * 1024 } });
+      if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
+      const svg = method === 'HEAD' ? '' : SHELL.pageThumbSvg(await obj.text());
+      // A version never changes, so the browser keeps it; private, because
+      // the doc may be readable only by some accounts.
+      return new Response(svg, {
+        headers: { ...SHELL.PAGE_THUMB_HEADERS, 'Cache-Control': 'private, max-age=604800' },
+      });
+    }
+
     const frameMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/frame\/?$/);
     if (frameMatch && (method === 'GET' || method === 'HEAD')) {
       const [, slug, vStr] = frameMatch;

@@ -165,7 +165,17 @@ async function startServer(worker, env) {
         assert.equal(await page.locator('.tabs').count(), 0, 'the old tab row is gone on a wide screen');
         assert.equal(await card(page, 'budget-2027').locator('.mda-th-sheet').count(), 1, 'a sheet is drawn as a grid');
         assert.equal(await card(page, 'launch-deck').locator('.mda-th-slides').count(), 1, 'a deck is drawn as a slide');
-        assert.equal(await card(page, 'q4-plan').locator('.mda-th-page > b').textContent(), await card(page, 'q4-plan').getAttribute('data-title'), 'a doc shows its first page: its own title');
+        // A doc shows a picture of its first page: a small SVG the server
+        // builds (not the document in a frame), and the page's own title.
+        const pic = card(page, 'q4-plan').locator('img.mda-th-pic');
+        assert.match(await pic.getAttribute('src'), /^\/d\/q4-plan\/v\/\d+\/thumb\.svg\?r=\d+$/);
+        await card(page, 'q4-plan').locator('.mda-th-page.is-pic').waitFor();
+        assert.ok(await pic.evaluate((img) => img.naturalWidth > 0), 'the page picture loads');
+        const svg = await page.evaluate(async (src) => { const r = await fetch(src); return { type: r.headers.get('content-type'), body: await r.text() }; }, await pic.getAttribute('src'));
+        assert.match(svg.type, /^image\/svg\+xml/);
+        assert.ok(svg.body.length < 12000, `thumbnail is ${svg.body.length} bytes`);
+        assert.ok(svg.body.includes(await card(page, 'q4-plan').getAttribute('data-title')), 'the picture shows the page title');
+        assert.doesNotMatch(svg.body, /<script|<iframe|<img|href=|src=/i, 'nothing in it runs or fetches');
         assert.equal(await card(page, 'budget-2027').getByRole('img', { name: 'Sheet' }).count(), 1);
         assert.match(await card(page, 'q4-plan').locator('.doc-meta').textContent(), /^updated 2h ago · Link$/);
         assert.equal(await page.getByRole('button', { name: 'Grid view' }).getAttribute('aria-pressed'), 'true');
