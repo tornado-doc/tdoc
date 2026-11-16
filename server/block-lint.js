@@ -199,8 +199,19 @@
     return false;
   }
 
-  function hasText(s) {
-    return /[^\s\u00a0]/.test(s.replace(/&(?:nbsp|#160|#xa0|zwj|zwnj|#8203);/gi, ''));
+  // Any character in s[from, to) that is not white space, a no-break space
+  // or an entity that draws nothing. Read in place: most runs answer on
+  // their first character, and only a run with an '&' is copied to strip
+  // the entities.
+  function hasText(s, from, to) {
+    if (from == null) { from = 0; to = s.length; }
+    for (var i = from; i < to; i++) {
+      var ch = s.charCodeAt(i);
+      if (ch === 38) return /[^\s\u00a0]/.test(s.slice(i, to).replace(/&(?:nbsp|#160|#xa0|zwj|zwnj|#8203);/gi, ''));
+      if (ch === 32 || (ch >= 9 && ch <= 13) || ch === 160) continue;
+      if (ch < 128 || !/\s/.test(s[i])) return true;
+    }
+    return false;
   }
   function snippet(s) {
     var t = s.replace(/\s+/g, ' ').trim();
@@ -225,6 +236,7 @@
     var tags = 0;
     var pos = start;
     var sheets = [], proseBlocks = 0, docContent = false;
+    var nextGt = -2, peekAt = -1, peekLt = -1;
 
     function top() { return stack.length ? stack[stack.length - 1] : null; }
     function popTo(name, stopAt) {
@@ -238,17 +250,16 @@
       if (to <= from) return;
       var el = top();
       if (!el) {
-        var orphan = html.slice(from, to);
-        if (hasText(orphan)) note({ name: 'body', cls: '' }, orphan);
+        if (hasText(html, from, to)) note({ name: 'body', cls: '' }, from, to);
         return;
       }
       if (el.exempt || !el.container || TEXT_BLOCK[el.container.name] || !WRAPPER[el.container.name]) return;
-      var s = html.slice(from, to);
-      if (hasText(s)) note(el.container, s);
+      if (hasText(html, from, to)) note(el.container, from, to);
     }
-    function note(container, s) {
+    function note(container, from, to) {
       loose++;
       if (samples.length >= MAX_SAMPLES) return;
+      var s = html.slice(from, to);
       var where = label(container);
       for (var k = 0; k < samples.length; k++) if (samples[k].where === where) return;
       samples.push({ where: where, text: snippet(s) });
@@ -256,7 +267,7 @@
 
     while (pos < end) {
       if (pos - start - skipped > MAX_BYTES) { truncated = true; break; }
-      var lt = html.indexOf('<', pos);
+      var lt = peekAt === pos ? peekLt : html.indexOf('<', pos);
       if (lt === -1 || lt >= end) { text(pos, end); break; }
       text(pos, lt);
       if (html.startsWith('<!--', lt)) {
@@ -269,6 +280,14 @@
         pos = de === -1 ? end : de + 1;
         continue;
       }
+      // TAG allows no '<' inside a tag (quoted values included), so a tag
+      // ends at a '>' before the next '<'. When the first '>' is past the
+      // next '<' (or there is none), skip the regex: a page of unclosed
+      // '<h1' would otherwise run it once per '<'.
+      if (nextGt !== -1 && nextGt < lt) nextGt = html.indexOf('>', lt);
+      if (nextGt === -1) { pos = lt + 1; continue; }
+      var after = html.indexOf('<', lt + 1);
+      if (after !== -1 && after < nextGt) { pos = lt + 1; peekAt = pos; peekLt = after; continue; }
       TAG.lastIndex = lt;
       var m = TAG.exec(html);
       if (!m) { pos = lt + 1; continue; }
