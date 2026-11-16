@@ -8,6 +8,7 @@
 //    "reply_as":null,"comments":2,"since_s":41.3,"via":"mcp_poll"}
 //
 // Milestones (seconds since the handoff was created, `since_s`):
+//   (cli: a known agent CLI name -- claude, codex, gemini, ... -- or "other")
 //   delivered    the push was sent / queued (status: delivered | queued |
 //                failed, with a short error code); resend: true on a Resend
 //   picked_up    the agent said it is on it (via: ack | pull | mcp_poll)
@@ -45,6 +46,14 @@
     new_version: function (h) { return h.first_version_at; },
   };
 
+  // A local agent's CLI name is whatever the daemon registered (any short
+  // [a-z0-9] word, so it could be a person's name): only known agent CLIs
+  // are named, anything else is "other".
+  var CLIS = ['claude', 'codex', 'gemini', 'cursor', 'grok', 'opencode', 'copilot', 'aider', 'amp', 'goose', 'qwen', 'kimi'];
+  function cliOf(v) {
+    var s = String(v == null ? '' : v).toLowerCase();
+    return s ? (CLIS.indexOf(s) !== -1 ? s : 'other') : null;
+  }
   function oneOf(v, list, fallback) { return list.indexOf(v) !== -1 ? v : fallback; }
   // A short lowercase token (a CLI name, an error code) or null: anything
   // that is not one is dropped rather than cleaned, so free text never lands.
@@ -68,8 +77,8 @@
     var p = h && h.recipient && h.recipient.provider;
     return oneOf(p, CHANNELS, 'none');
   }
-  // The kind of agent, never which one: a team's agent, a local CLI (its
-  // name, from the daemon's fixed list), a Raft agent or a webhook.
+  // The kind of agent, never which one: a team's agent, a local CLI (named
+  // in `cli` only when it is a known agent CLI), a Raft agent or a webhook.
   function agentOf(h) {
     if (h && h.team_agent) return 'team_agent';
     var c = channelOf(h);
@@ -100,7 +109,7 @@
       handoff_id: opaqueId(hh.handoff_id),
       channel: channelOf(hh),
       agent: agentOf(hh),
-      cli: channelOf(hh) === 'local' && hh.recipient ? token(hh.recipient.cli, 24) : null,
+      cli: channelOf(hh) === 'local' && hh.recipient ? cliOf(hh.recipient.cli) : null,
       doc_kind: oneOf(hh.doc_kind, DOC_KINDS, 'unknown'),
       reply_as: hh.reply_as === 'suggestions' ? 'suggestions' : null,
       comments: count(Array.isArray(hh.comment_ids) ? hh.comment_ids.length : 0),
@@ -139,6 +148,6 @@
 
   return {
     EVENT: EVENT, MILESTONES: MILESTONES, CHANNELS: CHANNELS, OUTCOMES: OUTCOMES,
-    record: record, emit: emit, channelOf: channelOf, agentOf: agentOf, docKind: docKind,
+    CLIS: CLIS, record: record, emit: emit, channelOf: channelOf, agentOf: agentOf, docKind: docKind,
   };
 });

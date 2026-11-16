@@ -92,7 +92,11 @@ function fullHandoff(extra = {}) {
     }
     // A handoff id that is not one tdoc mints is dropped, not cleaned.
     assert(AgentTiming.record(fullHandoff({ handoff_id: 'owner@example.com' }), 'delivered').handoff_id === null, 'odd id');
-    assert(AgentTiming.record(fullHandoff({ recipient: { provider: 'local', cli: 'Claude Code by Julie' } }), 'delivered').cli === null, 'free-text cli');
+    // A local CLI name is whatever the daemon registered: only known agent
+    // CLIs are named; a word that could be a person's name is "other".
+    assert(AgentTiming.record(fullHandoff({ recipient: { provider: 'local', cli: 'Claude Code by Julie' } }), 'delivered').cli === 'other', 'free-text cli');
+    assert(AgentTiming.record(fullHandoff({ recipient: { provider: 'local', device: 'macbook', cli: 'juliesmith', agent_sub: 'macbook_juliesmith' } }), 'delivered').cli === 'other', 'juliesmith');
+    for (const cli of ['claude', 'codex', 'gemini']) assert(AgentTiming.record(fullHandoff({ recipient: { provider: 'local', cli } }), 'delivered').cli === cli, cli);
     assert(AgentTiming.record(fullHandoff({ doc_kind: 'SECRET' }), 'delivered').doc_kind === 'unknown', 'doc kind');
     assert(AgentTiming.record(fullHandoff(), 'not_a_milestone') === null, 'unknown milestone');
   });
@@ -211,6 +215,40 @@ function fullHandoff(extra = {}) {
     assert(captured[0].status === 'queued' && captured[0].channel === 'local' && captured[0].cli === 'claude', JSON.stringify(captured[0]));
     assert(captured[2].outcome === 'run_failed' && captured[2].new_version_s != null, JSON.stringify(captured[2]));
     for (const rec of captured) assert(!/macbook|SECRET/.test(JSON.stringify(rec)), JSON.stringify(rec));
+  });
+
+  await t('a local CLI registered as "juliesmith" is logged as other, end to end', async () => {
+    const { env, token, slug, commentId, accountId } = await seed('julie-cli-doc');
+    const local = { provider: 'local', device: 'macbook', cli: 'juliesmith' };
+    await env.META.put(`account-notify:${accountId}`, JSON.stringify([local]));
+    captured.length = 0;
+    await capture(() => worker.fetch(req('/api/notify/handoff', { method: 'POST', token, body: { slug, comment_ids: [commentId], recipient: local } }), env, {}));
+    assert(captured.length === 1 && captured[0].cli === 'other' && !JSON.stringify(captured[0]).includes('julie'), JSON.stringify(captured));
+  });
+
+  await t('an outcome is set and logged once; a resend clears it only while the handoff is open', async () => {
+    const { env, token, slug, commentId, accountId } = await seed('outcome-doc');
+    const local = { provider: 'local', device: 'macbook', cli: 'claude' };
+    await env.META.put(`account-notify:${accountId}`, JSON.stringify([local]));
+    const stored = async () => JSON.parse(await env.META.get(`handoffs:${slug}`))[0];
+    captured.length = 0;
+    await capture(async () => {
+      const h = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', token, body: { slug, comment_ids: [commentId], recipient: local } }), env, {})).json();
+      // Run failed, then resent while still open: the outcome is cleared.
+      await worker.fetch(req('/api/notify/local/fail', { method: 'POST', token, body: { slug, handoff_id: h.handoff_id } }), env, {});
+      assert((await stored()).outcome === 'run_failed', 'run_failed stored');
+      await worker.fetch(req('/api/notify/handoff/resend', { method: 'POST', token, body: { slug, handoff_id: h.handoff_id } }), env, {});
+      assert(!(await stored()).outcome, `open resend keeps ${(await stored()).outcome}`);
+      // Resolved, then a late run failure: resolved stands, no second line.
+      await worker.fetch(req('/api/notify/resolve', { method: 'POST', token, body: { slug, handoff_id: h.handoff_id } }), env, {});
+      await worker.fetch(req('/api/notify/local/fail', { method: 'POST', token, body: { slug, handoff_id: h.handoff_id } }), env, {});
+      assert((await stored()).outcome === 'resolved', `late fail overwrote: ${(await stored()).outcome}`);
+      // A resend of a closed handoff keeps its outcome.
+      await worker.fetch(req('/api/notify/handoff/resend', { method: 'POST', token, body: { slug, handoff_id: h.handoff_id } }), env, {});
+      assert((await stored()).outcome === 'resolved', `closed resend cleared: ${(await stored()).outcome}`);
+    });
+    const outcomes = captured.filter((r) => r.milestone === 'outcome').map((r) => r.outcome);
+    assert(JSON.stringify(outcomes) === JSON.stringify(['run_failed', 'resolved']), `outcome lines: ${outcomes}`);
   });
 
   await t('the first suggestions for a handed comment are a milestone, once', async () => {

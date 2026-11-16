@@ -4313,22 +4313,18 @@ async function noteHandoffSuggestions(env, slug, commentIds, count, at, scope) {
   if (firstFor) agentTiming({ ...firstFor, first_suggested_at: at }, 'suggested', { now: Date.parse(at) });
 }
 
-// The first suggestions an agent sent for a handed-off comment, for the
-// agent_timing metrics (`first_suggested_at`, written once) when the progress
-// line (noteHandoffSuggestions, which keeps it too) is off. Changes nothing
-// anybody sees. Same target and credit rule: the
-// newest open handoff carrying one of these comments, if it was addressed to
-// the proposer.
-async function noteHandoffFirstSuggestion(env, slug, commentIds, at, scope) {
+// Suggestions sent for a handed-off comment while the progress line is off:
+// an agent_timing `suggested` line only, nothing stored (the earliest line
+// per handoff is its first suggestion). One read; the proposer's scope is
+// asked only when a handoff carries these comments. Same target and credit
+// rule as noteHandoffSuggestions.
+async function logHandoffSuggestion(env, slug, commentIds, at, scopeOf) {
   if (!env || !env.META || !slug || !Array.isArray(commentIds) || !commentIds.length) return;
-  const list = await loadHandoffs(env, slug);
-  const target = list
+  const target = (await loadHandoffs(env, slug))
     .filter((h) => h && handoffOpen(h) && Array.isArray(h.comment_ids) && h.comment_ids.some((id) => commentIds.includes(id)))
     .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))[0];
-  if (!target || target.first_suggested_at || !handoffInScope(target, scope)) return;
-  const rec = { ...target, first_suggested_at: at };
-  await env.META.put(`handoffs:${slug}`, JSON.stringify(list.map((h) => (h === target ? rec : h))));
-  agentTiming(rec, 'suggested', { now: Date.parse(at) });
+  if (!target || target.first_suggested_at || !handoffInScope(target, await scopeOf())) return;
+  agentTiming(target, 'suggested', { now: Date.parse(at) });
 }
 
 function handoffSuggestedEdits(h) {
@@ -23037,14 +23033,13 @@ async function handleProposeEdits(env, req, url, slug) {
   // The handoff these comments rode on learns how many edits are waiting,
   // for the progress line on its card. Never fails the suggestion.
   // Only with the progress line on, and only for the agent it was handed to.
-  // Off, only the first suggestions' time is kept, for the handoff's
-  // agent_timing metrics (noteHandoffSuggestions keeps it too when on).
+  // Off, only an agent_timing line is logged (logHandoffSuggestion): no write.
   try {
-    const scope = await handoffAckScope(env, auth.actor, acting);
     if (await agentProgressAllowed(env, auth.actor)) {
+      const scope = await handoffAckScope(env, auth.actor, acting);
       await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created, scope);
-    } else {
-      await noteHandoffFirstSuggestion(env, slug, commentIds, set.created, scope);
+    } else if (commentIds.length) {
+      await logHandoffSuggestion(env, slug, commentIds, set.created, () => handoffAckScope(env, auth.actor, acting));
     }
   } catch {}
   // The suggestions this handoff asked for have landed: for the comments they
@@ -32281,9 +32276,11 @@ const tdocHandlers = {
       if (woke) await settleSuggestLocks(env, slug, { comment_ids: prev.comment_ids || [], except: prev.handoff_id });
       // A resend after a failed local run is a fresh turn for the daemon,
       // queued by whoever pressed Resend (the owner, per the check above).
-      // A resend is a fresh try: an earlier outcome (run failed, access lost)
-      // no longer holds.
-      const { run: _run, reply_as: _replyAs, outcome: _outcome, outcome_at: _outcomeAt, ...keep } = prev;
+      // A resend of a handoff still open is a fresh try: an earlier outcome
+      // (run failed, access lost) no longer holds. A closed one keeps its own.
+      const { run: _run, reply_as: _replyAs, ...kept } = prev;
+      const { outcome: _outcome, outcome_at: _outcomeAt, ...reopened } = kept;
+      const keep = handoffOpen(prev) ? reopened : kept;
       const rec = await putHandoff(env, slug, {
         // `at` stays the original send; delivery.at moves to this attempt and
         // delivery.first_at keeps the first time the provider took it.
@@ -32410,7 +32407,7 @@ const tdocHandlers = {
         : [...prev.comment_ids];
       // The handoff's last open comment marked handled is its outcome: stamped
       // once (`outcome`, `outcome_at`) for the agent_timing metrics.
-      const closing = handoffOpen(prev)
+      const closing = handoffOpen(prev) && !prev.outcome
         && prev.comment_ids.every((id) => resolvedIds.includes(id));
       const rec = await putHandoff(env, slug, {
         ...prev, resolved_ids: resolvedIds,
@@ -32547,11 +32544,13 @@ const tdocHandlers = {
             } catch { keep.push(e); continue; }
           }
           const accessLost = async () => {
+            // An outcome already set (resolved, run failed) stands; the
+            // outcome line is logged once.
             const lost = await putHandoff(env, e.slug, {
               ...h, delivery: handoffDelivery({ status: 'failed', error: 'access_lost' }, h.delivery),
-              outcome: 'access_lost', outcome_at: new Date().toISOString(),
+              ...(h.outcome ? {} : { outcome: 'access_lost', outcome_at: new Date().toISOString() }),
             });
-            agentTiming(lost, 'outcome', { outcome: 'access_lost' });
+            if (!h.outcome) agentTiming(lost, 'outcome', { outcome: 'access_lost' });
             await releaseAnswerLock(env, e.slug, h.handoff_id);
           };
           if (!cache.get(`seat:${e.slug}`)) { await accessLost(); continue; }
@@ -32622,9 +32621,10 @@ const tdocHandlers = {
         ...prev,
         delivery: handoffDelivery({ status: 'failed', error: 'agent_run_failed' }, prev.delivery),
         run: { status: 'failed', at, error: String(body.error || '').slice(0, 300) },
-        outcome: 'run_failed', outcome_at: at,
+        // An outcome already set (resolved) stands; logged once.
+        ...(prev.outcome ? {} : { outcome: 'run_failed', outcome_at: at }),
       });
-      agentTiming(rec, 'outcome', { outcome: 'run_failed' });
+      if (!prev.outcome) agentTiming(rec, 'outcome', { outcome: 'run_failed' });
       await localPendingRemove(env, writeGate.meta, prev);
       await releaseAnswerLock(env, slug, prev.handoff_id);
       return json({ ok: true, handoff_id: rec.handoff_id, delivery: rec.delivery });
