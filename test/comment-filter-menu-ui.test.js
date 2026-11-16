@@ -1,8 +1,10 @@
 // The doc page's comment filter lives in the bar (Julie, 2026-11-16: the
 // floating "Open / Replied / Resolved / All" row and its Refresh icon sat on
 // the comment column and covered her cards). On a wide screen it is the
-// chevron beside Comment: the four choices with counts, Open by default, a
-// choice other than Open named on the button; nothing of it floats over the
+// chevron beside the Comment button: the four choices with counts, Open by
+// default. The button is the mark, the count and the chevron only (Julie,
+// 2026-11-16: no word "Comment", no "· Resolved"); a choice other than Open
+// is the check in the menu and a dot on the button; nothing floats over the
 // document and the first card has nothing on top of it. On a phone the
 // drawer keeps its filter. Threads refresh by the poll (use-comment-feed.js).
 // Run with: node test/comment-filter-menu-ui.test.js
@@ -40,25 +42,33 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
       assert.deepEqual(await docFilterLabels(page), ['Open (1)', 'Replied (0)', 'Resolved (4)', 'All (5)']);
       assert.equal(await (await docFilterItem(page, 'Open')).getAttribute('aria-checked'), 'true', 'Open is not the default');
       await closeDocFilterMenu(page);
-      assert.equal((await page.locator('.tdoc-comments-toggle').innerText()).replace(/\s+/g, ' ').trim(), 'Comment 1');
+      assert.equal((await page.locator('.tdoc-comments-toggle').innerText()).replace(/\s+/g, ' ').trim(), '1');
+      assert.equal(await page.locator('.tdoc-comments-toggle').getAttribute('title'), 'Comments');
+      assert.match(await page.locator('.tdoc-comments-toggle').getAttribute('aria-label'), /^Comments/);
+      assert.equal(await page.locator('.tdoc-comments-toggle-dot').count(), 0, 'Open, the default, shows a dot');
+      const box = await page.locator('.tdoc-comments-split').boundingBox();
+      assert.ok(box.width <= 80, `the Comment button is ${Math.round(box.width)}px wide`);
       await page.locator('.tdoc-pin[data-id="open"]').waitFor();
       assert.equal(await page.locator('.tdoc-pin[data-id="resolved"]').count(), 0, 'Open shows a resolved thread');
       assert.deepEqual(page.errors, []);
       await ctx.close();
     });
 
-    await t('desktop: picking Resolved filters the pins and names itself on the button; remembered; back to Open', async () => {
+    await t('desktop: picking Resolved filters the pins, is checked in the menu and a dot on the button (no name); remembered; back to Open', async () => {
       const { ctx, page } = await open({ width: 1512, height: 823 });
       await pickDocFilter(page, 'Resolved');
       await page.locator('.tdoc-pin[data-id="resolved"]').waitFor();
       assert.equal(await page.locator('.tdoc-pin[data-id="open"]').count(), 0, 'Resolved still shows an open thread');
-      assert.equal((await page.locator('.tdoc-comments-toggle').innerText()).replace(/\s+/g, ' ').trim(), 'Comment · Resolved 4');
+      assert.equal((await page.locator('.tdoc-comments-toggle').innerText()).replace(/\s+/g, ' ').trim(), '4');
+      assert.equal(await page.locator('.tdoc-comments-toggle-dot').count(), 1, 'a filter other than Open has no dot');
+      assert.equal(await (await docFilterItem(page, 'Resolved')).getAttribute('aria-checked'), 'true', 'Resolved is not checked');
+      await closeDocFilterMenu(page);
       await page.reload();
       await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
       assert.equal(await (await docFilterItem(page, 'Resolved')).getAttribute('aria-checked'), 'true', 'the choice was not remembered');
       await pickDocFilter(page, 'Open');
       await page.locator('.tdoc-pin[data-id="open"]').waitFor();
-      assert.equal(await page.locator('.tdoc-comments-toggle-filter').count(), 0, 'Open, the default, is named on the button');
+      assert.equal(await page.locator('.tdoc-comments-toggle-dot').count(), 0, 'Open, the default, shows a dot');
       assert.deepEqual(page.errors, []);
       await ctx.close();
     });

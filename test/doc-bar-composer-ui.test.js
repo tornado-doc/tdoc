@@ -377,8 +377,10 @@ async function dragSelect(page, phrase) {
       // open count, opening the comment list. No mode dropdown beside it.
       if (await page.locator('.tdoc-bar .tdoc-mode-trigger').count()) throw new Error('the mode switch is back in the bar beside Comment');
       const comment = page.locator('.tdoc-bar .tdoc-comments-toggle');
-      if ((await comment.innerText()).replace(/\s+/g, ' ').trim() !== 'Comment 1') throw new Error(`the Comment button reads ${JSON.stringify(await comment.innerText())}`);
-      if (await page.locator('.tdoc-bar button', { hasText: /^\s*Comment/ }).count() !== 1) throw new Error('more than one Comment button in the bar');
+      // Only the mark and the count, "Comments" its name (Julie, 2026-11-16).
+      if ((await comment.innerText()).replace(/\s+/g, ' ').trim() !== '1') throw new Error(`the Comment button reads ${JSON.stringify(await comment.innerText())}`);
+      if (await comment.getAttribute('title') !== 'Comments') throw new Error('the Comment button lost its Comments tooltip');
+      if (await page.locator('.tdoc-bar button[aria-label^="Comments"]').count() !== 1) throw new Error('more than one Comment button in the bar');
       await comment.click();
       const side = page.locator('.tdoc-doc-side');
       await side.waitFor();
@@ -410,12 +412,13 @@ async function dragSelect(page, phrase) {
       if (await page.getByRole('menuitemradio', { name: 'Edit', exact: true }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from ⋯');
       await page.keyboard.press('Escape');
       // The filter is the Comment button's chevron menu; nothing floats over
-      // the comment column, and a choice other than Open names itself.
+      // the comment column, and a choice other than Open is a dot on the button.
       if (await page.locator('.tdoc-comment-filter-dock, .tdoc-comment-filter-row:not(.tdoc-cpanel-filterrow)').count()) throw new Error('a floating comment filter is back');
       if (await page.locator('.tdoc-comment-refresh:not(.tdoc-cpanel .tdoc-comment-refresh)').count()) throw new Error('a floating Refresh is back');
       await pickDocFilter(page, /^Resolved/);
       await page.waitForFunction(() => document.querySelectorAll('.tdoc-pin').length === 1);
-      if (!/· Resolved/.test(await page.locator('.tdoc-comments-toggle').innerText())) throw new Error('the Comment button does not name the filter');
+      if (await page.locator('.tdoc-comments-toggle-dot').count() !== 1) throw new Error('the Comment button does not mark a filter other than Open');
+      if (/Comment|Resolved/.test(await page.locator('.tdoc-comments-toggle').innerText())) throw new Error('the Comment button names itself or the filter again');
       await pickDocFilter(page, /^All/);
       await page.locator('.tdoc-bar .tdoc-space-trigger').click();
       await page.locator('.ui-menu-popup .tdoc-space-item-name', { hasText: 'Tdoc' }).waitFor();
@@ -746,6 +749,10 @@ async function dragSelect(page, phrase) {
         await page.locator('#tdoc-send-agent-btn').click();
         if (await page.getByRole('dialog', { name: 'Ask AI' }).locator('.tdoc-ask-turn-summary').count() !== 1) throw new Error('conversation disappeared after closing the panel');
         await shot(page, 'ask-ai-reader-desktop.png');
+        // The Ask AI popover hangs from its button; with the compact Comment
+        // button beside it, it can sit over the document pin. Close it first.
+        await page.locator('#tdoc-send-agent-btn').click();
+        await page.getByRole('dialog', { name: 'Ask AI' }).waitFor({ state: 'detached' }).catch(() => {});
         await page.locator('.tdoc-pin-document').click();
         const cardPhoto = await page.locator('.tdoc-floating-open .author img').first().boundingBox();
         if (!cardPhoto || cardPhoto.width > 24 || cardPhoto.height > 24) throw new Error(`public comment photo exceeds its card: ${JSON.stringify(cardPhoto)}`);
