@@ -90,6 +90,7 @@ const OFFLINE = [
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
   'me-rows.test.js',            // My docs rows: doc/sheet/slides, sharing (own docs only), unread comments + agent replies without per-row reads, Recent/Starred dates, checklist on Docs below 3 docs
+  'notification-read-unify.test.js', // One read state: a seen thread reads its bell rows (reactions too), a bell read marks the thread seen, stale rows reconcile when the bell loads (bounded reads)
   'shell-scan-cap.test.js',     // big docs: the page scans only the head (Cloudflare 1102)
   'inline-media.test.js',       // base64 video/audio refused at publish: link it instead
   'catalog-index.test.js',      // My docs costs what the viewer owns, not the platform (1102)
@@ -276,6 +277,7 @@ const BROWSER = [
   'write-with-agent-ui.test.js', // New › Write it with your agent (flag writeWithAgent): Send to your agent opens the new doc on the sent request; no agent: why + Connect an agent; flag off: copy line only; agentProgress off: plain Sent line, no progress pill; desktop + phone
   'agent-progress-ui.test.js', // agent progress line on the comment card (flag agentProgress): steps, current step + elapsed always shown, agent status via the poll; desktop + phone; flag off = On it
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
+  'bell-read-unify-ui.test.js', // one read state: a thread seen on the doc page drops that page's bell count at once (no poll); a bell row read marks its thread seen; opening the doc marks nothing
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
   'ask-send-switch-ui.test.js', // Ask AI: quiet Ask ▾ / Edit ▾ mode picker in the input row (instruction input, N comments included · Choose, Send to <agent>, instruction-only becomes a whole-document comment handed off, mode remembered), long agent name on a 320/390 phone stays one row, one row per team agent, team agent answers in public; no phone paper-plane
   'comment-selection-ui.test.js', // one selection engine: old cssPath anchors resolve, slide comments follow reordered slides across versions, area boxes on charts, + Comment picks (whole doc on nothing), widget quotes and page comments; desktop + phone
