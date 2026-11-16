@@ -16,6 +16,14 @@ import { AppTextarea } from './ui/textarea.jsx';
 // writes is ever HTML here, as nothing it writes is HTML on the stored page
 // (the server escapes it). Stop ends the request; the server gives the draft
 // back to the allowance and keeps nothing.
+//
+// A reasoning model thinks before it writes, which can take tens of seconds.
+// The dialog is never blank meanwhile: "Starting…" at once, then, as the
+// server's `thinking` events arrive, "Thinking… 12s" with the model's
+// reasoning streaming below in small muted type (text nodes only, a few
+// lines visible). Without reasoning text the line shows the time alone.
+// With the first piece of the draft it folds to "Thought for 23s" (a click
+// opens it again). The reasoning lives in the dialog only, never in the doc.
 
 export const WRITE_AI_PROMPT_CHARS = 500;
 
@@ -34,9 +42,10 @@ export function writeAiErrorText(status, body) {
 
 // One POST that streams. Returns { ok, status, body } like the JSON answer
 // it falls back to: an error the server gives before the model runs (sign-in,
-// limit, allowance) is plain JSON; after that, `delta` events go to onDelta
-// and the last event is `done` or `error`.
-export async function writeWithAi(prompt, team = '', { onDelta = () => {}, signal } = {}) {
+// limit, allowance) is plain JSON; after that, `thinking` events
+// ({ text?, elapsed_ms }) go to onThinking, `delta` events to onDelta, and
+// the last event is `done` or `error`.
+export async function writeWithAi(prompt, team = '', { onDelta = () => {}, onThinking = () => {}, signal } = {}) {
   const r = await fetch('/api/write-with-ai', {
     method: 'POST',
     credentials: 'same-origin',
@@ -65,6 +74,7 @@ export async function writeWithAi(prompt, team = '', { onDelta = () => {}, signa
       let body = null;
       try { body = JSON.parse(data); } catch { continue; }
       if (event === 'delta' && typeof body.text === 'string') onDelta(body.text);
+      else if (event === 'thinking') onThinking({ text: typeof body.text === 'string' ? body.text : '', elapsedMs: Number(body.elapsed_ms) || 0 });
       else if (event === 'done') return { ok: Boolean(body.ok), status: 200, body };
       else if (event === 'error') return { ok: false, status: body.status || 502, body };
     }
@@ -166,7 +176,45 @@ function Inline({ nodes }) {
   });
 }
 
-export function WriteAiDraft({ markdown, live }) {
+// Seconds as the thinking line says them: "12s", "1m 05s".
+export function thinkingSeconds(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
+// The model's thinking above the draft. `ms` is how long it has thought
+// (live) or thought (done); `text` its reasoning, if the provider sent any.
+export function WriteAiThinking({ text, ms, done }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [text, open]);
+  if (done) {
+    return (
+      <div className="mk-think is-done">
+        {text ? (
+          <AppButton variant="quiet" size="s" className="mk-think-toggle" aria-expanded={open ? 'true' : 'false'} onClick={() => setOpen((o) => !o)}>
+            Thought for {thinkingSeconds(ms)}
+            <svg className="mk-think-caret" data-open={open ? '' : undefined} viewBox="0 0 10 10" width="8" height="8" aria-hidden="true">
+              <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </AppButton>
+        ) : <p className="mk-think-head">Thought for {thinkingSeconds(ms)}</p>}
+        {text && open ? <div ref={ref} className="mk-think-text">{text}</div> : null}
+      </div>
+    );
+  }
+  return (
+    <div className="mk-think" role="status" aria-live="polite">
+      <p className="mk-think-head">Thinking… {thinkingSeconds(ms)}</p>
+      {text ? <div ref={ref} className="mk-think-text" aria-hidden="true">{text}</div> : null}
+    </div>
+  );
+}
+
+export function WriteAiDraft({ markdown, live, thinking = null }) {
   const ref = useRef(null);
   const pinned = useRef(true);
   const blocks = draftBlocks(markdown);
@@ -182,6 +230,8 @@ export function WriteAiDraft({ markdown, live }) {
   };
   return (
     <div ref={ref} className="mk-write-paper" onScroll={onScroll} aria-busy={live ? 'true' : 'false'}>
+      {thinking}
+      {live && !markdown && !thinking ? <p className="mk-think-head mk-write-starting">Starting…</p> : null}
       <article className="mk-write-doc">
         {blocks.map((b, i) => {
           if (b.t === 'h') {
@@ -231,6 +281,11 @@ export function WriteWithAiDialog({ team = '', onClose, navigate = (url) => { lo
   const [units, setUnits] = useState(1);
   const [draft, setDraft] = useState('');
   const [startedAt, setStartedAt] = useState(0);
+  // The model's thinking: whether any came, its text, and when the draft
+  // began (it stops counting there).
+  const [thinking, setThinking] = useState(false);
+  const [thoughts, setThoughts] = useState('');
+  const [thoughtFor, setThoughtFor] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const inputRef = useRef(null);
   const abortRef = useRef(null);
@@ -268,12 +323,25 @@ export function WriteWithAiDialog({ team = '', onClose, navigate = (url) => { lo
     abortRef.current = ctl;
     setError(null);
     setDraft('');
-    setStartedAt(Date.now());
+    setThinking(false);
+    setThoughts('');
+    setThoughtFor(0);
+    const t0 = Date.now();
+    let drafting = false;
+    setStartedAt(t0);
     setNow(Date.now());
     setPhase('writing');
     const result = await writeWithAi(trimmed, team, {
       signal: ctl.signal,
-      onDelta: (text) => setDraft((d) => d + text),
+      onDelta: (text) => {
+        if (!drafting) { drafting = true; setThoughtFor(Date.now() - t0); }
+        setDraft((d) => d + text);
+      },
+      onThinking: ({ text }) => {
+        if (drafting) return;
+        setThinking(true);
+        if (text) setThoughts((t) => t + text);
+      },
     }).catch((e) => ({ ok: false, status: 0, body: {}, stopped: e && e.name === 'AbortError' }));
     abortRef.current = null;
     if (result.ok) {
@@ -292,7 +360,7 @@ export function WriteWithAiDialog({ team = '', onClose, navigate = (url) => { lo
 
   const count = words(draft);
   const status = phase === 'writing'
-    ? `${draft ? 'Writing' : 'Starting'} · ${seconds(now - startedAt)}${count ? ` · ${count} ${count === 1 ? 'word' : 'words'}` : ''}`
+    ? `${draft ? 'Writing' : thinking ? 'Thinking' : 'Starting'} · ${seconds(now - startedAt)}${count ? ` · ${count} ${count === 1 ? 'word' : 'words'}` : ''}`
     : phase === 'opening' ? 'Published v1 · Opening the doc…' : '';
 
   return (
@@ -329,7 +397,13 @@ export function WriteWithAiDialog({ team = '', onClose, navigate = (url) => { lo
             }}
           />
         </label>
-        {showDraft ? <WriteAiDraft markdown={draft} live={phase === 'writing'} /> : null}
+        {showDraft ? (
+          <WriteAiDraft
+            markdown={draft}
+            live={phase === 'writing'}
+            thinking={thinking ? <WriteAiThinking text={thoughts} done={Boolean(draft) || phase !== 'writing'} ms={draft ? thoughtFor : now - startedAt} /> : null}
+          />
+        ) : null}
         {status ? <p className="mk-foot mk-write-status" role="status" aria-live="polite">{status}</p> : null}
         {error ? (
           <p className="mk-foot mk-write-error" role="alert">

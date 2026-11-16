@@ -7,6 +7,10 @@
 // worker routes (in-process harness, the response streamed through) and the
 // real built shell in Chromium; only the model is stubbed, streaming its
 // answer a piece at a time. Desktop and phone.
+// A reasoning model first: "Starting…" at once, then "Thinking… Ns" with its
+// reasoning streaming below as text (never elements, never in the doc), then
+// folded to "Thought for Ns" once the draft begins, a click opening it. No
+// reasoning text: the elapsed-time line alone.
 //
 // TDOC_TEST_SCREENSHOTS=<dir> writes the menu, the dialog, the live draft
 // mid-stream and the landed doc per viewport.
@@ -119,7 +123,7 @@ async function startServer(worker, env) {
     '## Food\n\n',
     'Huts sell little; carry five days of lunches.\n',
   ];
-  const model = { fail: false, step: 450, calls: 0 };
+  const model = { fail: false, step: 450, calls: 0, thoughts: [], wait: 0 };
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const u = typeof input === 'string' ? input : input.url;
@@ -130,9 +134,19 @@ async function startServer(worker, env) {
       const pieces = model.fail ? DRAFT.slice(0, 3) : DRAFT;
       const fail = model.fail;
       const step = model.step;
+      const thoughts = model.thoughts;
+      const wait = model.wait;
       const body = new ReadableStream({
         async start(c) {
           try {
+            // Silence first (a reasoning model that sends nothing), then its
+            // reasoning-only deltas, then the answer.
+            if (wait) await new Promise((r) => setTimeout(r, wait));
+            for (const th of thoughts) {
+              await new Promise((r) => setTimeout(r, step));
+              if (signal && signal.aborted) return;
+              c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: '', reasoning: th } }] })}\n\n`));
+            }
             for (const p of pieces) {
               await new Promise((r) => setTimeout(r, step));
               if (signal && signal.aborted) return;
@@ -199,6 +213,93 @@ async function startServer(worker, env) {
         await dialog.waitFor();
         return dialog;
       };
+      // A reasoning model: its thinking streams before the draft.
+      const THOUGHTS = [
+        'The sentence asks for a packing list. ',
+        'Lead with the conditions: rain, wind, cold nights.\n',
+        'Sections: clothes, gear, food.\n',
+        'Use a table for gear <b>not markup</b>.\n',
+        'Huts: check what they sell.\n',
+        'Keep it short.\n',
+        'Placeholders for dates.\n',
+        'One more line to scroll.\n',
+      ];
+      const fresh = async () => {
+        for (const k of (await env.META.list({ prefix: 'rl:write-ai:' })).keys) await env.META.delete(k.name);
+        env.ASK_FREE_LIMIT = '30';
+        await page.goto(`${base}/me`);
+        await page.locator('.doc-row[data-slug="q4-roadmap"]').waitFor();
+      };
+      // Run after the others: they spend the allowance a set way.
+      const thinkingTests = async () => {
+      await t(`${label}: a reasoning model: Starting…, then Thinking… with its reasoning as text, folded to Thought for Ns when the draft begins`, async () => {
+        await fresh();
+        model.thoughts = THOUGHTS;
+        model.wait = 900;
+        const step = model.step;
+        model.step = 250;
+        try {
+          const dialog = await openDialog();
+          await dialog.getByRole('textbox').fill('A packing list, thought through');
+          await press(dialog.getByRole('button', { name: 'Write it', exact: true }));
+          const paper = dialog.locator('.mk-write-paper');
+          // Never blank: Starting… with the caret before anything arrives.
+          await paper.locator('.mk-write-starting', { hasText: 'Starting…' }).waitFor({ timeout: 3000 });
+          assert.equal(await paper.locator('.mk-write-caret').count(), 1);
+          const head = paper.locator('.mk-think .mk-think-head');
+          await head.waitFor({ timeout: 5000 });
+          assert.match(await head.innerText(), /^Thinking… \d+s$/);
+          const text = paper.locator('.mk-think-text');
+          await text.getByText(/Huts: check what they sell/).waitFor({ timeout: 5000 });
+          assert.equal(await text.locator('b').count(), 0, 'reasoning markup became an element');
+          assert.match(await text.innerText(), /<b>not markup<\/b>/);
+          // About six lines visible; the rest scrolls, following the end.
+          const box = await text.evaluate((el) => ({ h: el.clientHeight, sh: el.scrollHeight, lh: parseFloat(getComputedStyle(el).lineHeight), top: el.scrollTop }));
+          assert.ok(box.h <= box.lh * 6.5, `${box.h}px for ${box.lh}px lines`);
+          await shot('thinking');
+          // The draft begins: the thinking folds to one line.
+          await paper.getByRole('heading', { name: 'Iceland packing list', level: 1 }).waitFor({ timeout: 10000 });
+          const folded = paper.getByRole('button', { name: /^Thought for \d+s$/ });
+          await folded.waitFor();
+          assert.equal(await folded.getAttribute('aria-expanded'), 'false');
+          assert.equal(await paper.locator('.mk-think-text').count(), 0);
+          // The paper follows the draft, so the line moves: a direct click.
+          await folded.dispatchEvent('click');
+          await paper.locator('.mk-think-text').getByText(/Sections: clothes/).waitFor();
+          assert.equal(await folded.getAttribute('aria-expanded'), 'true');
+          await shot('thought');
+          await page.waitForURL(/\/d\/[a-z0-9-]+\/v\/1$/, { timeout: 30000 });
+          const slug = page.url().match(/\/d\/([a-z0-9-]+)\/v\/1$/)[1];
+          const html = await (await env.DOCS.get(`docs/${slug}/v1/index.html`)).text();
+          assert.ok(!html.includes('Huts: check what they sell') && !html.includes('not markup'), 'reasoning stored in the doc');
+          assert.deepEqual(errors, []);
+        } finally { model.thoughts = []; model.wait = 0; model.step = step; }
+      });
+      if (phone) return;
+      await t(`${label}: no reasoning text: Thinking… with the time alone, then Thought for Ns (not a button)`, async () => {
+        await fresh();
+        model.wait = 2600;
+        const step = model.step;
+        model.step = 150;
+        try {
+          const dialog = await openDialog();
+          await dialog.getByRole('textbox').fill('A quiet model');
+          await press(dialog.getByRole('button', { name: 'Write it', exact: true }));
+          const paper = dialog.locator('.mk-write-paper');
+          await paper.locator('.mk-write-starting').waitFor({ timeout: 3000 });
+          const head = paper.locator('.mk-think .mk-think-head');
+          await head.waitFor({ timeout: 5000 });
+          assert.match(await head.innerText(), /^Thinking… \d+s$/);
+          assert.equal(await paper.locator('.mk-think-text').count(), 0);
+          assert.match(await dialog.locator('.mk-write-status').innerText(), /^Thinking · \d+ s$/);
+          await shot('thinking-no-text');
+          await paper.getByRole('heading', { name: 'Iceland packing list', level: 1 }).waitFor({ timeout: 10000 });
+          await paper.locator('p.mk-think-head', { hasText: /^Thought for \d+s$/ }).waitFor();
+          assert.equal(await paper.locator('button.mk-think-toggle').count(), 0);
+          await page.waitForURL(/\/d\/[a-z0-9-]+\/v\/1$/, { timeout: 30000 });
+        } finally { model.wait = 0; model.step = step; }
+      });
+      };
       const remaining = () => page.evaluate(async () => (await (await fetch('/api/write-with-ai')).json()).remaining);
       await t(`${label}: Doc → Write it with tdoc AI → one sentence → the draft appears live → the new doc's v1`, async () => {
         const dialog = await openDialog();
@@ -239,7 +340,7 @@ async function startServer(worker, env) {
         assert.equal(await page.evaluate(() => window.__xss), undefined, 'model markup ran');
         assert.deepEqual(errors, []);
       });
-      if (phone) return;
+      if (phone) { await thinkingTests(); return; }
       await t(`${label}: Stop mid-stream: no doc, no navigation, the requests given back`, async () => {
         await page.goto(`${base}/me`);
         await page.locator('.doc-row[data-slug="q4-roadmap"]').waitFor();
@@ -279,6 +380,7 @@ async function startServer(worker, env) {
           await shot('failed');
         } finally { model.fail = false; }
       });
+      await thinkingTests();
     } finally {
       await context.close();
       server.close();
