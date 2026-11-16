@@ -119,6 +119,7 @@ const OFFLINE = [
   'handoff-state.test.js',      // handoff classifier: waiting → stale at 5 min, expired past Raft's expiresAt
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
   'folders-agent.test.js',      // agents file docs into folders (My docs + team) with the hosted Bearer
+  'folder-name-dedup.test.js',  // one live folder per name per parent: create answers it (case/space/width variants), rename clash 409, Trash never blocks, races in one isolate make one
   'docs-hub-unified.test.js',   // My docs + team use one toolbar/list and cached previews
   'catalog-search.test.js',      // all-folder document search + field prefixes + nested paths
   'full-text-search.test.js',    // body + comment search: CJK, ranking, snippets as text, only docs the viewer's hub lists

@@ -335,6 +335,79 @@ async function startServer(worker, env) {
         await page.locator('.mda-folder', { hasText: 'Essays' }).waitFor();
       });
 
+      await t('1440: Create is disabled while it saves (a double click sends one create); a taken name on rename shows in the dialog', async () => {
+        // Hold the create in flight so the second click and Enter land on it.
+        let release;
+        const held = new Promise((resolve) => { release = resolve; });
+        let posts = 0;
+        await page.route('**/api/folders', async (route) => {
+          if (route.request().method() !== 'POST') return route.continue();
+          posts += 1;
+          await held;
+          return route.continue();
+        });
+        try {
+          await page.locator('.mda-side').getByRole('button', { name: 'New folder' }).click();
+          const dialog = page.getByRole('dialog', { name: 'New folder' });
+          await dialog.locator('input').fill('Raft Bench 0');
+          const create = dialog.getByRole('button', { name: 'Create' });
+          await create.click();
+          await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] button')].some((b) => b.textContent === 'Create' && b.disabled));
+          await create.click({ force: true });
+          await dialog.locator('input').press('Enter');
+          await shot(page, 'a-1440-new-folder-saving');
+          release();
+          await dialog.waitFor({ state: 'detached' });
+          assert.equal(posts, 1, `${posts} creates sent`);
+          assert.equal(await page.locator('.mda-folder', { hasText: 'Raft Bench 0' }).count(), 1, 'listed once');
+        } finally {
+          release();
+          await page.unroute('**/api/folders');
+        }
+        // The same name again (another spelling) answers the folder already there.
+        await page.locator('.mda-side').getByRole('button', { name: 'New folder' }).click();
+        const again = page.getByRole('dialog', { name: 'New folder' });
+        await again.locator('input').fill('  raft  bench 0 ');
+        await again.getByRole('button', { name: 'Create' }).click();
+        await again.waitFor({ state: 'detached' });
+        assert.equal(await page.locator('.mda-folder', { hasText: /Raft Bench 0/i }).count(), 1, 'a second folder for the same name');
+        // Rename Essays onto it: refused, said under the name, dialog stays open.
+        const essays = page.locator('.mda-folder', { hasText: 'Essays' });
+        await essays.hover();
+        await essays.getByRole('button', { name: 'Folder actions' }).click();
+        await page.getByRole('menuitem', { name: 'Rename' }).click();
+        const rename = page.getByRole('dialog', { name: 'Rename folder' });
+        await rename.locator('input').fill('RAFT BENCH 0');
+        await rename.getByRole('button', { name: 'Save' }).click();
+        const alert = rename.getByRole('alert');
+        await alert.waitFor();
+        assert.match(await alert.textContent(), /A folder named "Raft Bench 0" is already here/);
+        assert.equal(await rename.locator('input').getAttribute('aria-invalid'), 'true');
+        await shot(page, 'a-1440-rename-folder-taken');
+        // Typing clears it; Cancel leaves Essays as it was.
+        await rename.locator('input').fill('Essays 2026');
+        assert.equal(await rename.getByRole('alert').count(), 0, 'the error outlived the edit');
+        await rename.getByRole('button', { name: 'Cancel' }).click();
+        await rename.waitFor({ state: 'detached' });
+        await page.locator('.mda-folder', { hasText: 'Essays' }).waitFor();
+        // The phone gets the same dialog and the same sentence.
+        const essaysId = await essays.getAttribute('data-folder-id');
+        const phone = await open({ width: 390, height: 844 });
+        try {
+          await phone.page.goto(`${base}/me?folder=${essaysId}`);
+          const crumbs = phone.page.getByRole('navigation', { name: 'Folder path' });
+          await crumbs.getByRole('button', { name: 'Essays' }).waitFor();
+          await crumbs.getByRole('button', { name: 'Folder actions' }).click();
+          await phone.page.getByRole('menuitem', { name: 'Rename' }).click();
+          const phoneRename = phone.page.getByRole('dialog', { name: 'Rename folder' });
+          await phoneRename.locator('input').fill('raft bench 0');
+          await phoneRename.getByRole('button', { name: 'Save' }).click();
+          await phoneRename.getByRole('alert').waitFor();
+          await shot(phone.page, 'a-phone-390-rename-folder-taken');
+          assert.deepEqual(phone.errors, []);
+        } finally { await phone.context.close(); }
+      });
+
       await t('1440: the list view is a table and is remembered across visits', async () => {
         await page.getByRole('button', { name: 'List view' }).click();
         await page.locator('.mda-table .mda-row').first().waitFor();

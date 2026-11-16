@@ -13,6 +13,7 @@ import { SheetDropHint, SheetFilePicker, SheetImportDialog, createBlankSheet, is
 import { DocList, DocRow, FolderRow, RowMenu, day, shareMenuItem } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { onboardingChecklistShown } from './docs-hub/row-meta.js';
+import { addFolderOnce, isFolderNameClash } from './docs-hub/folder-names.js';
 import { ConnectorsBody } from './connectors-page.jsx';
 import { DevicesBody } from './tokens-page.jsx';
 import { ConnectAiAppsSection } from './connect-ai-apps.jsx';
@@ -97,7 +98,7 @@ function pinNeedsPublicConfirm(visibility) {
   return visibility !== 'public';
 }
 
-function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose, actions }) {
+function HubDialog({ title, children, confirmLabel, danger, busy = false, onConfirm, onClose, actions }) {
   return (
     <AppDialog
       open
@@ -107,7 +108,7 @@ function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose, 
         <>
           <AppButton onClick={onClose}>Cancel</AppButton>
           {onConfirm ? (
-            <AppButton variant={danger ? 'danger' : 'primary'} className={danger ? 'danger' : 'primary'} onClick={onConfirm}>
+            <AppButton variant={danger ? 'danger' : 'primary'} className={danger ? 'danger' : 'primary'} disabled={busy} aria-busy={busy || undefined} onClick={onConfirm}>
               {confirmLabel}
             </AppButton>
           ) : null}
@@ -121,19 +122,40 @@ function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose, 
 
 // A name prompt. Folders were its first caller; renaming a document is its
 // second, and neither wants its own copy of an input that commits on Enter.
+// One save at a time: Enter and the button are ignored while a request is in
+// flight, so a double click or Enter-then-click never sends two creates.
+// `onSave` may resolve to { error } (a name already taken): it shows under the
+// input and the dialog stays open.
 function NameDialog({ title, confirmLabel, initialName, maxLength = 60, onSave, onClose }) {
   const [name, setName] = useState(initialName);
-  const save = () => onSave(name);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const busyRef = useRef(false);
+  const save = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await onSave(name);
+      if (result && result.error) setError(result.error);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
   return (
-    <HubDialog title={title} confirmLabel={confirmLabel} onConfirm={save} onClose={onClose}>
+    <HubDialog title={title} confirmLabel={confirmLabel} busy={busy} onConfirm={save} onClose={onClose}>
       <input
         type="text"
         maxLength={maxLength}
         autoFocus
         value={name}
-        onChange={(event) => setName(event.target.value)}
+        aria-invalid={error ? true : undefined}
+        onChange={(event) => { setName(event.target.value); if (error) setError(''); }}
         onKeyDown={(event) => { if (event.key === 'Enter') save(); }}
       />
+      {error ? <p className="tdoc-send-notice tdoc-notify-error" role="alert">{error}</p> : null}
     </HubDialog>
   );
 }
@@ -832,10 +854,14 @@ export function DocsHub({ boot }) {
     if (id) {
       return teamRun(renameFolder(id, trimmed, team.id).then(({ folder }) => {
         setSpaceFolders((list) => list.map((item) => (item.id === folder.id ? { ...item, ...folder } : item)));
+      }).catch((error) => {
+        if (isFolderNameClash(error)) return { error: error.message };
+        throw error;
       }));
     }
-    return teamRun(createFolder(trimmed, parent ?? teamFolder, team.id).then(({ folder }) => {
-      setSpaceFolders((list) => [...list, { ...folder, parent: folder.parent || '' }]);
+    return teamRun(createFolder(trimmed, parent ?? teamFolder, team.id).then(({ folder, existed }) => {
+      setSpaceFolders((list) => addFolderOnce(list, folder));
+      if (existed) hub.notify(`"${folder.name}" is already here`);
     }));
   };
   // A team folder goes to the team's Trash with its subfolders and the docs
@@ -904,7 +930,8 @@ export function DocsHub({ boot }) {
   }, [trashedFromDoc]);
 
   const closeModal = () => setModal(null);
-  const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
+  // `{ error }` (a name clash) keeps the dialog open to show it.
+  const closeIf = (promise) => promise.then((ok) => { if (ok && !ok.error) closeModal(); return ok; });
   const openAgentRecipe = (kind = 'doc') => setModal({ type: 'create-agent', kind });
   // Write with tdoc AI (flag writeWithTdocAi; the server holds the same line).
   const writeAiOn = isFeatureOn('writeWithTdocAi');

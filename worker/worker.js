@@ -1601,6 +1601,9 @@ async function restoreTrashFolder(env, session, team, scope, entry) {
     const copy = { ...f };
     // The parent it had may have been deleted since: then it lands at the top.
     if (copy.parent && !restoredIds.has(copy.parent)) delete copy.parent;
+    // A folder made since under the same name keeps it; the one coming back
+    // from Trash is called "Name (2)" rather than sitting beside its twin.
+    copy.name = freeFolderName(state, copy.parent || null, validFolderName(copy.name) || 'Folder');
     state.folders.push(copy);
     if (team && state.gone) delete state.gone[f.id];
     if (copy.share_id) await putFolderShareIndex(env, copy.share_id, team ? { team: team.id } : actorKey(session), copy.id);
@@ -5802,7 +5805,7 @@ function adoptRecentFolders(state, hints, { team = null, session = null, max = 1
     const name = validFolderName(h.name);
     if (!name) continue;
     const parent = typeof h.parent === 'string' && h.parent ? (use.get(h.parent) || h.parent) : null;
-    const twin = state.folders.find((f) => (f.parent || null) === parent && f.name.toLowerCase() === name.toLowerCase());
+    const twin = folderTwin(state, parent, name);
     if (twin) { use.set(id, twin.id); continue; }
     if (state.folders.length >= FOLDERS_MAX) continue;
     state.folders.push({
@@ -5858,6 +5861,16 @@ async function mergeVerifiedAccountState(env, group) {
           folderIds.add(folder.id);
           merged.folders.push(folder);
         }
+      }
+    }
+    // Two sign-ins that each had a "Reports" folder: both keep their docs and
+    // shares, the second is called "Reports (2)".
+    {
+      const placed = { folders: [] };
+      for (const folder of merged.folders) {
+        if (folder.parent && !folderIds.has(folder.parent)) delete folder.parent;
+        folder.name = freeFolderName(placed, folder.parent || null, validFolderName(folder.name) || 'Folder');
+        placed.folders.push(folder);
       }
     }
     for (const state of states) {
@@ -6152,10 +6165,67 @@ function folderDepth(state, id) {
   return depth;
 }
 
+// A folder name as stored: control and zero-width characters dropped, any
+// run of whitespace (NBSP, tabs, doubled spaces) one plain space, trimmed.
+// The page collapses whitespace when it draws a name, so two names that
+// differ only there look identical in the sidebar -- they must not both exist.
 function validFolderName(name) {
-  const n = String(name == null ? '' : name).replace(/[\x00-\x1f\x7f]/g, '').trim();
+  const n = String(name == null ? '' : name)
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f​-‍⁠﻿]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!n || n.length > FOLDER_NAME_MAX) return null;
   return n;
+}
+
+// The key two sibling folder names collide on: the stored form, Unicode
+// compatibility-folded (full-width letters, ligatures) and case-insensitive.
+function folderNameKey(name) {
+  const n = validFolderName(name) || '';
+  return n.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+// The live folder already called `name` at `parent` (null = top level), other
+// than `except`. Trashed folders are out of the tree, so they never collide.
+function folderTwin(state, parent, name, except = null) {
+  const key = folderNameKey(name);
+  const at = parent || null;
+  return state.folders.find((f) => f !== except && (f.parent || null) === at && folderNameKey(f.name) === key) || null;
+}
+
+// A name free at `parent`: `name` itself, else "name (2)", "name (3)", ...
+// For folders that come back on their own (a Trash restore, an account
+// merge) where neither copy can be thrown away or asked about.
+function freeFolderName(state, parent, name, except = null) {
+  if (!folderTwin(state, parent, name, except)) return name;
+  for (let i = 2; i < 1000; i += 1) {
+    const suffix = ` (${i})`;
+    const candidate = `${name.slice(0, FOLDER_NAME_MAX - suffix.length).trimEnd()}${suffix}`;
+    if (!folderTwin(state, parent, candidate, except)) return candidate;
+  }
+  return name;
+}
+
+// One read-modify-write of a folder blob at a time in this isolate. Folder
+// trees live in KV, which has no compare-and-swap: two creates racing in one
+// isolate (a double click, an agent retrying) would both read the tree
+// without the new folder and both add one. Queued, the second reads the
+// first's write (read-your-writes overlay) and finds its twin. Requests that
+// land on different isolates are not serialized; see the KV note above.
+const folderLocks = new Map();
+async function withFolderLock(key, fn) {
+  const prev = folderLocks.get(key) || Promise.resolve();
+  let release;
+  const mine = new Promise((resolve) => { release = resolve; });
+  const tail = prev.then(() => mine);
+  folderLocks.set(key, tail);
+  try {
+    await prev;
+    return await fn();
+  } finally {
+    release();
+    if (folderLocks.get(key) === tail) folderLocks.delete(key);
+  }
 }
 
 // ---- team folders ----
@@ -6292,7 +6362,7 @@ async function moveFolderToTeam(env, session, team, body) {
   for (const f of subtree) {
     const parent = f === root ? null : twin.get(f.parent) || null;
     const name = validFolderName(f.name) || 'Folder';
-    const same = teamState.folders.find((t) => (t.parent || null) === parent && t.name.toLowerCase() === name.toLowerCase());
+    const same = folderTwin(teamState, parent, name);
     if (same) { twin.set(f.id, same.id); continue; }
     const made = {
       id: `f_${Date.now()}_${rand(4)}`,
@@ -30133,41 +30203,44 @@ const tdocHandlers = {
       const team = scope.team;
       const name = validFolderName(body.name);
       if (!name) return json({ error: 'invalid_name' }, { status: 400 });
-      const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
-      // Folders this client made moments ago that a stale read may not show
-      // yet: seen, they answer existing_ok and survive this write.
-      const known = adoptRecentFolders(state, body.known, { team, session: s });
-      let parentId = body.parent == null || body.parent === '' ? null : String(body.parent);
-      if (parentId && known.has(parentId)) parentId = known.get(parentId);
-      if (parentId && !state.folders.some((f) => f.id === parentId)) return json({ error: 'parent_not_found' }, { status: 404 });
-      const show = (folder) => (team ? publicTeamFolder(folder, s, team) : publicFolder(folder));
-      // Names are unique among SIBLINGS (Drive semantics) — the same name
-      // under two different parents is fine.
-      const same = state.folders.find((f) => (f.parent || null) === parentId && f.name.toLowerCase() === name.toLowerCase());
-      if (same) {
-        // `existing_ok`: "make sure it exists" -- an agent filing a daily
-        // report into the same folder every run gets the folder back.
-        if (body.existing_ok === true) return json({ ok: true, existed: true, folder: show(same) });
-        return json({ error: 'duplicate_name' }, { status: 400 });
-      }
-      if (state.folders.length >= FOLDERS_MAX) return json({ error: 'too_many_folders', limit: FOLDERS_MAX }, { status: 400 });
-      if (parentId && folderDepth(state, parentId) >= FOLDER_DEPTH_MAX) return json({ error: 'too_deep', limit: FOLDER_DEPTH_MAX }, { status: 400 });
-      const folder = {
-        id: `f_${Date.now()}_${rand(4)}`,
-        name,
-        created: new Date().toISOString(),
-        ...(team ? { created_by: s.account_id } : { visibility: 'private' }),
-        ...(parentId ? { parent: parentId } : {}),
-      };
-      state.folders.push(folder);
-      if (team) {
-        // A recreated id is never in `gone`, but keep the map honest anyway.
-        delete state.gone[folder.id];
-        await saveTeamFolders(env, team.id, state);
-      } else {
-        await saveFolderState(env, actorKey(s), state);
-      }
-      return json({ ok: true, folder: show(folder) });
+      const lockKey = team ? teamFoldersKey(team.id) : personalKey('folders', actorKey(s));
+      return withFolderLock(lockKey, async () => {
+        const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
+        // Folders this client made moments ago that a stale read may not show
+        // yet: seen, they answer as existing and survive this write.
+        const known = adoptRecentFolders(state, body.known, { team, session: s });
+        let parentId = body.parent == null || body.parent === '' ? null : String(body.parent);
+        if (parentId && known.has(parentId)) parentId = known.get(parentId);
+        if (parentId && !state.folders.some((f) => f.id === parentId)) return json({ error: 'parent_not_found' }, { status: 404 });
+        const show = (folder) => (team ? publicTeamFolder(folder, s, team) : publicFolder(folder));
+        // Names are unique among SIBLINGS (Drive semantics) -- the same name
+        // under two different parents is fine. Create is "make sure it
+        // exists": a name that matches a live sibling (case, spacing and
+        // Unicode width aside) answers that folder, never a second one. An
+        // agent filing a daily report every run, a double-clicked Create and
+        // a retried request all get the one folder back. (`existing_ok` is
+        // what older clients send to ask for this; it is now always so.)
+        const same = folderTwin(state, parentId, name);
+        if (same) return json({ ok: true, existed: true, folder: show(same) });
+        if (state.folders.length >= FOLDERS_MAX) return json({ error: 'too_many_folders', limit: FOLDERS_MAX }, { status: 400 });
+        if (parentId && folderDepth(state, parentId) >= FOLDER_DEPTH_MAX) return json({ error: 'too_deep', limit: FOLDER_DEPTH_MAX }, { status: 400 });
+        const folder = {
+          id: `f_${Date.now()}_${rand(4)}`,
+          name,
+          created: new Date().toISOString(),
+          ...(team ? { created_by: s.account_id } : { visibility: 'private' }),
+          ...(parentId ? { parent: parentId } : {}),
+        };
+        state.folders.push(folder);
+        if (team) {
+          // A recreated id is never in `gone`, but keep the map honest anyway.
+          delete state.gone[folder.id];
+          await saveTeamFolders(env, team.id, state);
+        } else {
+          await saveFolderState(env, actorKey(s), state);
+        }
+        return json({ ok: true, folder: show(folder) });
+      });
     }
 
     if (p === '/api/folders' && method === 'PATCH') {
@@ -30189,50 +30262,61 @@ const tdocHandlers = {
       if (wantsUnshare && (wantsVisibility || wantsAllowed)) {
         return json({ error: 'invalid_access_value', field: 'share' }, { status: 400 });
       }
-      const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
-      const folder = state.folders.find((f) => f.id === body.id);
-      if (!folder) return json({ error: 'not_found' }, { status: 404 });
-      if (team && !publicTeamFolder(folder, s, team).can_manage) return json({ error: 'not_folder_owner' }, { status: 403 });
-      if (wantsName) {
-        const name = validFolderName(body.name);
-        if (!name) return json({ error: 'invalid_name' }, { status: 400 });
-        if (state.folders.some((f) => f !== folder && (f.parent || null) === (folder.parent || null) && f.name.toLowerCase() === name.toLowerCase())) {
-          return json({ error: 'duplicate_name' }, { status: 400 });
+      const lockKey = team ? teamFoldersKey(team.id) : personalKey('folders', actorKey(s));
+      return withFolderLock(lockKey, async () => {
+        const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
+        const folder = state.folders.find((f) => f.id === body.id);
+        if (!folder) return json({ error: 'not_found' }, { status: 404 });
+        if (team && !publicTeamFolder(folder, s, team).can_manage) return json({ error: 'not_folder_owner' }, { status: 403 });
+        if (wantsName) {
+          const name = validFolderName(body.name);
+          if (!name) return json({ error: 'invalid_name' }, { status: 400 });
+          // Renaming onto a live sibling's name is refused, not merged: the
+          // two folders hold different docs and shares. A folder in Trash
+          // does not count (it is out of the tree; restoring it renames it).
+          const twin = folderTwin(state, folder.parent || null, name, folder);
+          if (twin) {
+            return json({
+              error: 'duplicate_name',
+              message: `A folder named "${twin.name}" is already here. Pick another name.`,
+              folder: { id: twin.id, name: twin.name },
+            }, { status: 409 });
+          }
+          folder.name = name;
         }
-        folder.name = name;
-      }
-      if (wantsVisibility) {
-        if (!ACCESS_VISIBILITIES.has(body.visibility)) {
-          return json({ error: 'invalid_access_value', field: 'visibility' }, { status: 400 });
+        if (wantsVisibility) {
+          if (!ACCESS_VISIBILITIES.has(body.visibility)) {
+            return json({ error: 'invalid_access_value', field: 'visibility' }, { status: 400 });
+          }
+          folder.visibility = body.visibility;
         }
-        folder.visibility = body.visibility;
-      }
-      if (wantsAllowed) {
-        if (!Array.isArray(body.allowed_users)) {
-          return json({ error: 'invalid_access_value', field: 'allowed_users' }, { status: 400 });
+        if (wantsAllowed) {
+          if (!Array.isArray(body.allowed_users)) {
+            return json({ error: 'invalid_access_value', field: 'allowed_users' }, { status: 400 });
+          }
+          const allowed = [];
+          const seen = new Set();
+          for (const item of body.allowed_users) {
+            const login = normalizeInvitee(item);
+            if (!login) return json({ error: 'invalid_access_value', field: 'allowed_users' }, { status: 400 });
+            if (seen.has(login)) continue;
+            seen.add(login);
+            allowed.push(login);
+          }
+          folder.allowed_users = allowed;
         }
-        const allowed = [];
-        const seen = new Set();
-        for (const item of body.allowed_users) {
-          const login = normalizeInvitee(item);
-          if (!login) return json({ error: 'invalid_access_value', field: 'allowed_users' }, { status: 400 });
-          if (seen.has(login)) continue;
-          seen.add(login);
-          allowed.push(login);
+        // Mint a share id whenever access is touched so Copy link always works
+        // (private invitees still open /f/<id> after sign-in).
+        const owner = team ? { team: team.id } : actorKey(s);
+        if (wantsUnshare) await unshareFolder(env, folder);
+        else if (wantsVisibility || wantsAllowed) await ensureFolderShareId(env, owner, folder);
+        if (team) {
+          await saveTeamFolders(env, team.id, state);
+          return json({ ok: true, folder: publicTeamFolder(folder, s, team) });
         }
-        folder.allowed_users = allowed;
-      }
-      // Mint a share id whenever access is touched so Copy link always works
-      // (private invitees still open /f/<id> after sign-in).
-      const owner = team ? { team: team.id } : actorKey(s);
-      if (wantsUnshare) await unshareFolder(env, folder);
-      else if (wantsVisibility || wantsAllowed) await ensureFolderShareId(env, owner, folder);
-      if (team) {
-        await saveTeamFolders(env, team.id, state);
-        return json({ ok: true, folder: publicTeamFolder(folder, s, team) });
-      }
-      await saveFolderState(env, actorKey(s), state);
-      return json({ ok: true, folder: publicFolder(folder) });
+        await saveFolderState(env, actorKey(s), state);
+        return json({ ok: true, folder: publicFolder(folder) });
+      });
     }
 
     if (p === '/api/folders' && method === 'DELETE') {
