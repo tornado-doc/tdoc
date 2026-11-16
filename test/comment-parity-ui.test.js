@@ -445,6 +445,141 @@ async function startServer(worker, env) {
       await ctx.close();
     });
 
+    // ── A press on a card selects it; Go to comment goes there ─────────
+    // Julie (2026-11-16): a press anywhere on a card jumped to its place,
+    // too easy to set off. Now the card only selects (replies and reply box
+    // open, nothing scrolls or navigates); Go to comment, in ⋯ and on the
+    // line naming where it is, does what the press used to.
+    const openMore = async (page, card) => {
+      await card.getByRole('button', { name: 'More actions' }).click();
+      const item = page.getByRole('menuitem', { name: 'Go to comment' });
+      await item.waitFor({ timeout: 8000 });
+      return item;
+    };
+    await t(`${tag}: doc: a press on a card selects it without scrolling; Go to comment scrolls to its words`, async () => {
+      const slug = `goto-${++n}`;
+      const filler = Array.from({ length: 60 }, (_, i) => `<p>Filler paragraph ${i} keeps the far line out of view.</p>`).join('');
+      const html = `<!doctype html><html><body><h1>${slug}</h1><p id="a">Alpha line one to comment on.</p>${filler}<p id="z">Far line to go to.</p></body></html>`;
+      assert.equal((await call('/api/upload', { method: 'POST', token: julie.token, body: { slug, version: 1, html, meta: { title: slug } } })).status, 200);
+      const target = { slug, version: 1, auth: { cookie: julie.cookie } };
+      const near = await thread(target, 'doc', 0, `Near ${tag}`);
+      const c = await call('/api/comments', { method: 'POST', cookie: julie.cookie, body: { slug, version: 1, text: `Far away ${tag}`, anchor: { kind: 'text', text: 'Far line to go to' } } });
+      assert.equal(c.status, 200, JSON.stringify(c.body));
+      const far = c.body.id;
+      await call('/api/comments', { method: 'POST', cookie: julie.cookie, body: { slug, version: 1, text: `A reply ${tag}`, parent_id: far } });
+      const ctx = await contextFor();
+      const page = await tracked(ctx);
+      await ui.doc.open(page, target);
+      void near;
+      let list;
+      if (phone) {
+        await page.locator('.tdoc-fab').click();
+        list = page.locator('#tdoc-comment-layer');
+      } else {
+        if (!(await page.locator('.tdoc-doc-side').count())) await page.locator('.tdoc-comments-toggle').click();
+        list = page.locator('.tdoc-doc-side');
+      }
+      const card = list.locator(`[data-comment-id="${far}"]`).first();
+      await card.waitFor({ timeout: 10000 });
+      const docFrame = page.frames().find((f) => /\/frame/.test(f.url()));
+      const y0 = await docFrame.evaluate(() => scrollY);
+      const pageY0 = await page.evaluate(() => scrollY);
+      await card.locator('.tdoc-cc-body > .text').first().click();
+      await list.locator(`.tdoc-current-comment[data-comment-id="${far}"]`).waitFor({ timeout: 8000 });
+      // Selected: the replies and the reply box are open, the list is still there.
+      await card.locator('.tdoc-replies.open').waitFor({ timeout: 8000 });
+      await card.locator('.tdoc-reply-form').waitFor({ timeout: 8000 });
+      assert.notEqual(await page.evaluate(() => document.activeElement && document.activeElement.tagName), 'TEXTAREA', 'the reply box took the caret on a press');
+      await page.waitForTimeout(600);
+      assert.equal(await docFrame.evaluate(() => scrollY), y0, 'a press on a card scrolled the doc');
+      assert.equal(await page.evaluate(() => scrollY), pageY0, 'a press on a card scrolled the page');
+      assert.ok(await list.isVisible(), 'a press on a card closed the list');
+      // The words are marked where they are (no scroll): the light highlight.
+      if (!phone) await docFrame.waitForFunction(() => [...(CSS.highlights.get('tdoc-anchor-active') || [])].some((r) => r.toString().includes('Far line')), null, { timeout: 8000 });
+      // Keyboard: Enter on a focused card selects it too.
+      const nearCard = list.locator(`[data-comment-id="${near}"]`).first();
+      await nearCard.focus();
+      await page.keyboard.press('Enter');
+      await list.locator(`.tdoc-current-comment[data-comment-id="${near}"]`).waitFor({ timeout: 8000 });
+      await card.locator('.tdoc-cc-body > .text').first().click();
+      await list.locator(`.tdoc-current-comment[data-comment-id="${far}"]`).waitFor({ timeout: 8000 });
+      const go = await openMore(page, card);
+      await shot(page, 'doc-goto-menu');
+      await go.click();
+      // Go to comment: the doc scrolls to the words (the phone drawer closes).
+      const deadline = Date.now() + 8000;
+      const scrolled = async () => (await docFrame.evaluate(() => scrollY)) !== y0 || (await page.evaluate(() => scrollY)) !== pageY0;
+      while (!(await scrolled())) { assert.ok(Date.now() < deadline, 'Go to comment did not scroll to the words'); await page.waitForTimeout(150); }
+      if (phone) await page.locator('#tdoc-comment-layer').waitFor({ state: 'hidden', timeout: 8000 });
+      assert.deepEqual(page.errors, []);
+      await ctx.close();
+    });
+
+    await t(`${tag}: widget: a press on a card selects it in the list; Go to comment (⋯ or its place line) opens it on the page`, async () => {
+      const target = await freshSpace();
+      const id = await thread(target, 'widget', 0, `Widget go ${tag}`);
+      const other = await thread(target, 'widget', 1, `Widget other ${tag}`);
+      const ctx = await contextFor();
+      const page = await tracked(ctx);
+      await ui.widget.open(page, target);
+      const panel = await ui.widget.header(page);
+      const card = panel.locator(`[data-comment-id="${id}"]`).first();
+      await card.waitFor({ timeout: 10000 });
+      await card.locator('.tdoc-cc-body > .text').first().click();
+      await panel.locator(`.tdoc-current-comment[data-comment-id="${id}"]`).waitFor({ timeout: 8000 });
+      await card.locator('.tdoc-reply-form').waitFor({ timeout: 8000 });
+      await page.waitForTimeout(400);
+      assert.ok(await panel.isVisible(), 'a press on a card closed the list');
+      assert.equal(await page.locator('#tdoc-feedback-root .tdoc-floating-open').count(), 0, 'a press on a card opened it on the page');
+      // The place line says what it does.
+      const line = page.locator('#tdoc-feedback-root .tdoc-cpanel-context').first();
+      assert.equal(await line.getAttribute('title'), 'Go to comment');
+      const go = await openMore(page, card);
+      await shot(page, 'widget-goto-menu');
+      await go.click();
+      await page.locator(`#tdoc-feedback-root .tdoc-floating-open[data-comment-id="${id}"]`).waitFor({ timeout: 8000 });
+      void other;
+      assert.deepEqual(page.errors, []);
+      await ctx.close();
+    });
+
+    await t(`${tag}: space: a press on a card selects it and stays; Go to comment opens the app page`, async () => {
+      const target = await freshSpace();
+      const id = await thread(target, 'widget', 0, `Space go ${tag}`);
+      await call('/api/comments', { method: 'POST', cookie: julie.cookie, body: { slug: target.slug, version: 1, text: `Space reply ${tag}`, parent_id: id } });
+      const ctx = await contextFor();
+      const page = await tracked(ctx);
+      await page.goto(`${base}/d/${target.slug}`);
+      const card = page.locator(`.tdoc-fbspace-list [data-comment-id="${id}"]`).first();
+      await card.waitFor({ timeout: 15000 });
+      const url = page.url();
+      let popups = 0;
+      ctx.on('page', () => { popups++; });
+      await card.locator('.tdoc-cc-body > .text').first().click();
+      await page.locator(`.tdoc-fbspace-list .tdoc-current-comment[data-comment-id="${id}"]`).waitFor({ timeout: 8000 });
+      await card.locator('.tdoc-replies.open').waitFor({ timeout: 8000 });
+      await card.locator('.tdoc-reply-form').waitFor({ timeout: 8000 });
+      await page.waitForTimeout(500);
+      assert.equal(page.url(), url, 'a press on a card navigated');
+      assert.equal(popups, 0, 'a press on a card opened a tab');
+      // The line naming the app page: only its words are a target.
+      const where = card.locator('.tdoc-product-where');
+      assert.match(await where.getAttribute('title'), /^Go to comment/);
+      const whereBox = await where.boundingBox();
+      const cardBox = await card.boundingBox();
+      assert.ok(whereBox.width < cardBox.width - 20, `the place line spans the card (${whereBox.width} of ${cardBox.width})`);
+      const go = await openMore(page, card);
+      await shot(page, 'space-goto-menu');
+      const opened = ctx.waitForEvent('page', { timeout: 8000 });
+      await go.click();
+      const tab = await opened;
+      await tab.waitForLoadState('domcontentloaded').catch(() => {});
+      assert.ok(tab.url().startsWith(`${base}/__page`), `Go to comment opened ${tab.url()}`);
+      assert.equal(page.url(), url, 'Go to comment navigated the space page itself');
+      assert.deepEqual(page.errors, []);
+      await ctx.close();
+    });
+
     if (!phone) {
       await t(`${tag}: doc: the side list opens from the bar, is remembered, follows pins, and flashes the words of the thread picked`, async () => {
         const target = await freshDoc();

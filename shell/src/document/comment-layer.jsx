@@ -248,7 +248,9 @@ export function MobileCommentDrawer({
   onResolve,
   onEdit,
   onReanchor,
-  onNavigate,
+  onSelect,
+  onGoTo = null,
+  canGoTo = null,
   handoff = null,
   onResendHandoff = null,
   onSendHandoffElsewhere = null,
@@ -321,7 +323,9 @@ export function MobileCommentDrawer({
             expandReplies={expandReplies}
             isAnchored={(comment) => isDocumentComment(comment) || pinIds.has(comment.id)}
             onSeen={open && !showAsk ? onMarkRead : null}
-            onNavigate={onNavigate}
+            onSelect={onSelect}
+            onGoTo={onGoTo}
+            canGoTo={canGoTo}
             cardProps={{
               currentUser, handoffViewer, isOwner, mentionable, demo,
               canSendToAgent, agentSetupHref, onReply, onReact, onDelete,

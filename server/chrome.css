@@ -155,8 +155,12 @@
      and came out as pills. */
   .tdoc-bar .tdoc-chip.signin, .tdoc-bar a.tdoc-chip.signin { border-radius: 6px; padding: 7px 14px; font-weight: 600; line-height: 1.2; }
   a.tdoc-chip { text-decoration: none; }
-  .tdoc-product-where { display: block; margin: -2px 0 6px; font-size: 12px; color: var(--td-muted, #6b6a66); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  a.tdoc-product-where:hover { color: var(--td-accent, #1652f0); }
+  /* The line naming where an app comment is: Go to comment. Only its words
+     are a target (fit-content), so a click meant for the card stays there. */
+  .tdoc-product-where { display: block; width: fit-content; max-width: 100%; margin: -2px 0 6px; padding: 0; border: 0; background: none; font: inherit; font-size: 12px; text-align: left; color: var(--td-muted, #6b6a66); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  a.tdoc-product-where, button.tdoc-product-where { cursor: pointer; }
+  a.tdoc-product-where:hover, button.tdoc-product-where:hover { color: var(--td-accent, #1652f0); text-decoration: underline; }
+  .tdoc-product-where:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 1px; border-radius: 2px; }
   .tdoc-popup .submit.agent.tdoc-agent-unlinked { opacity: .7; }
   .tdoc-connectors { display: grid; gap: 12px; }
   .tdoc-connector { border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; padding: 12px; display: grid; gap: 8px; }
@@ -204,6 +208,8 @@
   .tdoc-floating-open > .tdoc-reply-form { flex: none; min-width: 0; max-height: 60%; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
   .tdoc-margin-comment.active { box-shadow: 0 4px 16px var(--td-accent-ring-soft); border-color: var(--td-accent); }
   .tdoc-margin-comment.tdoc-current-comment { box-shadow: 0 0 0 2px var(--td-accent-ring-soft), 0 4px 16px var(--td-accent-ring-soft); }
+  /* A list card is a keyboard stop (Enter selects it): the tdoc focus ring. */
+  .tdoc-margin-comment[tabindex]:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; }
   .tdoc-margin-comment.tdoc-unanchored { border-style: dashed; }
   /* A resolved (agent-applied) comment whose anchor text was rewritten is the
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or

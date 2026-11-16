@@ -1269,7 +1269,7 @@ ${uiCss}
   // The list: the shared CommentPanel (comments/panel/), in a side panel on
   // a wide screen and the shared bottom sheet on a phone, where a
   // full-width aside used to cover the app being commented on.
-  function ListPanel({ side, area, prefs, pageUrl, cardProps, onPick, onOpen, onClose, onRefresh, refreshing, spaces = [], onSwitch = null }) {
+  function ListPanel({ side, area, prefs, pageUrl, cardProps, selectedId = null, onSelect = null, onPick, onOpen, onClose, onRefresh, refreshing, spaces = [], onSwitch = null }) {
     const { filter } = prefs;
     // This page first, then one section per other page (comment-query.js
     // groupBy), each in the order the query gave.
@@ -1291,10 +1291,15 @@ ${uiCss}
         onClose={onClose}
         closeLabel="Close list"
         cardProps={cardProps}
-        selectedId={area.selected?.id}
+        selectedId={selectedId}
         isAnchored={(c) => c.anchor.url !== pageUrl || Boolean(c.anchor.page) || Boolean(elementFor(c)) || Boolean(stateLabel(c.anchor))}
-        onNavigate={(id) => { const c = area.byId.get(id); if (c) onOpen(c, c.anchor.url === pageUrl); }}
-        contextLine={(c) => <button type="button" className="tdoc-cpanel-context" onClick={() => onOpen(c, c.anchor.url === pageUrl)}>
+        // A press on a card selects it in the list (replies and reply box
+        // open); Go to comment, in ⋯ or on the line naming where it is,
+        // opens it in place or on its page.
+        onSelect={onSelect}
+        onGoTo={(id) => { const c = area.byId.get(id); if (c) onOpen(c, c.anchor.url === pageUrl); }}
+        canGoTo={(c) => Boolean(c.anchor && c.anchor.url)}
+        contextLine={(c) => <button type="button" className="tdoc-cpanel-context" title="Go to comment" onClick={() => onOpen(c, c.anchor.url === pageUrl)}>
           {c.anchor.url === pageUrl && !c.anchor.page && !elementFor(c) ? 'Not on screen now · ' : ''}
           {stateLabel(c.anchor) ? `${stateLabel(c.anchor)} · ` : ''}{labelOf(c.anchor)}
         </button>}
@@ -1369,6 +1374,9 @@ ${uiCss}
     // Moves when the frame reports where our comments are now.
     const [, setFrameTick] = useState(0);
     const [openId, setOpenId] = useState(null);
+    // The thread picked in the list: selected there (replies, reply box),
+    // nothing on the page moves. Go to comment opens it on the page (openId).
+    const [listId, setListId] = useState(null);
     const [notice, setNotice] = useState(null);
     // Connecting, with the tdoc window cut off from us by signing in.
     const [waiting, setWaiting] = useState(null);
@@ -1571,7 +1579,7 @@ ${uiCss}
     const slug = session && session.slug;
     const handoffViewer = useMemo(() => surface?.handoffViewer || [surface?.currentUser || 'anon'], [surface?.handoffViewer, surface?.currentUser]);
     const area = useCommentArea({
-      comments: surface?.allComments || [], slug, selectedId: openId,
+      comments: surface?.allComments || [], slug, selectedId: listId || openId,
       filter: listPrefs.filter, sort: listPrefs.sort, search: listPrefs.search, positionOf: positionOnPage,
       handoffViewer, isOwner: owner,
       pageUrl: canonical(),
@@ -2174,6 +2182,7 @@ ${uiCss}
       setPicking(false);
       setSelected(null);
       setPanelOpen(false);
+      setListId(null);
       setOpenId(c.id);
     };
 
@@ -2255,6 +2264,8 @@ ${uiCss}
             pageUrl={canonical()}
             cardProps={cardProps}
             onPick={() => { setOpenId(null); setPanelOpen(false); setPicking(true); }}
+            selectedId={listId || openId}
+            onSelect={setListId}
             onOpen={openFromList}
             onClose={() => setPanelOpen(false)}
             onRefresh={feed.refresh}

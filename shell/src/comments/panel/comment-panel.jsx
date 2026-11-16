@@ -12,7 +12,8 @@ import { filterName, filterOptions, SORT_OPTIONS } from '../core/comment-query.j
 // Data comes from comment-area.js (useCommentArea + useCommentListPrefs);
 // each surface passes only what is its own: how threads are grouped (by
 // page, by document vs. body), the empty state, a context line over each
-// card, and where a click on a thread goes.
+// card, what a press on a card selects (onSelect) and where Go to comment
+// goes (onGoTo, where canGoTo allows). A press on a card never navigates.
 
 // The filter, with a count on every choice.
 export function CommentFilter({ area, prefs, ariaLabel = 'Show comments' }) {
@@ -112,7 +113,7 @@ export function CommentPanel({
   onClose = null, closeLabel = 'Close comments',
   empty = null,
   cardProps, selectedId = null, expandReplies = true,
-  isAnchored = null, onNavigate = null, contextLine = null,
+  isAnchored = null, onSelect = null, onGoTo = null, canGoTo = null, contextLine = null,
   onSeen = undefined,
   showTitle = true,
   className = '', ariaLabel = 'Comments', style = undefined,
@@ -140,7 +141,9 @@ export function CommentPanel({
       isAnchored={isAnchored}
       isUnread={(comment) => unreadIds.has(comment.id)}
       onSeen={onSeen === undefined ? area.onSeen : onSeen}
-      onNavigate={onNavigate}
+      onSelect={onSelect}
+      onGoTo={onGoTo}
+      canGoTo={canGoTo}
       beforeCard={contextLine}
     />
   );
