@@ -335,7 +335,7 @@ async function touchSelect(page, phrase) {
       await context.close();
     });
 
-    await t('without a connected agent the comment Send to agent button opens the connection guide', async () => {
+    await t('without a connected agent the comment @agent button opens the connection guide', async () => {
       const { context, page } = await open(owner, DESKTOP);
       await page.locator('#tdoc-send-agent-btn').waitFor();
       await noBarAsk(page);
@@ -343,7 +343,7 @@ async function touchSelect(page, phrase) {
       const pop = page.locator('.tdoc-popup');
       await pop.waitFor();
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
-      if (labels.join('|') !== 'Send to agent|Comment') throw new Error(`owner popover buttons: ${labels.join('|')}`);
+      if (labels.join('|') !== '@agent|Comment') throw new Error(`owner popover buttons: ${labels.join('|')}`);
       await pop.locator('textarea').fill('Tighten this');
       await pop.locator('.tdoc-composer-agent').click();
       await pop.getByText('No agent is connected yet.').waitFor();

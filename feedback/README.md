@@ -30,7 +30,7 @@ signs the person in, finds or creates the app's feedback space (a normal doc,
 See `getSession` and `FEEDBACK_TOKEN_PATHS` in `worker/worker.js`.
 
 A site's own space (`data-tdoc-space`, the SDK in `packages/feedback`) is
-bound to its origins in My docs → Feedback → Add to your site, or made in one
+bound to its origins in My docs → Comments → Add to your site, or made in one
 call by an agent or a script:
 
 - MCP: the tool `create_feedback_space` (`origins`, optional `team`, `title`).

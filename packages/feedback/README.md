@@ -6,7 +6,7 @@ your AI agent to fix.
 
 ## 1. Get a space id
 
-On [tdoc.dev](https://tdoc.dev): **My docs → Feedback → Add to your site**.
+On [tdoc.dev](https://tdoc.dev): **My docs → Comments → Add to your site**.
 Enter your site's address. Who can comment is the space's Share settings,
 the same as any tdoc doc: people you invite, anyone with the link who signs
 in, or your team if the space is in a team.

@@ -412,6 +412,15 @@ export function markAllNotificationsRead() {
   });
 }
 
+// Every unread comment, reply and mention row on one doc (Needs you).
+export function markDocNotificationsRead(slug) {
+  return request('/api/notifications/read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+  });
+}
+
 export function markNotificationsRead(ids) {
   return request('/api/notifications/read', {
     method: 'POST',

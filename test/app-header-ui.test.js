@@ -172,7 +172,7 @@ async function startServer(worker, env) {
     }
     await anon.close();
 
-    await t('/feedback: the bookmark is the real address, Copy copies the one line, the pill opens the coach', async () => {
+    await t('/feedback: the bookmark is the real address, Copy copies the SDK line, the pill opens the coach', async () => {
       const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
       await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
       const page = await context.newPage();
@@ -183,7 +183,7 @@ async function startServer(worker, env) {
         assert.equal(await pill.getAttribute('href'), BOOKMARK('https://tdoc.dev'));
         await page.getByRole('button', { name: 'Copy code' }).click();
         await page.locator('.code-copy .copy-btn.copied').waitFor();
-        assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '<script src="https://tdoc.dev/feedback.js"></script>');
+        assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '<script src="https://tdoc.dev/feedback.js" data-tdoc-space="YOUR_SPACE_ID" async></script>');
         await pill.click();
         await page.locator('#coach .coach-copy').waitFor();
         await page.waitForFunction(() => /^M [\d.]+ [\d.]+ C /.test(

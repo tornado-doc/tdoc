@@ -70,7 +70,7 @@ export function localSeenText(t) {
 }
 
 // "smarter-tdoc-claw", or "your Raft agent" when the handle is unreadable.
-function agentLabel(t) {
+export function agentLabel(t) {
   if (t && t.team_agent && t.team_agent.name) return t.team_agent.name;
   return readableHandle(t) || `your ${providerMeta(t).label} agent`;
 }

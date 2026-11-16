@@ -69,10 +69,19 @@ async function load() {
   assert.strictEqual(isThreadUnread({ ...base, status: 'applied', resolved_by: 'julie' }, {}), false);
   ok('a person resolving the thread has seen the reply');
 
-  // Read state at rest writes nothing: a thread no agent spoke in is never marked.
-  assert.strictEqual(markThreadSeen('quiet', { id: 'h1', replies: [{ author: { kind: 'human', login: 'julie' }, created: '2026-01-01T02:00:00Z' }] }), false);
-  assert.deepStrictEqual(readSeenMap('quiet'), {});
-  ok('a human-only thread is never marked (no stamp, no write)');
+  // A human-only thread is read too (its bell rows go with it), up to its
+  // newest activity of any kind -- and only once per new activity.
+  const human = { id: 'h1', created: '2026-01-01T01:00:00Z', replies: [{ author: { kind: 'human', login: 'bob' }, created: '2026-01-01T02:00:00Z' }] };
+  assert.strictEqual(markThreadSeen('quiet', human), Date.parse('2026-01-01T02:00:00Z'));
+  assert.deepStrictEqual(readSeenMap('quiet'), { h1: Date.parse('2026-01-01T02:00:00Z') });
+  assert.strictEqual(markThreadSeen('quiet', human), false, 'nothing new: no stamp, no write');
+  assert.strictEqual(markThreadSeen('quiet', { id: 'h2', created: '2026-01-01T05:00:00Z', replies: [] }), Date.parse('2026-01-01T05:00:00Z'), 'a comment with no replies yet');
+  ok('a human-only thread is marked at its newest activity, once per new activity');
+  // An agent's turn still counts, so the pin's unread clears as before.
+  const mixed = { ...base, id: 'm1', created: '2026-01-01T00:00:00Z', replies: [...base.replies, { author: { kind: 'human', login: 'bob' }, created: '2026-01-01T05:00:00Z' }] };
+  assert.strictEqual(markThreadSeen('mixed', mixed), Date.parse('2026-01-01T05:00:00Z'));
+  assert.strictEqual(isThreadUnread(mixed, readSeenMap('mixed')), false);
+  ok('the stamp is the newest activity of any kind, and covers the agent\'s turn');
 
   // After a POST: unknown threads leave, a lowered stamp is taken only while
   // the cache still holds what was sent, a merely-not-kept id stays.

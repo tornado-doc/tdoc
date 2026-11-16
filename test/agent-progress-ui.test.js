@@ -1,9 +1,12 @@
-// The agent progress line on a comment card (flag agentProgress), desktop
-// and phone: while the agent works, the status chip reads "Delivered ·
-// Reading the doc · Suggested 3 edits · Published v3 · Working · N min"
-// from the comments the page already polls, and the agent's own status
-// takes the current step while it is the newest fact. With the flag off the
-// chip still says "On it". Screenshots: TDOC_PROGRESS_SHOTS=<dir>.
+// The agent progress pill on a comment card (flag agentProgress), desktop
+// and phone: while the agent works, the pill names the current step in plain
+// words with the agent's name ("Claude updated the doc"), from the comments
+// the page already polls. Tapping it opens the step list under it inside the
+// comment (a check per finished step; a spinner on the current one while the
+// agent is still working, with its own note as a muted line under it);
+// collapsed by default. Its tooltip holds the whole line, the agent's own
+// status included; no version number anywhere (Julie, 2026-11-14). With the
+// flag off the chip still says "On it". Screenshots: TDOC_PROGRESS_SHOTS=<dir>.
 // Run with: node test/agent-progress-ui.test.js
 
 const assert = require('node:assert/strict');
@@ -16,8 +19,9 @@ const { resolveTarget } = require('./helpers/fixture-server');
 // chip's minutes only move on its own 30 s tick.
 const clock = (base = Date.now()) => (min) => new Date(base - min * 60000).toISOString();
 
-async function open(browser, target, { flag, width, withStatus = false }) {
-  const page = await browser.newPage({ viewport: { width, height: 900 } });
+async function open(browser, target, { flag, width, withStatus = false, working = false, agentName = 'Claude' }) {
+  const phone = width < 600;
+  const page = await browser.newPage({ viewport: { width, height: 900 }, hasTouch: phone, isMobile: phone && browser.browserType().name() !== 'firefox' });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.addInitScript((on) => { window.__TDOC_FLAGS__ = { agentProgress: on }; window.__TDOC_COMMENT_POLL_MS = 2000; }, flag);
@@ -40,11 +44,12 @@ async function open(browser, target, { flag, width, withStatus = false }) {
         handoff_delivery: { status: 'delivered', at: ago(7), first_at: ago(7) },
         handoff_acked_at: ago(6),
         handoff_suggested_edits: 3, handoff_suggested_at: ago(4),
-        handoff_last_version: 3, handoff_last_version_at: ago(3),
-        handoff_first_version_at: ago(3),
+        // `working`: still at it (latest step: 3 edits), no version yet.
+        handoff_last_version: working ? null : 3, handoff_last_version_at: working ? null : ago(3),
+        handoff_first_version_at: working ? null : ago(3),
         // The second poll brings the agent's own status (newest fact).
         handoff_progress: withStatus && reads > 1 ? { text: 'Editing the Pack section', at: ago(1) } : null,
-        handoff_to: { provider: 'local', device: 'mbp', cli: 'claude', agent_name: 'claude on mbp' },
+        handoff_to: { provider: 'local', device: 'mbp', cli: 'claude', agent_name: agentName },
       });
     }
     await route.fulfill({ json: comments });
@@ -67,25 +72,140 @@ async function open(browser, target, { flag, width, withStatus = false }) {
       const chip = page.locator('.tdoc-handoff-chip[data-handoff-progress]:visible').first();
       await chip.waitFor({ timeout: 20000 });
       const title = await chip.getAttribute('title');
-      assert.match(title, /^Delivered · Reading the doc · Suggested 3 edits · Published v3 · (Working|Editing the Pack section) · 6 min$/, title);
+      assert.match(title, /^Sent to Claude · Claude is reading · Claude suggested 3 edits · Claude updated the doc · (Editing the Pack section · )?6 min$/, title);
       assert(!/handoff/i.test(await chip.innerText()), 'the word handoff is on the card');
       assert.equal(await chip.getAttribute('data-handoff-state'), 'received');
-      // Nothing is cut off: the line wraps instead (what it is doing now and
-      // how long always show).
-      const tail = chip.locator('.tdoc-handoff-line-tail');
-      assert.match(await tail.innerText(), /· (Working|Editing the Pack section) · 6 min/);
-      const box = await tail.boundingBox();
-      assert(box && box.width > 0 && box.x + box.width <= width, `tail off screen at ${width}`);
-      const clipped = await chip.evaluate((el) => [...el.querySelectorAll('span')].some((s) => s.scrollWidth > s.clientWidth + 1 && getComputedStyle(s).display !== 'inline'));
-      assert(!clipped, `a step is cut off at ${width}`);
-      // The next poll brings the agent's own status as the current step.
+      // The pill names the current step in plain words, the same pill as any
+      // other status (Julie, 2026-11-14).
+      assert.equal((await chip.textContent()).trim(), 'Claude updated the doc');
+      // The next poll brings the agent's own status: into the tooltip, never the pill.
       await page.waitForFunction(() => /Editing the Pack section/.test(document.querySelector('.tdoc-handoff-chip[data-handoff-progress]')?.getAttribute('title') || ''), null, { timeout: 40000 });
       assert(reads() >= 2, 'the status came with the existing comment poll');
+      assert.equal(await chip.getAttribute('title'), 'Sent to Claude · Claude is reading · Claude suggested 3 edits · Claude updated the doc · Editing the Pack section · 6 min');
+      assert.equal((await chip.textContent()).trim(), 'Claude updated the doc');
+      // Collapsed by default: the comment shows no steps and no version.
+      assert.equal(await chip.getAttribute('role'), 'button');
+      assert.equal(await chip.getAttribute('aria-expanded'), 'false');
+      assert.equal(await page.locator('.tdoc-handoff-steps').count(), 0, 'the steps are open before the pill was tapped');
+      assert.equal(await page.locator('.tdoc-handoff-progress-detail').count(), 0, 'the old detail line is back');
+      const card = chip.locator('xpath=ancestor::article[1]');
+      const cardText = async () => card.innerText();
+      assert(!/is reading|Editing the Pack section|Published|\bv3\b/.test(await cardText()), `progress text in the closed card: ${await cardText()}`);
+      // Finished: no loading spinner in the pill.
+      assert.equal(await chip.locator('.tdoc-handoff-chip-spinner').count(), 0, 'a finished pill still spins');
       if (shots) {
         fs.mkdirSync(shots, { recursive: true });
-        await page.screenshot({ path: path.join(shots, `progress-${width}.png`) });
-        await chip.screenshot({ path: path.join(shots, `progress-chip-${width}.png`) });
+        await page.screenshot({ path: path.join(shots, `progress-collapsed-${width}.png`) });
       }
+      // Tap (phone) or click (desktop): the steps open under the pill.
+      if (width < 600) await chip.tap(); else await chip.click();
+      const steps = page.locator('.tdoc-handoff-steps:visible').first();
+      await steps.waitFor({ timeout: 5000 });
+      assert.equal(await chip.getAttribute('aria-expanded'), 'true');
+      assert.equal(await chip.getAttribute('aria-controls'), await steps.getAttribute('id'));
+      const lines = (await steps.locator('.tdoc-handoff-step-line').allTextContents()).map((t) => t.trim());
+      assert.deepEqual(lines, ['Sent to Claude', 'Claude is reading', 'Claude suggested 3 edits', 'Claude updated the doc']);
+      // "Claude updated the doc" ends the turn: every step is checked, no
+      // spinner, and so no note under a current step.
+      assert.equal(await steps.locator('.tdoc-handoff-step-mark.is-done').count(), 4);
+      assert.equal(await steps.locator('.tdoc-handoff-step-mark.is-current').count(), 0);
+      assert.equal(await steps.locator('.tdoc-handoff-step-note').count(), 0);
+      assert(!/Editing the Pack section|Published|\bv3\b|version/i.test(await steps.innerText()), 'the note or a version is in the steps');
+      // The list sits inside the comment, under the pill, and the card stayed put.
+      const box = await steps.evaluate((el) => {
+        const c = el.closest('article').getBoundingClientRect();
+        const p = document.querySelector('.tdoc-handoff-chip[data-handoff-progress]').getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        return { inside: r.left >= c.left && r.right <= c.right + 1 && r.top >= p.bottom - 1, h: r.height };
+      });
+      assert(box.inside && box.h > 0, `the steps are not under the pill inside the comment: ${JSON.stringify(box)}`);
+      if (shots) {
+        await page.waitForTimeout(300); // the caret's turn
+        await page.screenshot({ path: path.join(shots, `progress-expanded-${width}.png`) });
+        await card.screenshot({ path: path.join(shots, `progress-expanded-card-${width}.png`) });
+      }
+      // Again: collapsed. On desktop the keyboard opens it too.
+      if (width < 600) await chip.tap(); else await chip.click();
+      await page.waitForFunction(() => !document.querySelector('.tdoc-handoff-steps'), null, { timeout: 5000 });
+      assert.equal(await chip.getAttribute('aria-expanded'), 'false');
+      if (width >= 600) {
+        await chip.focus();
+        await page.keyboard.press('Enter');
+        await steps.waitFor({ timeout: 5000 });
+        await page.keyboard.press(' ');
+        await page.waitForFunction(() => !document.querySelector('.tdoc-handoff-steps'), null, { timeout: 5000 });
+      }
+      const pill = await chip.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        const plain = document.createElement('span');
+        plain.className = 'tdoc-handoff-chip';
+        plain.textContent = 'On it';
+        el.parentElement.appendChild(plain);
+        const h = plain.getBoundingClientRect().height;
+        plain.remove();
+        return { h: r.height, plainH: h, w: r.width, clipped: el.scrollWidth > el.clientWidth + 1, ws: cs.whiteSpace };
+      });
+      assert(Math.abs(pill.h - pill.plainH) <= 1, `the progress pill is ${pill.h}px tall, a plain pill ${pill.plainH}px, at ${width}`);
+      assert(pill.w <= 16 * 16 + 1 && !pill.clipped, `the progress pill is ${pill.w}px wide or cut off at ${width}`);
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+    // Still working (latest step: 3 edits): a spinner on the current step and
+    // the agent's own note as a muted line under it; never in the pill.
+    for (const width of [1440, 390]) {
+      const { page, errors } = await open(browser, target, { flag: true, width, withStatus: true, working: true });
+      if (width === 390 && !(await page.locator('.tdoc-handoff-chip:visible').count())) {
+        await page.locator('.tdoc-fab').click().catch(() => {});
+      }
+      const chip = page.locator('.tdoc-handoff-chip[data-handoff-progress]:visible').first();
+      await chip.waitFor({ timeout: 20000 });
+      await page.waitForFunction(() => /Editing the Pack section/.test(document.querySelector('.tdoc-handoff-chip[data-handoff-progress]')?.getAttribute('title') || ''), null, { timeout: 40000 });
+      assert.equal((await chip.textContent()).trim(), 'Claude suggested 3 edits');
+      // Still working: a loading spinner at the front of the pill.
+      assert.equal(await chip.locator('.tdoc-handoff-chip-spinner').count(), 1, 'no spinner in a working pill');
+      if (width < 600) await chip.tap(); else await chip.click();
+      const steps = page.locator('.tdoc-handoff-steps:visible').first();
+      await steps.waitFor({ timeout: 5000 });
+      const lines = (await steps.locator('.tdoc-handoff-step-line').allTextContents()).map((t) => t.trim());
+      assert.deepEqual(lines, ['Sent to Claude', 'Claude is reading', 'Claude suggested 3 edits']);
+      assert.equal(await steps.locator('.tdoc-handoff-step-mark.is-done').count(), 2);
+      const current = steps.locator('.tdoc-handoff-step[aria-current="step"]');
+      assert.equal(await current.count(), 1);
+      assert.equal(await current.getAttribute('data-step'), 'suggested');
+      assert.equal(await current.locator('.tdoc-handoff-step-mark.is-current').count(), 1);
+      assert.equal(await steps.locator('.tdoc-handoff-step-note').count(), 1);
+      assert.equal((await current.locator('.tdoc-handoff-step-note').textContent()).trim(), 'Editing the Pack section');
+      assert(!/Editing/.test(await chip.textContent()), 'the note is in the pill');
+      if (shots) {
+        await page.waitForTimeout(300); // the caret's turn
+        await page.screenshot({ path: path.join(shots, `progress-working-expanded-${width}.png`) });
+        await chip.locator('xpath=ancestor::article[1]').screenshot({ path: path.join(shots, `progress-working-expanded-card-${width}.png`) });
+      }
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+    // A very long agent name: the pill keeps its cap, the spinner and the
+    // step words stay, only the name gives way.
+    for (const width of [1440, 390]) {
+      const agentName = 'Research assistant for the quarterly planning offsite';
+      const { page, errors } = await open(browser, target, { flag: true, width, withStatus: true, working: true, agentName });
+      if (width === 390 && !(await page.locator('.tdoc-handoff-chip:visible').count())) {
+        await page.locator('.tdoc-fab').click().catch(() => {});
+      }
+      const chip = page.locator('.tdoc-handoff-chip[data-handoff-progress]:visible').first();
+      await chip.waitFor({ timeout: 20000 });
+      await page.waitForFunction(() => /suggested 3 edits/.test(document.querySelector('.tdoc-handoff-chip[data-handoff-progress]')?.textContent || ''), null, { timeout: 40000 });
+      const long = await chip.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const fixed = [...el.querySelectorAll('.tdoc-handoff-step-fixed')].map((n) => ({ text: n.textContent, cut: n.scrollWidth > n.clientWidth + 1, right: n.getBoundingClientRect().right }));
+        const sp = el.querySelector('.tdoc-handoff-chip-spinner')?.getBoundingClientRect();
+        return { w: r.width, right: r.right, fixed, spinner: sp ? sp.width : 0 };
+      });
+      assert(long.w <= 16 * 16 + 1, `a long agent name makes the pill ${long.w}px wide at ${width}`);
+      assert(long.spinner > 0, 'the spinner is squeezed out by a long name');
+      assert(long.fixed.some((f) => /suggested 3 edits/.test(f.text) && !f.cut && f.right <= long.right + 1), `the step words are cut by a long name: ${JSON.stringify(long.fixed)}`);
+      if (shots) await chip.locator('xpath=ancestor::article[1]').screenshot({ path: path.join(shots, `progress-long-name-${width}.png`) });
       assert.deepEqual(errors, []);
       await page.close();
     }
@@ -96,6 +216,6 @@ async function open(browser, target, { flag, width, withStatus = false }) {
     assert.equal((await plain.innerText()).trim(), 'On it');
     assert.equal(await page.locator('.tdoc-handoff-chip[data-handoff-progress]').count(), 0);
     assert.deepEqual(errors, []);
-    console.log('PASS progress line: steps in order, current step + elapsed always visible, agent status via the poll, desktop + phone; flag off keeps On it');
+    console.log('PASS progress pill: plain step with the agent name, tap/click/keyboard opens the step list inside the comment, collapsed by default, finished turn all checked, spinner + note only while working, whole line in the tooltip, no version number, desktop + phone; flag off keeps On it');
   } finally { await browser?.close(); target.stop(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

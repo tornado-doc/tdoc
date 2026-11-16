@@ -36,8 +36,10 @@ export function notificationTarget(item) {
   if (item.kind === 'team_join_request' && item.team_id) return `/me?team=${encodeURIComponent(item.team_id)}&view=settings`;
   // Access is about the document, not a comment: open its latest version.
   if (item.kind === 'access_request' || item.kind === 'access_granted') return `/d/${encodeURIComponent(item.slug)}`;
-  const version = Math.max(1, Number(item.version) || 1);
+  // A comment opens on the doc as it is now, at that comment: /d/<slug> is
+  // served at the newest version and its threads carry across versions, so a
+  // pinned /v/<n> only landed people on an old copy (Julie, 2026-11-14).
   const target = item.comment_id || item.thread_id;
   const query = target ? `?comment=${encodeURIComponent(target)}` : '';
-  return `/d/${encodeURIComponent(item.slug)}/v/${version}${query}`;
+  return `/d/${encodeURIComponent(item.slug)}${query}`;
 }

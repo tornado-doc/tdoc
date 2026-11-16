@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreHorizontal, SmilePlus } from 'lucide-react';
@@ -15,7 +15,7 @@ import { agentForThread, targetKey } from './agent-choices.js';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, avatarInitial, QUICK_REACTIONS, tdocUrl } from './model.js';
 import { AuthorFace } from './author-face.jsx';
-import { HandoffStatusChips } from './handoff-status-line.jsx';
+import { HandoffProgressSteps, HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from '../comments/core/handoff-state.js';
 import { productPageUrl } from './product-url.js';
 import { observeVisibleRead } from '../comments/core/visible-read.js';
@@ -702,6 +702,10 @@ export function CommentCard({
   // One record at a time is being rewritten — this card's comment or any reply
   // under it — the same way one reply form is open at a time.
   const [editTarget, setEditTarget] = useState(null);
+  // The agent's steps under the progress pill: collapsed until the pill is
+  // tapped, so the comment stays clean (Julie, 2026-11-14).
+  const [stepsOpen, setStepsOpen] = useState(false);
+  const stepsId = `tdoc-handoff-steps-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const cardRef = useRef(null);
   const onSeenRef = useRef(onSeen);
   const commentRef = useRef(comment);
@@ -884,12 +888,22 @@ export function CommentCard({
           </span>
         ) : null}
         {demo || canSeeHandoff(comment, handoffViewer, isOwner) ? (
-          <HandoffStatusChips comment={comment} progressLine={progressLine} onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff} />
+          <HandoffStatusChips
+            comment={comment}
+            progressLine={progressLine}
+            onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff}
+            stepsOpen={stepsOpen}
+            stepsId={stepsId}
+            onToggleSteps={() => setStepsOpen((open) => !open)}
+          />
         ) : null}
         {unread ? (onMarkRead && !onSeen
           ? <button type="button" className="tdoc-thread-mark-read" aria-label="Mark as read" title="Mark as read" onClick={() => onMarkRead(comment)}><span className="tdoc-thread-unread-dot" aria-hidden="true" /></button>
           : <span className="tdoc-thread-unread-dot" role="status" aria-label="New agent reply" title="New agent reply" />) : null}
       </div>
+      {stepsOpen && (demo || canSeeHandoff(comment, handoffViewer, isOwner)) ? (
+        <HandoffProgressSteps comment={comment} progressLine={progressLine} open id={stepsId} />
+      ) : null}
       <header className="tdoc-cc-head">
         <Author
           author={comment.author}

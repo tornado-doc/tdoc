@@ -104,9 +104,9 @@ function commentDate(value) {
   return date.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+// The doc as it is now, at the comment (see notificationTarget).
 function commentTarget(item) {
-  const version = Math.max(1, Number(item.version) || 1);
-  return `/d/${encodeURIComponent(item.slug)}/v/${version}?comment=${encodeURIComponent(item.id || item.thread_id)}`;
+  return `/d/${encodeURIComponent(item.slug)}?comment=${encodeURIComponent(item.id || item.thread_id)}`;
 }
 
 function CommentAvatar({ author }) {

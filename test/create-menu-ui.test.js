@@ -220,7 +220,7 @@ async function startServer(worker, env) {
         const dialog = page.getByRole('dialog');
         await dialog.locator('.mk-agent[data-kind="slides"]').waitFor();
         assert.equal((await dialog.locator('.ui-dialog-title').textContent()).trim(), 'Build it with your agent');
-        await dialog.locator('.mk-subject input').fill('our Q4 plan');
+        await dialog.locator('.mk-subject textarea').fill('our Q4 plan');
         assert.equal((await dialog.locator('.mk-line p').textContent()).trim(),
           'Use tdoc to make a slide deck about our Q4 plan, publish it, and give me the link');
         await page.keyboard.press('Escape');
@@ -236,7 +236,7 @@ async function startServer(worker, env) {
           const dialog = page.getByRole('dialog');
           await dialog.locator(`.mk-agent[data-kind="${kind}"]`).waitFor();
           assert.equal((await dialog.locator('.ui-dialog-title').textContent()).trim(), title);
-          await dialog.locator('.mk-subject input').fill('X');
+          await dialog.locator('.mk-subject textarea').fill('X');
           assert.equal((await dialog.locator('.mk-line p').textContent()).trim(), line);
           await page.keyboard.press('Escape');
           await dialog.waitFor({ state: 'detached' });

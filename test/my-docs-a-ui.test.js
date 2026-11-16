@@ -20,6 +20,7 @@ const { loadRuntimeAssets } = require('../server/runtime-assets');
 const { chromium } = requirePlaywrightOrSkip('my-docs-a-ui.test.js');
 
 const JULIE = 'c3'.repeat(16);
+const BOB_AVATAR = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><rect width="28" height="28" fill="#2f7d5b"/></svg>')}`;
 const SHOTS = process.env.TDOC_SHOTS_DIR || '';
 const H = 3600e3;
 const D = 24 * H;
@@ -63,8 +64,10 @@ async function seed(env) {
   await env.META.put('recents:julie', JSON.stringify({ items: [{ slug: 'bobs-doc', at: ago(5 * H) }, { slug: 'q4-plan', at: ago(D + H) }] }));
   await env.META.put('stars:julie', JSON.stringify({ items: [{ slug: 'launch-deck', at: ago(2 * D) }] }));
   await env.META.put('inbox:julie', JSON.stringify({ items: [
-    { id: 'n1', kind: 'comment', group_key: 'comment:q4-plan', slug: 'q4-plan', version: 2, comment_id: 'c_1', thread_id: 'c_1', actor: { login: 'bob', name: 'Bob Lee' }, preview: 'Is this final? The Q3 numbers moved.', title: 'Q4 plan', at: ago(H), read: false, count: 2 },
+    { id: 'n1', kind: 'reply', group_key: 'reply:c_1', slug: 'q4-plan', version: 2, comment_id: 'c_1r', thread_id: 'c_1', actor: { login: 'bob', name: 'Bob Lee', avatar_url: BOB_AVATAR }, preview: 'Is this final? The Q3 numbers moved.', title: 'Q4 plan', at: ago(H), read: false, count: 1 },
     { id: 'n2', kind: 'mention', group_key: 'mention:budget-2027', slug: 'budget-2027', version: 2, comment_id: 'c_2', thread_id: 'c_2', actor: { login: 'serena', name: 'Serena Park' }, preview: '@julie can we drop the annual line?', title: 'Budget 2027', at: ago(3 * H), read: false, count: 1 },
+    // The same thread, left on an older version: one item with n1, not two.
+    { id: 'n3', kind: 'comment', group_key: 'comment:q4-plan', slug: 'q4-plan', version: 1, comment_id: 'c_1', thread_id: 'c_1', actor: { login: 'bob', name: 'Bob Lee', avatar_url: BOB_AVATAR }, preview: 'Starting a thread on the numbers.', title: 'Q4 plan', at: ago(D), read: false, count: 1 },
   ] }));
   await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: ago(30 * 60e3) }] }));
 }
@@ -159,6 +162,7 @@ async function startServer(worker, env) {
         assert.equal(await page.locator('.tabs').count(), 0, 'the old tab row is gone on a wide screen');
         assert.equal(await card(page, 'budget-2027').locator('.mda-th-sheet').count(), 1, 'a sheet is drawn as a grid');
         assert.equal(await card(page, 'launch-deck').locator('.mda-th-slides').count(), 1, 'a deck is drawn as a slide');
+        assert.equal(await card(page, 'q4-plan').locator('.mda-th-page > b').textContent(), await card(page, 'q4-plan').getAttribute('data-title'), 'a doc shows its first page: its own title');
         assert.equal(await card(page, 'budget-2027').getByRole('img', { name: 'Sheet' }).count(), 1);
         assert.match(await card(page, 'q4-plan').locator('.doc-meta').textContent(), /^updated 2h ago · Link$/);
         assert.equal(await page.getByRole('button', { name: 'Grid view' }).getAttribute('aria-pressed'), 'true');
@@ -171,16 +175,28 @@ async function startServer(worker, env) {
         const needs = page.locator('.mda-needs').first();
         await needs.locator('.mda-need').first().waitFor();
         const slugs = await needs.locator('.mda-need').evaluateAll((cards) => cards.map((c) => c.dataset.slug));
-        assert.deepEqual(slugs, ['q4-plan', 'budget-2027', 'launch-deck']);
+        assert.deepEqual(slugs, ['launch-deck', 'q4-plan', 'budget-2027'], 'newest first: the agent replied 30 min ago');
         const q4 = needs.locator('.mda-need[data-slug="q4-plan"]');
-        assert.match(await q4.locator('.mda-need-reason').textContent(), /^Bob Lee commented/);
+        assert.equal(await q4.count(), 1, 'one item per doc and thread, whatever version each row was left on');
+        // What to do, in plain words, then the doc.
+        assert.equal(await q4.locator('.mda-need-action').textContent(), 'Answer Bob Lee\u2019s question');
         assert.equal(await q4.locator('.mda-need-quote').textContent(), 'Is this final? The Q3 numbers moved.');
-        assert.equal(await q4.locator('.mda-who').textContent(), 'BL');
-        assert.match(await q4.locator('.mda-need-link').getAttribute('href'), /^\/d\/q4-plan\/v\/2\?comment=c_1$/);
+        assert.equal(await q4.locator('.mda-need-more').textContent(), '+1 more');
+        assert.equal(await q4.locator('.mda-need-title').textContent(), await card(page, 'q4-plan').getAttribute('data-title'));
+        // Whose it is: their photo.
+        assert.equal(await q4.locator('img.mda-need-avatar').getAttribute('src'), BOB_AVATAR);
+        const serena = needs.locator('.mda-need[data-slug="budget-2027"]');
+        assert.equal(await serena.locator('.mda-need-avatar').textContent(), 'S', 'no photo: the initial');
+        assert.equal(await serena.locator('.mda-need-action').textContent(), 'Answer Serena Park\u2019s question');
+        // The doc as it is now, at the thread: never a /v/<n>.
+        assert.equal(await q4.locator('.mda-need-link').getAttribute('href'), '/d/q4-plan?comment=c_1');
         const agent = needs.locator('.mda-need[data-slug="launch-deck"]');
         assert.equal(await agent.getAttribute('data-kind'), 'agent');
-        assert.equal(await agent.locator('.mda-need-reason').textContent(), 'An agent replied');
-        assert.equal(await agent.getByRole('button', { name: /Mark done/ }).count(), 0, 'no done for an agent reply (read it in the doc)');
+        assert.equal(await agent.locator('.mda-need-action').textContent(), 'Review the agent\u2019s reply');
+        assert.equal(await agent.locator('.mda-need-link').getAttribute('href'), '/d/launch-deck?comment=c_9');
+        assert.equal(await agent.locator('.mda-need-avatar svg').count(), 1, 'an agent reply: the agent mark');
+        // Every item has the check.
+        assert.equal(await needs.locator('.mda-need').count(), await needs.locator('.mda-need .mda-need-done').count());
         assert.equal(await page.getByRole('tab', { name: /Needs you/ }).locator('.mda-chip-n').textContent(), '3');
         // The card's unread: one blue circle with one number on the drawing's corner.
         const unread = card(page, 'launch-deck').locator('.doc-activity');
@@ -192,13 +208,30 @@ async function startServer(worker, env) {
 
       await t('1440: Mark done reads the bell rows on the server, and the card stays gone after a reload', async () => {
         const read = page.waitForRequest((req) => req.url().includes('/api/notifications/read') && req.method() === 'POST');
-        await page.locator('.mda-need[data-slug="budget-2027"]').getByRole('button', { name: 'Mark done: Budget 2027' }).click();
+        await page.locator('.mda-need[data-slug="budget-2027"]').getByRole('button', { name: /^Mark done: .* in Budget 2027$/ }).click();
         assert.deepEqual(JSON.parse((await read).postData()).ids, ['n2']);
         await page.locator('.mda-need[data-slug="budget-2027"]').waitFor({ state: 'detached' });
         await page.waitForTimeout(200);
         await page.reload();
         await page.locator('.mda-need[data-slug="q4-plan"]').waitFor();
         assert.equal(await page.locator('.mda-need[data-slug="budget-2027"]').count(), 0);
+      });
+
+      await t('1440: an agent reply\u2019s check marks its thread seen, as opening it would', async () => {
+        const seen = page.waitForRequest((req) => req.url().includes('/api/comments/seen') && req.method() === 'POST');
+        await page.locator('.mda-need[data-slug="launch-deck"]').getByRole('button', { name: /^Mark done: / }).click();
+        const body = JSON.parse((await seen).postData());
+        assert.equal(body.slug, 'launch-deck');
+        assert.deepEqual(Object.keys(body.seen), ['c_9']);
+        await page.locator('.mda-need[data-slug="launch-deck"]').waitFor({ state: 'detached' });
+        await page.waitForTimeout(200);
+        await page.reload();
+        await page.locator('.mda-need[data-slug="q4-plan"]').waitFor();
+        assert.equal(await page.locator('.mda-need[data-slug="launch-deck"]').count(), 0, 'gone on the server too');
+        // Back for the views below.
+        await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: new Date(Date.now() - 30 * 60e3).toISOString() }] }));
+        await page.reload();
+        await page.locator('.mda-need[data-slug="launch-deck"]').waitFor();
       });
 
       await t('1440: Needs you view lists every card; the chip is a tab', async () => {
@@ -438,16 +471,17 @@ async function startServer(worker, env) {
           assert.equal(await p.locator('.doc-activity svg').count(), 0);
           const [badgeBox, titleBox] = [await badge.boundingBox(), await card(p, 'q4-plan').locator('.doc-title').boundingBox()];
           assert.ok(badgeBox.height === 20 && badgeBox.x > titleBox.x + titleBox.width, 'badge is a 20px circle after the title');
-          // A long title wraps to two lines before it is cut.
+          // A long title stays on one line and ends in an ellipsis (Google Docs app).
           const wrap = await card(p, 'q4-plan').locator('.doc-title').evaluate((el) => {
             const before = el.textContent;
             el.textContent = 'A much longer title that goes on and on about the quarterly plan and its numbers, 第一轮原始记录';
             const lh = parseFloat(getComputedStyle(el).lineHeight);
             const lines = Math.round(el.getBoundingClientRect().height / lh);
+            const cut = el.scrollWidth > el.clientWidth;
             el.textContent = before;
-            return { lines, clamp: getComputedStyle(el).webkitLineClamp };
+            return { lines, cut, ellipsis: getComputedStyle(el).textOverflow };
           });
-          assert.deepEqual(wrap, { lines: 2, clamp: '2' }, 'a long title wraps to two lines, then is cut');
+          assert.deepEqual(wrap, { lines: 1, cut: true, ellipsis: 'ellipsis' }, 'a long title is one line, then cut with an ellipsis');
           // A starred doc keeps its star by the title.
           assert.equal(await card(p, 'launch-deck').getByRole('img', { name: 'Starred' }).count(), 1);
           // The row opens the doc from anywhere on it.
@@ -455,8 +489,18 @@ async function startServer(worker, env) {
           const box = await card(p, 'ideas').boundingBox();
           const hit = await p.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('a')?.getAttribute('href'), [box.x + box.width * 0.6, box.y + box.height - 8]);
           assert.equal(hit, '/d/ideas');
-          const body = await p.locator('.mda-psearch input').evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+          // Search is an icon in the header; it opens a field with Cancel.
+          assert.equal(await p.locator('.mda-psearch input').count(), 0, 'no search field until asked');
+          await p.getByRole('button', { name: 'Search docs' }).click();
+          const field = p.locator('.mda-psearch input');
+          assert.equal(await field.evaluate((el) => el === document.activeElement), true, 'the field takes focus');
+          const body = await field.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
           assert.ok(body >= 16, `search is ${body}px (iOS zooms under 16)`);
+          await p.getByRole('button', { name: 'Cancel' }).click();
+          await p.locator('.mda-hd h1').waitFor();
+          // One toolbar row under Needs you: the view menu, filter, sort, Select.
+          const bar = await p.locator('.mda-pbar').evaluate((el) => ({ h: el.getBoundingClientRect().height, rows: el.querySelectorAll('.mda-scroll').length }));
+          assert.ok(bar.h <= 48, `toolbar is one row (${bar.h}px)`);
           const newBtn = await p.locator('.mda-new').boundingBox();
           assert.ok(newBtn.height >= 44, `New is ${newBtn.height}px tall`);
           await shot(p, `a-phone-${width}`);
@@ -465,63 +509,57 @@ async function startServer(worker, env) {
         } finally { await ctx.close(); }
       });
 
-      await t(`phone ${width}, flag on: Needs you is a strip of cards to swipe, See all opens the view`, async () => {
+      await t(`phone ${width}, flag on: Needs you is the same to-do list as on desktop, See all opens the view`, async () => {
         const { context: ctx, page: p, errors: errs } = await open({ width, height: 844 });
         try {
           await p.goto(`${base}/me`);
-          const strip = p.locator('.mda-needs-grid.is-strip');
-          await strip.locator('.mda-need').first().waitFor();
-          assert.deepEqual(await strip.locator('.mda-need').evaluateAll((cards) => cards.map((c) => c.dataset.slug)), ['q4-plan', 'launch-deck']);
-          const layout = await strip.evaluate((el) => {
-            const tops = [...el.querySelectorAll('.mda-need')].map((c) => Math.round(c.getBoundingClientRect().top));
-            return { oneRow: new Set(tops).size === 1, scrolls: el.scrollWidth > el.clientWidth, overflowX: getComputedStyle(el).overflowX, snap: getComputedStyle(el).scrollSnapType };
+          const list = p.locator('.mda-needs-grid');
+          await list.locator('.mda-need').first().waitFor();
+          assert.deepEqual(await list.locator('.mda-need').evaluateAll((rows) => rows.map((r) => r.dataset.slug)), ['launch-deck', 'q4-plan']);
+          const layout = await list.evaluate((el) => {
+            const rows = [...el.querySelectorAll('.mda-need')].map((r) => r.getBoundingClientRect());
+            return { stacked: rows.every((r, i) => i === 0 || r.top >= rows[i - 1].bottom - 1), sideways: el.scrollWidth > el.clientWidth + 1 };
           });
-          assert.ok(layout.oneRow, 'cards sit in one row');
-          assert.ok(layout.scrolls && layout.overflowX === 'auto', 'the strip scrolls sideways');
-          assert.match(layout.snap, /x/);
-          const reason = await strip.locator('.mda-need-reason').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-          assert.ok(reason >= 15, `card text is ${reason}px`);
-          await strip.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
-          await shot(p, `a-phone-${width}-needs-swiped`);
+          assert.ok(layout.stacked, 'one to-do per line');
+          assert.ok(!layout.sideways, 'nothing to swipe');
+          const title = await list.locator('.mda-need-title').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+          assert.ok(title >= 15, `to-do text is ${title}px`);
           await p.getByRole('button', { name: 'See all 2' }).click();
-          assert.equal(await p.getByRole('tab', { name: /Needs you/ }).getAttribute('aria-selected'), 'true');
+          await p.getByRole('button', { name: 'View: Needs you' }).waitFor();
           await p.locator('.mda-needs .mda-need').first().waitFor();
-          assert.equal(await p.locator('.mda-needs-grid.is-strip').count(), 0, 'the view lists them, one per line');
           assert.match(p.url(), /view=needs/);
           await shot(p, `a-phone-${width}-needs`);
           assert.deepEqual(errs, []);
         } finally { await ctx.close(); }
       });
 
-      await t(`phone ${width}, flag on: type chips and folder chips filter the list`, async () => {
+      await t(`phone ${width}, flag on: the filter menu narrows by type and folder`, async () => {
         const { context: ctx, page: p, errors: errs } = await open({ width, height: 844 });
         try {
           await p.goto(`${base}/me`);
           await card(p, 'q4-plan').waitFor();
-          const filters = p.getByRole('group', { name: 'Filter by type and folder' });
-          const scrolls = await filters.evaluate((el) => getComputedStyle(el).overflowX === 'auto' && getComputedStyle(el).flexWrap === 'nowrap');
-          assert.ok(scrolls, 'the chip row scrolls sideways');
-          const sheets = filters.getByRole('button', { name: 'Sheets (2)' });
-          await sheets.click();
-          assert.equal(await sheets.getAttribute('aria-pressed'), 'true');
+          const pick = async (name) => {
+            await p.locator('.mda-pfilter-btn').click();
+            await p.getByRole('menuitem', { name }).click();
+          };
+          await pick(/^Sheets/);
           assert.deepEqual(await shownSlugs(p), ['budget-2027', 'hiring-plan']);
           assert.match(p.url(), /type=sheet/);
+          assert.equal(await p.locator('.mda-pfilter-btn').getAttribute('aria-label'), 'Filter (on)');
           await shot(p, `a-phone-${width}-type-sheets`);
-          await sheets.click();
+          await pick(/^Sheets/);
           assert.equal((await shownSlugs(p)).length, 6);
-          const planning = filters.locator(`.mda-folder[data-folder-id="${FOLDER}"]`);
-          assert.equal(await planning.locator('.mda-chip-n').textContent(), '2');
+          assert.equal(await p.locator('.mda-pfilter-btn').getAttribute('aria-label'), 'Filter');
+          await p.locator('.mda-pfilter-btn').click();
+          const planning = p.locator(`.mda-folder[data-folder-id="${FOLDER}"]`);
+          assert.equal(await planning.locator('.mda-pmenu-n').textContent(), '2');
+          assert.equal(await p.getByRole('menuitem', { name: 'New folder' }).count(), 1);
+          await shot(p, `a-phone-${width}-filter-menu`);
           await planning.click();
-          assert.equal(await planning.getAttribute('aria-pressed'), 'true');
           assert.deepEqual(await shownSlugs(p), ['ideas', 'q4-plan']);
           assert.match(p.url(), new RegExp(`folder=${FOLDER}`));
           await p.reload();
           await card(p, 'ideas').waitFor();
-          const inSight = await filters.locator(`.mda-folder[data-folder-id="${FOLDER}"]`).evaluate((chip) => {
-            const r = chip.getBoundingClientRect();
-            return r.left >= 0 && r.right <= innerWidth;
-          });
-          assert.ok(inSight, 'the chosen folder chip is scrolled into sight');
           // The open folder's path, with its ⋯ (Share, Rename, Delete).
           const crumbs = p.getByRole('navigation', { name: 'Folder path' });
           await crumbs.getByRole('button', { name: 'Planning' }).waitFor();
@@ -531,16 +569,15 @@ async function startServer(worker, env) {
           for (const want of ['Share', 'Rename', 'Delete folder']) assert.ok(folderItems.includes(want), `folder menu: ${folderItems.join(', ')}`);
           await p.keyboard.press('Escape');
           // Type and folder together.
-          await filters.getByRole('button', { name: /^Docs/ }).click();
+          await pick(/^Docs/);
           assert.deepEqual(await shownSlugs(p), ['ideas', 'q4-plan']);
-          await filters.getByRole('button', { name: /^Slides/ }).click();
+          await pick(/^Slides/);
           assert.deepEqual(await shownSlugs(p), []);
           await p.locator('.mda-phone .empty').getByText('No slides in Planning yet.').waitFor();
           await shot(p, `a-phone-${width}-folder`);
-          await filters.getByRole('button', { name: /^Slides/ }).click();
-          await filters.getByRole('button', { name: 'All folders' }).click();
+          await pick(/^Slides/);
+          await pick('All folders');
           assert.equal((await shownSlugs(p)).length, 6);
-          assert.equal(await filters.getByRole('button', { name: 'New folder' }).count(), 1);
           assert.deepEqual(errs, []);
         } finally { await ctx.close(); }
       });
@@ -577,19 +614,20 @@ async function startServer(worker, env) {
           await p.locator('.mk-tile[data-kind="doc"]').waitFor();
           await shot(p, `a-phone-${width}-new`);
           await p.keyboard.press('Escape');
-          // Recent, Comments, Trash: chips in the same scrolling row.
-          const views = p.getByRole('tablist', { name: 'My docs views' });
-          await views.getByRole('tab', { name: /Recent/ }).click();
+          // Recent, Comments, Trash: the view menu at the left of the toolbar.
+          const views = { go: async (name) => { await p.locator('.mda-pview-btn').click(); await p.getByRole('menuitem', { name }).click(); } };
+          await views.go(/^Recent/);
           await card(p, 'bobs-doc').waitFor();
           assert.match(await card(p, 'bobs-doc').locator('.doc-meta').textContent(), /^bob · visited 5h ago/);
-          await views.getByRole('tab', { name: 'Trash' }).click();
+          await views.go('Trash');
           await p.locator('#pane-trash').waitFor();
           assert.match(p.url(), /view=trash/);
-          await views.getByRole('tab', { name: 'Comments' }).click();
+          await views.go('Comments');
           await p.locator('#pane-feedback').waitFor();
-          await views.getByRole('tab', { name: /All docs/ }).click();
+          await views.go(/^All docs/);
           await card(p, 'q4-plan').waitFor();
           // Search: the same filter as on a wide screen, the folder in the meta line.
+          await p.getByRole('button', { name: 'Search docs' }).click();
           await p.locator('.mda-psearch input').fill('ideas');
           assert.deepEqual(await shownSlugs(p), ['ideas']);
           assert.match(await card(p, 'ideas').locator('.doc-meta').textContent(), /^in Planning · /);

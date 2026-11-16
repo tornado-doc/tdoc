@@ -1735,6 +1735,8 @@ const server = http.createServer(async (req, res) => {
       if (!i) return i;
       if (Array.isArray(body.ids) && body.ids.includes(i.id)) return { ...i, read: true };
       if (body.comment_id && i.comment_id === body.comment_id) return { ...i, read: true };
+      // A doc's unread comment, reply and mention rows (My docs' Needs you).
+      if (typeof body.slug === 'string' && body.slug && i.slug === body.slug && ['comment', 'reply', 'mention'].includes(i.kind)) return { ...i, read: true };
       return i;
     });
     writeJson(file, { items });
@@ -2487,7 +2489,9 @@ const server = http.createServer(async (req, res) => {
   // answered — the Worker's event log is what makes "already answered, and
   // deleted since" a knowable thing. Local preview is one person on one
   // machine; the loop this protects against is a published doc being pulled
-  // and regenerated.
+  // and regenerated. A reply does record the doc's version when it landed
+  // (doc_version), which publishing carries into the Worker's log as the
+  // baseline for a "live now" follow-up there.
   if (p === '/api/agent/reply' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
@@ -2495,12 +2499,21 @@ const server = http.createServer(async (req, res) => {
     const { parent_id, status: agentStatus, applied_in } = body;
     const text = typeof body.text === 'string' ? body.text.trim() : body.text;
     if (!slug || !parent_id || !text) return json(res, 400, { error: 'invalid slug or missing parent_id/text' });
+    // Same rule as the Worker: a version is a whole number.
+    if (applied_in !== undefined && applied_in !== null && applied_in !== ''
+        && !(Number.isInteger(Number(applied_in)) && Number(applied_in) >= 1)) {
+      return json(res, 400, { error: 'invalid_applied_in', message: 'applied_in must be a whole version number (1, 2, ...).' });
+    }
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
     const parent = all.find(c => c.id === parent_id)
       || all.find(c => (c.replies || []).some(r => r.id === parent_id));
     if (!parent) return json(res, 404, { error: 'parent_not_found' });
     if (!Array.isArray(parent.replies)) parent.replies = [];
+    const verdict = Object.prototype.hasOwnProperty.call(AGENT_STATUS_EMOJI, agentStatus) ? agentStatus : null;
+    let latest = 0;
+    try { latest = latestLocalVersion(slug, JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8'))); }
+    catch { latest = latestLocalVersion(slug, null); }
     const agent = agentIdentity(body, process.env);
     parent.agent_actor = agent.login;
     const reply = {
@@ -2511,7 +2524,10 @@ const server = http.createServer(async (req, res) => {
       // the request version, then 1) so the fold can hide it on earlier ones.
       version: Number(applied_in != null ? applied_in : body.version) || 1,
       author: agent,
-      agent_status: Object.prototype.hasOwnProperty.call(AGENT_STATUS_EMOJI, agentStatus) ? agentStatus : null,
+      agent_status: verdict,
+      // The doc's latest version as this reply lands: what a later "live
+      // now" follow-up is compared to (the Worker's agentReplyGate).
+      ...(latest ? { doc_version: latest } : {}),
       created: new Date().toISOString(),
       reactions: {},
     };

@@ -341,6 +341,39 @@ function waitReady(port, ms = 5000) {
     if (/tdoc_home-card|og:image:width|twitter:image:alt/.test(doc)) throw new Error('plain doc took the home card tags');
   });
 
+  // Local preview does not gate agent replies (the Worker does, #349): who
+  // may reply here is unchanged. A reply records the doc's version when it
+  // landed (doc_version), which publishing carries into the Worker's log as
+  // the baseline for its "live now" follow-up; applied_in is a whole number.
+  {
+    const GATE = 'api-agent-' + Date.now();
+    const gateDir = path.join(TMP_DIR, GATE);
+    fs.mkdirSync(path.join(gateDir, 'v1'), { recursive: true });
+    fs.mkdirSync(path.join(gateDir, 'v2'), { recursive: true });
+    fs.writeFileSync(path.join(gateDir, 'v1', 'index.html'), '<h1>v1</h1>');
+    fs.writeFileSync(path.join(gateDir, 'v2', 'index.html'), '<h1>v2</h1>');
+    fs.writeFileSync(path.join(gateDir, 'meta.json'), JSON.stringify({ title: 'agent', versions: [{ n: 1 }, { n: 2 }] }));
+    fs.writeFileSync(path.join(gateDir, 'comments.json'), '[]');
+    const id = (await req('POST', '/api/comments', { slug: GATE, version: 1, text: 'fix the intro', anchor: null })).body.id;
+
+    await t('local agent replies are not gated: a second agent reply in a row still lands', async () => {
+      const a = await req('POST', '/api/agent/reply', { slug: GATE, parent_id: id, text: 'Working on it.', agent_login: 'claude' });
+      const b = await req('POST', '/api/agent/reply', { slug: GATE, parent_id: id, text: 'Rewrote it again.', status: 'answered', agent_login: 'claude' });
+      const c = await req('POST', '/api/agent/reply', { slug: GATE, parent_id: id, text: 'And once more.', status: 'answered', agent_login: 'claude' });
+      for (const r of [a, b, c]) if (r.status !== 200 || !r.body.id || r.body.skipped) throw new Error(`refused: ${JSON.stringify(r.body)}`);
+    });
+
+    await t('a local agent reply records the doc version it landed on', async () => {
+      const r = await req('POST', '/api/agent/reply', { slug: GATE, parent_id: id, text: 'Live now.', status: 'applied', applied_in: 2, agent_login: 'claude' });
+      if (r.status !== 200 || r.body.doc_version !== 2) throw new Error(`doc_version: ${JSON.stringify(r.body)}`);
+    });
+
+    await t('local applied_in must be a whole number (2.5 is refused)', async () => {
+      const r = await req('POST', '/api/agent/reply', { slug: GATE, parent_id: id, text: 'Fixed.', status: 'applied', applied_in: 2.5, agent_login: 'claude' });
+      if (r.status !== 400 || r.body.error !== 'invalid_applied_in') throw new Error(`${r.status} ${JSON.stringify(r.body)}`);
+    });
+  }
+
   // Cleanup: kill the spawned server + remove the temp dir.
   shutdown();
 
