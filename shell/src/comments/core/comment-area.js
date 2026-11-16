@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { canSeeHandoff, handoffWaitState, isHandoffInFlight, summarizeHandoffSurfaces } from './handoff-state.js';
-import { isThreadUnread, markThreadSeen, mergeSeenMap, readSeenMap, reconcileSeenMap } from './thread-seen.js';
+import { THREAD_SEEN_EVENT, isThreadUnread, markThreadSeen, mergeSeenMap, readSeenMap, reconcileSeenMap } from './thread-seen.js';
 import { DEFAULT_FILTER, DEFAULT_SORT, normalizeFilter, normalizeSort, queryThreads } from './comment-query.js';
 import { hasReplyDraft, subscribeReplyDrafts } from '../../document/reply-draft.js';
 import { isFeatureOn } from '../../feature-flags.js';
@@ -113,6 +113,9 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
     if (!syncSeen || !slug || !save || !Object.keys(entries).length) return;
     Promise.resolve(save(slug, entries)).then((body) => {
       if (!body?.seen) return;
+      // The server read the bell's rows for these threads too (one read
+      // state): the bell on this page counts again now, not at its next poll.
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event(THREAD_SEEN_EVENT));
       // What the server said about what was sent: a thread it does not hold
       // leaves the cache, a stamp from a clock running ahead is lowered.
       const reconciled = reconcileSeenMap(slug, entries, body.seen, body.unknown, body.capped);

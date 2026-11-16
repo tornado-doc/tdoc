@@ -16084,11 +16084,22 @@ function applyInboxEvent(inbox, ev) {
 // Needs you, marking a doc's item done). `slug` + `seen` (thread id -> ms):
 // only the rows of those threads that the person has seen up to -- what they
 // read on the doc page needs nobody's attention in the bell any more.
-function markInboxRead(inbox, { ids, comment_id, slug, seen } = {}) {
+// `slug` + `seen` + `viewed` (thread ids marked seen by this request) and
+// `viewed_at` (ISO, when): a reaction row on one of those threads, from
+// before then, goes too. A reaction is not thread activity, so no seen
+// stamp ever reaches its time; the thread being marked seen after it came
+// is what says it was seen.
+// `ids_at` (row id -> its `at`): those rows, but only while they still say
+// what was looked at -- a row that took a newer event since (a grouped row
+// moves its `at`) stays unread (reconcileInboxSeen decides outside the lane).
+function markInboxRead(inbox, { ids, comment_id, slug, seen, viewed, viewed_at, ids_at } = {}) {
+  const viewedSet = Array.isArray(viewed) ? new Set(viewed) : null;
+  const viewedMs = Date.parse(viewed_at || '') || 0;
   const items = (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
     if (!i) return i;
     if (Array.isArray(ids) && ids.includes(i.id)) return { ...i, read: true };
     if (comment_id && i.comment_id === comment_id) return { ...i, read: true };
+    if (ids_at && typeof ids_at === 'object' && !i.read && typeof ids_at[i.id] === 'string' && ids_at[i.id] === i.at) return { ...i, read: true };
     if (slug && !i.read && i.slug === slug && DOC_ACTIVITY_INBOX_KINDS.has(i.kind)) {
       if (!seen) return { ...i, read: true };
       // Read only when every thread the row covers has been seen up to its
@@ -16097,6 +16108,8 @@ function markInboxRead(inbox, { ids, comment_id, slug, seen } = {}) {
       const threads = inboxRowThreads(i);
       if (threads && threads.every(([id, ms]) => (Number(seen[id]) || 0) >= ms)) return { ...i, read: true };
     }
+    if (slug && seen && viewedSet && viewedMs && !i.read && i.slug === slug && i.kind === 'reaction'
+      && viewedSet.has(i.thread_id || i.comment_id) && (Date.parse(i.at) || 0) <= viewedMs) return { ...i, read: true };
     return i;
   });
   return { items };
@@ -16104,13 +16117,15 @@ function markInboxRead(inbox, { ids, comment_id, slug, seen } = {}) {
 
 // The rows of a doc's threads this person has now seen go read, in every
 // inbox they have (loadViewerInboxes), through each inbox's lane. Only an
-// inbox that holds such a row is written.
-async function markInboxSeen(env, session, slug, seen) {
+// inbox that holds such a row is written. `viewed`: the threads this
+// request marked (their reaction rows go too, markInboxRead).
+async function markInboxSeen(env, session, slug, seen, viewed = null) {
   if (!seen || !Object.keys(seen).length) return;
+  const mark = { slug, seen, ...(Array.isArray(viewed) && viewed.length ? { viewed, viewed_at: new Date().toISOString() } : {}) };
   for (const part of await loadViewerInboxes(env, session)) {
-    const next = markInboxRead(part.inbox, { slug, seen });
+    const next = markInboxRead(part.inbox, mark);
     if (JSON.stringify(next) === JSON.stringify(part.inbox)) continue;
-    await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark: { slug, seen } });
+    await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark });
   }
 }
 
@@ -16118,6 +16133,155 @@ async function markInboxSeen(env, session, slug, seen) {
 function applyInboxRead(inbox, mark) {
   if (mark && mark.all) return { items: (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => (i ? { ...i, read: true } : i)) };
   return markInboxRead(inbox, mark || {});
+}
+
+// ── One read state: bell <-> thread-seen ────────────────────────────────
+// The bell (inbox rows) and the doc's read state (thread-seen, comments
+// core) are two records of one thing: whether the person has seen a
+// thread's newest activity. Each side moves the other:
+//  - a thread marked seen (doc page, feedback widget, Needs you) reads its
+//    bell rows (markInboxSeen, from handleThreadSeen);
+//  - a bell row read (a click, Mark all read, Needs you's check) marks the
+//    threads it covers seen up to the activity it was about (bellThreadsRead
+//    + markThreadsSeenFromBell, from POST /api/notifications/read);
+//  - rows left unread although their thread was already seen -- read before
+//    either sync existed, or on another surface -- are found when the bell
+//    loads (reconcileInboxSeen) and go read then.
+
+// The threads the rows that `mark` turns read speak for: slug -> { thread
+// id -> newest ms }. Comment, reply and mention rows only: a reaction or an
+// access request is not a thread's activity. A row that does not know all
+// of its threads (inboxRowThreads null) still names its newest one.
+function bellThreadsRead(items, mark) {
+  const before = { items: (Array.isArray(items) ? items : []).filter(Boolean) };
+  const after = applyInboxRead(before, mark);
+  const out = new Map();
+  after.items.forEach((row, n) => {
+    const was = before.items[n];
+    if (!row || !was || was.read || !row.read || !DOC_ACTIVITY_INBOX_KINDS.has(row.kind) || !isValidSlug(row.slug)) return;
+    const threads = inboxRowThreads(row) || [[row.thread_id || row.comment_id, Date.parse(row.at) || 0]];
+    for (const [id, ms] of threads) {
+      if (typeof id !== 'string' || !THREAD_SEEN_ID_RE.test(id) || !(ms > 0)) continue;
+      if (!out.has(row.slug)) out.set(row.slug, {});
+      const map = out.get(row.slug);
+      map[id] = Math.max(Number(map[id]) || 0, ms);
+    }
+  });
+  return out;
+}
+
+// A bell read reaches the doc's read state: the person's thread-seen record
+// for each doc is raised (never lowered) to the activity the rows were about,
+// and My docs' agent-reply notes on those threads go with it (as a seen POST
+// would). Bounded: the newest BELL_SEEN_SYNC_SLUGS docs (Mark all read can
+// span many); per doc one read and at most one write, plus one read of the
+// person's agent-unread record(s) in all. Never fails the bell's request.
+const BELL_SEEN_SYNC_SLUGS = 20;
+async function markThreadsSeenFromBell(env, session, bySlug) {
+  if (!bySlug || !bySlug.size) return;
+  const who = await threadSeenWho(env, session);
+  if (!who) return;
+  const now = Date.now();
+  const raised = new Map();
+  for (const [slug, marks] of [...bySlug.entries()].slice(0, BELL_SEEN_SYNC_SLUGS)) {
+    const key = `thread-seen:${slug}:${who}`;
+    let stored = {};
+    try { stored = cleanThreadSeen(JSON.parse(await env.META.get(key) || '{}')); } catch { stored = {}; }
+    const next = { ...stored };
+    let changed = false;
+    for (const [id, ms] of Object.entries(cleanThreadSeen(marks, { now }))) {
+      if (ms > (Number(next[id]) || 0)) { next[id] = ms; changed = true; }
+    }
+    if (changed) {
+      const kept = Object.fromEntries(Object.entries(next).sort((a, b) => b[1] - a[1]).slice(0, THREAD_SEEN_MAX_ENTRIES));
+      try { await env.META.put(key, JSON.stringify(kept), { expirationTtl: THREAD_SEEN_TTL_SECONDS }); } catch { continue; }
+    }
+    raised.set(slug, next);
+  }
+  try { await clearAgentUnreadMany(env, session, raised); } catch {}
+}
+
+// Rows still unread whose threads the person has already seen go read when
+// the bell loads. Bounded per call: the INBOX_RECONCILE_SLUGS
+// docs with the newest unread comment/reply/mention rows -- one thread-seen
+// read each, plus the account lookup threadSeenWho makes -- and, for a
+// grouped row that does not know its threads in full (stored before rows
+// kept them, or past the cap), at most INBOX_RECONCILE_COMMENT_READS reads
+// of a doc's comments. Nothing unread to check: no read at all. Writes only
+// when a row changes, one lane op per inbox that holds one.
+const INBOX_RECONCILE_SLUGS = 10;
+const INBOX_RECONCILE_COMMENT_READS = 3;
+async function reconcileInboxSeen(env, session, parts) {
+  const rows = mergeInboxes(parts).items.filter((i) => i && !i.read && DOC_ACTIVITY_INBOX_KINDS.has(i.kind) && isValidSlug(i.slug));
+  if (!rows.length) return parts;
+  const slugs = [];
+  for (const row of rows) {
+    if (!slugs.includes(row.slug)) slugs.push(row.slug);
+    if (slugs.length >= INBOX_RECONCILE_SLUGS) break;
+  }
+  const who = await threadSeenWho(env, session);
+  if (!who) return parts;
+  const seenBySlug = new Map(await Promise.all(slugs.map(async (slug) => {
+    let seen = {};
+    try { seen = cleanThreadSeen(JSON.parse(await env.META.get(`thread-seen:${slug}:${who}`) || '{}')); } catch { seen = {}; }
+    return [slug, seen];
+  })));
+  const keys = actorKeys(session);
+  const commentReads = new Map();
+  const idsAt = {};
+  for (const row of rows) {
+    const seen = seenBySlug.get(row.slug);
+    if (!seen || !Object.keys(seen).length) continue;
+    let threads = inboxRowThreads(row);
+    if (!threads && row.kind === 'comment') {
+      // The row covers the doc's `count` newest top-level comments by others
+      // up to its time. Checked against exactly those: one the person has
+      // not seen keeps it unread.
+      if (!commentReads.has(row.slug)) {
+        if (commentReads.size >= INBOX_RECONCILE_COMMENT_READS) continue;
+        let list = [];
+        try { list = await readComments(env, row.slug); ensureMigrated(list); list = snapshotList(list, Infinity); } catch { list = null; }
+        commentReads.set(row.slug, list);
+      }
+      const list = commentReads.get(row.slug);
+      if (!list) continue;
+      const upTo = Date.parse(row.at) || 0;
+      const count = Math.max(1, Math.floor(Number(row.count)) || 1);
+      const covered = list
+        .filter((c) => c && c.id && !authoredBy(keys, c) && (Date.parse(c.created) || 0) <= upTo)
+        .sort((a, b) => (Date.parse(b.created) || 0) - (Date.parse(a.created) || 0))
+        .slice(0, count);
+      if (covered.length < count) continue;
+      threads = covered.map((c) => [c.id, Date.parse(c.created) || 0]);
+    }
+    if (threads && threads.every(([id, ms]) => (Number(seen[id]) || 0) >= ms)) idsAt[row.id] = row.at;
+  }
+  if (!Object.keys(idsAt).length) return parts;
+  const mark = { ids_at: idsAt };
+  for (const part of parts) {
+    if (JSON.stringify(markInboxRead(part.inbox, mark)) === JSON.stringify(part.inbox)) continue;
+    try {
+      const stored = await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark });
+      if (stored && Array.isArray(stored.items)) part.inbox = stored;
+    } catch {}
+  }
+  return parts;
+}
+
+// The bell's count is polled (every 30s per open page, My docs included):
+// there, reconciling runs at most once per INBOX_RECONCILE_EVERY_MS per
+// person in this isolate. Opening the bell's list (which Needs you reads
+// too) always runs it. /api/me's row badges never pay for it: they count
+// the stored rows, which the bell's pass has already put right.
+const INBOX_RECONCILE_EVERY_MS = 5 * 60 * 1000;
+const inboxReconciledAt = new Map();
+async function reconcileInboxSeenThrottled(env, session, parts) {
+  const id = parts.map((p) => p.key).join('|');
+  const now = Date.now();
+  if (now - (inboxReconciledAt.get(id) || 0) < INBOX_RECONCILE_EVERY_MS) return parts;
+  if (inboxReconciledAt.size > 5000) inboxReconciledAt.clear();
+  inboxReconciledAt.set(id, now);
+  try { return await reconcileInboxSeen(env, session, parts); } catch { return parts; }
 }
 
 // One person can be several actor keys -- a GitHub handle and the email
@@ -16891,10 +17055,19 @@ async function loadAgentUnread(env, session) {
 }
 // `seen`: thread id -> ms the person has seen it up to.
 async function clearAgentUnread(env, session, slug, seen) {
+  return clearAgentUnreadMany(env, session, new Map([[slug, seen]]));
+}
+// `bySlug`: slug -> seen, several docs in one pass (a bell read spanning
+// docs, markThreadsSeenFromBell): each record read once, written at most once.
+async function clearAgentUnreadMany(env, session, bySlug) {
+  if (!bySlug || !bySlug.size) return;
   for (const part of await loadAgentUnread(env, session)) {
-    // Written only when this person's record holds this doc.
-    if (!part.items.some((i) => i.slug === slug)) continue;
-    const kept = part.items.filter((i) => !(i.slug === slug && Number(seen[i.thread] || 0) >= Date.parse(i.at)));
+    // Written only when this person's record holds one of these docs.
+    if (!part.items.some((i) => bySlug.has(i.slug))) continue;
+    const kept = part.items.filter((i) => {
+      const seen = bySlug.get(i.slug);
+      return !(seen && Number(seen[i.thread] || 0) >= Date.parse(i.at));
+    });
     if (kept.length === part.items.length) continue;
     if (kept.length) await env.META.put(part.key, JSON.stringify({ items: kept }), { expirationTtl: AGENT_UNREAD_TTL_SECONDS });
     else await env.META.delete(part.key);
@@ -19489,8 +19662,9 @@ async function handleThreadSeen(env, req, url) {
     for (const [id, stamp] of Object.entries(cleanThreadSeen(body.seen))) upTo[id] = Math.max(stamp, Number(upTo[id]) || 0);
     try { await clearAgentUnread(env, session, slug, upTo); } catch {}
     // The bell's rows for those threads too: a comment read on the page is
-    // not still waiting in Needs you (Julie, 2026-11-14).
-    try { await markInboxSeen(env, session, slug, upTo); } catch {}
+    // not still waiting in Needs you (Julie, 2026-11-14). The threads this
+    // request names take their reaction rows with them.
+    try { await markInboxSeen(env, session, slug, upTo, Object.keys(cleanThreadSeen(body.seen))); } catch {}
   };
   // Nothing newer than what is kept: no comment read, no write.
   const asked = Object.entries(cleanThreadSeen(body.seen)).filter(([id, stamp]) => stamp > (stored[id] || 0));
@@ -29625,15 +29799,20 @@ const tdocHandlers = {
     if (p === '/api/notifications' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const parts = await loadViewerInboxes(env, s);
+      let parts = await loadViewerInboxes(env, s);
       if (!parts.length) return json({ error: 'sign_in_required' }, { status: 401 });
       const offset = Number(url.searchParams.get('offset') || 0);
+      // Opening the list: rows whose threads were already seen go read first.
+      if (!offset) {
+        try { parts = await reconcileInboxSeen(env, s, parts); } catch {}
+        inboxReconciledAt.set(parts.map((part) => part.key).join('|'), Date.now());
+      }
       return json(await redactCommentEmails(pageInbox(mergeInboxes(parts), { offset }), await emailPrivacyFor(env, s, 'me:inbox', null)));
     }
     if (p === '/api/notifications/unread' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const parts = await loadViewerInboxes(env, s);
+      const parts = await reconcileInboxSeenThrottled(env, s, await loadViewerInboxes(env, s));
       return json({ unread: inboxUnread(mergeInboxes(parts)) });
     }
     if (p === '/api/notifications/read' && method === 'POST') {
@@ -29653,12 +29832,16 @@ const tdocHandlers = {
         comment_id: typeof body.comment_id === 'string' ? body.comment_id : undefined,
         ...(typeof body.slug === 'string' && isValidSlug(body.slug) ? { slug: body.slug } : {}),
       };
+      // The threads these rows were about, as they stand before the mark:
+      // reading them in the bell is seeing them (one read state).
+      const threadsRead = bellThreadsRead(mergeInboxes(parts).items, mark);
       for (const part of parts) {
         // Read first, outside the lane: most marks change nothing.
         if (JSON.stringify(applyInboxRead(part.inbox, mark)) === JSON.stringify(part.inbox)) continue;
         const stored = await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark });
         if (stored && Array.isArray(stored.items)) part.inbox = stored;
       }
+      try { await markThreadsSeenFromBell(env, s, threadsRead); } catch {}
       return json({ ok: true, unread: inboxUnread(mergeInboxes(parts)) });
     }
 
