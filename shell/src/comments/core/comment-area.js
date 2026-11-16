@@ -181,11 +181,13 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
     return true;
   }, [slug, push]);
 
+  // Opening a thread is seeing it, with or without read-when-seen: in-view
+  // reading only covers threads with an unread agent turn, and a thread of
+  // people's replies opened on the page must still read its bell rows.
   useEffect(() => {
-    if (autoRead) return;
     const selected = comments?.find((comment) => comment.id === selectedId);
     if (selected) mark([selected]);
-  }, [autoRead, comments, selectedId, mark]);
+  }, [comments, selectedId, mark]);
   // A card with a reply being typed stays where it is when the thread's phase
   // changes under it (an agent answers, someone resolves): it leaves when the
   // reply is posted or the viewer changes tab, and its draft goes with the
