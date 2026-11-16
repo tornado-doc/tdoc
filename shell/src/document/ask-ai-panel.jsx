@@ -4,7 +4,7 @@ import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { AppButton } from '../ui/button.jsx';
 import { AppCheckbox } from '../ui/checkbox.jsx';
 import { readStored, writeStored } from '../safe-storage.js';
-import { agentMentionName, byRelevance, sameTarget } from './agent-choices.js';
+import { agentMentionName, byRelevance, sameTarget, setupLinkProps } from './agent-choices.js';
 import { AgentMenuItems } from './agent-menu.jsx';
 import { Author, CommentMessageText, ReplyMessage, authorLine } from './comment-card.jsx';
 import { HandoffSendResult, defaultInstruction, useHandoffSend } from './notify-handoff.jsx';
@@ -207,6 +207,11 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
   disabledChoices = [], guestAction = null,
   turns, busy, remaining, onAsk, onKeep, onPost, send = null, cta = null,
   activityOpen, onActivityOpen, unreadCount, signInToAsk = false, onConnect = null, children,
+  // Where this viewer connects an agent, while they may send this doc's
+  // comments to one but none is connected (sendToAgentSetup). Set, the panel
+  // says so whoever answers questions (tdoc AI included): without it the
+  // owner saw tdoc AI here and no way to their own agent.
+  setupHref = null,
   // Ask/Edit v2 (flag askEditV2): one input, no Ask / Edit switch. tdoc AI
   // answers a question or proposes edits that show in the doc; an agent
   // that may edit gets the request as a handoff and replies the same way.
@@ -270,7 +275,8 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
       : unified ? 'Questions get a private answer · changes show in the doc for you to accept' : 'Answers only · won’t edit this document'}</div>
     {teamAgent ? <div className="tdoc-ask-notice tdoc-ask-public-notice" role="note">{teamAgent} is a team agent: its answer is posted as a comment everyone can see</div> : null}
     {noFreeAnswers ? <div className="tdoc-ask-notice">No free tdoc AI answers left. <a href="/start">Connect my agent</a> to keep asking.</div> : null}
-    {!targets.length && !signInToAsk ? <div className="tdoc-ask-notice">Connect an agent to ask about this document. <a href="/start">Connect my agent</a></div> : null}
+    {setupHref && !noFreeAnswers ? <div className="tdoc-ask-notice tdoc-ask-connect-notice">No agent connected yet. <a href={setupHref} {...setupLinkProps(setupHref)}>Connect your agent</a> to send it comments from here.</div>
+      : !targets.length && !signInToAsk ? <div className="tdoc-ask-notice">Connect an agent to ask about this document. <a href="/start">Connect my agent</a></div> : null}
     </>}
     {cta}
     {turns.length ? <div className="tdoc-ask-conversation" aria-live="polite">

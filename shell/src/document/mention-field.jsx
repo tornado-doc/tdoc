@@ -2,9 +2,9 @@ import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, 
 import { createPortal } from 'react-dom';
 import { usePortalContainer } from '../ui/portal.js';
 import { useGithubUserSearch } from './github-user-search.js';
-import { AGENT_TAG_JOINER, agentDisplayName, byRelevance, agentFacts, agentMentionName, matchAgentChoices, taggedAgentSpan, targetKey } from './agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, byRelevance, agentFacts, agentMentionName, matchAgentChoices, sendToAgentWords, taggedAgentSpan, targetKey } from './agent-choices.js';
 import { ChevronDown } from 'lucide-react';
-import { AppMenu } from '../ui/menu.jsx';
+import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { AgentMenuItems, agentTag } from './agent-menu.jsx';
 import { ProviderMark, recipientOption } from './notify-handoff.jsx';
 import { insertMention, matchMentionable, mentionQueryAt, mentionReason, splitMentions } from './mentions.js';
@@ -234,6 +234,12 @@ export function MentionField({
     caretAfterInsert.current = pill.start + tag.length + (value[pill.end] === ' ' ? 1 : 0);
     onChange(`${value.slice(0, pill.start)}${tag}${value.slice(pill.end)}`);
   };
+  // The pill's "Don't send" / "Don't ask": the tag goes, with the space after it.
+  const clearAgent = () => {
+    if (!pill) return;
+    caretAfterInsert.current = pill.start;
+    onChange(`${value.slice(0, pill.start)}${value.slice(pill.end).replace(/^ /, '')}`);
+  };
   const removeWholeTag = (event) => {
     if (!pill || event.metaKey || event.ctrlKey || event.altKey) return false;
     const el = event.currentTarget;
@@ -280,6 +286,13 @@ export function MentionField({
           guestAction={agentsOnOffer.guestAction}
           ai={agentsOnOffer.ai}
           onPick={swapAgent}
+          onClear={clearAgent}
+          // Its words are the old @agent switch's: "Don't send" for an agent
+          // the comment is handed to, "Don't ask" for one that only answers.
+          offLabel={sendToAgentWords(pill.target, {
+            editable: agentsOnOffer.sendToAgent?.kind === 'ready' ? agentsOnOffer.sendToAgent.choices : [],
+            offer: agentsOnOffer.choices || [],
+          }).off}
         />
       ) : null}
       {open && menuBox ? createPortal((
@@ -352,7 +365,7 @@ export function MentionField({
 const MIRRORED = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'wordSpacing',
   'textTransform', 'textIndent', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
   'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'tabSize'];
-function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, disabledChoices, guestAction, ai, onPick }) {
+function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, disabledChoices, guestAction, ai, onPick, onClear = null, offLabel = "Don't send" }) {
   const [box, setBox] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const measure = useRef(null);
@@ -407,6 +420,9 @@ function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, disabledChoi
           </span>
         )}
       >
+        {/* The one way to turn the agent off now that the @agent button
+            hides once a pill is in the text (owner, 2026-11-15). */}
+        {onClear ? <AppMenuItem className="tdoc-agent-menu-item tdoc-agent-menu-off" onClick={() => { setMenuOpen(false); onClear(); }}><span className="tdoc-agent-menu-name">{offLabel}</span></AppMenuItem> : null}
         <AgentMenuItems choices={byRelevance(choices)} preserveOrder disabledChoices={disabledChoices} guestAction={guestAction} ai={ai} current={pill.target} onPick={(t) => { setMenuOpen(false); onPick(t); }} />
       </AppMenu>
       <span aria-hidden="true">{`${value.slice(pill.end)}\u200b`}</span>

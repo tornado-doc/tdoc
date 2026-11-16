@@ -33,6 +33,7 @@ const OFFLINE = [
   'sheet-format.test.js',      // sheets: cell formats are whitelisted attributes (hostile values read as none), number formats, Excel codes, merges read and kept through structural edits
   'version-history.test.js', // history rows: same writer within 30 min grouped, paged, what changed cached, access, Restore
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
+  'tdoc-ai-mark.test.js',      // tdoc AI's face: tdoc_logo.svg's strokes + the Ask AI star on an accent badge; tdoc AI and unnamed agents wear it
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'no-async-wait-for-function.test.js', // browser tests never waitForFunction(async ...): Playwright does not await the predicate's value
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
@@ -71,6 +72,7 @@ const OFFLINE = [
   'write-with-ai.test.js',     // New -> Write it with tdoc AI: session + same-site only, dev/preview gate, sentence cap, rate limit, Ask allowance charged (3 units a draft)/refunded, model output escaped (no script/on*), v1 private to the caller; SSE: delta events then done/error, refund on failure or hang-up, JSON without Accept, preview streams its fixed draft
   'ask-doc.test.js',           // Ask this doc: off without a key, browser readers only, read gate, 5 per account, no address to the model
   'ai-timing.test.js',         // tdoc AI response times: one ai_timing log line per model call (Ask answer, Ask edit, Write with tdoc AI JSON/streamed), marks in ms, no prompt/doc/slug/account/upstream text
+  'agent-timing.test.js',      // agent reply metrics: one agent_timing log line per handoff milestone (delivered, picked_up, first_reply, suggested, new_version, outcome), stored times, weekly script; no comment/instruction/slug/agent name/account
   'reader-agent-ask.test.js',  // Send to my agent: a reader's own agents only, never anyone else's; the answer is the asker's alone
   'suggest-edits.test.js',     // Ask/Edit v2: tdoc AI suggests text edits; editors accept (publish) or reject; text only, no markup
   'suggest-handoff-lock.test.js', // Ask/Edit v2: a reply_as "suggestions" handoff refuses its agent's publish until it is dealt with or an hour passes; browser, other agents, non-dev and team docs untouched
@@ -300,6 +302,7 @@ const BROWSER = [
   'dev-mode-ui.test.js', // account menu Dev mode on/off and nested onboarding controls; two-press exit/replay, refused off the list, re-login skips the gate; desktop + phone
   'ui-fonts-ui.test.js', // no serif in product controls: doc page (bar, card, composer, menus, drawer, Ask AI, Agent activity), /me, account + team settings, /feedback; settings hints muted, /me views fit a phone; desktop + phone
   'comment-post-no-hang-ui.test.js', // "Posting…" ends at the POST on the widget, space page and doc page while later reads hang; Send to agent opens on the list already loaded
+  'no-agent-cta-ui.test.js', // signed in, no agent: Ask AI beside tdoc AI and the owner's copy-prompt card link to Settings › Agents; a reader is not asked to connect the owner's; the widget's Set up opens tdoc in a new tab; desktop + phone
   'feedback-own-agent-ui.test.js', // a joiner's @ lists their own agents (answer only) on the space page and the widget on tdoc's own pages; none on a third-party space; desktop + phone
   'feedback-share-ui.test.js', // feedback space Share = the doc Share dialog; owner moves it to a team; site mode offers the team first; desktop + phone
   'feedback-invites-ui.test.js', // share from the widget: copy link + invite by name; landing page; Join / Keep my own; switcher; SDK Join; Reconnect without a popup; desktop + phone

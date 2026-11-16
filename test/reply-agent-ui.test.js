@@ -388,7 +388,7 @@ async function dragSelect(page, phrase) {
       if ((await pill.textContent()).includes('·')) throw new Error(`pill: ${await pill.textContent()}`);
       if (!(await pill.getAttribute('title')).includes('·')) throw new Error(`pill tooltip without the full name: ${await pill.getAttribute('title')}`);
       const { menu } = await menuItems(page, form);
-      const picked = await rowsOf(menu, '.tdoc-agent-menu-item', '.tdoc-agent-menu-name');
+      const picked = await rowsOf(menu, '.tdoc-agent-menu-item:not(.tdoc-agent-menu-off)', '.tdoc-agent-menu-name');
       if (JSON.stringify(picked) !== JSON.stringify(typed)) throw new Error(`pill ${JSON.stringify(picked)} vs @ ${JSON.stringify(typed)}`);
       if (await menu.locator('.tdoc-agent-menu-item [aria-label="Picked"]').count() !== 1) throw new Error('no single check on the agent in the text');
       if (await menu.locator('.tdoc-agent-menu-connect').count() !== 1) throw new Error('no Connect my agent row');

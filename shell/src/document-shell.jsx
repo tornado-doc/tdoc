@@ -2242,6 +2242,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       disabledChoices={teamGuestsEnabled && config.teamManage?.guest ? (myAgent.state?.disabled_team_agents || []) : []}
       guestAction={guestAction}
       signInToAsk={signedOutAsk}
+      setupHref={sendToAgentSetupHref}
       onConnect={signedOutAsk ? () => {
         if (askAiDraft.trim()) {
           try { sessionStorage.setItem(`tdoc-ask-draft:${config.slug}`, askAiDraft); } catch {}
