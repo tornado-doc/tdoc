@@ -1735,7 +1735,8 @@
   //   frame -> shell: tdoc:bubble { rect|null, marks:{bold,italic} }
   //                   tdoc:slash { rect }              ("/" typed on an empty line)
   //   shell -> frame: tdoc:bubbleComment                (comment on the selection)
-  //                   tdoc:slashApply { command, value } / tdoc:slashCancel
+  //                   tdoc:blockApply { command, value, at:'slash'|'selection' }
+  //                   tdoc:slashCancel
   //                   tdoc:editCommitted { bodyHtml }   (that body is a version now)
   //                   tdoc:swapBody { bodyHtml, shape } (a newer version, in place)
   var bubbleShown = false, bubbleTimer = null, lastTypedAt = 0, slashBlock = null, pointerIsDown = false;
@@ -1774,6 +1775,12 @@
     if (!sel || sel.isCollapsed || !sel.rangeCount || !selectionInsideRoot() || !String(sel.toString()).trim()) { hideBubble(); return; }
     var marks = {};
     try { marks.bold = document.queryCommandState('bold'); marks.italic = document.queryCommandState('italic'); } catch (e) {}
+    // Which level the block the selection starts in is: Text / H1 / H2 / H3.
+    var startBlock = editBlockOf(sel.getRangeAt(0).startContainer);
+    var tag = startBlock ? startBlock.tagName.toLowerCase() : 'p';
+    var inList = startBlock && startBlock.closest('ul,ol');
+    var inQuote = startBlock && startBlock.closest('blockquote');
+    marks.block = /^h[1-3]$/.test(tag) ? tag : inList ? (inList.tagName === 'OL' ? 'ol' : 'ul') : inQuote ? 'quote' : 'p';
     bubbleShown = true;
     post({ type: 'tdoc:bubble', rect: selectionRect(sel.getRangeAt(0)), marks: marks });
   }
@@ -1842,15 +1849,40 @@
     findEditRoot().focus({ preventScroll: true });
     caretInto(block, true);
   }
-  function slashApply(command, value) {
-    var block = slashBlock;
-    slashBlock = null;
-    if (!modelessEdit() || !block || !document.contains(block)) return;
+  // One block command from the registry (shell block-commands.js), on the
+  // "/" line (at 'slash': the line is cleared, then turned or replaced) or
+  // on the selection's block (at 'selection': turned in place; an insert
+  // goes in after it).
+  var TURN_INTO = { p: 'p', h1: 'h1', h2: 'h2', h3: 'h3', quote: 'blockquote' };
+  function blockApply(command, value, at) {
+    if (!modelessEdit()) return;
     var root = findEditRoot();
-    root.focus({ preventScroll: true });
-    // The "/" that opened the menu goes; the line it was on becomes the block.
-    if (String(block.textContent) === '/') block.innerHTML = '<br>';
-    caretInto(block, false);
+    var block = null;
+    if (at === 'slash') {
+      block = slashBlock;
+      slashBlock = null;
+      if (!block || !document.contains(block)) return;
+      root.focus({ preventScroll: true });
+      // The "/" that opened the menu goes.
+      if (String(block.textContent) === '/') block.innerHTML = '<br>';
+      caretInto(block, false);
+    } else {
+      root.focus({ preventScroll: true });
+      restoreSelection();
+      var live = window.getSelection();
+      block = live && live.rangeCount ? editBlockOf(live.getRangeAt(0).startContainer) : null;
+      if (!block) return;
+      if (!TURN_INTO[command] && command !== 'ul' && command !== 'ol') {
+        // An insert goes after the top-level block the selection is in.
+        var top = block;
+        while (top.parentElement && top.parentElement !== root) top = top.parentElement;
+        var line = document.createElement('p');
+        line.innerHTML = '<br>';
+        top.parentNode.insertBefore(line, top.nextSibling);
+        block = line;
+        caretInto(block, false);
+      }
+    }
     var after = function (node) {
       var p = document.createElement('p');
       p.innerHTML = '<br>';
@@ -1858,10 +1890,15 @@
       return p;
     };
     try {
-      if (/^h[1-3]$/.test(command) || command === 'p') document.execCommand('formatBlock', false, command);
-      else if (command === 'ul') document.execCommand('insertUnorderedList', false, null);
-      else if (command === 'ol') document.execCommand('insertOrderedList', false, null);
-      else if (command === 'divider') {
+      var list = block.closest('ul,ol');
+      if (TURN_INTO[command]) {
+        // Out of a list first: formatBlock inside an <li> nests instead.
+        if (list) document.execCommand(list.tagName === 'OL' ? 'insertOrderedList' : 'insertUnorderedList', false, null);
+        document.execCommand('formatBlock', false, TURN_INTO[command]);
+      } else if (command === 'ul' || command === 'ol') {
+        var want = command === 'ol' ? 'OL' : 'UL';
+        if (!list || list.tagName !== want) document.execCommand(command === 'ol' ? 'insertOrderedList' : 'insertUnorderedList', false, null);
+      } else if (command === 'divider') {
         var hr = document.createElement('hr');
         block.parentNode.replaceChild(hr, block);
         caretInto(after(hr), false);
@@ -1886,7 +1923,7 @@
         block.parentNode.replaceChild(img, block);
         markAtomic(img);
         caretInto(after(img), false);
-      }
+      } else return;
     } catch (e) {}
     onEditInput();
   }
@@ -2498,7 +2535,7 @@
     else if (d.type === 'tdoc:diagramInsert') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!insertDiagram(d) });
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
     else if (d.type === 'tdoc:bubbleComment') bubbleComment();
-    else if (d.type === 'tdoc:slashApply') slashApply(String(d.command || ''), typeof d.value === 'string' ? d.value : '');
+    else if (d.type === 'tdoc:blockApply') blockApply(String(d.command || ''), typeof d.value === 'string' ? d.value : '', d.at === 'selection' ? 'selection' : 'slash');
     else if (d.type === 'tdoc:slashCancel') slashCancel();
     else if (d.type === 'tdoc:editCommitted') editCommitted(d.bodyHtml);
     else if (d.type === 'tdoc:swapBody') swapBody(d);

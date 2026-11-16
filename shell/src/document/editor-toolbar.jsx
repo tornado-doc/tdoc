@@ -8,11 +8,10 @@ import {
   Heading1,
   Heading2,
   Heading3,
-  Image,
   Italic,
   Link,
   List,
-  Minus,
+  MoreHorizontal,
   ListOrdered,
   Pencil,
   Quote,
@@ -20,7 +19,6 @@ import {
   RotateCcw,
   Save,
   Shapes,
-  Table,
   Undo2,
 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
@@ -170,14 +168,31 @@ export function StaleDraftDialog({ draft, currentVersion, onRestore, onKeep }) {
 // Modeless editing (flag modelessEdit) -------------------------------------
 // No Edit mode, no bar: the formatting tools come up over a selection (the
 // same buttons and commands as the editor bar above), "/" on an empty line
-// opens the block menu (AppMenu), and the bar's status text says whether the
-// draft is saved. The frame says where (tdoc:bubble / tdoc:slash rects, in
-// its own viewport); `frameBox` moves them into the page's.
+// opens the block menu (AppMenu), and the bar's status text says where the
+// draft is. Both menus are built from one registry (block-commands.js). The
+// frame says where (tdoc:bubble / tdoc:slash rects, in its own viewport);
+// `frameBox` moves them into the page's.
 const BUBBLE_HEIGHT = 40;
-// Half its width (five tools and Comment), to keep it on a phone's screen.
-const BUBBLE_HALF_WIDTH = 140;
+// Half its width, to keep it on a phone's screen.
+const BUBBLE_HALF_WIDTH = 170;
 
-export function SelectionToolbar({ rect, frameBox, marks = {}, narrow = false, onFormat, onComment }) {
+function CommandItem({ item, current, onPick }) {
+  const { Icon } = item;
+  return (
+    <AppMenuItem className={`tdoc-mode-item${current ? ' current' : ''}`}
+      {...(current === undefined ? {} : { role: 'menuitemradio', 'aria-checked': current })}
+      onClick={() => onPick(item)}>
+      {Icon ? <Icon size={15} /> : null}
+      <span>{item.label}</span>
+      {current ? <Check className="tdoc-mode-check" size={14} /> : null}
+    </AppMenuItem>
+  );
+}
+
+// [Text ▾] · B · I · link · Comment · [···]: the dropdown turns the block
+// into another kind (the registry's turnInto items), ··· holds the rest
+// (its insert items).
+export function SelectionToolbar({ rect, frameBox, marks = {}, narrow = false, commands, onFormat, onCommand, onComment }) {
   if (!rect || !frameBox) return null;
   const top = frameBox.top + rect.top;
   const bottom = frameBox.top + rect.bottom;
@@ -187,38 +202,56 @@ export function SelectionToolbar({ rect, frameBox, marks = {}, narrow = false, o
   const y = below ? bottom + 8 : top - BUBBLE_HEIGHT - 8;
   if (y < frameBox.top - BUBBLE_HEIGHT || y > window.innerHeight - BUBBLE_HEIGHT) return null;
   const center = frameBox.left + rect.left + rect.width / 2;
+  const turnInto = commands.filter((item) => item.kind === 'turnInto');
+  const more = commands.filter((item) => item.kind === 'insert');
+  const current = turnInto.find((item) => item.id === marks.block) || turnInto[0];
   return (
     <div className="tdoc-editor-toolbar tdoc-editor-bubble" role="toolbar" aria-label="Format selection"
       style={{ top: y, left: Math.max(8 + BUBBLE_HALF_WIDTH, Math.min(window.innerWidth - 8 - BUBBLE_HALF_WIDTH, center)) }}
       onPointerDown={(event) => event.stopPropagation()}>
       <div className="tdoc-editor-tools">
+        <AppMenu
+          align="start"
+          popupClassName="tdoc-block-menu tdoc-turn-into-menu"
+          trigger={(
+            <button type="button" className="tdoc-block-level" aria-label={`Turn into: ${current?.label || 'Text'}`} title="Turn into">
+              <span>{current?.short || 'Text'}</span>
+              <ChevronDown size={13} />
+            </button>
+          )}
+        >
+          {turnInto.map((item) => <CommandItem key={item.id} item={item} current={item.id === current?.id} onPick={onCommand} />)}
+        </AppMenu>
+        <span className="tdoc-editor-divider" />
         <ToolButton keepFocus label="Bold" icon={<Bold size={16} />} command="bold" pressed={marks.bold} onFormat={onFormat} />
         <ToolButton keepFocus label="Italic" icon={<Italic size={16} />} command="italic" pressed={marks.italic} onFormat={onFormat} />
-        <ToolButton keepFocus label="Heading" icon={<Heading2 size={17} />} command="formatBlock" value="h2" onFormat={onFormat} />
         <ToolButton keepFocus label="Add link" icon={<Link size={16} />} command="createLink" onFormat={onFormat} />
         <span className="tdoc-editor-divider" />
-        <button type="button" title="Comment" aria-label="Comment" onMouseDown={(event) => event.preventDefault()} onClick={onComment}>
+        <button type="button" className="tdoc-bubble-comment" title="Comment" aria-label="Comment" onMouseDown={(event) => event.preventDefault()} onClick={onComment}>
           <CommentIcon size={15} outline /> <span>Comment</span>
         </button>
+        {more.length ? (
+          <AppMenu
+            align="end"
+            popupClassName="tdoc-block-menu tdoc-insert-menu"
+            trigger={(
+              <button type="button" className="tdoc-block-more" aria-label="More blocks" title="More">
+                <MoreHorizontal size={16} />
+              </button>
+            )}
+          >
+            {more.map((item) => <CommandItem key={item.id} item={item} onPick={onCommand} />)}
+          </AppMenu>
+        ) : null}
       </div>
     </div>
   );
 }
 
-export const SLASH_ITEMS = [
-  { command: 'h1', label: 'Heading 1', Icon: Heading1 },
-  { command: 'h2', label: 'Heading 2', Icon: Heading2 },
-  { command: 'h3', label: 'Heading 3', Icon: Heading3 },
-  { command: 'ul', label: 'Bulleted list', Icon: List },
-  { command: 'ol', label: 'Numbered list', Icon: ListOrdered },
-  { command: 'table', label: 'Table', Icon: Table },
-  { command: 'image', label: 'Image', Icon: Image },
-  { command: 'divider', label: 'Divider', Icon: Minus },
-];
-
-// AppMenu, opened at the caret. Arrow keys, Enter, Esc and type-to-find are
-// the menu's own; closing without a choice puts the caret back after "/".
-export function SlashMenu({ rect, frameBox, onPick, onCancel }) {
+// AppMenu, opened at the caret, with every registry item. Arrow keys, Enter,
+// Esc and type-to-find are the menu's own; closing without a choice puts the
+// caret back after "/".
+export function SlashMenu({ rect, frameBox, commands, onPick, onCancel }) {
   const open = Boolean(rect && frameBox);
   const picked = React.useRef(false);
   useEffect(() => {
@@ -236,58 +269,41 @@ export function SlashMenu({ rect, frameBox, onPick, onCancel }) {
       // A pick closes the menu too, and may report the close first.
       onOpenChange={(next) => { if (!next) window.setTimeout(() => { if (!picked.current) onCancel(); }, 0); }}
       align="start"
-      popupClassName="tdoc-slash-menu"
+      popupClassName="tdoc-block-menu tdoc-slash-menu"
       trigger={<span className="tdoc-slash-anchor" aria-hidden="true"
         style={{ top: frameBox.top + rect.top, left: frameBox.left + rect.left, height: rect.height || 18 }} />}
     >
-      {SLASH_ITEMS.map(({ command, label, Icon }) => (
-        <AppMenuItem key={command} className="tdoc-mode-item" onClick={() => { picked.current = true; onPick(command); }}>
-          <Icon size={15} />
-          <span>{label}</span>
-        </AppMenuItem>
+      {commands.map((item) => (
+        <CommandItem key={item.id} item={item} onPick={(chosen) => { picked.current = true; onPick(chosen); }} />
       ))}
     </AppMenu>
   );
 }
 
-const SAVE_STATUS_TEXT = {
-  typing: 'Saving…',
-  publishing: 'Saving…',
-  draft: 'Saved',
-  published: 'Saved',
-  conflict: 'Saved in this browser',
-  error: 'Not saved yet',
+// The one status line beside "Edited …" in the bar: where the draft is.
+// Once it is published the slot is empty again and "Edited just now" lights
+// up (flashEdited, modeless-edit.jsx). No version numbers here.
+const SAVE_STATES = {
+  typing: { text: 'Saving…' },
+  publishing: { text: 'Saving…' },
+  draft: { text: 'Draft · only you can see', title: 'Publishes after 2 min idle or when you leave' },
+  conflict: { text: 'Draft · not published', title: 'Someone else just edited this doc. Your changes are kept in this browser.' },
+  error: { text: 'Draft · not published yet', title: 'Publishing failed; it tries again shortly. Your changes are kept in this browser.' },
 };
 
-// The one status line beside "Edited …" in the bar.
 export function EditorSaveStatus({ status }) {
-  const text = SAVE_STATUS_TEXT[status];
-  if (!text) return null;
-  const title = status === 'draft' || status === 'typing'
-    ? 'Saved in this browser. It becomes a new version when you pause for a couple of minutes or leave the page.'
-    : status === 'published' ? 'Saved as a new version.' : undefined;
-  return <span className="tdoc-editor-status tdoc-editor-autosave" role="status" title={title}>{text}</span>;
+  const state = SAVE_STATES[status];
+  if (!state) return null;
+  return (
+    <span className="tdoc-editor-status tdoc-editor-autosave" role="status" title={state.title} data-state={status}>
+      {state.text}
+    </span>
+  );
 }
 
 export function SaveConflictDialog({ conflict, onClose }) {
-  if (conflict?.modeless) {
-    return (
-      <AppDialog
-        open
-        onOpenChange={(open) => !open && onClose()}
-        title="Someone published a new version"
-        description={`v${conflict.latestVersion} was published while you were editing, so your changes were not published over it. They are kept in this browser: open v${conflict.latestVersion} and you will be offered them back.`}
-        actions={(
-          <>
-            <AppButton onClick={onClose}>Not now</AppButton>
-            <AppButton variant="primary" className="primary" onClick={() => { location.href = conflict.latestUrl; }}>
-              Open v{conflict.latestVersion}
-            </AppButton>
-          </>
-        )}
-      />
-    );
-  }
+  // Modeless editing says it in the "was just published" strip instead.
+  if (conflict?.modeless) return null;
   return (
     <AppDialog
       open={Boolean(conflict)}

@@ -205,6 +205,9 @@ html:has(.tdoc-document-app[data-visual-open]) { filter: none !important; }
 }
 .tdoc-editor-bubble button[aria-pressed="true"] { border-color: #d9d9dc; background: #fff; color: var(--td-accent); }
 .tdoc-editor-bubble button span { margin-left: 4px; }
+.tdoc-editor-bubble button.tdoc-block-level { gap: 2px; font-weight: 600; }
+.tdoc-editor-bubble button.tdoc-block-level span { margin-left: 0; min-width: 26px; text-align: left; }
+@media (max-width: 700px) { .tdoc-editor-bubble .tdoc-bubble-comment span { display: none; } }
 .tdoc-slash-anchor { position: fixed; width: 1px; pointer-events: none; }
 .tdoc-live-swap-frame { position: fixed; left: -10000px; top: 0; width: 1024px; height: 600px; border: 0; visibility: hidden; pointer-events: none; }
 .tdoc-editor-status.tdoc-editor-autosave { min-width: 0; margin: 0 2px; }

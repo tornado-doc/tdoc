@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { LinkDialog, SelectionToolbar, SlashMenu } from './editor-toolbar.jsx';
+import { blockCommands } from './block-commands.js';
 
 // Modeless editing (flag modelessEdit), the doc page's half. The frame
 // (server/frame-probe.js) says where a selection or a "/" is; this puts the
@@ -50,6 +51,17 @@ export function loadVersionBody(slug, n, { timeoutMs = 20_000 } = {}) {
   });
 }
 
+// "Edited just now" in the bar lights up for a moment: the page just became
+// a newer version (published from here, or swapped in).
+export function flashEdited() {
+  window.setTimeout(() => {
+    const edited = document.getElementById('tdoc-version-toggle');
+    if (!edited) return;
+    edited.setAttribute('data-just-updated', '');
+    window.setTimeout(() => edited.removeAttribute('data-just-updated'), 3000);
+  }, 0);
+}
+
 export function useModelessEdit({
   enabled, // modeless editing for this person on this doc
   liveSwap, // the flag is on: newer versions replace the page in place
@@ -61,6 +73,7 @@ export function useModelessEdit({
   busy, // a composer, dialog or panel the person is using
   latest, // the newest version the page has heard of
   onAdoptVersion, // (n) => the page is version n now
+  onSwapFailed = null, // (n) => version n could not be swapped in
   onLink, // open the link dialog for the selection
 }) {
   const [bubble, setBubble] = useState(null);
@@ -95,6 +108,7 @@ export function useModelessEdit({
     if (command === 'createLink') { onLink(); return; }
     editor.format(command, value);
   };
+  const [commands] = useState(blockCommands);
 
   // Comment on the selection: what it quotes has to be in a published
   // version for everybody else to see it anchored, so a draft publishes first.
@@ -110,20 +124,29 @@ export function useModelessEdit({
     try { frameRef.current?.focus(); frameRef.current?.contentWindow?.focus(); } catch {}
   };
   const toFrame = (message) => {
-    // After the menu or dialog has put focus back where it was.
-    window.setTimeout(() => { focusDoc(); send(message); }, 0);
+    // After the menu or dialog has put focus back where it was (base-ui
+    // returns it a frame or two after the pick).
+    window.setTimeout(() => { focusDoc(); send(message); }, 60);
   };
-  const pick = (command) => {
-    if (command === 'image') { setImageOpen(true); setSlash(null); return; }
-    setSlash(null);
-    toFrame({ type: 'tdoc:slashApply', command });
+  // A registry item (block-commands.js) runs against the "/" line or the
+  // selection's block: `at` tells the frame which.
+  const imageAt = useRef('slash');
+  const run = (item, at) => {
+    item.run({
+      block: (command, value) => toFrame({ type: 'tdoc:blockApply', command, value, at }),
+      askImage: () => { imageAt.current = at; setImageOpen(true); },
+    });
   };
+  const pick = (item) => { setSlash(null); run(item, 'slash'); };
+  const command = (item) => { setBubble(null); run(item, 'selection'); };
 
   // --- a newer version, in place -----------------------------------------
   const swapWait = useRef(null);
   const swapping = useRef(0);
   const failed = useRef(new Set());
   const [tick, setTick] = useState(0);
+  // A failed swap shows the plain strip (a re-render, not just the ref).
+  const [, setFailedCount] = useState(0);
   const current = Number(config.version) || 0;
   const handsOn = () => editor.dirty || busy || Boolean(bubble || slash || imageOpen)
     || editor.saveStatus === 'publishing' || Date.now() - (editor.lastTypedAt() || 0) < TYPING_PAUSE_MS;
@@ -162,16 +185,16 @@ export function useModelessEdit({
         if (result.ok) {
           onAdoptVersion(n);
           // "Edited just now" lights up for as long as the changes stay marked.
-          window.setTimeout(() => {
-            const edited = document.getElementById('tdoc-version-toggle');
-            if (!edited) return;
-            edited.setAttribute('data-just-updated', '');
-            window.setTimeout(() => edited.removeAttribute('data-just-updated'), 3000);
-          }, 0);
+          flashEdited();
+        } else {
+          failed.current.add(n);
+          setFailedCount((c) => c + 1);
+          onSwapFailed?.(n);
         }
-        else failed.current.add(n);
       } catch {
         failed.current.add(n);
+        setFailedCount((c) => c + 1);
+        onSwapFailed?.(n);
       } finally {
         if (swapping.current === n) swapping.current = 0;
         if (retry) setTick((t) => t + 1);
@@ -181,6 +204,18 @@ export function useModelessEdit({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveSwap, latest, current, editor.dirty, busy, bubble, slash, imageOpen, editor.saveStatus, tick]);
 
+  // The "vN was just published" strip, with the flag on: never for a
+  // reader (the page is swapped in place); for someone with a draft, the
+  // "while you were editing" form; the plain one only where a swap cannot
+  // apply (failed: styles changed, sheets, slides, embeds).
+  const newest = Math.max(latest || 0, Number(editor.conflict?.latestVersion) || 0);
+  let strip = 'default';
+  if (liveSwap && newest > current) {
+    if (editor.conflict || editor.dirty) strip = 'editing';
+    else if (failed.current.has(newest)) strip = 'default';
+    else strip = 'hidden';
+  }
+
   const overlay = enabled ? (
     <>
       {!busy ? (
@@ -189,13 +224,16 @@ export function useModelessEdit({
           marks={bubble?.marks}
           frameBox={frameBox}
           narrow={narrow}
+          commands={commands}
           onFormat={format}
+          onCommand={command}
           onComment={comment}
         />
       ) : null}
       <SlashMenu
         rect={slash?.rect}
         frameBox={frameBox}
+        commands={commands}
         onPick={pick}
         onCancel={() => { setSlash(null); toFrame({ type: 'tdoc:slashCancel' }); }}
       />
@@ -206,12 +244,12 @@ export function useModelessEdit({
         onOpenChange={(open) => {
           if (open) return;
           setImageOpen(false);
-          toFrame({ type: 'tdoc:slashCancel' });
+          if (imageAt.current === 'slash') toFrame({ type: 'tdoc:slashCancel' });
         }}
-        onSubmit={(url) => { setImageOpen(false); toFrame({ type: 'tdoc:slashApply', command: 'image', value: url }); }}
+        onSubmit={(url) => { setImageOpen(false); toFrame({ type: 'tdoc:blockApply', command: 'image', value: url, at: imageAt.current }); }}
       />
     </>
   ) : null;
 
-  return { handlers, overlay, bubbleOpen: Boolean(bubble), slashOpen: Boolean(slash) };
+  return { handlers, overlay, strip, newest, bubbleOpen: Boolean(bubble), slashOpen: Boolean(slash) };
 }

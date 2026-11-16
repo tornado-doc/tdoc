@@ -52,7 +52,7 @@ import {
   saveNoticeDismissed,
   EditorSaveStatus,
 } from './document/editor-toolbar.jsx';
-import { useModelessEdit } from './document/modeless-edit.jsx';
+import { flashEdited, useModelessEdit } from './document/modeless-edit.jsx';
 import {
   DeleteDocumentDialog,
   OwnerAccessDialog,
@@ -143,7 +143,14 @@ function OldVersionNotice({ value }) {
   return (
     <div className="tdoc-oldver-slot">
       <div className="tdoc-oldver-strip tdoc-oldver-visible">
-        {value.fresh ? (
+        {value.editing ? (
+          // Modeless editing: someone published while this person has a
+          // draft (theirs was not published over it).
+          <span role="status">
+            Someone else just edited this doc. Your changes are kept.{' '}
+            <a href={value.latestUrl}>Show latest</a>
+          </span>
+        ) : value.fresh ? (
           // Published while this page was open: say so, and let the reader
           // move when they are ready instead of reloading under them.
           <span role="status">
@@ -351,7 +358,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // Two arrivals the journey makes on its own: the first doc (`welcome`) and
   // a version the agent just published (`revised`). Read once and taken off
   // the URL, so a reload is an ordinary visit.
-  const [arrival] = useState(() => {
+  const [arrival, setArrival] = useState(() => {
     const params = new URLSearchParams(location.search);
     // `step` is the checklist arriving: a row on My docs sends people here, and
     // the page opens whatever that row is about instead of leaving them on a
@@ -877,7 +884,16 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
 
   // The page is a version it published itself (modeless autosave) or was
   // swapped to in place: as after a sheet's column width (ownVersion above).
+  const revisedPending = useRef(0);
+  const modelessFlagRef = useRef(false);
   const adoptVersion = useCallback((n) => {
+    // The agent's version the owner was waiting for, swapped in: the same
+    // arrival as ?revised=1 (its answered thread opens, the toast says so).
+    if (revisedPending.current && n >= revisedPending.current) {
+      revisedPending.current = 0;
+      arrivedRef.current = false;
+      setArrival('revised');
+    }
     if (!n || n <= ownVersionRef.current) return;
     ownVersionRef.current = n;
     setOwnVersion({ n, created: new Date().toISOString(), source: 'browser' });
@@ -889,6 +905,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // Modeless editing (flag modelessEdit): someone who may edit a prose doc
   // types into it; sheets and slides keep Read / Comment / Edit.
   const modelessFlag = isFeatureOn('modelessEdit');
+  modelessFlagRef.current = modelessFlag;
   const modeless = modelessFlag && Boolean(config.canEdit) && !config.isLanding && !boot.oldVersion
     && !docShape.sheets && !docShape.slides;
   const editor = useDocumentEditor({
@@ -899,7 +916,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     showToast,
     onDisableCommentSelection: disableCommentSelection,
     modeless,
-    onPublished: (result) => adoptVersion(Number(result?.version) || 0),
+    onPublished: (result) => { adoptVersion(Number(result?.version) || 0); flashEdited(); },
   });
   editorRef.current = editor;
 
@@ -1869,6 +1886,15 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           // The thing it was waiting for arrived; the wait should not outlive
           // it into the next page.
           try { localStorage.removeItem(handoffKey); } catch {}
+          // modelessEdit: no navigation. The version is swapped into this
+          // page (as for anyone) and the "revised" arrival is set here; only
+          // a version that cannot be swapped in navigates (onSwapFailed).
+          if (modelessFlagRef.current) {
+            revisedPending.current = latest;
+            setHandoff({ state: 'idle', copiedAt: null });
+            setLiveLatest(latest);
+            return;
+          }
           // On the doc's own address the newest version is what it shows; a
           // reader who chose a version is taken to the new one explicitly.
           location.href = /\/v\/\d+\/?$/.test(location.pathname)
@@ -1966,6 +1992,14 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     busy: Boolean(composer || dialog || comparing || historyOpen || (narrow && drawerOpen) || editor.conflict || editor.staleDraft),
     latest: liveLatest,
     onAdoptVersion: adoptVersion,
+    // A version that cannot be swapped in: the owner waiting on their agent
+    // is taken to it, as before the flag.
+    onSwapFailed: (n) => {
+      if (!revisedPending.current || n < revisedPending.current) return;
+      location.href = /\/v\/\d+\/?$/.test(location.pathname)
+        ? `/d/${encodeURIComponent(config.slug)}/v/${n}?revised=1`
+        : `/d/${encodeURIComponent(config.slug)}?revised=1`;
+    },
     onLink: () => setDialog({ type: 'link' }),
   });
   modelessRef.current = modelessEdit;
@@ -2511,11 +2545,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           showToast(`${diagram.isNew ? 'Diagram inserted' : 'Diagram applied'}. Save the document to publish a new version.`);
         }} />
       <div className="tdoc-reader-surface" hidden={comparing || historyOpen} style={sideInset ? { marginRight: sideInset } : undefined}>
-      <OldVersionNotice value={boot.oldVersion || (liveLatest > Number(config.version) ? {
+      <OldVersionNotice value={boot.oldVersion || (modelessEdit.strip !== 'hidden' && modelessEdit.newest > Number(config.version) ? {
         current: Number(config.version),
-        latest: liveLatest,
+        latest: modelessEdit.newest,
         latestUrl: `/d/${encodeURIComponent(config.slug)}`,
         fresh: true,
+        editing: modelessEdit.strip === 'editing',
       } : null)} />
 
       {/* /start: the no-terminal way in (remote MCP), behind remoteMcp. */}

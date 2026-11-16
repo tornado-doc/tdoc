@@ -81,15 +81,16 @@ ${FILLER}
   // A browser context as the published doc page would be: the local server
   // calls itself "local" (no version poll, no Edited line), so the boot is
   // patched to "published", as reply-activity-ui does.
-  async function newContext({ flag = true, idleMs = 120_000, shell = {}, mobile = false, reducedMotion } = {}) {
+  async function newContext({ flag = true, idleMs = 120_000, shell = {}, mobile = false, reducedMotion, extraCommands = null } = {}) {
     const context = await browser.newContext(mobile
       ? { ...devices['iPhone 13'], viewport: { width: 390, height: 844 }, reducedMotion }
       : { viewport: { width: 1280, height: 800 }, reducedMotion });
-    await context.addInitScript(([flagOn, idle]) => {
+    await context.addInitScript(([flagOn, idle, extra]) => {
       window.__TDOC_FLAGS__ = { modelessEdit: flagOn };
       window.__TDOC_MODELESS_IDLE_MS = idle;
       window.__TDOC_LIVE_SYNC_MS = 700;
-    }, [flag, idleMs]);
+      if (extra) window.__TDOC_BLOCK_COMMANDS_EXTRA__ = extra;
+    }, [flag, idleMs, extraCommands]);
     await context.route(new RegExp(`/d/${slug}/v/\\d+(\\?.*)?$`), async (route) => {
       const response = await route.fetch();
       const body = (await response.text()).replace(/window\.__TDOC_SHELL__ = (.*?);<\/script>/,
@@ -169,11 +170,18 @@ ${FILLER}
       await caretAtEnd(frame, '#intro');
       await page.keyboard.type(' Ana posts the notes.');
       await page.locator('.tdoc-editor-autosave', { hasText: 'Saving…' }).waitFor();
-      await page.locator('.tdoc-editor-autosave', { hasText: 'Saved' }).waitFor({ timeout: 4000 });
+      const draftStatus = page.locator('.tdoc-editor-autosave', { hasText: 'Draft · only you can see' });
+      await draftStatus.waitFor({ timeout: 4000 });
+      assert(await draftStatus.getAttribute('title') === 'Publishes after 2 min idle or when you leave', 'the draft status does not say when it publishes');
+      assert(!/v\d/.test(await page.locator('.tdoc-bar').innerText()), 'the bar names a version number');
       const draft = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tdoc-draft:')).map((k) => localStorage.getItem(k)).join(''));
       assert(draft.includes('Ana posts the notes.'), 'the draft is not in the browser');
       assert(versions().length === 1, 'a version was published before the pause');
       await page.waitForFunction(() => !location.pathname.includes('/v/'), null, { timeout: 8000 });
+      // Published: the status gives the slot back and "Edited just now" lights up.
+      await page.locator('#tdoc-version-toggle[data-just-updated]').waitFor({ timeout: 3000 });
+      assert((await page.locator('#tdoc-version-toggle').innerText()).includes('just now'), 'Edited does not say just now');
+      await page.locator('.tdoc-editor-autosave').waitFor({ state: 'detached', timeout: 3000 });
       assert(latest() === 2 && versionHtml(2).includes('Ana posts the notes.'), 'the draft did not become v2');
       assert(!(await page.reloaded()), 'publishing reloaded the page');
       await page.waitForFunction(() => !Object.keys(localStorage).some((k) => k.startsWith('tdoc-draft:') && (localStorage.getItem(k) || '').includes('bodyHtml')), null, { timeout: 3000 });
@@ -199,6 +207,40 @@ ${FILLER}
       await bubble.waitFor();
       await bubble.getByRole('button', { name: 'Bold' }).click();
       await frame.waitForFunction(() => /<(b|strong)>Comments<\/(b|strong)>/.test(document.querySelector('#second').innerHTML));
+      // Turn into: the dropdown names the block (Text), picks a level by
+      // keyboard, then names the new one (H1); Text turns it back.
+      await selectWords(frame, '#third', 0, 6);
+      await bubble.waitFor();
+      const level = bubble.locator('button.tdoc-block-level');
+      assert((await level.innerText()).trim() === 'Text', `the dropdown says ${await level.innerText()}`);
+      await level.focus();
+      await page.keyboard.press('Enter');
+      await page.locator('.tdoc-turn-into-menu').waitFor();
+      await page.waitForFunction(() => document.activeElement && document.activeElement.closest('.tdoc-turn-into-menu'));
+      const turnItems = await page.locator('.tdoc-turn-into-menu [role^="menuitem"]').allInnerTexts();
+      assert(['Text', 'Heading 1', 'Heading 2', 'Heading 3', 'Bulleted list', 'Numbered list', 'Quote'].every((label) => turnItems.some((t) => t.includes(label))), `turn-into items: ${turnItems}`);
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+      await frame.waitForFunction(() => Array.from(document.querySelectorAll('h1')).some((h) => h.textContent.startsWith('Should drafts')), null, { timeout: 5000 });
+      await frame.evaluate(() => {
+        const h = Array.from(document.querySelectorAll('h1')).find((el) => el.textContent.startsWith('Should drafts'));
+        const r = document.createRange(); r.setStart(h.firstChild, 0); r.setEnd(h.firstChild, 6);
+        getSelection().removeAllRanges(); getSelection().addRange(r);
+        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      });
+      await page.waitForFunction(() => document.querySelector('.tdoc-editor-bubble button.tdoc-block-level')?.innerText.trim() === 'H1');
+      await bubble.locator('button.tdoc-block-level').click();
+      await page.getByRole('menuitemradio', { name: 'Text' }).click();
+      await frame.waitForFunction(() => Array.from(document.querySelectorAll('main p')).some((p) => p.textContent.startsWith('Should drafts')));
+      // ···: the registry's insert items, after the selection's block.
+      await selectWords(frame, '#intro', 0, 2);
+      await bubble.waitFor();
+      await bubble.getByRole('button', { name: 'More blocks' }).click();
+      await page.locator('.tdoc-insert-menu').waitFor();
+      const moreItems = await page.locator('.tdoc-insert-menu [role="menuitem"]').allInnerTexts();
+      assert(['Table', 'Image', 'Divider'].every((label) => moreItems.some((t) => t.includes(label))), `··· items: ${moreItems}`);
+      await page.getByRole('menuitem', { name: 'Divider' }).click();
+      await frame.waitForFunction(() => document.querySelector('#intro + hr'));
       await selectWords(frame, '#intro', 3, 7);
       await bubble.waitFor();
       await bubble.getByRole('button', { name: 'Comment' }).click();
@@ -228,7 +270,7 @@ ${FILLER}
       await frame.waitForFunction(() => Array.from(document.querySelectorAll('h2')).some((h) => h.textContent === 'New section'));
       assert(!(await frame.evaluate(() => document.querySelector('main').textContent.includes('/New'))), 'the "/" stayed in the text');
       await slash();
-      await page.keyboard.type('t'); // the menu's own type-to-find
+      await page.keyboard.type('ta'); // the menu's own type-to-find
       await page.keyboard.press('Enter');
       await applied();
       await frame.waitForFunction(() => document.querySelectorAll('table').length === 2);
@@ -241,8 +283,35 @@ ${FILLER}
       await slash();
       await page.keyboard.press('Escape');
       await page.locator('.tdoc-slash-menu').waitFor({ state: 'detached' });
+      // The caret goes back after the menu's own focus return.
+      await frame.waitForFunction(() => document.hasFocus() && document.activeElement && document.activeElement.isContentEditable
+        && getSelection().anchorNode && getSelection().anchorNode.textContent === '/');
       await page.keyboard.type('x');
       await frame.waitForFunction(() => document.querySelector('main').textContent.includes('/x'));
+      await context.close();
+    });
+
+    await test('one item added to the block registry shows in both "/" and the toolbar\'s ···', async () => {
+      reset();
+      const context = await newContext({ extraCommands: [{ id: 'callout-test', label: 'Callout test', kind: 'insert', command: 'divider' }] });
+      const { page, frame } = await openDoc(context);
+      await caretAtEnd(frame, '#third');
+      await page.keyboard.press('Enter');
+      await page.keyboard.type('/');
+      await page.locator('.tdoc-slash-menu').waitFor();
+      assert(await page.locator('.tdoc-slash-menu [role="menuitem"]', { hasText: 'Callout test' }).count() === 1, 'not in the "/" menu');
+      await page.keyboard.press('Escape');
+      await page.locator('.tdoc-slash-menu').waitFor({ state: 'detached' });
+      await page.waitForTimeout(400);
+      await selectWords(frame, '#intro', 0, 2);
+      await page.locator('.tdoc-editor-bubble').waitFor();
+      await page.waitForTimeout(300); // the bubble settles over the new selection
+      await page.locator('.tdoc-editor-bubble').getByRole('button', { name: 'More blocks' }).click();
+      await page.locator('.tdoc-insert-menu').waitFor();
+      const item = page.locator('.tdoc-insert-menu [role="menuitem"]', { hasText: 'Callout test' });
+      assert(await item.count() === 1, 'not in the toolbar ···');
+      await item.click();
+      await frame.waitForFunction(() => document.querySelector('#intro + hr'));
       await context.close();
     });
 
@@ -263,7 +332,7 @@ ${FILLER}
       await frame.waitForFunction(() => !document.querySelector('#cell-a').hasAttribute('data-tdoc-cell-caret'), null, { timeout: 2000 }).catch(() => {});
       assert(await ring() === 'none', 'the cell left behind is still ringed');
       await hide(page);
-      await page.waitForFunction(() => document.querySelector('.tdoc-editor-autosave')?.title === 'Saved as a new version.', null, { timeout: 5000 });
+      await until(() => latest() === 2, 5000);
       const saved = versionHtml(latest());
       assert(saved.includes('Reader app') && saved.includes('>Bea<'), 'the cell edits were not published');
       assert(!/data-tdoc-cell-caret|contenteditable/.test(saved), 'editor markup leaked into the version');
@@ -292,13 +361,16 @@ ${FILLER}
       await caretAtEnd(b.frame, '#second'); await b.page.keyboard.type(' From B.');
       await caretAtEnd(a.frame, '#third'); await a.page.keyboard.type(' From A.');
       await hide(a.page);
-      await a.page.waitForFunction(() => document.querySelector('.tdoc-editor-autosave')?.title === 'Saved as a new version.', null, { timeout: 5000 });
+      await until(() => latest() === 2, 5000);
       await hide(b.page);
-      const dialog = b.page.getByRole('dialog');
-      await dialog.waitFor({ timeout: 5000 });
-      assert((await dialog.textContent()).includes('Someone published a new version'), 'the conflict notice is not the modeless one');
+      // No dialog: the strip says it, in words without version numbers.
+      const strip = b.page.locator('.tdoc-oldver-strip');
+      await strip.waitFor({ timeout: 5000 });
+      assert((await strip.innerText()).includes('Someone else just edited this doc. Your changes are kept.'), `the conflict strip says: ${await strip.innerText()}`);
+      assert(await strip.getByRole('link', { name: 'Show latest' }).count() === 1, 'the strip has no Show latest');
+      assert(await b.page.getByRole('dialog').count() === 0, 'a conflict dialog opened');
       assert(latest() === 2 && versionHtml(2).includes('From A.') && !versionHtml(2).includes('From B.'), 'B overwrote A');
-      assert(await b.page.locator('.tdoc-editor-autosave').textContent() === 'Saved in this browser', 'B\'s status does not say where the draft is');
+      await b.page.locator('.tdoc-editor-autosave', { hasText: 'Draft · not published' }).waitFor({ timeout: 3000 });
       const draft = await b.page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tdoc-draft:')).map((k) => localStorage.getItem(k)).join(''));
       assert(draft.includes('From B.'), 'B\'s draft is gone');
       await first.close(); await second.close();
@@ -327,6 +399,7 @@ ${FILLER}
       await c.page.waitForTimeout(3000);
       assert(!(await c.frame.evaluate(() => document.querySelector('#second').textContent.includes('Second round.'))), 'the page was swapped under someone typing');
       assert(await c.frame.evaluate(() => document.querySelector('#third').textContent.includes('C typing.')), 'C lost what it typed');
+      assert((await c.page.locator('.tdoc-oldver-strip').innerText()).includes('Someone else just edited this doc.'), 'the person typing is not told');
       await writer.close(); await reader.close();
     });
 
