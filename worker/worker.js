@@ -16127,10 +16127,11 @@ async function markInboxSeen(env, session, slug, seen, viewed = null) {
   const base = { slug, seen, ...(viewed && Object.keys(viewed).length ? { viewed } : {}) };
   for (const part of await loadViewerInboxes(env, session)) {
     // A row here that does not know its threads is decided only by
-    // reconcileInboxSeen: a check it already finished is started again.
+    // reconcileInboxSeen: this doc is taken off the round's done list so the
+    // next pass checks it again -- only this doc, not the whole round.
     const undecided = part.inbox && part.inbox.seen_checked && (part.inbox.items || []).some((i) => i && !i.read
       && i.slug === slug && DOC_ACTIVITY_INBOX_KINDS.has(i.kind) && !inboxRowThreads(i));
-    const mark = undecided ? { ...base, recheck: true } : base;
+    const mark = undecided ? { ...base, recheck: slug } : base;
     const next = applyInboxRead(part.inbox, mark);
     if (JSON.stringify(next) === JSON.stringify(part.inbox)) continue;
     await serialKvOp(env, part.key, 'inbox_mark_read', { key: part.key, mark });
@@ -16142,9 +16143,28 @@ function applyInboxRead(inbox, mark) {
   if (mark && mark.all) return { items: (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => (i ? { ...i, read: true } : i)) };
   const next = markInboxRead(inbox, mark || {});
   // reconcileInboxSeen's progress, kept with the inbox it is about.
-  if (mark && mark.recheck) delete next.seen_checked;
+  if (mark && mark.recheck && next.seen_checked) {
+    if (typeof mark.recheck === 'string') next.seen_checked = recheckSlug(next.seen_checked, mark.recheck);
+    else delete next.seen_checked;
+  }
   if (mark && mark.checked && typeof mark.checked === 'object') next.seen_checked = mark.checked;
   return next;
+}
+
+// The round's progress with one doc to be checked again: off the done list
+// (and its failed reads forgotten), the round not complete. Unchanged when
+// the doc is not done and the round is still open.
+function recheckSlug(checked, slug) {
+  const done = Array.isArray(checked.done) ? checked.done : [];
+  const failed = checked.failed && typeof checked.failed === 'object' ? checked.failed : null;
+  if (!done.includes(slug) && !checked.complete && !(failed && slug in failed)) return checked;
+  const out = { ...checked, done: done.filter((s) => s !== slug), complete: false };
+  if (failed) {
+    const rest = { ...failed };
+    delete rest[slug];
+    if (Object.keys(rest).length) out.failed = rest; else delete out.failed;
+  }
+  return out;
 }
 
 // ── One read state: bell <-> thread-seen ────────────────────────────────
@@ -16227,6 +16247,10 @@ const INBOX_RECONCILE_SLUGS = 10;
 const INBOX_RECONCILE_COMMENT_READS = 3;
 const INBOX_RECONCILE_TTL_MS = 6 * 3600 * 1000;
 const INBOX_RECONCILE_DONE_MAX = 200;
+// A doc whose comments could not be read is tried again on the next passes;
+// after this many failed reads in a round it counts as done (its legacy row
+// left to the bell), so one unreadable doc never keeps a round open.
+const INBOX_RECONCILE_READ_TRIES = 3;
 function unreadSeenRows(parts) {
   return mergeInboxes(parts).items.filter((i) => i && !i.read && DOC_ACTIVITY_INBOX_KINDS.has(i.kind) && isValidSlug(i.slug));
 }
@@ -16239,6 +16263,7 @@ async function reconcileInboxSeen(env, session, parts, { now = Date.now() } = {}
   const current = prior && prior.at === newest && (Date.parse(prior.until) || 0) > now;
   if (current && prior.complete) return parts;
   const done = new Set(current && Array.isArray(prior.done) ? prior.done.filter((s) => typeof s === 'string') : []);
+  const failedBefore = current && prior.failed && typeof prior.failed === 'object' ? prior.failed : {};
   const slugs = [];
   for (const row of rows) {
     if (done.has(row.slug) || slugs.includes(row.slug)) continue;
@@ -16255,6 +16280,7 @@ async function reconcileInboxSeen(env, session, parts, { now = Date.now() } = {}
   const keys = actorKeys(session);
   const commentReads = new Map();
   const deferred = new Set();
+  const unreadable = new Set();
   const idsAt = {};
   for (const row of rows) {
     if (!seenBySlug.has(row.slug)) continue;
@@ -16272,7 +16298,7 @@ async function reconcileInboxSeen(env, session, parts, { now = Date.now() } = {}
         commentReads.set(row.slug, list);
       }
       const list = commentReads.get(row.slug);
-      if (!list) { deferred.add(row.slug); continue; }
+      if (!list) { deferred.add(row.slug); unreadable.add(row.slug); continue; }
       const upTo = Date.parse(row.at) || 0;
       const count = Math.max(1, Math.floor(Number(row.count)) || 1);
       const covered = list
@@ -16291,17 +16317,30 @@ async function reconcileInboxSeen(env, session, parts, { now = Date.now() } = {}
   const left = unreadSeenRows(after);
   const afterNewest = left.length ? left[0].at || '' : '';
   const nextDone = afterNewest === newest ? new Set(done) : new Set();
+  // Failed comment reads, counted per doc: at INBOX_RECONCILE_READ_TRIES the
+  // doc is done for this round instead of being deferred again.
+  const failed = {};
+  for (const [slug, n] of Object.entries(failedBefore)) if (Number(n) > 0) failed[slug] = Math.floor(Number(n));
+  for (const slug of unreadable) {
+    const n = (failed[slug] || 0) + 1;
+    if (n >= INBOX_RECONCILE_READ_TRIES) { delete failed[slug]; deferred.delete(slug); } else failed[slug] = n;
+  }
   for (const slug of slugs) if (!deferred.has(slug)) nextDone.add(slug);
   const remaining = left.filter((row) => !nextDone.has(row.slug));
+  // Kept only for docs that still have unread rows and are not done.
+  const stillOpen = new Set(remaining.map((row) => row.slug));
+  for (const slug of Object.keys(failed)) if (!stillOpen.has(slug)) delete failed[slug];
   const checked = {
     at: afterNewest,
     done: [...nextDone].slice(-INBOX_RECONCILE_DONE_MAX),
     complete: !remaining.length,
     until: new Date(now + INBOX_RECONCILE_TTL_MS).toISOString(),
+    ...(Object.keys(failed).length ? { failed } : {}),
   };
   // `until` alone moving is no reason to write.
   const sameProgress = prior && prior.at === checked.at && prior.complete === checked.complete
-    && JSON.stringify(prior.done || []) === JSON.stringify(checked.done) && (Date.parse(prior.until) || 0) > now;
+    && JSON.stringify(prior.done || []) === JSON.stringify(checked.done)
+    && JSON.stringify(prior.failed || {}) === JSON.stringify(checked.failed || {}) && (Date.parse(prior.until) || 0) > now;
   for (const [n, part] of parts.entries()) {
     const mark = { ...(readMark || {}), ...(n === 0 && !sameProgress ? { checked } : {}) };
     if (!mark.ids_at && !mark.checked) continue;
@@ -17165,13 +17204,17 @@ const SERIAL_KV_OPS = {
   },
   // A person's thread-seen record for one doc is raised here, and only here
   // (the seen POST, a bell read): two raises at once never lose one.
-  // `allowed` (thread ids): the doc's threads, the rest pruned. Newest marks
-  // kept past the cap. Throws when KV refuses the write.
-  async thread_seen_raise(env, { key, marks, allowed = null }) {
+  // `drop` (thread ids): ids the doc no longer holds, pruned. The caller
+  // works them out against the doc outside the lane, so what crosses into it
+  // is bounded by the record, never by the doc's thread count. (`allowed`,
+  // every thread id, is what an older caller sends; still honoured.) Newest
+  // marks kept past the cap. Throws when KV refuses the write.
+  async thread_seen_raise(env, { key, marks, drop = null, allowed = null }) {
     let stored = {};
     try { stored = cleanThreadSeen(JSON.parse(await env.META.get(key) || '{}')); } catch { stored = {}; }
     const keep = Array.isArray(allowed) ? new Set(allowed) : null;
     const next = cleanThreadSeen(stored, { allowed: keep });
+    if (Array.isArray(drop)) for (const id of drop) if (typeof id === 'string') delete next[id];
     for (const [id, stamp] of Object.entries(cleanThreadSeen(marks))) {
       if (keep && !keep.has(id)) continue;
       if (stamp > (next[id] || 0)) next[id] = stamp;
@@ -19747,11 +19790,14 @@ async function handleThreadSeen(env, req, url) {
   // asked about that the doc does not hold, so its cache can drop them.
   const unknown = asked.map(([id]) => id).filter((id) => !threads.has(id));
   // Raised in the record's lane (thread_seen_raise), where a bell read's
-  // raise also goes: read again there, the doc's threads only, newest marks
-  // first past the cap, written only if it changed.
+  // raise also goes: read again there, newest marks first past the cap,
+  // written only if it changed. Only the asked ids the doc holds go in, with
+  // the stored ids it no longer holds to prune -- not the doc's every thread.
+  const marks = Object.fromEntries(asked.filter(([id]) => threads.has(id)));
+  const drop = Object.keys(stored).filter((id) => !threads.has(id));
   let kept;
   try {
-    ({ kept } = await serialKvOp(env, key, 'thread_seen_raise', { key, marks: Object.fromEntries(asked), allowed: [...threads] }));
+    ({ kept } = await serialKvOp(env, key, 'thread_seen_raise', { key, marks, ...(drop.length ? { drop } : {}) }));
   } catch {
     // KV refused (its own write limit): the browser keeps the mark and
     // sends it again later.
