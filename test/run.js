@@ -299,6 +299,7 @@ const BROWSER = [
   'dev-mode-ui.test.js', // account menu Dev mode on/off and nested onboarding controls; two-press exit/replay, refused off the list, re-login skips the gate; desktop + phone
   'ui-fonts-ui.test.js', // no serif in product controls: doc page (bar, card, composer, menus, drawer, Ask AI, Agent activity), /me, account + team settings, /feedback; settings hints muted, /me views fit a phone; desktop + phone
   'comment-post-no-hang-ui.test.js', // "Posting…" ends at the POST on the widget, space page and doc page while later reads hang; Send to agent opens on the list already loaded
+  'no-agent-cta-ui.test.js', // signed in, no agent: Ask AI beside tdoc AI and the owner's copy-prompt card link to Settings › Agents; a reader is not asked to connect the owner's; the widget's Set up opens tdoc in a new tab; desktop + phone
   'feedback-own-agent-ui.test.js', // a joiner's @ lists their own agents (answer only) on the space page and the widget on tdoc's own pages; none on a third-party space; desktop + phone
   'feedback-share-ui.test.js', // feedback space Share = the doc Share dialog; owner moves it to a team; site mode offers the team first; desktop + phone
   'feedback-invites-ui.test.js', // share from the widget: copy link + invite by name; landing page; Join / Keep my own; switcher; SDK Join; Reconnect without a popup; desktop + phone

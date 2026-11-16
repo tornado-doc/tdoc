@@ -10,7 +10,7 @@ import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AskOnlyToggle, PrivateAnswer, SendToAgentToggle, agentAskHint, useAgentAsk } from './agent-ask.jsx';
-import { agentForThread, targetKey } from './agent-choices.js';
+import { agentForThread, setupLinkProps, targetKey } from './agent-choices.js';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, QUICK_REACTIONS, tdocUrl } from './model.js';
 import { AuthorAvatar } from './author-face.jsx';
@@ -1012,6 +1012,13 @@ export function CommentCard({
                 {handoff.state === 'waiting' && !handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />Waiting for your agent…</> : null}
                 {handoff.state === 'reading' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is reading…</> : null}
                 {handoff.state === 'stuck' ? 'Check your agent’s window.' : null}
+              </div>
+            ) : null}
+            {/* The owner with no agent connected: copying is the way today,
+                and this is the way to stop copying (Send to agent, @agent). */}
+            {agentSetupHref && handoff.state === 'idle' ? (
+              <div className="tdoc-handoff-status tdoc-handoff-connect">
+                Or <a href={agentSetupHref} {...setupLinkProps(agentSetupHref)}>connect your agent</a> once and send comments to it from here.
               </div>
             ) : null}
           </div>

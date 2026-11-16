@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { AgentMentionContext, MentionText } from './mention-field.jsx';
-import { AGENT_BUTTON_LABEL, AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sendToAgentState, sendToAgentWords, taggedAgent, taggedAgentSpan, targetKey } from './agent-choices.js';
+import { AGENT_BUTTON_LABEL, AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sendToAgentState, sendToAgentWords, setupLinkProps, taggedAgent, taggedAgentSpan, targetKey } from './agent-choices.js';
 import { AppCheckbox } from '../ui/checkbox.jsx';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { AgentMenuItems } from './agent-menu.jsx';
@@ -182,7 +182,7 @@ export function SendToAgentToggle({ ask, busy = false, className = 'tdoc-send-ag
       return <button className={className} type="button" disabled={busy} onClick={onConnect} title={title}>{AGENT_BUTTON_LABEL}</button>;
     }
     if (state.href) {
-      return <a className={className} href={state.href} title={title}>{AGENT_BUTTON_LABEL}</a>;
+      return <a className={className} href={state.href} title={title} {...setupLinkProps(state.href)}>{AGENT_BUTTON_LABEL}</a>;
     }
     return <button className={className} type="button" disabled title={title}>{AGENT_BUTTON_LABEL}</button>;
   }

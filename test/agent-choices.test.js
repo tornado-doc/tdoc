@@ -327,5 +327,28 @@ t('the control\'s words: @agent for a send target (the pre-#1034 label), Ask for
   assert(!/editable\[0\]|offer\[0\]/.test(toggle.slice(toggle.indexOf('const fallback'), toggle.indexOf('const shown'))), 'the tooltip names an agent the click would not put in');
 });
 
+t('no agent connected: every place that offers the agent says where to connect one (owner feedback, 2026-11-15)', () => {
+  // The link's target: the widget's absolute tdoc address opens a new tab;
+  // a tdoc path stays in this one.
+  const off = box.setupLinkProps('https://tdoc.dev/me/agents?tab=send');
+  assert(off.target === '_blank' && /noopener/.test(off.rel), JSON.stringify(off));
+  assert(Object.keys(box.setupLinkProps('/me?view=settings#agents')).length === 0, 'a tdoc path opens in a new tab');
+  assert(Object.keys(box.setupLinkProps(null)).length === 0);
+  // Every connect link uses it, so none navigates the widget's host page.
+  const ask = read('shell/src/document/agent-ask.jsx');
+  assert(/href=\{state\.href\}[^>]*\{\.\.\.setupLinkProps\(state\.href\)\}/.test(ask), '@agent connect link without setupLinkProps');
+  const composer = read('shell/src/document/comment-composer.jsx');
+  assert(/tdoc-connect-agent-cta[^>]*\{\.\.\.setupLinkProps\(agentSetupHref\)\}/.test(composer), 'composer Set up an agent without setupLinkProps');
+  // Ask AI (#tdoc-send-agent-btn) says it even when tdoc AI can answer: the
+  // doc page hands it the same setup link the comment boxes use.
+  const panel = read('shell/src/document/ask-ai-panel.jsx');
+  assert(/setupHref && !noFreeAnswers/.test(panel) && /Connect your agent<\/a> to send it comments/.test(panel), 'Ask AI has no connect line beside tdoc AI');
+  const shell = read('shell/src/document-shell.jsx');
+  assert(/setupHref=\{sendToAgentSetupHref\}/.test(shell), 'the doc page does not pass its setup link to Ask AI');
+  // The owner's "Let your agent fix it" card offers the connection too.
+  const card = read('shell/src/document/comment-card.jsx');
+  assert(/agentSetupHref && handoff\.state === 'idle'/.test(card) && /connect your agent<\/a> once/.test(card), 'the copy-prompt card has no connect link');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
