@@ -62,7 +62,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(again.status === 200 && again.body.existed === true && again.body.folder.id === daily.id, `existing_ok ${JSON.stringify(again.body)}`);
     assert(writes() === before, 'existing_ok wrote to KV');
     const dup = await call('/api/folders', { method: 'POST', token: zed.token, body: { name: '日报 Daily reports' } });
-    assert(dup.status === 400 && dup.body.error === 'duplicate_name', `dup ${dup.status}`);
+    assert(dup.status === 200 && dup.body.existed === true && dup.body.folder.id === daily.id, `dup ${dup.status}`);
     const sub = await call('/api/folders', { method: 'POST', token: zed.token, body: { name: '2026', parent: daily.id } });
     assert(sub.status === 200 && sub.body.folder.parent === daily.id, 'nested folder');
   });

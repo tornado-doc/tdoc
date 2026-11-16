@@ -291,7 +291,8 @@ function bootData(html, name) {
     const folder = (await create.json()).folder;
     assert(folder && folder.id && folder.name === 'Work', 'create must return the folder');
     const dup = await worker.fetch(req('/api/folders', { method: 'POST', cookie, body: { name: 'work' } }), env, {});
-    assert(dup.status === 400 && (await dup.json()).error === 'duplicate_name', 'duplicate names (case-insensitive) must 400');
+    const dupBody = await dup.json();
+    assert(dup.status === 200 && dupBody.existed === true && dupBody.folder.id === folder.id, 'a duplicate name (case-insensitive) must answer the existing folder');
     const empty = await worker.fetch(req('/api/folders', { method: 'POST', cookie, body: { name: '   ' } }), env, {});
     assert(empty.status === 400, 'blank name must 400');
 
@@ -356,7 +357,7 @@ function bootData(html, name) {
     const sib = await mk('A', a.body.folder.id);
     assert(sib.status === 200, 'same name under another parent must be allowed');
     const clash = await mk('a');
-    assert(clash.status === 400 && clash.body.error === 'duplicate_name', 'sibling name clash must 400');
+    assert(clash.status === 200 && clash.body.existed === true && clash.body.folder.id === a.body.folder.id, 'a sibling name clash must answer the existing folder');
     const c = await mk('C', b.body.folder.id);
     const d = await mk('D', c.body.folder.id);
     assert(c.status === 200 && d.status === 200, 'nesting to depth 4 must pass');

@@ -191,11 +191,14 @@ resolve() {
       const folders = (JSON.parse(s).folders || []);
       const byId = new Map(folders.map((f) => [f.id, f]));
       const path = (f) => { const out = []; for (let c = f, i = 0; c && i < 8; c = byId.get(c.parent), i++) out.unshift(c.name); return out.join("/"); };
+      // Matched the way the server tells sibling names apart: case, runs of
+      // whitespace and Unicode width aside.
+      const key = (x) => String(x).normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
       const want = process.argv[1].trim();
-      const low = want.toLowerCase();
+      const low = key(want);
       let hit = folders.filter((f) => f.id === want);
-      if (!hit.length) hit = folders.filter((f) => path(f).toLowerCase() === low.replace(/^\/+|\/+$/g, ""));
-      if (!hit.length) hit = folders.filter((f) => f.name.toLowerCase() === low);
+      if (!hit.length) hit = folders.filter((f) => key(path(f)) === low.replace(/^\/+|\/+$/g, ""));
+      if (!hit.length) hit = folders.filter((f) => key(f.name) === low);
       if (hit.length === 1) { process.stdout.write(hit[0].id); return; }
       if (hit.length > 1) {
         process.stderr.write(`[tdoc] more than one folder is called "${want}": ${hit.map((f) => `${path(f)} (${f.id})`).join(", ")}. Pass a path or id.\n`);

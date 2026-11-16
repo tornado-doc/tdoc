@@ -13,6 +13,7 @@ import {
 } from '../document/api.js';
 import { rememberTrashed } from '../recent-trash.js';
 import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from '../docs-hub/search.js';
+import { addFolderOnce, isFolderNameClash } from '../docs-hub/folder-names.js';
 
 const plural = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`;
 
@@ -243,17 +244,29 @@ export function useDocsHub({ boot, onUnauthorized }) {
     if (!trimmed) return false;
     if (id) {
       let saved;
-      const ok = await run(async () => { saved = (await renameFolder(id, trimmed)).folder; });
+      let clash = '';
+      const ok = await run(async () => {
+        try {
+          saved = (await renameFolder(id, trimmed)).folder;
+        } catch (error) {
+          // Shown in the dialog, under the name, not as a toast.
+          if (isFolderNameClash(error)) { clash = error.message; return; }
+          throw error;
+        }
+      });
+      if (clash) return { error: clash };
       if (!ok) return false;
       setFolders((items) => items.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)));
       return true;
     }
     let created;
-    const ok = await run(async () => { created = (await createFolder(trimmed, parent ?? folder)).folder; });
+    let existed = false;
+    const ok = await run(async () => { ({ folder: created, existed = false } = await createFolder(trimmed, parent ?? folder)); });
     if (!ok) return false;
-    setFolders((items) => [...items, { ...created, parent: created.parent || '' }]);
+    setFolders((items) => addFolderOnce(items, created));
+    if (existed) notify(`"${created.name}" is already here`);
     return true;
-  }, [folder, run]);
+  }, [folder, run, notify]);
 
   const setFolderAccess = useCallback(async (id, patch) => {
     let saved;
