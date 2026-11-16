@@ -35,22 +35,16 @@ function seedOf(text) {
 }
 
 // The top of a card. A doc shows its first page the way Google Docs does:
-// its own title and opening text, set as a page and cut off at the card's
-// edge. (The stored preview image is a 1200x630 link-share card -- a blue
-// rule, the title, one line of tiny print -- not a page, and shrunk into a
-// tile it read as an empty box.) A sheet or deck, with no text to show, is
-// drawn: a grid or a slide, varied per doc so a wall of cards is not one card.
+// a picture of the top of the page (/thumb.svg, a few KB the server builds
+// from the stored page; never the whole document in a frame), lazy, so only
+// cards near the screen fetch one. Until it arrives, or if it cannot, the
+// card sets the title and opening text as a page itself. (The stored preview
+// image is a 1200x630 link-share card, not a page.) A sheet or deck is drawn:
+// a grid or a slide, varied per doc so a wall of cards is not one card.
 export function DocThumb({ doc }) {
   const type = docTypeOf(doc);
   const h = seedOf(doc.slug || doc.title);
-  if (isPageType(type)) {
-    return (
-      <span className="mda-th mda-th-page" aria-hidden="true">
-        <b>{doc.title}</b>
-        {doc.excerpt ? <span className="mda-th-text">{doc.excerpt}</span> : <PageLines h={h} />}
-      </span>
-    );
-  }
+  if (isPageType(type)) return <PageThumb doc={doc} h={h} />;
   const w = (k) => (h >> k) % 5;
   if (type === 'sheet') {
     const selected = 7 + (h % 18);
@@ -84,6 +78,40 @@ export function DocThumb({ doc }) {
   return null;
 }
 
+// The browser keeps a version's picture for a week; bump this when the
+// picture's look changes (server/shell.js pageThumbSvg) so cards redraw.
+const THUMB_LOOK = 1;
+
+function PageThumb({ doc, h }) {
+  const src = doc.slug && Number(doc.latest) > 0
+    ? `/d/${encodeURIComponent(doc.slug)}/v/${Number(doc.latest)}/thumb.svg?r=${THUMB_LOOK}`
+    : '';
+  return <PagePicture key={src} src={src} doc={doc} h={h} />;
+}
+
+// One picture per src (keyed), so a new version starts over.
+function PagePicture({ src, doc, h }) {
+  const [state, setState] = React.useState('loading');
+  // decode() settles once the picture is loaded and drawable, even when it
+  // finished before React listened; a failure still comes through onError.
+  const settle = React.useCallback((img) => {
+    if (img && typeof img.decode === 'function') img.decode().then(() => setState('ready'), () => {});
+  }, []);
+  return (
+    <span className={`mda-th mda-th-page${state === 'ready' ? ' is-pic' : ''}`} aria-hidden="true">
+      {state !== 'ready' ? (
+        <span className="mda-th-fallback">
+          <b>{doc.title}</b>
+          {doc.excerpt ? <span className="mda-th-text">{doc.excerpt}</span> : <PageLines h={h} />}
+        </span>
+      ) : null}
+      {src && state !== 'failed' ? (
+        <img ref={settle} className="mda-th-pic" src={src} alt="" loading="lazy" decoding="async" draggable="false"
+          onLoad={() => setState('ready')} onError={() => setState('failed')} />
+      ) : null}
+    </span>
+  );
+}
 function isPageType(type) {
   return type !== 'sheet' && type !== 'slides';
 }
@@ -98,8 +126,8 @@ function PageLines({ h }) {
 
 // One card, as on Google Docs' home: one bordered card, the page on top, a
 // rule, then the title, the type icon and the row's own meta line (when, who
-// can open it). Unread sits on the page's corner, the star on the other, ⋯
-// beside the title.
+// can open it). Unread is a small dot before the title (its count in the
+// label), the star on the page's corner, ⋯ on the meta row.
 export function DocCard({ doc, meta, path, starrable = true, onToggleStar, menuItems = [], dragSlugs, data = {} }) {
   const dataAttrs = Object.fromEntries(Object.entries(data).map(([key, value]) => [`data-${key}`, value]));
   return (
@@ -107,10 +135,10 @@ export function DocCard({ doc, meta, path, starrable = true, onToggleStar, menuI
       <a className={`mda-thumb${isPageType(docTypeOf(doc)) ? ' is-page' : ''}`} href={docHref(doc)} tabIndex={-1} aria-hidden="true" draggable={false}>
         <DocThumb doc={doc} />
       </a>
-      <ActivityBadge doc={doc} />
       {starrable ? <StarButton doc={doc} onToggle={onToggleStar} /> : null}
       <div className="doc-info">
         <div className="doc-title-line">
+          <ActivityBadge doc={doc} />
           {path ? <span className="doc-path" title={path}>{path} ›</span> : null}
           <a className="doc-title" href={docHref(doc)} draggable={false}>{doc.title}</a>
         </div>
