@@ -120,11 +120,10 @@
 .mda-card .doc-title-line { display: flex; align-items: baseline; gap: 5px; }
 :where(.docs-hub) .mda-card .doc-title { font-size: 15px; line-height: 22px; font-weight: 500; color: var(--td-ink); }
 .mda-card .doc-meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 8px; font-size: 13px; line-height: 20px; color: var(--td-muted); }
-/* The type as Google Docs marks it: a filled tile in the type's colour. */
-.mda-card .doc-meta .doc-type { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; background: var(--td-accent); color: #fff; }
+/* The type as a quiet grey tile: the shape Google Docs uses, without the
+   colour, so the page preview is what stands out. */
+.mda-card .doc-meta .doc-type { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; background: var(--td-surface-2); color: var(--td-muted); }
 .mda-card .doc-meta .doc-type svg { width: 13px; height: 13px; }
-.mda-card .doc-meta .doc-type.is-sheet { background: var(--td-ok); }
-.mda-card .doc-meta .doc-type.is-slides { background: var(--td-star, #e8a317); }
 /* On a card the sharing state is its icon (the words are its label). */
 .mda-card .doc-sharing > span[aria-hidden] { display: none; }
 .mda-meta-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
