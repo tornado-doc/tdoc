@@ -327,6 +327,16 @@ t('the control\'s words: @agent for a send target (the pre-#1034 label), Ask for
   assert(!/editable\[0\]|offer\[0\]/.test(toggle.slice(toggle.indexOf('const fallback'), toggle.indexOf('const shown'))), 'the tooltip names an agent the click would not put in');
 });
 
+t('once a pill is in the text the @agent button goes; the pill menu keeps Don\'t send (owner, 2026-11-15)', () => {
+  const ask = read('shell/src/document/agent-ask.jsx');
+  const toggle = ask.slice(ask.indexOf('export function SendToAgentToggle'), ask.indexOf('// "Ask only", beside the send button'));
+  assert(/if \(target\) return null;/.test(toggle), 'the @agent button still shows beside a pill');
+  assert(!/aria-pressed/.test(toggle), 'the old @agent switch is back');
+  const field = read('shell/src/document/mention-field.jsx');
+  assert(/onClear=\{clearAgent\}/.test(field) && /tdoc-agent-menu-off/.test(field), 'the pill menu has no Don\'t send');
+  assert(/sendToAgentWords\(pill\.target/.test(field), 'the pill menu has its own wording for Don\'t send');
+});
+
 t('no agent connected: every place that offers the agent says where to connect one (owner feedback, 2026-11-15)', () => {
   // The link's target: the widget's absolute tdoc address opens a new tab;
   // a tdoc path stays in this one.

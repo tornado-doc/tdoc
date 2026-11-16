@@ -164,6 +164,34 @@ async function startServer(worker, env) {
       await ctx.close();
     });
 
+    if (!phone) await t(`${tag}: a named agent (its pill) hides the @agent button; the pill's menu turns it off`, async () => {
+      const ctx = await contextFor(julie);
+      const page = await openDoc(ctx);
+      const frameBox = await page.locator('iframe').first().boundingBox();
+      const r = await page.frameLocator('iframe').locator('#b').evaluate((el) => { const b = el.getBoundingClientRect(); return { x1: b.left + 2, x2: b.left + 200, y: b.top + 8 }; });
+      await page.mouse.move(frameBox.x + r.x1, frameBox.y + r.y);
+      await page.mouse.down();
+      await page.mouse.move(frameBox.x + r.x2, frameBox.y + r.y, { steps: 6 });
+      await page.mouse.up();
+      const pop = page.locator('.tdoc-popup');
+      await pop.waitFor();
+      const box = pop.locator('textarea');
+      await box.fill('What does this mean? ');
+      await box.press('End');
+      await box.type('@');
+      await page.locator('.tdoc-mention-menu .tdoc-mention-agent', { hasText: 'tdoc AI' }).first().click();
+      await pop.locator('.tdoc-agent-pill').waitFor();
+      assert.equal(await pop.locator('.tdoc-send-agent-toggle').count(), 0, 'the @agent button shows beside the pill');
+      await shot(page, 'pill-no-agent-button');
+      await pop.locator('.tdoc-agent-pill').click();
+      await page.locator('.tdoc-agent-menu-off').click();
+      await pop.locator('.tdoc-agent-pill').waitFor({ state: 'detached' });
+      assert.equal(await box.inputValue(), 'What does this mean? ');
+      await pop.locator('.tdoc-send-agent-toggle').waitFor();
+      assert.deepEqual(page.errors, []);
+      await ctx.close();
+    });
+
     await t(`${tag}: a reader with no agent is not sent to connect the owner's`, async () => {
       const ctx = await contextFor(eve);
       const page = await openDoc(ctx);

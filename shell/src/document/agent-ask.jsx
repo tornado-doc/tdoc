@@ -3,8 +3,6 @@ import { Lock } from 'lucide-react';
 import { AgentMentionContext, MentionText } from './mention-field.jsx';
 import { AGENT_BUTTON_LABEL, AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sendToAgentState, sendToAgentWords, setupLinkProps, taggedAgent, taggedAgentSpan, targetKey } from './agent-choices.js';
 import { AppCheckbox } from '../ui/checkbox.jsx';
-import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
-import { AgentMenuItems } from './agent-menu.jsx';
 import { mentionsAi, onlyMeDefault } from './ai-answerer.js';
 
 // The @agent part of a comment box, shared by the new-comment composer and
@@ -148,12 +146,16 @@ export function AgentButton({ ask, busy = false, className = 'tdoc-composer-agen
 
 // The one Send to agent control every comment box shows (Kat feedback): the
 // same judgment the @ picker uses, so the doc page and the widget cannot
-// drift. Ready: it names the default/last agent and its menu swaps the tag
-// the comment will carry (or turns it off). Connect: the viewer could send
+// drift. Ready: its click puts this box's default agent in as a pill, and
+// then it steps aside for the pill (whose menu swaps or drops it). Connect: the viewer could send
 // but nobody is linked, so it opens the connect prompt instead of failing.
 // Disabled: it stays visible and says why on hover.
 export function SendToAgentToggle({ ask, busy = false, className = 'tdoc-send-agent-toggle ui-btn ui-btn-secondary ui-btn-m', onConnect = null }) {
   const { agents, choices, target } = ask;
+  // An agent named in the text (its pill): the pill's own menu changes it or
+  // turns it off (Don't send), so this button goes (owner, 2026-11-15: a
+  // second @agent under the pill read as a duplicate). Every surface.
+  if (target) return null;
   const state = agents.sendToAgent || sendToAgentState({
     canSendToAgent: Boolean(agents.canSendToAgent),
     choices,
@@ -167,15 +169,13 @@ export function SendToAgentToggle({ ask, busy = false, className = 'tdoc-send-ag
   // stays live on those rows even though they are not send targets.
   const offer = choices;
   const askable = state.kind !== 'ready' && state.kind !== 'connect' && offer.length > 0;
-  const menuChoices = editable.length ? editable : offer;
-  const current = target && offer.some((t) => targetKey(t) === targetKey(target)) ? target : null;
   const pre = (list) => list.find((t) => agents.preselected && targetKey(t) === targetKey(agents.preselected));
   // The agent the button names is the one its click puts in: this box's
   // default only. With none (composerDefault never hands a member or reader
   // somebody else's agent) it names nobody and its click is a bare @ to
   // pick from -- never a label for one agent and a click for another.
   const fallback = (state.kind === 'ready' ? pre(editable) : askable ? pre(offer) : null) || null;
-  const shown = current || fallback;
+  const shown = fallback;
   if (state.kind === 'connect') {
     const title = state.prompt || state.reason || 'Connect an agent to send comments to it';
     if (onConnect) {
@@ -194,41 +194,18 @@ export function SendToAgentToggle({ ask, busy = false, className = 'tdoc-send-ag
   // (Julie, 2026-11-14: "@agent", not "Send to agent · Name"). Its click
   // puts this box's default agent in (putDefault: composerDefault, which
   // never hands a member or reader somebody else's agent), else a bare @ to
-  // pick from; the pill's own menu swaps it. Once a pill is in the text the
-  // control becomes the switch: pick another agent or turn it off.
-  if (!current) {
-    return (
-      <button
-        className={className}
-        type="button"
-        disabled={busy}
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={ask.putDefault}
-        title={words.title}
-      >
-        {words.label}
-      </button>
-    );
-  }
+  // pick from. Once a pill is in the text the button is gone (above).
   return (
-    <AppMenu
-      align="end"
-      popupClassName="tdoc-agent-menu"
-      trigger={(
-        <button
-          className={className}
-          type="button"
-          disabled={busy}
-          aria-pressed
-          title={words.switchTitle}
-        >
-          {words.label}
-        </button>
-      )}
+    <button
+      className={className}
+      type="button"
+      disabled={busy}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={ask.putDefault}
+      title={words.title}
     >
-      <AppMenuItem className="tdoc-agent-menu-item" onClick={ask.clearAgent}><span className="tdoc-agent-menu-name">{words.off}</span></AppMenuItem>
-      <AgentMenuItems choices={menuChoices} current={current} onPick={ask.replaceAgent} showConnect={false} preserveOrder />
-    </AppMenu>
+      {words.label}
+    </button>
   );
 }
 
