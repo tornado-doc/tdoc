@@ -1,10 +1,11 @@
 import React, { useEffect, useRef } from 'react';
-import { Plus, RefreshCw, X } from 'lucide-react';
+import { Check, ChevronDown, Plus, RefreshCw, X } from 'lucide-react';
 import { AppButton } from '../../ui/button.jsx';
+import { AppMenu, AppMenuItem, AppMenuSeparator } from '../../ui/menu.jsx';
 import { AppSelect } from '../../ui/select.jsx';
 import { SegmentedControl } from '../../ui/segmented-control.jsx';
 import { CommentThreadList } from '../../document/comment-thread-list.jsx';
-import { filterOptions, SORT_OPTIONS } from '../core/comment-query.js';
+import { filterName, filterOptions, SORT_OPTIONS } from '../core/comment-query.js';
 
 // The one comment list, on every surface: the widget's side panel and phone
 // sheet, the feedback space page, the doc page's side panel and phone sheet.
@@ -58,20 +59,45 @@ export function MarkAllBar({ area }) {
   );
 }
 
-// The compact header the doc keeps beside its pins when the side panel is
-// closed: filter, Refresh and Mark all as read, no list.
-export function CommentListControls({ filter, unreadCount = 0, onMarkAllRead = null, onRefresh = null, refreshing = false, list = null }) {
-  if (!filter && !(unreadCount && onMarkAllRead)) return null;
-  return <>
-    <div className={`tdoc-comment-filter-row${unreadCount > 0 && onMarkAllRead ? ' has-mark-all' : ''}`}>
-      {filter}
-      {onRefresh ? <RefreshButton onRefresh={onRefresh} refreshing={refreshing} /> : null}
-      {unreadCount > 0 && onMarkAllRead ? (
-        <button type="button" className="tdoc-comment-mark-all" onClick={() => onMarkAllRead()}>Mark all as read</button>
-      ) : null}
-    </div>
-    {list ? <CommentListQuery {...list} /> : null}
-  </>;
+// The doc bar's filter: a chevron beside the Comment button opening Open /
+// Replied / Resolved / All with their counts (and Mark all as read while
+// something is unread). It replaced the filter row that floated at the top
+// of the comment column and covered the first cards (Julie, 2026-11-16).
+// Threads refresh on their own (use-comment-feed.js), so no Refresh here.
+export function CommentFilterMenu({ area, prefs, onChange = null, unreadCount = 0, onMarkAllRead = null }) {
+  const pick = onChange || prefs.setFilter;
+  return (
+    // A press in the menu is not a press on the page: it must not close the
+    // open card (document-shell's pointer-down dismiss).
+    <span className="tdoc-comments-filter-wrap" onPointerDown={(event) => event.stopPropagation()}>
+      <AppMenu align="end" popupClassName="tdoc-comments-filter-popup" trigger={(
+        <AppButton variant="icon" className="tdoc-comments-filter-menu" aria-label="Filter comments" title="Filter comments">
+          <ChevronDown size={14} aria-hidden="true" />
+        </AppButton>
+      )}>
+        <div className="tdoc-menu-label">Show</div>
+        {filterOptions(area.counts).map((option) => {
+          const selected = option.value === prefs.filter;
+          return (
+            <AppMenuItem key={option.value}
+              className={`tdoc-action-menu-item tdoc-mode-item tdoc-comments-filter-item${selected ? ' current' : ''}`}
+              role="menuitemradio" aria-checked={selected} aria-label={option.label} data-filter={option.value}
+              onClick={() => pick(option.value)}>
+              <span>{filterName(option.value)}</span>
+              <span className="tdoc-comments-filter-count">{option.count}</span>
+              {selected ? <Check className="tdoc-mode-check" size={14} aria-hidden="true" /> : <span className="tdoc-mode-check" aria-hidden="true" />}
+            </AppMenuItem>
+          );
+        })}
+        {unreadCount > 0 && onMarkAllRead ? <>
+          <AppMenuSeparator />
+          <AppMenuItem className="tdoc-action-menu-item tdoc-comment-mark-all-item" onClick={() => onMarkAllRead()}>
+            Mark all as read
+          </AppMenuItem>
+        </> : null}
+      </AppMenu>
+    </span>
+  );
 }
 
 // groups: [{ key, label, title?, href?, items, empty? }]. A group with no
