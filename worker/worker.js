@@ -11199,15 +11199,13 @@ const WRITE_WITH_AGENT_KINDS = Object.freeze({
 const WRITE_WITH_AGENT_LINE = 'Your agent is writing this doc.';
 const PUSH_PROVIDERS = new Set(['raft', 'webhook', 'local']);
 
-// The shell's writeWithAgent flag is dev mode only in production and on for
-// everyone on a PR preview; the server holds the same line (as
-// writeWithAiAllowed does for Write it with tdoc AI): anybody else finds no
-// such routes.
+// The shell's writeWithAgent flag is on for everyone (approved by Julie
+// 2026-11-16; the flag is the off switch), so the routes are open to every
+// signed-in person, not dev mode only. Never a feedback-widget session or a
+// team agent: the doc is the person's own and so are the agents offered.
 async function writeWithAgentAllowed(env, session) {
   if (env && env.TDOC_PREVIEW === '1') return true;
-  if (!session || session.feedback || session.team_agent) return false;
-  const dev = await devModeState(env, session).catch(() => null);
-  return Boolean(dev && dev.on);
+  return Boolean(session && !session.feedback && !session.team_agent);
 }
 
 // What the dialog says when the doc was made but the request did not reach

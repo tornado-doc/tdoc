@@ -93,8 +93,11 @@ export const FLAGS = Object.freeze({
   // person's own agents tdoc can push to (Raft, webhook, the tdoc app): a
   // private doc is made, the request handed to that agent, and the doc opens
   // with the progress line (agentProgress) until it publishes. Off: the copy
-  // line only, as before. Server: /api/write-with-agent.
-  writeWithAgent: Object.freeze({ label: 'New: send the sentence to your agent', owner: 'julie', added: '2026-11-12', default: false, preview: true }),
+  // line only, as before. Server: /api/write-with-agent, open to every
+  // signed-in person (writeWithAgentAllowed). On for everyone: approved by
+  // Julie 2026-11-16; the flag is the off switch. Without agentProgress the
+  // doc opens on the request comment with the plain Sent -> Delivered line.
+  writeWithAgent: Object.freeze({ label: 'New: send the sentence to your agent', owner: 'julie', added: '2026-11-12', default: true, preview: true }),
   // New -> Doc -> "Write it with tdoc AI": one sentence, the built-in tdoc
   // AI (the Ask this doc model and its free allowance) drafts the doc and
   // publishes v1, private (write-with-ai.jsx, worker /api/write-with-ai).
