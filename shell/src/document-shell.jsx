@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { deliveryErrorText, resendResultText } from './document/notify-handoff.jsx';
 import { handoffSurfaceState } from './comments/core/handoff-state.js';
 import { TopBar } from './top-bar.jsx';
-import { SegmentedControl } from './ui/segmented-control.jsx';
 import {
   duplicateDocument,
   getAgentStatus,
@@ -22,7 +21,7 @@ import {
 } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
 import {
-  CommentListControls,
+  CommentFilterMenu,
   DesktopCommentLayer,
   MobileCommentDrawer,
 } from './document/comment-layer.jsx';
@@ -89,7 +88,7 @@ import { AskAiPanel, DemoRewriteBar, DemoRewriteCta } from './document/ask-ai-pa
 import { SuggestContext, useSuggestions } from './document/suggestions.js';
 import { SuggestInlineChip, SuggestReviewBar } from './document/suggest-review-bar.jsx';
 import { useCommentArea, useCommentListPrefs } from './comments/core/comment-area.js';
-import { filterOptions, groupBy, matchesFilter, sortThreads } from './comments/core/comment-query.js';
+import { DEFAULT_FILTER, filterName, groupBy, matchesFilter, sortThreads } from './comments/core/comment-query.js';
 import { useCommentFeed } from './comments/core/use-comment-feed.js';
 import { useNarrowViewport } from './comments/core/narrow.js';
 import { useSheetView } from './document/sheet-view.js';
@@ -1935,7 +1934,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // Threads stay current the way the feedback widget's do, through the same
   // hook (use-comment-feed.js): every 15 s while the tab is visible, at once
   // when it comes back, never while somebody is typing or the composer is
-  // open, and on the Refresh button by the filter. An agent's reply appears
+  // open, and on the Refresh button in the side list and drawer. An agent's reply appears
   // on an open doc without a reload.
   // A quiet doc backs off to a minute, as live sync used to; a handoff still
   // on its way (`sent`) keeps it at 15 s until the agent answers.
@@ -2162,9 +2161,9 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     viewRight - 34,
   );
   const openComment = commentArea.selected;
-  // Open / Resolved / All, in the comments area (it was a switch in the bar).
-  // Only when there is something to filter.
   const openCount = commentArea.openCount;
+  // The count on the Comment button: open threads, or what the filter shows.
+  const filterCount = commentFilter === DEFAULT_FILTER ? openCount : (commentArea.counts[commentFilter] || 0);
   // Read / Comment / Edit, at the top of ⋯ (document-toolbar.jsx).
   const modeOptions = availableModes({ canComment: config.canComment, canEdit: config.canEdit, signInToComment: Boolean(config.signInToComment) });
   const mobileUnread = commentArea.unreadCount > 0;
@@ -2342,15 +2341,6 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       {askAiPanel(handoffDetailsOpen)}
     </DocumentSendAgentAction>
   ) : null;
-  const commentFilterControl = comments.comments.length ? (
-    <SegmentedControl
-      className="tdoc-comment-filter"
-      ariaLabel="Show comments"
-      value={commentFilter}
-      onChange={setCommentFilter}
-      options={filterOptions(commentArea.counts).map(({ value, label }) => ({ value, label }))}
-    />
-  ) : null;
   const openCluster = clusters.find((cluster) => (
     cluster.items.some(({ comment }) => comment.id === openCommentId)
   ));
@@ -2442,17 +2432,26 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
               // (+ New comment), from a selection, or with double-tap Option.
               // The Read / Comment / Edit switch that sat beside it read as a
               // second comment button (Julie, 2026-11-10); it heads ⋯ now.
-              <AppButton variant="quiet" className="tdoc-comments-toggle" aria-pressed={sidePanelOpen ? 'true' : 'false'}
-                aria-label={`Comment${openCount ? ` (${openCount} open)` : ''}`}
-                title={sidePanelOpen ? 'Hide comments' : 'Show comments'}
-                onClick={() => {
-                  if (!sidePanelOpen && editor.mode === 'read') editor.changeMode('comment');
-                  setSidePanel(!sidePanelOpen);
-                }}>
-                <CommentIcon size={16} outline />
-                <span className="tdoc-comments-toggle-label">Comment</span>
-                {openCount ? <span className="tdoc-comments-toggle-count">{openCount}</span> : null}
-              </AppButton>
+              // The filter is the chevron beside it (CommentFilterMenu); a
+              // choice other than Open names itself on the button.
+              <span className="tdoc-comments-split">
+                <AppButton variant="quiet" className="tdoc-comments-toggle" aria-pressed={sidePanelOpen ? 'true' : 'false'}
+                  aria-label={`Comment${commentFilter !== DEFAULT_FILTER ? `, showing ${filterName(commentFilter)} (${filterCount})` : (openCount ? ` (${openCount} open)` : '')}`}
+                  title={sidePanelOpen ? 'Hide comments' : 'Show comments'}
+                  onClick={() => {
+                    if (!sidePanelOpen && editor.mode === 'read') editor.changeMode('comment');
+                    setSidePanel(!sidePanelOpen);
+                  }}>
+                  <CommentIcon size={16} outline />
+                  <span className="tdoc-comments-toggle-label">Comment</span>
+                  {commentFilter !== DEFAULT_FILTER ? <span className="tdoc-comments-toggle-filter">· {filterName(commentFilter)}</span> : null}
+                  {filterCount ? <span className="tdoc-comments-toggle-count">{filterCount}</span> : null}
+                </AppButton>
+                {comments.comments.length ? (
+                  <CommentFilterMenu area={commentArea} prefs={listPrefs} onChange={setCommentFilter}
+                    unreadCount={sidePanelOpen ? 0 : unreadAgentReplies} onMarkAllRead={markAllAgentRepliesRead} />
+                ) : null}
+              </span>
             ) : null}
             {/* Only the "Read only" note is left in the bar: a doc that takes
                 no comments and no edits has no mode to switch to. */}
@@ -2635,14 +2634,6 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
 
       <DocumentFooter footerRef={footerRef} visible={bridge.layout.footerVisible && !bridge.layout.fullBleed} />
 
-      {!narrow && commentFilterControl && !comparing && !historyOpen && !sidePanelOpen && !bridge.layout.fullBleed ? (
-        <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.max(8, Math.min(pinLeft - 4, window.innerWidth - 336)) }}>
-          <CommentListControls filter={commentFilterControl}
-            unreadCount={unreadAgentReplies}
-            onMarkAllRead={markAllAgentRepliesRead}
-            onRefresh={commentFeed.refresh} refreshing={commentFeed.refreshing} />
-        </div>
-      ) : null}
       {narrow ? (<>
         {editor.mode !== 'read' ? <DesktopCommentLayer
           clusters={clusters.filter((cluster) => cluster.items.every(({ comment }) => comment.document))}

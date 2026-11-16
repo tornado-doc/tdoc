@@ -13,6 +13,7 @@
 // 1280 and 390. TDOC_UI_SHOTS=<dir> saves screenshots.
 // Run with: node test/comment-parity-ui.test.js
 const assert = require('assert/strict');
+const { openDocFilterMenu, closeDocFilterMenu, docFilterItem, docFilterLabels } = require('./helpers/doc-filter');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
@@ -170,24 +171,32 @@ async function startServer(worker, env) {
           await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
         },
         header: async (page) => {
-          if (!phone) return page.locator('.tdoc-comment-filter-dock');
+          // Desktop: the bar's Comment chevron menu (no floating filter row).
+          if (!phone) return openDocFilterMenu(page);
           const drawer = page.locator('#tdoc-comment-layer');
           if (!(await drawer.isVisible().catch(() => false))) await page.locator('.tdoc-fab').click();
           await drawer.locator('.tdoc-comment-filter').waitFor();
           return drawer;
         },
-        filter: async (page, name) => (await ui.doc.header(page)).locator('.tdoc-comment-filter').getByRole('radio', { name: new RegExp(`^${name}`) }),
-        labels: async (page) => (await ui.doc.header(page)).locator('.tdoc-comment-filter [role="radio"]').allInnerTexts(),
+        filter: async (page, name) => (phone
+          ? (await ui.doc.header(page)).locator('.tdoc-comment-filter').getByRole('radio', { name: new RegExp(`^${name}`) })
+          : docFilterItem(page, name)),
+        labels: async (page) => (phone
+          ? (await ui.doc.header(page)).locator('.tdoc-comment-filter [role="radio"]').allInnerTexts()
+          : docFilterLabels(page)),
         // Where a thread can be seen: its pin on desktop, its card in the drawer.
         present: async (page, id) => (phone
           ? (await ui.doc.header(page)).locator(`[data-comment-id="${id}"]`)
           : page.locator(`.tdoc-pin[data-id="${id}"]`)),
         openThread: async (page, id) => {
           if (phone) { await (await ui.doc.header(page)).locator(`[data-comment-id="${id}"]`).first().click(); return; }
+          await closeDocFilterMenu(page);
           await page.locator(`.tdoc-pin[data-id="${id}"]`).click({ force: true });
           await page.locator(`.tdoc-margin-comment [data-comment-id="${id}"], .tdoc-margin-comment[data-comment-id="${id}"]`).first().waitFor({ timeout: 8000 }).catch(() => {});
         },
-        markAll: async (page) => (await ui.doc.header(page)).getByRole('button', { name: 'Mark all as read' }),
+        markAll: async (page) => (phone
+          ? (await ui.doc.header(page)).getByRole('button', { name: 'Mark all as read' })
+          : (await ui.doc.header(page)).getByRole('menuitem', { name: 'Mark all as read' })),
       },
       widget: {
         open: async (page, target) => {
@@ -448,7 +457,8 @@ async function startServer(worker, env) {
         await toggle.click();
         const side = page.locator('.tdoc-doc-side');
         await side.locator(`[data-comment-id="${a}"]`).first().waitFor({ timeout: 10000 });
-        assert.equal(await page.locator('.tdoc-comment-filter-dock').count(), 0, 'the dock and the side list both show the filter');
+        assert.equal(await page.locator('.tdoc-comment-filter-dock').count(), 0, 'a floating filter row is back over the comment column');
+        assert.equal(await side.locator('.tdoc-comment-filter').count(), 1, 'the side list lost its filter');
         // The document makes room: the panel covers no pin.
         const panelBox = await side.boundingBox();
         for (const pin of await page.locator('.tdoc-pin').all()) {

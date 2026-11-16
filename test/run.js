@@ -242,6 +242,7 @@ const BROWSER = [
   'table-fit-ui.test.js', // standard tables fit the reader: page width beside the column, wrap, held first column, phone cards; author-laid-out tables, print and the stored HTML untouched; data-tdoc-wide
   'table-scroll-ui.test.js', // wide tables draw a scrollbar and scroll sideways in their own box (bar, wheel, swipe), page still scrolls over them, desktop + phone
   'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior
+  'comment-filter-menu-ui.test.js', // the doc page's filter is the Comment button's chevron menu: no floating row or Refresh over the cards, counts, named on the button, phone drawer keeps its filter
   'custom-design-theme.test.js', // custom palettes opt out of house styles and theme inversion
   'visual-viewer.test.js', // visual expansion preserves interactive state and reading mode
   'slides-scale.test.js', // slide view scales cards once: cqw type the same in WebKit and Chromium, desktop and phone
