@@ -27,8 +27,8 @@ ok(hub.includes('matchesCatalogQuery(doc, teamPathForDoc(doc), hub.query)')
   && fs.readFileSync(path.join(root, 'shell/src/hooks/use-docs-hub.js'), 'utf8').includes('matchesCatalogQuery(doc, folderPathLabel(doc.folder, folderById), query)'),
   'both spaces use the same all-folder field-aware search');
 ok(rows.includes('className="doc-preview-excerpt"') && !rows.includes('className="doc-preview-image"'),
-  'list rows show the cached excerpt and no picture (pictures are for the grid only)');
-ok(rows.includes('doc-card-preview') && hub.includes('CatalogLayoutToggle') && teams.includes('layout={layout}'),
+  'rows show the cached excerpt and no picture (the share card is for link previews only)');
+ok(rows.includes('is-text-card') && hub.includes('CatalogLayoutToggle') && teams.includes('layout={layout}'),
   'personal and team catalogs share the persistent grid/list preview switch');
 ok(hub.includes('doc.workspace_id === team.id') && worker.includes("workspace_id: row.meta && row.meta.workspace_id"),
   'Recent and Starred rows are scoped to the active workspace');

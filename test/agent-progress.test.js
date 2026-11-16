@@ -276,17 +276,17 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
     assert(p.status === 409 && p.body.error === 'handoff_closed', `${p.status} ${JSON.stringify(p.body)}`);
   });
 
-  await t('MCP report_progress is a thin wrapper over /api/notify/progress (dev mode tool)', () => {
+  await t('MCP report_progress is a thin wrapper over /api/notify/progress (open to every agent)', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
     const block = src.slice(src.indexOf('  report_progress: {'), src.indexOf('  answer_question: {'));
-    assert(/devMode: true/.test(block), 'not dev mode');
+    assert(!/devMode: true/.test(block), 'still a dev-mode tool');
     assert(/mcpApi\(call, 'POST', '\/api\/notify\/progress'/.test(block), 'does not call the endpoint');
     assert(!/env\.META|loadHandoffs/.test(block), 'reaches storage itself');
     const cli = fs.readFileSync(path.join(__dirname, '..', 'bin', 'tdoc-agent-reply'), 'utf8');
     assert(cli.includes('/api/notify/progress') && cli.includes('--progress'), 'CLI flag missing');
   });
 
-  // ---- flag off (no dev mode, not a preview) ----------------------------------
+  // ---- graduated (2026-11-16): no dev mode, not a preview --------------------
   {
     const env2 = makeEnv(mod.CommentsStore);
     const owner2 = await issue(worker, env2, 'owner');
@@ -298,14 +298,14 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
     const h = await call2('/api/notify/handoff', { method: 'POST', token: owner2.token, body: { slug: 'off', comment_ids: [c.body.id], recipient: LOCAL_CLAUDE, instruction: 'fix it' } });
     const rec = async () => JSON.parse(await env2.META.get('handoffs:off') || '[]').find((x) => x.handoff_id === h.body.handoff_id);
 
-    await t('flag off: POST /api/notify/progress is not found, even for the addressed agent', async () => {
+    await t('no dev mode: POST /api/notify/progress works for the addressed agent', async () => {
       assert(up.status === 200 && c.status === 200 && h.status === 200, `setup ${up.status} ${c.status} ${h.status}`);
       const r = await call2('/api/notify/progress', { method: 'POST', token: owner2.token, headers: AS_CLAUDE, body: { slug: 'off', comment_id: c.body.id, text: 'Working' } });
-      assert(r.status === 404, `${r.status} ${JSON.stringify(r.body)}`);
-      assert(!(await rec()).progress, 'status written with the flag off');
+      assert(r.status === 200, `${r.status} ${JSON.stringify(r.body)}`);
+      assert((await rec()).progress, 'status not written without dev mode');
     });
 
-    await t('flag off: publishes stamp the first version once and nothing more', async () => {
+    await t('no dev mode: publishes stamp the first version and follow the newest', async () => {
       const writes = [];
       const put = env2.META.put.bind(env2.META);
       env2.META.put = (k, ...rest) => { if (k === 'handoffs:off') writes.push(k); return put(k, ...rest); };
@@ -317,8 +317,8 @@ const AS_B = { 'X-Tdoc-Raft-Agent': 'S1/b2' };
       } finally { env2.META.put = put; }
       const x = await rec();
       assert(x.first_version_at, 'first version not stamped');
-      assert(x.last_version == null && x.last_version_at == null, `last_version written with the flag off: ${JSON.stringify(x)}`);
-      assert(writes.length === 1, `handoffs rewritten on every publish: ${writes.length}`);
+      assert(x.last_version === 4 && x.last_version_at, `last_version not followed: ${JSON.stringify(x)}`);
+      assert(writes.length >= 1, `handoffs not written: ${writes.length}`);
     });
   }
 

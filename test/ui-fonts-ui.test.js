@@ -180,11 +180,13 @@ function serifControls(page) {
         await page.waitForTimeout(500);
         await check(page, '/me');
         await page.goto(`${base}/me?view=settings`);
-        await page.locator('.tm-settings').waitFor();
+        // Account settings: the settings page, or on a phone in layout A
+        // (myDocsA, on for everyone) its list of sections.
+        await page.locator('.tm-settings, .mds-list').first().waitFor();
         await page.waitForTimeout(500);
         await check(page, 'account settings');
         await hintsAreHints(page, 'account settings');
-        if (phone) {
+        if (phone && await page.locator('.tabs').count()) {
           // All six views fit a 390px phone: none cut to "Settir".
           const tabs = await page.locator('.tabs').first().evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
           if (tabs.scroll > tabs.client + 1) throw new Error(`My docs views are cut off: ${JSON.stringify(tabs)}`);

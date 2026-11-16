@@ -167,7 +167,7 @@ async function startServer(worker, env) {
   const run = async (label, viewport, flag) => {
     const env = makeEnv(mod.CommentsStore);
     env.ASK_API_KEY = 'test-key';
-    env.TDOC_DEBUG_ACCOUNTS = 'alice@example.com';
+    // alice is a plain account (no dev mode): writeWithTdocAi graduated.
     await seed(env);
     const { server, base } = await startServer(worker, env);
     const phone = viewport.width < 600;
@@ -175,7 +175,8 @@ async function startServer(worker, env) {
     await context.addCookies([{ name: 'tdoc_sid', value: SID, url: base }]);
     await context.addInitScript((on) => {
       try { localStorage.setItem('tdoc-save-notice-dismissed', '1'); } catch {}
-      if (window === window.top) window.__TDOC_FLAGS__ = Object.assign({}, window.__TDOC_FLAGS__, { writeWithTdocAi: on });
+      // On: the default, unpinned; off: pinned off (the off switch).
+      if (window === window.top && !on) window.__TDOC_FLAGS__ = Object.assign({}, window.__TDOC_FLAGS__, { writeWithTdocAi: false });
     }, flag);
     const page = await context.newPage();
     const errors = [];

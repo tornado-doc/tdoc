@@ -2,7 +2,8 @@
 // drafts the doc server-side and it is published as v1, private, owned by
 // the person who asked.
 //   - browser sessions only, same-site writes, signed in;
-//   - dev mode (or a PR preview) only, held on the server: 404 otherwise;
+//   - every signed-in person (writeWithTdocAi graduated 2026-11-16), no dev
+//     mode needed; a feedback session or a team agent: 404;
 //   - off without the tdoc AI key (503), like Ask this doc;
 //   - the sentence is capped; a few drafts per window per account;
 //   - the Ask this doc free allowance is charged first, WRITE_AI_ASK_UNITS (3)
@@ -112,9 +113,9 @@ const ORIGIN = 'https://tdoc.dev';
     assert(r.status === 403 || r.status === 401, `token ${r.status}`);
   });
 
-  await t('not in dev mode: the route does not exist', async () => {
-    const r = await write(plain, { prompt: 'A packing list' });
-    assert(r.status === 404, `${r.status}`);
+  await t('not in dev mode: the route is there too (graduated)', async () => {
+    const r = await call('/api/write-with-ai', { cookie: plain });
+    assert(r.status === 200 && r.body.available === true, `${r.status} ${r.text}`);
     assert(!calls.length, 'the model ran');
   });
 
@@ -403,9 +404,9 @@ const ORIGIN = 'https://tdoc.dev';
     assert(!calls[calls.length - 1].body.stream, 'asked the model to stream');
   });
 
-  await t('streamed, flag off: 404 before anything streams', async () => {
-    const r = await writeSse(plain, { prompt: 'A packing list' });
-    assert(r.status === 404 && !/event-stream/.test(r.type), `${r.status} ${r.type}`);
+  await t('streamed, signed out: refused before anything streams', async () => {
+    const r = await writeSse(null, { prompt: 'A packing list' });
+    assert(r.status === 401 && !/event-stream/.test(r.type), `${r.status} ${r.type}`);
   });
 
   await t('PR preview without a key: the fixed draft streams in several pieces', async () => {

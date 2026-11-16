@@ -184,7 +184,7 @@ const LLMS_TXT = `# tdoc
 
 ## Connect
 
-tdoc is a remote MCP server: \`https://tdoc.dev/mcp\` (Streamable HTTP). You sign in with OAuth the first time an app connects; there is no API key to paste. An app that cannot do OAuth can send an existing tdoc account token as \`Authorization: Bearer tdoc_...\`. Tools: get_writing_guide, create_doc, update_doc, edit_doc, create_upload, commit_upload, get_doc, list_docs, get_comments, reply_to_comment, resolve_comment, answer_question, share_doc, create_feedback_space (a private comment space for a website, returned with the one-line <script> to embed).
+tdoc is a remote MCP server: \`https://tdoc.dev/mcp\` (Streamable HTTP). You sign in with OAuth the first time an app connects; there is no API key to paste. An app that cannot do OAuth can send an existing tdoc account token as \`Authorization: Bearer tdoc_...\`. Tools: get_writing_guide, create_doc, update_doc, edit_doc, create_upload, commit_upload, get_doc, list_docs, get_comments, reply_to_comment, resolve_comment, report_progress, answer_question, share_doc, create_feedback_space (a private comment space for a website, returned with the one-line <script> to embed).
 
 Add tdoc feedback to a project ("add tdoc feedback to my project"): call create_feedback_space with the site's origins (production and local dev, e.g. \`https://app.example.com\`, \`http://localhost:3000\`; optional \`team\` you are an admin of), or run \`tdoc-feedback init --site <origin> [--site ...] [--write index.html]\` with the CLI. Add the returned \`<script src="https://tdoc.dev/feedback.js" data-tdoc-space="<slug>" async></script>\` before \`</head>\` in the project's HTML entry (or set \`TDOC_FEEDBACK_SPACE=<slug>\` where the app reads it, \`--env\`). The space is private (you and people you invite, or the team); comments people leave on the site come back through get_comments. Over HTTP: \`POST https://tdoc.dev/api/feedback/spaces\` with \`{"origins": [...]}\` and a tdoc account token.
 
@@ -4228,11 +4228,11 @@ async function noteHandoffReply(env, slug, commentId, at) {
 // doc". Only stamped when the publisher can be named (a verified agent claim
 // or a team agent): an unattributed upload says nothing about whose work it
 // was, and a resolved handoff needs no clock.
-// With the progress line on (`progress`, agentProgressAllowed),
+// With `progress` (every publish since agentProgress graduated, 2026-11-16),
 // `last_version` / `last_version_at` follow every later version the same
 // agent publishes while the handoff is still open, so the card's progress
-// line can say "Published v3" for the newest one, not the first. Off, a
-// handoff is written once, for its first version, as before.
+// line can say "Published v3" for the newest one, not the first. Without
+// it, a handoff is written once, for its first version.
 async function noteHandoffVersion(env, slug, { actor, target, at, version = null, progress = false }) {
   if (!env || !env.META || !slug || !at) return;
   const teamAgentId = actor && actor.team_agent ? actor.team_agent.id : null;
@@ -4264,15 +4264,6 @@ async function noteHandoffVersion(env, slug, { actor, target, at, version = null
 // A handoff still has a comment nobody marked handled.
 function handoffOpen(h) {
   return !!h && (h.comment_ids || []).some((id) => !(h.resolved_ids || []).includes(id));
-}
-
-// The agent progress line (shell flag agentProgress) is dev mode only in
-// production and on for everyone on a PR preview, held on the server the
-// same way as its MCP tool report_progress (a devMode tool): the status
-// route 404s and the extra handoff bookkeeping below is not written for a
-// caller outside it.
-function agentProgressAllowed(env, actor) {
-  return askEditV2Allowed(env, actor).catch(() => false);
 }
 
 // Suggestions (propose_edits / tdoc-propose) sent for a handed-off comment:
@@ -4311,20 +4302,6 @@ async function noteHandoffSuggestions(env, slug, commentIds, count, at, scope) {
   });
   if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
   if (firstFor) agentTiming({ ...firstFor, first_suggested_at: at }, 'suggested', { now: Date.parse(at) });
-}
-
-// Suggestions sent for a handed-off comment while the progress line is off:
-// an agent_timing `suggested` line only, nothing stored (the earliest line
-// per handoff is its first suggestion). One read; the proposer's scope is
-// asked only when a handoff carries these comments. Same target and credit
-// rule as noteHandoffSuggestions.
-async function logHandoffSuggestion(env, slug, commentIds, at, scopeOf) {
-  if (!env || !env.META || !slug || !Array.isArray(commentIds) || !commentIds.length) return;
-  const target = (await loadHandoffs(env, slug))
-    .filter((h) => h && handoffOpen(h) && Array.isArray(h.comment_ids) && h.comment_ids.some((id) => commentIds.includes(id)))
-    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))[0];
-  if (!target || target.first_suggested_at || !handoffInScope(target, await scopeOf())) return;
-  agentTiming(target, 'suggested', { now: Date.parse(at) });
 }
 
 function handoffSuggestedEdits(h) {
@@ -10708,9 +10685,12 @@ async function createFeedbackSiteSpace(env, req, session, { origins, team, title
 // them loses them when dev mode is turned off). Only flags the widget reads,
 // never the person's dev-mode status as such: the page holding the token
 // can read this answer. UI only -- nothing the server allows depends on it.
-const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['feedbackAreaSelect', 'feedbackDocFramePick', 'agentProgress']);
+// feedbackAreaSelect, feedbackDocFramePick and agentProgress graduated
+// (default: true, 2026-11-16), so none is left here; a new dev-mode flag the
+// widget reads goes on this list.
+const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze([]);
 async function feedbackDevFlags(env, session) {
-  if (!session) return [];
+  if (!session || !FEEDBACK_WIDGET_DEV_FLAGS.length) return [];
   let dev = null;
   try { dev = await devModeState(env, session); } catch { return []; }
   return dev && dev.on ? [...FEEDBACK_WIDGET_DEV_FLAGS] : [];
@@ -21089,8 +21069,8 @@ async function handleAsk(env, req, url, slug) {
 // Without that Accept the answer is the one JSON body, as before.
 // One sentence from the New menu; tdoc AI (the Ask this doc model, the same
 // key and the same free allowance) drafts the doc and it is published as v1,
-// private, owned by the person who asked. Behind the shell flag
-// writeWithTdocAi and held here too: dev mode or a PR preview, else 404.
+// private, owned by the person who asked. The shell flag writeWithTdocAi
+// graduated (2026-11-16): open to every signed-in person in a browser.
 //
 // The model is asked for Markdown, never HTML, and what it returns is put
 // through mcpMarkdownToHtml, which escapes every character of it before any
@@ -21141,9 +21121,7 @@ const WRITE_AI_PREVIEW_DOC = [
 
 async function writeWithAiAllowed(env, session) {
   if (env && env.TDOC_PREVIEW === '1') return true;
-  if (!session || session.feedback || session.team_agent) return false;
-  const dev = await devModeState(env, session).catch(() => null);
-  return Boolean(dev && dev.on);
+  return Boolean(session && !session.feedback && !session.team_agent);
 }
 
 // The title is the first "# " line the model wrote, else the sentence.
@@ -23032,15 +23010,10 @@ async function handleProposeEdits(env, req, url, slug) {
   if (!added.ok) return suggestionsUnavailable();
   // The handoff these comments rode on learns how many edits are waiting,
   // for the progress line on its card. Never fails the suggestion.
-  // Only with the progress line on, and only for the agent it was handed to.
-  // Off, only an agent_timing line is logged (logHandoffSuggestion): no write.
+  // Only for the agent it was handed to (agentProgress, on for everyone).
   try {
-    if (await agentProgressAllowed(env, auth.actor)) {
-      const scope = await handoffAckScope(env, auth.actor, acting);
-      await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created, scope);
-    } else if (commentIds.length) {
-      await logHandoffSuggestion(env, slug, commentIds, set.created, () => handoffAckScope(env, auth.actor, acting));
-    }
+    const scope = await handoffAckScope(env, auth.actor, acting);
+    await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created, scope);
   } catch {}
   // The suggestions this handoff asked for have landed: for the comments they
   // name, or for all of it when they name none.
@@ -26360,9 +26333,7 @@ const MCP_TOOLS = {
 
   report_progress: {
     title: 'Say what you are working on',
-    // Dev mode only while the progress line is (shell flag agentProgress).
-    devMode: true,
-    description: 'While working on a comment handed to you, post one short line saying what you are doing now ("Editing the Pack section"); the person sees it under the current step in the progress steps on the comment. Optional; at most one every 10 seconds.',
+    description: 'Optional: one short line on what you are doing now on a comment handed to you ("Editing the Pack section"), shown in its progress steps. At most one per 10 s.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -32340,9 +32311,6 @@ const tdocHandlers = {
     if (p === '/api/notify/progress' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
       if (!auth.ok) return auth.response;
-      // Dev mode / PR preview only, as report_progress is: anybody else
-      // finds no such route.
-      if (!(await agentProgressAllowed(env, auth.actor))) return new Response('Not found', { status: 404 });
       let body = {};
       try { body = await req.json(); } catch {}
       const slug = body && body.slug;
@@ -33570,7 +33538,7 @@ const tdocHandlers = {
           // the publish.
           await noteHandoffVersion(env, slug, {
             actor: auth.actor, target: publishingAgent, at: new Date().toISOString(), version: verNum,
-            progress: await agentProgressAllowed(env, auth.actor),
+            progress: true,
           });
         } catch (e) {
           console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));

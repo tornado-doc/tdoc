@@ -1,7 +1,6 @@
 import React from 'react';
 import { FileText, Folder, Globe, Link2, Lock, MoreHorizontal, Presentation, Sheet, Star, UserRound, UsersRound } from 'lucide-react';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
-import { isFeatureOn } from '../feature-flags.js';
 import { absoluteTime, activityText, docTypeLabel, docTypeOf, relativeTime, sharingText } from './row-meta.js';
 
 export const day = (iso) => (typeof iso === 'string' && iso.length >= 10 ? iso.slice(0, 10) : '');
@@ -135,8 +134,7 @@ export function DocRow({
   const dataAttrs = Object.fromEntries(
     Object.entries(data).map(([key, value]) => [`data-${key}`, value]),
   );
-  const thumbnail = layout === 'grid' && isFeatureOn('docThumbnails');
-  const classes = ['doc-row', layout === 'grid' ? 'is-card' : null, layout === 'grid' && !thumbnail ? 'is-text-card' : null, selection?.checked ? 'is-selected' : null, className]
+  const classes = ['doc-row', layout === 'grid' ? 'is-card' : null, layout === 'grid' ? 'is-text-card' : null, selection?.checked ? 'is-selected' : null, className]
     .filter(Boolean)
     .join(' ');
   return (
@@ -150,19 +148,6 @@ export function DocRow({
             aria-label={`Select ${doc.title}`}
           />
         </label>
-      ) : null}
-      {thumbnail ? (
-        <a className="doc-card-preview" href={docHref(doc)} aria-label={`Open ${doc.title}`}>
-          <span>{doc.excerpt || doc.title}</span>
-          {doc.image ? (
-            <img
-              src={doc.image}
-              alt=""
-              loading="lazy"
-              onError={(event) => { event.currentTarget.hidden = true; }}
-            />
-          ) : null}
-        </a>
       ) : null}
       <div className="doc-info">
         <div className="doc-title-line">
