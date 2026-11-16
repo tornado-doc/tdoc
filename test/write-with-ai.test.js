@@ -2,12 +2,18 @@
 // drafts the doc server-side and it is published as v1, private, owned by
 // the person who asked.
 //   - browser sessions only, same-site writes, signed in;
-//   - dev mode (or a PR preview) only, held on the server: 404 otherwise;
+//   - every signed-in person (writeWithTdocAi graduated 2026-11-16), no dev
+//     mode needed; a feedback session or a team agent: 404;
 //   - off without the tdoc AI key (503), like Ask this doc;
 //   - the sentence is capped; a few drafts per window per account;
+//   - what the create would refuse that is knowable up front (the doc quota,
+//     a team's plan) is refused before anything is charged or the model runs;
 //   - the Ask this doc free allowance is charged first, WRITE_AI_ASK_UNITS (3)
-//     per draft, and given back when the model or the create fails, or when
-//     the person watching leaves mid-stream; out of it, nothing is created;
+//     per draft, and given back only when no piece of the draft was delivered
+//     (the model failed, or the person left, before the first piece); out of
+//     it, nothing is created;
+//   - one draft at a time per account (a lock in the allowance's Durable
+//     Object), so parallel requests cannot slip past the rate limit;
 //   - Accept: text/event-stream streams the draft (delta events, then done
 //     with the url, or error); without it the answer is one JSON body;
 //   - the model's answer is Markdown and every character of it is escaped:
@@ -112,9 +118,9 @@ const ORIGIN = 'https://tdoc.dev';
     assert(r.status === 403 || r.status === 401, `token ${r.status}`);
   });
 
-  await t('not in dev mode: the route does not exist', async () => {
-    const r = await write(plain, { prompt: 'A packing list' });
-    assert(r.status === 404, `${r.status}`);
+  await t('not in dev mode: the route is there too (graduated)', async () => {
+    const r = await call('/api/write-with-ai', { cookie: plain });
+    assert(r.status === 200 && r.body.available === true, `${r.status} ${r.text}`);
     assert(!calls.length, 'the model ran');
   });
 
@@ -363,21 +369,30 @@ const ORIGIN = 'https://tdoc.dev';
     assert(r.events.filter((e) => e.event === 'delta').every((e) => typeof e.data.text === 'string'));
   });
 
-  await t('streamed: the model fails (before or mid-stream): error event, given back, nothing created', async () => {
+  await t('streamed: the model fails before its first piece: error event, given back, nothing created', async () => {
     await clearRate();
     const before = await docCount();
     const left = await remainingOf(dev);
     streamReply = () => ({ status: 500 });
     const a = await writeSse(dev, { prompt: 'fails' });
-    assert(a.status === 200 && a.events.length === 1 && a.events[0].event === 'error' && a.events[0].data.error === 'write_failed' && a.events[0].data.status === 502, a.text);
-    streamReply = () => ({ raw: [`data: ${JSON.stringify({ choices: [{ delta: { content: '# Half' } }] })}`, `data: ${JSON.stringify({ error: { message: 'overloaded', code: 502 } })}`] });
-    const b = await writeSse(dev, { prompt: 'fails later' });
-    assert(JSON.stringify(b.events.map((e) => e.event)) === '["delta","error"]', b.text);
+    assert(a.status === 200 && a.events.length === 1 && a.events[0].event === 'error' && a.events[0].data.error === 'write_failed' && a.events[0].data.status === 502 && a.events[0].data.charged === false, a.text);
     assert(await docCount() === before, 'a doc was created');
     assert(await remainingOf(dev) === left, 'not given back');
   });
 
-  await t('streamed: the reader leaves mid-stream: the model stops, given back, nothing created', async () => {
+  await t('streamed: the model fails after a piece was delivered: error event, still charged, nothing created', async () => {
+    await clearRate();
+    const before = await docCount();
+    const left = await remainingOf(dev);
+    streamReply = () => ({ raw: [`data: ${JSON.stringify({ choices: [{ delta: { content: '# Half' } }] })}`, `data: ${JSON.stringify({ error: { message: 'overloaded', code: 502 } })}`] });
+    const b = await writeSse(dev, { prompt: 'fails later' });
+    assert(JSON.stringify(b.events.map((e) => e.event)) === '["delta","error"]', b.text);
+    assert(b.events[1].data.charged === true && !/Nothing was charged/.test(b.events[1].data.message), JSON.stringify(b.events[1].data));
+    assert(await docCount() === before, 'a doc was created');
+    assert(await remainingOf(dev) === left - 3, `given back after a delivered piece: ${await remainingOf(dev)} vs ${left}`);
+  });
+
+  await t('streamed: the reader leaves after a piece: the model stops, nothing created, still charged', async () => {
     await clearRate();
     const before = await docCount();
     const left = await remainingOf(dev);
@@ -388,11 +403,114 @@ const ORIGIN = 'https://tdoc.dev';
     let seen = '';
     while (!seen.includes('event: delta')) seen += new TextDecoder().decode((await reader.read()).value);
     await reader.cancel();
-    for (let i = 0; i < 100 && (await remainingOf(dev)) !== left; i++) await new Promise((res) => setTimeout(res, 20));
-    assert(await remainingOf(dev) === left, 'not given back');
-    await new Promise((res) => setTimeout(res, 300));
+    await new Promise((res) => setTimeout(res, 400));
+    assert(await remainingOf(dev) === left - 3, `given back after a delivered piece: ${await remainingOf(dev)} vs ${left}`);
     assert(await docCount() === before, 'a doc was created');
     assert(calls.length === n + 1, 'retried');
+    // The lock was released: the next draft may start.
+    await clearRate();
+    streamReply = () => ({ pieces: ['# Next\n'] });
+    const next = await writeSse(dev, { prompt: 'next one' });
+    assert(next.events[next.events.length - 1].event === 'done', next.text);
+  });
+
+  await t('streamed: reasoning text was sent, then the reader leaves before the first piece: still charged', async () => {
+    await clearRate();
+    const before = await docCount();
+    const left = await remainingOf(dev);
+    streamReply = () => ({ thoughts: ['Planning the list. ', 'Clothes first, then gear. '], pieces: ['# Late\n'], delay: 200 });
+    const r = await worker.fetch(req('/api/write-with-ai', { method: 'POST', cookie: dev, headers: { Origin: ORIGIN, Accept: 'text/event-stream' }, body: { prompt: 'leave after reasoning' } }), env, {});
+    const reader = r.body.getReader();
+    let seen = '';
+    while (!/event: thinking\ndata: \{"text"/.test(seen)) seen += new TextDecoder().decode((await reader.read()).value);
+    assert(!seen.includes('event: delta'), 'a draft piece came before the test left');
+    await reader.cancel();
+    await new Promise((res) => setTimeout(res, 800));
+    assert(await remainingOf(dev) === left - 3, `given back after reasoning text was sent: ${await remainingOf(dev)} vs ${left}`);
+    assert(await docCount() === before, 'a doc was created');
+  });
+
+  await t('streamed: the model fails after reasoning text, before any piece: still charged', async () => {
+    await clearRate();
+    const left = await remainingOf(dev);
+    streamReply = () => ({ raw: [`data: ${JSON.stringify({ choices: [{ delta: { content: '', reasoning: 'Thinking about it. ' } }] })}`, `data: ${JSON.stringify({ error: { message: 'overloaded', code: 502 } })}`] });
+    const r = await writeSse(dev, { prompt: 'fails after thinking' });
+    const last = r.events[r.events.length - 1];
+    assert(r.events.some((e) => e.event === 'thinking' && e.data.text) && last.event === 'error' && last.data.charged === true, r.text);
+    assert(await remainingOf(dev) === left - 3, 'given back after reasoning text was sent');
+  });
+
+  await t('streamed: the reader leaves before anything the model wrote was sent: given back', async () => {
+    await clearRate();
+    const before = await docCount();
+    const left = await remainingOf(dev);
+    streamReply = () => ({ pieces: ['# Late\n'], firstDelay: 400 });
+    const r = await worker.fetch(req('/api/write-with-ai', { method: 'POST', cookie: dev, headers: { Origin: ORIGIN, Accept: 'text/event-stream' }, body: { prompt: 'leave while thinking' } }), env, {});
+    const reader = r.body.getReader();
+    await reader.read();
+    await reader.cancel();
+    for (let i = 0; i < 100 && (await remainingOf(dev)) !== left; i++) await new Promise((res) => setTimeout(res, 20));
+    assert(await remainingOf(dev) === left, 'not given back before any piece');
+    await new Promise((res) => setTimeout(res, 600));
+    assert(await docCount() === before, 'a doc was created');
+  });
+
+  await t('the doc quota is checked before anything is charged or the model runs', async () => {
+    const full = await session('full.quota@example.com', 'f1'.repeat(16));
+    await clearRate();
+    // Mint the account and give it one doc, then a limit of one.
+    reply = () => ({ status: 200, body: { choices: [{ message: { content: '# First' } }] } });
+    assert((await write(full, { prompt: 'first' })).status === 200);
+    env.TDOC_HOSTED_MAX_DOCS = '1';
+    try {
+      await clearRate();
+      const left = await remainingOf(full);
+      const n = calls.length;
+      const before = await docCount();
+      const r = await write(full, { prompt: 'second' });
+      assert(r.status === 403 && /quota/.test(r.body.error || ''), `${r.status} ${r.text}`);
+      const s = await writeSse(full, { prompt: 'second, streamed' });
+      assert(s.status === 403 && s.body && /quota/.test(s.body.error || '') && !/event-stream/.test(s.type), `${s.status} ${s.text}`);
+      assert(calls.length === n, 'the model ran for a doc the quota refuses');
+      assert(await remainingOf(full) === left, 'charged for a doc the quota refuses');
+      assert(await docCount() === before, 'a doc was created');
+    } finally { delete env.TDOC_HOSTED_MAX_DOCS; }
+  });
+
+  await t('the create refuses a draft already streamed (the size cap): nothing stored, not given back', async () => {
+    await clearRate();
+    const left = await remainingOf(dev);
+    const before = await docCount();
+    env.TDOC_HOSTED_MAX_UPLOAD_BYTES = '200';
+    try {
+      streamReply = () => ({ pieces: ['# A long one\n\n', 'x'.repeat(400), '\n'] });
+      const r = await writeSse(dev, { prompt: 'too big' });
+      const last = r.events[r.events.length - 1];
+      assert(last.event === 'error' && last.data.status === 413, r.text);
+    } finally { delete env.TDOC_HOSTED_MAX_UPLOAD_BYTES; }
+    assert(await docCount() === before, 'a doc was created');
+    assert(await remainingOf(dev) === left - 3, 'a streamed draft was given back');
+  });
+
+  await t('one draft at a time per account: a parallel request is refused while one runs, before any charge', async () => {
+    await clearRate();
+    const left = await remainingOf(dev);
+    streamReply = () => ({ pieces: Array.from({ length: 10 }, (_, i) => `line ${i}\n`), delay: 30 });
+    const first = writeSse(dev, { prompt: 'first of two' });
+    await new Promise((res) => setTimeout(res, 60));
+    const n = calls.length;
+    const [second, third] = await Promise.all([writeSse(dev, { prompt: 'second of two' }), write(dev, { prompt: 'third, JSON' })]);
+    assert(second.status === 429 && second.body && second.body.error === 'write_in_progress', `${second.status} ${second.text}`);
+    assert(third.status === 429 && third.body.error === 'write_in_progress', `${third.status} ${third.text}`);
+    assert(calls.length === n, 'a parallel draft reached the model');
+    const one = await first;
+    assert(one.events[one.events.length - 1].event === 'done', one.text);
+    assert(await remainingOf(dev) === left - 3, 'the refused requests were charged');
+    // Released at the end: the next one runs.
+    await clearRate();
+    streamReply = () => ({ pieces: ['# After\n'] });
+    const after = await writeSse(dev, { prompt: 'after' });
+    assert(after.events[after.events.length - 1].event === 'done', after.text);
   });
 
   await t('no Accept: text/event-stream: one JSON body, as before', async () => {
@@ -403,9 +521,9 @@ const ORIGIN = 'https://tdoc.dev';
     assert(!calls[calls.length - 1].body.stream, 'asked the model to stream');
   });
 
-  await t('streamed, flag off: 404 before anything streams', async () => {
-    const r = await writeSse(plain, { prompt: 'A packing list' });
-    assert(r.status === 404 && !/event-stream/.test(r.type), `${r.status} ${r.type}`);
+  await t('streamed, signed out: refused before anything streams', async () => {
+    const r = await writeSse(null, { prompt: 'A packing list' });
+    assert(r.status === 401 && !/event-stream/.test(r.type), `${r.status} ${r.type}`);
   });
 
   await t('PR preview without a key: the fixed draft streams in several pieces', async () => {

@@ -141,9 +141,13 @@ t('the worker create route claims a slug, charges quota, and writes v1', () => {
   assert(route.includes('?edit=1'), 'the new doc must come back pointing at edit mode');
   // The ownership, quota and slug rules live in the helper the route calls —
   // shared with the feedback space (#564), so both births obey the same ones.
+  // (createDocPreflight holds the checks knowable before any HTML exists;
+  // createDocForSession runs it first, then the rest.)
+  const preStart = worker.indexOf('async function createDocPreflight(');
   const helperStart = worker.indexOf('async function createDocForSession(');
-  assert(helperStart >= 0, 'createDocForSession missing from the worker');
-  const helper = worker.slice(helperStart, worker.indexOf('\nfunction ', helperStart + 1));
+  assert(preStart >= 0 && helperStart > preStart, 'createDocPreflight / createDocForSession missing from the worker');
+  const helper = worker.slice(preStart, worker.indexOf('\nfunction ', helperStart + 1));
+  assert(helper.includes('const pre = await createDocPreflight(env, req, session, team);'), 'createDocForSession must run the preflight');
   for (const needle of [
     'hostedAccountCopiesEnabled(env, req)',
     'sessionLogin(session)\n    ? await hostedAccountForGithub(env, session.login, session && session.email',

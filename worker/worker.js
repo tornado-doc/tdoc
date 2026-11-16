@@ -184,7 +184,7 @@ const LLMS_TXT = `# tdoc
 
 ## Connect
 
-tdoc is a remote MCP server: \`https://tdoc.dev/mcp\` (Streamable HTTP). You sign in with OAuth the first time an app connects; there is no API key to paste. An app that cannot do OAuth can send an existing tdoc account token as \`Authorization: Bearer tdoc_...\`. Tools: get_writing_guide, create_doc, update_doc, edit_doc, create_upload, commit_upload, get_doc, list_docs, get_comments, reply_to_comment, resolve_comment, answer_question, share_doc, create_feedback_space (a private comment space for a website, returned with the one-line <script> to embed).
+tdoc is a remote MCP server: \`https://tdoc.dev/mcp\` (Streamable HTTP). You sign in with OAuth the first time an app connects; there is no API key to paste. An app that cannot do OAuth can send an existing tdoc account token as \`Authorization: Bearer tdoc_...\`. Tools: get_writing_guide, create_doc, update_doc, edit_doc, create_upload, commit_upload, get_doc, list_docs, get_comments, reply_to_comment, resolve_comment, report_progress, answer_question, share_doc, create_feedback_space (a private comment space for a website, returned with the one-line <script> to embed).
 
 Add tdoc feedback to a project ("add tdoc feedback to my project"): call create_feedback_space with the site's origins (production and local dev, e.g. \`https://app.example.com\`, \`http://localhost:3000\`; optional \`team\` you are an admin of), or run \`tdoc-feedback init --site <origin> [--site ...] [--write index.html]\` with the CLI. Add the returned \`<script src="https://tdoc.dev/feedback.js" data-tdoc-space="<slug>" async></script>\` before \`</head>\` in the project's HTML entry (or set \`TDOC_FEEDBACK_SPACE=<slug>\` where the app reads it, \`--env\`). The space is private (you and people you invite, or the team); comments people leave on the site come back through get_comments. Over HTTP: \`POST https://tdoc.dev/api/feedback/spaces\` with \`{"origins": [...]}\` and a tdoc account token.
 
@@ -4228,11 +4228,11 @@ async function noteHandoffReply(env, slug, commentId, at) {
 // doc". Only stamped when the publisher can be named (a verified agent claim
 // or a team agent): an unattributed upload says nothing about whose work it
 // was, and a resolved handoff needs no clock.
-// With the progress line on (`progress`, agentProgressAllowed),
+// With `progress` (every publish since agentProgress graduated, 2026-11-16),
 // `last_version` / `last_version_at` follow every later version the same
 // agent publishes while the handoff is still open, so the card's progress
-// line can say "Published v3" for the newest one, not the first. Off, a
-// handoff is written once, for its first version, as before.
+// line can say "Published v3" for the newest one, not the first. Without
+// it, a handoff is written once, for its first version.
 async function noteHandoffVersion(env, slug, { actor, target, at, version = null, progress = false }) {
   if (!env || !env.META || !slug || !at) return;
   const teamAgentId = actor && actor.team_agent ? actor.team_agent.id : null;
@@ -4248,6 +4248,9 @@ async function noteHandoffVersion(env, slug, { actor, target, at, version = null
       || (key && h.recipient && notifyKey(h.recipient) === key);
     if (!mine || !handoffOpen(h)) return h;
     if (h.first_version_at && !(Number.isInteger(n) && n > 0)) return h;
+    // Already the newest version on record (a re-upload, an older version
+    // published again): nothing changes, nothing is written.
+    if (h.first_version_at && Number.isInteger(h.last_version) && n <= h.last_version) return h;
     changed = true;
     const rec = {
       ...h,
@@ -4264,15 +4267,6 @@ async function noteHandoffVersion(env, slug, { actor, target, at, version = null
 // A handoff still has a comment nobody marked handled.
 function handoffOpen(h) {
   return !!h && (h.comment_ids || []).some((id) => !(h.resolved_ids || []).includes(id));
-}
-
-// The agent progress line (shell flag agentProgress) is dev mode only in
-// production and on for everyone on a PR preview, held on the server the
-// same way as its MCP tool report_progress (a devMode tool): the status
-// route 404s and the extra handoff bookkeeping below is not written for a
-// caller outside it.
-function agentProgressAllowed(env, actor) {
-  return askEditV2Allowed(env, actor).catch(() => false);
 }
 
 // Suggestions (propose_edits / tdoc-propose) sent for a handed-off comment:
@@ -4301,6 +4295,10 @@ async function noteHandoffSuggestions(env, slug, commentIds, count, at, scope) {
     const sets = Object.fromEntries(Object.entries(had).filter(([k]) => !overlaps(k)));
     const dropped = Object.keys(sets).length !== Object.keys(had).length;
     if (h === target && credit) {
+      // The same count for the same comment set already stored, nothing
+      // else replaced: no write.
+      const replaced = Object.keys(had).filter((k) => overlaps(k));
+      if (replaced.length === 1 && replaced[0] === key && had[key] === count && h.first_suggested_at) return h;
       changed = true;
       if (!h.first_suggested_at) firstFor = h;
       return { ...h, suggested_sets: { ...sets, [key]: count }, suggested_at: at, first_suggested_at: h.first_suggested_at || at };
@@ -4311,20 +4309,6 @@ async function noteHandoffSuggestions(env, slug, commentIds, count, at, scope) {
   });
   if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
   if (firstFor) agentTiming({ ...firstFor, first_suggested_at: at }, 'suggested', { now: Date.parse(at) });
-}
-
-// Suggestions sent for a handed-off comment while the progress line is off:
-// an agent_timing `suggested` line only, nothing stored (the earliest line
-// per handoff is its first suggestion). One read; the proposer's scope is
-// asked only when a handoff carries these comments. Same target and credit
-// rule as noteHandoffSuggestions.
-async function logHandoffSuggestion(env, slug, commentIds, at, scopeOf) {
-  if (!env || !env.META || !slug || !Array.isArray(commentIds) || !commentIds.length) return;
-  const target = (await loadHandoffs(env, slug))
-    .filter((h) => h && handoffOpen(h) && Array.isArray(h.comment_ids) && h.comment_ids.some((id) => commentIds.includes(id)))
-    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))[0];
-  if (!target || target.first_suggested_at || !handoffInScope(target, await scopeOf())) return;
-  agentTiming(target, 'suggested', { now: Date.parse(at) });
 }
 
 function handoffSuggestedEdits(h) {
@@ -10171,7 +10155,12 @@ function blankDocSlug(bytes) {
 // scratch", shared with the feedback space that /api/feedback/connect makes
 // on the person's behalf. Ownership, quota and slug rules are the ones the
 // create-from-scratch path always had; `meta` and `version` are what differs.
-async function createDocForSession(env, req, session, { html, meta, version, team = null }) {
+// What createDocForSession would refuse that is known before any HTML is
+// written: the team's plan, a host closed to account creates, the account
+// store, and the doc quota. Run alone by callers that do expensive work
+// first (Write with tdoc AI runs the model only after this passes).
+// -> { ok: true, actor, ownerCreate } | { ok: false, response }
+async function createDocPreflight(env, req, session, team = null) {
   if (team) {
     const blocked = await teamPlanBlocksDocs(env, await loadTeam(env, team), 1);
     if (blocked) return { ok: false, response: json(blocked, { status: 402 }) };
@@ -10204,14 +10193,22 @@ async function createDocForSession(env, req, session, { html, meta, version, tea
     return { ok: false, response: json({ error: 'hosted_account_unavailable' }, { status: 503 }) };
   }
   // else: BYOK operator with no hosted registry keeps the old unlimited path.
+  if (actor.kind === 'hosted') {
+    const limit = await hostedMaxDocsFor(env, actor.account_id);
+    const used = await countHostedDocs(env, actor.account_id);
+    if (used >= limit) return { ok: false, response: json(quotaDocsPayload(env, limit, used), { status: 403 }) };
+  }
+  return { ok: true, actor, ownerCreate };
+}
 
+async function createDocForSession(env, req, session, { html, meta, version, team = null }) {
+  const pre = await createDocPreflight(env, req, session, team);
+  if (!pre.ok) return pre;
+  const { actor } = pre;
   if (actor.kind === 'hosted') {
     const maxBytes = hostedMaxUploadBytes(env, html);
     const size = utf8ByteLength(html);
     if (size > maxBytes) return { ok: false, response: json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 }) };
-    const limit = await hostedMaxDocsFor(env, actor.account_id);
-    const used = await countHostedDocs(env, actor.account_id);
-    if (used >= limit) return { ok: false, response: json(quotaDocsPayload(env, limit, used), { status: 403 }) };
   }
 
   // Opaque ids don't collide in practice; the loop is here so that when one
@@ -10708,9 +10705,12 @@ async function createFeedbackSiteSpace(env, req, session, { origins, team, title
 // them loses them when dev mode is turned off). Only flags the widget reads,
 // never the person's dev-mode status as such: the page holding the token
 // can read this answer. UI only -- nothing the server allows depends on it.
-const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['feedbackAreaSelect', 'feedbackDocFramePick', 'agentProgress']);
+// feedbackAreaSelect, feedbackDocFramePick and agentProgress graduated
+// (default: true, 2026-11-16), so none is left here; a new dev-mode flag the
+// widget reads goes on this list.
+const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze([]);
 async function feedbackDevFlags(env, session) {
-  if (!session) return [];
+  if (!session || !FEEDBACK_WIDGET_DEV_FLAGS.length) return [];
   let dev = null;
   try { dev = await devModeState(env, session); } catch { return []; }
   return dev && dev.on ? [...FEEDBACK_WIDGET_DEV_FLAGS] : [];
@@ -20478,6 +20478,12 @@ export class CommentsStore {
       let out = { ok: false, error: 'quota_unavailable' };
       try {
         await this.state.storage.transaction(async (txn) => {
+          if (op && (op.kind === 'lock' || op.kind === 'unlock')) {
+            const next = applyWriteLockOp(await txn.get('write_lock'), op);
+            if (next.changed) { if (next.lock) await txn.put('write_lock', next.lock); else await txn.delete('write_lock'); }
+            out = { ...next.result, used: 0 };
+            return;
+          }
           const next = applyAskQuotaOp(await txn.get('used'), op);
           if (next.changed) await txn.put('used', next.used);
           out = next.result;
@@ -21316,8 +21322,8 @@ async function handleAsk(env, req, url, slug) {
 // Without that Accept the answer is the one JSON body, as before.
 // One sentence from the New menu; tdoc AI (the Ask this doc model, the same
 // key and the same free allowance) drafts the doc and it is published as v1,
-// private, owned by the person who asked. Behind the shell flag
-// writeWithTdocAi and held here too: dev mode or a PR preview, else 404.
+// private, owned by the person who asked. The shell flag writeWithTdocAi
+// graduated (2026-11-16): open to every signed-in person in a browser.
 //
 // The model is asked for Markdown, never HTML, and what it returns is put
 // through mcpMarkdownToHtml, which escapes every character of it before any
@@ -21328,6 +21334,13 @@ async function handleAsk(env, req, url, slug) {
 const WRITE_AI_PROMPT_CHARS = 500;
 const WRITE_AI_RATE_LIMIT = 3;
 const WRITE_AI_RATE_WINDOW = 600;
+// One draft at a time per account (the allowance's Durable Object holds it):
+// longer than the longest a streamed draft may run, so a lock a crashed
+// request never released frees itself.
+const WRITE_AI_LOCK_MS = ASK_STREAM_TOTAL_MS + 60000;
+function writeAiLockToken() {
+  return [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 const WRITE_AI_MAX_TOKENS = 6000;
 // What one draft costs of the Ask allowance. A question is one unit and
 // answers in ASK_DEFAULT_MAX_TOKENS (4500) at most, usually far less; a
@@ -21368,9 +21381,7 @@ const WRITE_AI_PREVIEW_DOC = [
 
 async function writeWithAiAllowed(env, session) {
   if (env && env.TDOC_PREVIEW === '1') return true;
-  if (!session || session.feedback || session.team_agent) return false;
-  const dev = await devModeState(env, session).catch(() => null);
-  return Boolean(dev && dev.on);
+  return Boolean(session && !session.feedback && !session.team_agent);
 }
 
 // The title is the first "# " line the model wrote, else the sentence.
@@ -21425,15 +21436,38 @@ async function handleWriteWithAi(env, req, url, ctx) {
   if (team && !teamMember(await loadTeam(env, team), sessionInTeam(session, team) ? session.account_id : null)) {
     return json({ error: 'not_team_member' }, { status: 403 });
   }
+  // Whatever the create would refuse that is knowable now (team plan, a
+  // host closed to account creates, the account store, the doc quota) is
+  // refused before anything is charged or the model runs: a draft the
+  // create then turns away would be a free draft (it used to be refunded
+  // after streaming in full).
+  const pre = await createDocPreflight(env, req, session, team);
+  if (!pre.ok) return pre.response;
+  // One draft at a time per account, held in the allowance's Durable Object
+  // (atomic), so parallel requests cannot all pass the KV rate limit below
+  // before any of them counts. Released when the draft ends; it expires on
+  // its own after the longest a draft may run.
+  const lock = cfg.previewMock ? { ok: true, token: null } : await askQuotaOp(env, accountKey, { kind: 'lock', token: writeAiLockToken(), ttl_ms: WRITE_AI_LOCK_MS });
+  if (!lock.ok) {
+    if (lock.error === 'write_in_progress') return json({ error: 'write_in_progress', message: 'tdoc AI is already writing a draft for you. Wait for it to finish.' }, { status: 429 });
+    return json({ error: 'quota_unavailable' }, { status: 503 });
+  }
+  const unlock = async () => { if (lock.token) await askQuotaOp(env, accountKey, { kind: 'unlock', token: lock.token }).catch(() => null); };
+  // Counted only once the lock is held: a request refused for a draft in
+  // progress does not use up the window.
   if (await rateLimited(env, `write-ai:${accountKey}`, WRITE_AI_RATE_LIMIT, WRITE_AI_RATE_WINDOW)) {
+    await unlock();
     return json({ error: 'rate_limited', retry_after: WRITE_AI_RATE_WINDOW, message: 'A few drafts at a time: try again in a few minutes.' }, { status: 429 });
   }
   // The free allowance Ask this doc uses, charged before the model runs so a
-  // burst cannot spend more than it; a failure gives it back. A draft is up
-  // to WRITE_AI_MAX_TOKENS of output, so it costs WRITE_AI_ASK_UNITS
-  // questions, charged and given back as one.
+  // burst cannot spend more than it. It is given back only when nothing of
+  // the draft reached the person (the model failed before its first piece,
+  // or they left before it): once a piece was delivered the draft is spent,
+  // whatever happens after. A draft is up to WRITE_AI_MAX_TOKENS of output,
+  // so it costs WRITE_AI_ASK_UNITS questions, charged and given back as one.
   if (!cfg.previewMock) {
     const charged = await askQuotaOp(env, accountKey, { kind: 'charge', limit: cfg.limit, units: WRITE_AI_ASK_UNITS });
+    if (!charged.ok) await unlock();
     if (!charged.ok) {
       if (charged.error === 'ask_limit') {
         const left = Math.max(0, cfg.limit - (Number(charged.used) || 0));
@@ -21447,22 +21481,24 @@ async function handleWriteWithAi(env, req, url, ctx) {
       return json({ error: 'quota_unavailable' }, { status: 503 });
     }
   }
-  const refund = async () => { if (!cfg.previewMock) await askQuotaOp(env, accountKey, { kind: 'refund', units: WRITE_AI_ASK_UNITS }); };
+  const giveBack = async () => { if (!cfg.previewMock) await askQuotaOp(env, accountKey, { kind: 'refund', units: WRITE_AI_ASK_UNITS }); };
   const messages = [
     { role: 'system', content: WRITE_AI_SYSTEM_PROMPT },
     // An address typed into the sentence leaves the worker hidden, as in Ask.
     { role: 'user', content: `<request>\n${askFence(askNoEmails(rawPrompt)).replace(/<\/?\s*request\b[^>]*>/gi, '[tag removed]')}\n</request>` },
   ];
   const modelCfg = { ...cfg, maxTokens: Math.max(cfg.maxTokens, WRITE_AI_MAX_TOKENS) };
-  const job = { env, req, session, team, rawPrompt, accountKey, cfg, refund };
-
   // A client that asked for server-sent events watches the draft arrive.
   if (!(req.headers.get('accept') || '').includes('text/event-stream')) {
-    const timing = aiTimer('write_ai', modelCfg);
-    const out = cfg.previewMock ? { ok: true, answer: WRITE_AI_PREVIEW_DOC } : await callAskModel(modelCfg, messages, timing);
-    timing.done({ ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0 });
-    const done = await writeAiFinish(job, out);
-    return json(done.body, { status: done.status });
+    try {
+      const timing = aiTimer('write_ai', modelCfg);
+      const out = cfg.previewMock ? { ok: true, answer: WRITE_AI_PREVIEW_DOC } : await callAskModel(modelCfg, messages, timing);
+      timing.done({ ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0 });
+      // One JSON answer: nothing of the draft is delivered unless it is
+      // stored, so only a failed model run gives the request back.
+      const done = await writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, delivered: false, refund: giveBack }, out);
+      return json(done.body, { status: done.status });
+    } finally { await unlock(); }
   }
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
@@ -21471,6 +21507,10 @@ async function handleWriteWithAi(env, req, url, ctx) {
   const run = (async () => {
     let gone = false;
     let streamed = 0;
+    // Given back only while nothing the model wrote has been sent: no piece
+    // of the draft, and no reasoning text (up to WRITE_AI_REASONING_CHARS of
+    // it may go out as `thinking` events; elapsed-only beats do not count).
+    const refund = async () => { if (streamed === 0 && shownReasoning === 0) await giveBack(); };
     // One ai_timing line per call (server/ai-timing.js): the upstream's
     // headers, its first reasoning and first answer piece, the end, plus
     // whether reasoning text came, finish_reason, token usage and why a kept
@@ -21510,16 +21550,19 @@ async function handleWriteWithAi(env, req, url, ctx) {
         // Once the draft has begun the dialog has collapsed the thoughts.
         if (drafting || shownReasoning >= WRITE_AI_REASONING_CHARS) return;
         const piece = text.slice(0, WRITE_AI_REASONING_CHARS - shownReasoning);
-        shownReasoning += piece.length;
         await thinking(piece);
+        // Counted once it went out: a write to a reader who already left
+        // delivered nothing (the refund rule reads this).
+        shownReasoning += piece.length;
       },
     };
     // A write that fails means the reader went away: stop the model.
     const onDelta = async (text) => {
       if (!drafting) { drafting = true; if (cfg.previewMock) timer.mark('first_token'); }
       if (streamed >= WRITE_AI_MARKDOWN_CHARS) return false;
-      streamed += text.length;
       try { await send('delta', { text }); } catch { throw clientGone(); }
+      // Counted once it went out (as the reasoning above).
+      streamed += text.length;
       return streamed < WRITE_AI_MARKDOWN_CHARS;
     };
     let out;
@@ -21538,16 +21581,21 @@ async function handleWriteWithAi(env, req, url, ctx) {
     const timing = timer.done(out.clientGone || gone
       ? { ok: false, detail: 'client_gone', chars: streamed, extra }
       : { ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0, extra });
-    // Left before the end: nothing is created and the draft is given back.
+    // Left before the end: nothing is created; the request is given back
+    // only if they left before the first piece of the draft.
     if (out.clientGone || gone) {
       await refund();
-      console.log(JSON.stringify({ event: 'write_ai_abandoned' }));
+      await unlock();
+      console.log(JSON.stringify({ event: 'write_ai_abandoned', delivered_chars: streamed, reasoning_chars_sent: shownReasoning }));
       try { await writer.abort(); } catch {}
       return;
     }
     // The stream is over; v1 is being stored.
     if (out.ok) { try { await send('publishing', {}); } catch {} }
-    const done = await writeAiFinish(job, out);
+    let done;
+    try {
+      done = await writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, delivered: streamed > 0 || shownReasoning > 0, refund }, out);
+    } finally { await unlock(); }
     try {
       await send(done.status === 200 ? 'done' : 'error', { ...done.body, status: done.status, timing, ...(done.status === 200 ? { cutoff } : {}) });
       await writer.close();
@@ -21596,11 +21644,15 @@ async function writeAiPreviewStream(onDelta, hooks = {}) {
 
 // After the model: store the draft exactly one way for both responses.
 // -> { status, body }
-async function writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, refund }, out) {
+// `refund` gives the request back only when nothing was delivered (the
+// caller decides); `delivered` says whether part of the draft was sent.
+async function writeAiFinish({ env, req, session, team, rawPrompt, accountKey, cfg, refund, delivered = false }, out) {
   if (!out.ok) {
     await refund();
-    console.log(JSON.stringify({ event: 'write_ai_failed', status: out.status || null, detail: out.detail || null }));
-    return { status: 502, body: { error: 'write_failed', message: 'tdoc AI could not write it this time. Nothing was charged; try again.' } };
+    console.log(JSON.stringify({ event: 'write_ai_failed', status: out.status || null, detail: out.detail || null, delivered }));
+    return { status: 502, body: { error: 'write_failed', charged: delivered, message: delivered
+      ? 'tdoc AI stopped partway through this draft. Try again.'
+      : 'tdoc AI could not write it this time. Nothing was charged; try again.' } };
   }
   const markdown = writeAiMarkdown(out.answer);
   const title = writeAiTitle(markdown, rawPrompt);
@@ -21618,6 +21670,8 @@ async function writeAiFinish({ env, req, session, team, rawPrompt, accountKey, c
     version: { prompt: 'Written by tdoc AI from one sentence', ...(styled.style ? { style: styled.style } : {}) },
   });
   if (!made.ok) {
+    // The preflight passed, so this is rare (the size cap, a store error, a
+    // race to the doc quota). A draft already streamed is not given back.
     await refund();
     let body = null;
     try { body = await made.response.json(); } catch {}
@@ -21646,6 +21700,23 @@ function askQuotaUnits(op) {
   const n = Math.floor(Number(op && op.units));
   return Number.isFinite(n) && n >= 1 ? Math.min(n, 100) : 1;
 }
+// One draft at a time per account (Write with tdoc AI): the lock lives next
+// to the count in the same Durable Object, as { token, until }.
+//   { kind: 'lock', token, ttl_ms, now } -> { ok, token } | { ok: false, error: 'write_in_progress' }
+//   { kind: 'unlock', token }            -> { ok }  (only the holder's token frees it)
+function applyWriteLockOp(stored, op, now = Date.now()) {
+  const held = stored && typeof stored === 'object' && Number(stored.until) > now ? stored : null;
+  if (op.kind === 'lock') {
+    if (held) return { changed: false, lock: stored, result: { ok: false, error: 'write_in_progress' } };
+    const ttl = Math.min(Math.max(1000, Number(op.ttl_ms) || 0), 30 * 60 * 1000);
+    const token = String(op.token || '');
+    if (!token) return { changed: false, lock: stored, result: { ok: false, error: 'bad_quota_op' } };
+    return { changed: true, lock: { token, until: now + ttl }, result: { ok: true, token } };
+  }
+  if (held && held.token === String(op.token || '')) return { changed: true, lock: null, result: { ok: true } };
+  return { changed: false, lock: stored, result: { ok: true } };
+}
+
 function applyAskQuotaOp(stored, op) {
   const have = Math.max(0, Number(stored) || 0);
   const kv = Math.max(0, Number(op && op.kv) || 0);
@@ -21686,7 +21757,9 @@ async function askQuotaOp(env, accountKey, op) {
       return out;
     } catch { return { ok: false, error: 'quota_unavailable' }; }
   }
-  // A PR preview has no Durable Object: the KV count, read then written.
+  // A PR preview has no Durable Object: the KV count, read then written,
+  // and no draft lock (the preview runs a fixed draft, no model).
+  if (op.kind === 'lock' || op.kind === 'unlock') return env.TDOC_PREVIEW === '1' ? { ok: true, token: null, used: 0 } : { ok: false, error: 'quota_unavailable' };
   if (env.TDOC_PREVIEW === '1') {
     const next = applyAskQuotaOp(kv, { ...op, kv });
     if (next.changed) await env.META.put(usedKey, String(next.used));
@@ -23259,15 +23332,10 @@ async function handleProposeEdits(env, req, url, slug) {
   if (!added.ok) return suggestionsUnavailable();
   // The handoff these comments rode on learns how many edits are waiting,
   // for the progress line on its card. Never fails the suggestion.
-  // Only with the progress line on, and only for the agent it was handed to.
-  // Off, only an agent_timing line is logged (logHandoffSuggestion): no write.
+  // Only for the agent it was handed to (agentProgress, on for everyone).
   try {
-    if (await agentProgressAllowed(env, auth.actor)) {
-      const scope = await handoffAckScope(env, auth.actor, acting);
-      await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created, scope);
-    } else if (commentIds.length) {
-      await logHandoffSuggestion(env, slug, commentIds, set.created, () => handoffAckScope(env, auth.actor, acting));
-    }
+    const scope = await handoffAckScope(env, auth.actor, acting);
+    await noteHandoffSuggestions(env, slug, commentIds, kept.length, set.created, scope);
   } catch {}
   // The suggestions this handoff asked for have landed: for the comments they
   // name, or for all of it when they name none.
@@ -26587,9 +26655,7 @@ const MCP_TOOLS = {
 
   report_progress: {
     title: 'Say what you are working on',
-    // Dev mode only while the progress line is (shell flag agentProgress).
-    devMode: true,
-    description: 'While working on a comment handed to you, post one short line saying what you are doing now ("Editing the Pack section"); the person sees it under the current step in the progress steps on the comment. Optional; at most one every 10 seconds.',
+    description: 'Optional: one short line on what you are doing now on a comment handed to you ("Editing the Pack section"), shown in its progress steps. At most one per 10 s.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -32581,9 +32647,6 @@ const tdocHandlers = {
     if (p === '/api/notify/progress' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
       if (!auth.ok) return auth.response;
-      // Dev mode / PR preview only, as report_progress is: anybody else
-      // finds no such route.
-      if (!(await agentProgressAllowed(env, auth.actor))) return new Response('Not found', { status: 404 });
       let body = {};
       try { body = await req.json(); } catch {}
       const slug = body && body.slug;
@@ -32624,7 +32687,17 @@ const tdocHandlers = {
       const n = Number.isInteger(prev.progress_n) ? prev.progress_n : 0;
       if (n >= HANDOFF_PROGRESS_MAX) return json({ error: 'too_many_progress', message: 'This handoff has had enough status updates; reply on the comment instead.' }, { status: 429 });
       const progress = { text, at: new Date(nowMs).toISOString() };
-      const rec = await putHandoff(env, slug, { ...prev, progress, progress_n: n + 1 });
+      // The same line again changes nothing: no write.
+      if (prev.progress && prev.progress.text === text) return json({ ok: true, handoff_id: prev.handoff_id, progress: prev.progress, unchanged: true });
+      // An optional status line: a refused KV write (its per-key write rate)
+      // is "try again shortly", never a 500 for the agent.
+      let rec;
+      try {
+        rec = await putHandoff(env, slug, { ...prev, progress, progress_n: n + 1 });
+      } catch (e) {
+        console.error('[notify/progress] handoff write refused (non-fatal):', (e && e.message) || String(e));
+        return json({ error: 'rate_limited', retry_after: Math.ceil(HANDOFF_PROGRESS_MIN_MS / 1000), message: 'Status not saved; try again shortly.' }, { status: 429, headers: { 'Retry-After': String(Math.ceil(HANDOFF_PROGRESS_MIN_MS / 1000)) } });
+      }
       return json({ ok: true, handoff_id: rec.handoff_id, progress });
     }
 
@@ -33811,7 +33884,7 @@ const tdocHandlers = {
           // the publish.
           await noteHandoffVersion(env, slug, {
             actor: auth.actor, target: publishingAgent, at: new Date().toISOString(), version: verNum,
-            progress: await agentProgressAllowed(env, auth.actor),
+            progress: true,
           });
         } catch (e) {
           console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));

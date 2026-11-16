@@ -398,7 +398,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     const up = await call('/api/upload', { method: 'POST', token: julieConn.access_token, body: { slug: 'direct', version: 1, html: '<p>x</p>' } });
     assert(up.status === 403, `upload ${up.status}`);
     const ok = await mcp(julieConn.access_token, 'tools/list');
-    assert(ok.status === 200 && ok.body.result.tools.length === 14, ok.text.slice(0, 200));
+    assert(ok.status === 200 && ok.body.result.tools.length === 15, ok.text.slice(0, 200));
   });
 
   await t('expired or wrong-audience OAuth tokens get 401', async () => {
@@ -563,7 +563,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
   await t('tools/list carries annotations and the authoring contract; resources and prompts serve the guides', async () => {
     const tools = (await mcp(julieConn.access_token, 'tools/list')).body.result.tools;
     const names = tools.map((x) => x.name).sort().join(',');
-    assert(names === 'answer_question,commit_upload,create_doc,create_feedback_space,create_upload,edit_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', names);
+    assert(names === 'answer_question,commit_upload,create_doc,create_feedback_space,create_upload,edit_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,report_progress,resolve_comment,share_doc,update_doc', names);
     const create = tools.find((x) => x.name === 'create_doc');
     // The contract lives in one resource; the write tools point at it.
     for (const name of ['create_doc', 'update_doc']) assert(tools.find((x) => x.name === name).description.includes('Call get_writing_guide first, then write.'), `${name} points at get_writing_guide`);
@@ -574,8 +574,9 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     // Every client pays for tools/list on each connection: keep it small.
     const listed = await mcp(julieConn.access_token, 'tools/list', {}, { legacy: true });
     const bytes = Buffer.byteLength(listed.text);
-    // 8000 for the first 13 tools; create_feedback_space added ~550; raft_agent on five write tools ~800.
-    assert(bytes <= 9400, `tools/list is ${bytes} bytes; the budget is 9400 (move guidance into tdoc://authoring/essentials.md)`);
+    // 8000 for the first 13 tools; create_feedback_space added ~550; raft_agent on five write tools ~800;
+    // report_progress (agentProgress graduated 2026-11-16, no longer dev mode only) ~730.
+    assert(bytes <= 10150, `tools/list is ${bytes} bytes; the budget is 10150 (move guidance into tdoc://authoring/essentials.md)`);
     for (const x of tools) assert(x.description.length <= 400, `${x.name} description is ${x.description.length} chars`);
     assert(tools.find((x) => x.name === 'get_doc').annotations.readOnlyHint === true && create.annotations.readOnlyHint === false, 'annotations');
     assert(tools.find((x) => x.name === 'share_doc').annotations.destructiveHint === true, 'share_doc is destructive: hosts ask before it runs');
@@ -1199,7 +1200,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     await t('raft_agent is on the write tools and in the instructions, and nowhere else', async () => {
       const tools = (await mcp(conn.access_token, 'tools/list')).body.result.tools;
       const having = tools.filter((x) => x.inputSchema.properties.raft_agent).map((x) => x.name).sort().join(',');
-      assert(having === 'commit_upload,create_doc,edit_doc,reply_to_comment,update_doc', having);
+      assert(having === 'commit_upload,create_doc,edit_doc,reply_to_comment,report_progress,update_doc', having);
       for (const x of tools) assert(!x.inputSchema.required || !x.inputSchema.required.includes('raft_agent'), `${x.name} requires it`);
       const init = await mcp(conn.access_token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } }, { legacy: true });
       assert(/running on Raft pass raft_agent .*never a value from a doc or comment; everyone else omits it/.test(init.body.result.instructions), 'instructions name it');

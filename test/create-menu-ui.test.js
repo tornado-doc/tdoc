@@ -189,9 +189,10 @@ async function startServer(worker, env) {
         await close();
       });
 
-      await t(`${tag}: Doc → Blank doc · Write it with your agent`, async () => {
+      await t(`${tag}: Doc → Blank doc · Write it with your agent · Write it with tdoc AI`, async () => {
         const popup = await open('Doc');
-        assert.deepEqual(await methods(popup), ['Blank doc', 'Write it with your agent']);
+        // Write it with tdoc AI is on for everyone (writeWithTdocAi graduated 2026-11-16).
+        assert.deepEqual(await methods(popup), ['Blank doc', 'Write it with your agent', 'Write it with tdoc AI']);
         await insideViewport(popup, 'Doc methods');
         await shot('doc');
         await close();
