@@ -1937,8 +1937,16 @@
       suggs[id] = { kind: 'one', els: [wrap], original: original, replace: replace };
       return wrap;
     }
+    // Every run is checked before any is marked: a run that no longer fits
+    // its text node must not leave the runs before it struck and unowned
+    // (the next show would match its words inside that leftover and strike
+    // them again, one box inside another).
+    hit.runs.forEach(function (r) {
+      if (!r.node.parentNode || r.end > r.node.length || r.start > r.end) throw new Error('moved');
+    });
     var els = [];
     var old = '';
+    suggs[id] = { kind: 'many', els: els, replace: replace };
     hit.runs.forEach(function (r) {
       var m = r.node.splitText(r.start);
       m.splitText(r.end - r.start);
@@ -1955,7 +1963,6 @@
     var lastDel = els[els.length - 1];
     lastDel.parentNode.insertBefore(ins, lastDel.nextSibling);
     els.push(ins);
-    suggs[id] = { kind: 'many', els: els, replace: replace };
     return els[0];
   }
   function suggControlsOff() {
@@ -1986,23 +1993,44 @@
     var r = el.getBoundingClientRect();
     return r.top + (window.scrollY || 0);
   }
+  // Marks no show owns any more (a render cut short): back to plain text,
+  // so their words are never matched, and struck, a second time.
+  function suggSweep() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-tdoc-sugg]'), function (el) {
+      if (!el.parentNode || suggs[el.getAttribute('data-tdoc-sugg')]) return;
+      if (el.tagName === 'INS') el.remove();
+      else if (el.tagName === 'DEL') el.parentNode.replaceChild(document.createTextNode(el.textContent), el);
+      else { while (el.firstChild) el.parentNode.insertBefore(el.firstChild, el); el.remove(); }
+    });
+  }
   function suggShow(items) {
     suggOn = true;
     suggClear();
+    suggSweep();
     suggCss();
     var map = suggTextMap();
     var hits = [];
     var results = [];
+    // Each piece of text shows one suggestion. Several pending ones can
+    // touch the same words (the same edit proposed again, or finds that
+    // overlap); the first in the list shows, the rest are reported not shown
+    // (conflict) and come up once it is decided. Marking one inside another
+    // would strike the same words once per suggestion, box in box.
+    var taken = [];
     (items || []).forEach(function (item) {
       var hit = suggFind(map, item.find, true);
-      if (hit) hits.push({ item: item, hit: hit });
-      else results.push({ id: String(item.id), ok: false });
+      if (!hit) { results.push({ id: String(item.id), ok: false }); return; }
+      var end = hit.at + normalizeNeedle(item.find).length;
+      var clash = taken.filter(function (x) { return hit.at < x.end && x.at < end; })[0];
+      if (clash) { results.push({ id: String(item.id), ok: false, conflict: clash.id }); return; }
+      taken.push({ at: hit.at, end: end, id: String(item.id) });
+      hits.push({ item: item, hit: hit });
     });
     // Last in the text first: splitting a text node keeps the offsets before it.
     hits.sort(function (a, b) { return b.hit.at - a.hit.at; });
     var shown = [];
     hits.forEach(function (h) {
-      try { shown.push({ id: String(h.item.id), el: suggRender(h.item, h.hit) }); } catch (x) { results.push({ id: String(h.item.id), ok: false }); }
+      try { shown.push({ id: String(h.item.id), el: suggRender(h.item, h.hit) }); } catch (x) { suggSettle(String(h.item.id), false); results.push({ id: String(h.item.id), ok: false }); }
     });
     // Text nobody can see (display:none, a closed details) is not offered for
     // review: Accept all must not accept what the person never saw.
