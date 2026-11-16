@@ -12,6 +12,8 @@ const { loadWorker, makeEnv, issue, req } = require('./helpers/worker-harness');
     method: 'POST', token: owner.token, body: { slug, version: 1, html },
   }), env, {});
 
+  // Budget: a quadratic scan of 1.5 MB costs seconds; linear work is ~150-300 ms
+  // on CI runners. 1000 ms keeps the DoS guard (quadratic is minutes) without flaking on a busy runner.
   // Warm route initialization and the JIT before measuring document work.
   assert.equal((await upload('warm-up', '<h1>Warm up</h1><p>Text</p>')).status, 200);
 
@@ -29,7 +31,7 @@ const { loadWorker, makeEnv, issue, req } = require('./helpers/worker-harness');
     const cpu = process.cpuUsage(start);
     const elapsedMs = (cpu.user + cpu.system) / 1000;
     assert.equal(response.status, 200, `${kind} upload: ${await response.text()}`);
-    assert.ok(elapsedMs < 200, `${kind} upload took ${elapsedMs.toFixed(1)} ms CPU for 1.5 MB`);
+    assert.ok(elapsedMs < 1000, `${kind} upload took ${elapsedMs.toFixed(1)} ms CPU for 1.5 MB`);
     console.log(`  ✓ ${kind}: 1.5 MB uploaded in ${elapsedMs.toFixed(1)} ms CPU`);
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

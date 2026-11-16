@@ -226,6 +226,7 @@ const OFFLINE = [
 const BROWSER = [
   'diagram-controls-ui.test.js', // authored map SVG sizing cannot stretch provider controls
   'reply-activity-ui.test.js', // v2 receives v3 reply status without navigation or pulsing
+  'modeless-edit-ui.test.js', // modelessEdit: type with no Edit mode, autosave -> version in place, bubble + "/" menu, table cells, commenter unchanged, two-editor conflict notice, newer version swapped in without reload (marked, reduced motion), phone, flag off unchanged
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
   'version-history-ui.test.js', // Edited opens the history panel: grouped rows, Show changes on/off remembered, Share this version, Restore, phone drawer, dev-mode numbers, suggestions row, flag off, earlier-version comment
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
@@ -280,6 +281,7 @@ const BROWSER = [
   'comment-one-behaviour-ui.test.js', // doc page, feedback space and widget draw one card: reply prefill rule, one agent-list height, a reply draft per thread, floating card fits the screen, panel drag width
   'ask-edit-feedback-ui.test.js', // Ask/Edit v2 feedback: @agent in a comment or reply asks for suggestions (phone drawer, ⌘⇧Enter), nothing changes outside dev mode, a reply box is not held by delivery, rewrites read as blocks, edits stay text
   'suggest-accept-ui.test.js', // a suggestion's Accept in the real shell: readable refusals, decided rows leave silently, the list stays true without a refresh, Accept lands on /v/N
+  'suggest-overlap-ui.test.js', // pending suggestions on the same words (copies, overlapping finds) show once each, never one inside another; Reject takes exact copies; the held-back one then shows; Accept publishes
   'ask-edit-v2-gate-ui.test.js', // Ask/Edit v2 is dev-mode only: not on the list (desktop + phone), flag pinned, switch off -> Ask AI and comments exactly as before, no suggestions request; dev mode on is the control
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
   'comment-overflow-ask-dismiss-ui.test.js', // a long markdown reply (inline code, paths, a code block) never scrolls a comment card, its thread or an Ask AI answer sideways; Ask AI closes on a click in the document or Escape and keeps the draft; V1 + V2, desktop + phone

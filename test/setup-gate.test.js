@@ -560,7 +560,9 @@ t('the hint keeps out of the way of everything else on the doc', () => {
   assert(shell.includes('(hintBar ? STEP_HINT_HEIGHT : 0)'), 'the overlay counts it');
   assert(hint.includes('onVisible(showing)') && shell.includes('onVisible={setHintBar}'),
     'and only the row itself knows whether it drew');
-  assert(/editor\.mode === 'edit' \? null : \(\s*<DocStepHint/.test(shell), 'it is gone while the doc is being written');
+  // (Modeless editing, flag modelessEdit, has no "being written" mode: the
+  // page is always editable there, so the hint stays.)
+  assert(/editor\.mode === 'edit'( && !editor\.modeless)? \? null : \(\s*<DocStepHint/.test(shell), 'it is gone while the doc is being written');
   const small = (hintCss.match(/font[^;]*?(\d+(?:\.\d+)?)px/g) || [])
     .map((m) => Number((m.match(/(\d+(?:\.\d+)?)px/) || [])[1]))
     .filter((n) => n && n < 12.5);

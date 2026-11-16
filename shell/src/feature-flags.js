@@ -101,6 +101,14 @@ export const FLAGS = Object.freeze({
   // Graduated 2026-11-16: on for everyone signed in; the server's
   // writeWithAiAllowed holds the same line (a person in a browser).
   writeWithTdocAi: Object.freeze({ label: 'Write with tdoc AI (New menu)', owner: 'julie', added: '2026-11-12', default: true }),
+  // No Edit mode for people who may edit a prose doc: click and type. A
+  // selection brings up the editor bar's tools (and Comment), "/" on an empty
+  // line the block menu, plain tables are typed into cell by cell. Drafts
+  // stay in the browser and publish as a version after a pause or on leaving
+  // (never over a newer version: the conflict dialog). A version published
+  // while the doc is open replaces the page in place, once nobody is typing.
+  // Sheets and slides keep their modes. Readers and commenters: unchanged.
+  modelessEdit: Object.freeze({ label: 'Edit without Edit mode (autosave)', owner: 'julie', added: '2026-11-16', default: false, preview: true, graduate_by: '2026-11-23' }),
   // Sheet embeds: a <figure data-tdoc-embed="sheet" data-src="/d/<slug>">
   // in a page shows a live view of that sheet (its first rows, the saved
   // view applied, the comment count, Open), read under the SHEET's access
