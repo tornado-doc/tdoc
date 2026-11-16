@@ -62,8 +62,16 @@
 .tm-comment-row.is-resolved { opacity: .74; }
 .tm-comment-avatar {
   display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
-  border-radius: 50%; object-fit: cover; background: var(--td-surface-2); color: var(--td-muted); font-size: 12px; font-weight: 700;
+  border-radius: 50%; overflow: hidden; background: var(--td-surface-2); color: var(--td-muted); font-size: 12px; font-weight: 700;
 }
+/* The author as their comment card draws them (AuthorAvatar), filling the circle. */
+.tm-comment-avatar > img,
+.tm-comment-avatar > .tdoc-agent-provider-mark,
+.tm-comment-avatar > .tdoc-avatar-fallback { width: 100%; height: 100%; border-radius: 50%; }
+.tm-comment-avatar > img { object-fit: cover; }
+.tm-comment-avatar.is-agent > img { object-fit: contain; background: #fff; }
+.tm-comment-avatar > .tdoc-agent-provider-mark { box-shadow: inset 0 0 0 1px var(--td-line); }
+.tm-comment-avatar > .tdoc-avatar-fallback { font-size: 12px; }
 .tm-comment-body { min-width: 0; display: grid; gap: 5px; }
 .tm-comment-line { display: flex; align-items: baseline; gap: 5px; min-width: 0; font-size: 13px; color: var(--td-muted); }
 .tm-comment-line strong { color: var(--td-ink); }

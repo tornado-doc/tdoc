@@ -7,6 +7,7 @@ import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { copyText } from '../document/model.js';
+import { AuthorAvatar } from '../document/author-face.jsx';
 import {
   addTeamAgent,
   createTeam,
@@ -109,9 +110,14 @@ function commentTarget(item) {
   return `/d/${encodeURIComponent(item.slug)}?comment=${encodeURIComponent(item.id || item.thread_id)}`;
 }
 
+// The author as their comment card draws them (AuthorAvatar): an agent
+// wears its program's mark.
 function CommentAvatar({ author }) {
-  if (author?.avatar_url) return <img className="tm-comment-avatar" src={author.avatar_url} alt="" />;
-  return <span className="tm-comment-avatar tm-comment-avatar--anon" aria-hidden="true">{String(author?.name || '?').slice(0, 1).toUpperCase()}</span>;
+  return (
+    <span className={`tm-comment-avatar${author?.kind === 'agent' ? ' is-agent' : ''}`}>
+      <AuthorAvatar author={author || { name: 'Someone' }} size={0} />
+    </span>
+  );
 }
 
 // A browseable team review surface, separate from the bell. The bell answers

@@ -449,8 +449,17 @@ a.ui-menu-item:visited {
 .tdoc-modal button.tdoc-notif-open:hover, button.tdoc-notif-open:hover { background: var(--td-surface-2, #f7f7f5); }
 .tdoc-notif-row.unread button.tdoc-notif-open:hover { background: color-mix(in srgb, var(--td-accent) 10%, transparent); }
 .tdoc-notif-actions { display: flex; gap: 8px; padding: 0 12px 12px 50px; }
-.tdoc-notif-avatar { flex: none; width: 30px; height: 30px; border-radius: 50%; object-fit: cover; }
-.tdoc-notif-avatar--anon { display: grid; place-items: center; background: #8a93a2; color: #fff; font-size: 12px; font-weight: 600; }
+/* The actor as their comment card draws them (AuthorAvatar), filling the
+   circle; the initial is drawn here too, since the feedback overlay does not
+   load docs-hub.css. My docs' Needs you and a team's comments use the same. */
+.tdoc-notif-avatar { flex: none; display: grid; width: 30px; height: 30px; border-radius: 50%; overflow: hidden; }
+.tdoc-notif-avatar > img,
+.tdoc-notif-avatar > .tdoc-agent-provider-mark,
+.tdoc-notif-avatar > .tdoc-avatar-fallback { width: 100%; height: 100%; border-radius: 50%; }
+.tdoc-notif-avatar > img { object-fit: cover; }
+.tdoc-notif-avatar.is-agent > img { object-fit: contain; background: #fff; }
+.tdoc-notif-avatar > .tdoc-agent-provider-mark { box-shadow: inset 0 0 0 1px var(--td-line); }
+.tdoc-notif-avatar > .tdoc-avatar-fallback { display: grid; place-items: center; background: var(--td-accent); color: #fff; font-size: 12px; font-weight: 600; }
 .tdoc-notif-main { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
 .tdoc-notif-line { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .tdoc-notif-line strong { font-weight: 600; }
@@ -715,6 +724,28 @@ a.ui-menu-item:visited {
 }
 @keyframes mk-write-blink { to { visibility: hidden; } }
 @media (prefers-reduced-motion: reduce) { .mk-write-caret { animation: none; } }
+/* The model thinking before it writes: one quiet line and, under it, the
+   latest three lines of its reasoning in small muted type, older lines
+   fading out at the top; each line cut with an ellipsis. Folded to one
+   "Thought for 23s" line once the draft begins. No boxes, no new colours. */
+.mk-think { margin: 0 0 12px; }
+.mk-think-head { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--td-muted); font-size: 13px; line-height: 1.5; }
+.tdoc-modal p.mk-think-head { margin: 0; color: var(--td-muted); font-size: 13px; }
+.mk-think-toggle.ui-btn { gap: 6px; }
+.mk-think-caret { transition: transform 120ms ease; }
+.mk-think-caret[data-open] { transform: rotate(180deg); }
+.mk-think-lines {
+  margin-top: 2px; color: var(--td-muted); font-size: 12.5px; line-height: 1.5; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.5em);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 1.5em);
+}
+.mk-think-line { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mk-think-full {
+  max-height: calc(12 * 1.5em); margin-top: 2px; overflow-y: auto;
+  color: var(--td-muted); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.mk-write-cutoff { display: block; margin-top: 2px; color: var(--td-muted); }
+.mk-write-starting { margin: 0 0 6px; }
 .mk-foot.mk-write-error { color: var(--td-danger); }
 .mk-foot.mk-write-error a { color: inherit; text-decoration: underline; }
 @media (max-width: 700px) {

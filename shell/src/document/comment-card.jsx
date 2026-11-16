@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreHorizontal, SmilePlus } from 'lucide-react';
 import { SuggestContext } from './suggestions.js';
@@ -13,15 +12,13 @@ import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AskOnlyToggle, PrivateAnswer, SendToAgentToggle, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { agentForThread, targetKey } from './agent-choices.js';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
-import { avatarFor, avatarInitial, QUICK_REACTIONS, tdocUrl } from './model.js';
-import { AuthorFace } from './author-face.jsx';
+import { avatarFor, QUICK_REACTIONS, tdocUrl } from './model.js';
+import { AuthorAvatar } from './author-face.jsx';
 import { HandoffProgressSteps, HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from '../comments/core/handoff-state.js';
 import { productPageUrl } from './product-url.js';
 import { observeVisibleRead } from '../comments/core/visible-read.js';
 import { clearReplyDraft, readReplyDraft, writeReplyDraft } from './reply-draft.js';
-
-const AUTHOR_FACE_SIZE = { width: 24, height: 24, maxWidth: 24, maxHeight: 24 };
 
 export function authorLine(author) {
   if (!author) return 'anonymous';
@@ -77,7 +74,6 @@ export function Author({ author, timestamp }) {
   }
 
   const avatar = avatarFor(author);
-  const initial = <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(author)}</span>;
   const providerAvatar = author.kind === 'agent' && author.provider;
   const profileUrl = author.kind !== 'agent' && author.kind !== 'system'
     && /^\/@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(author.profile_url || '')
@@ -90,20 +86,16 @@ export function Author({ author, timestamp }) {
     : undefined;
   return (
     <div className={`author${author.kind === 'agent' ? ' tdoc-agent-author' : ''}`} title={title}>
-      {providerAvatar ? (
-        <span className="tdoc-agent-provider-mark" aria-hidden="true">
-          <ProviderMark target={author} size={18} />
-        </span>
-      ) : avatar && profileUrl ? (
+      {!providerAvatar && avatar && profileUrl ? (
         <a className="tdoc-author-profile" href={profileUrl}
           {...(profileElsewhere ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
           aria-label={`View ${authorLine(author)}'s public profile`}
           title={`View ${authorLine(author)}'s public profile`}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}>
-          <AuthorFace src={avatar} style={AUTHOR_FACE_SIZE} fallback={initial} />
+          <AuthorAvatar author={author} />
         </a>
-      ) : <AuthorFace src={avatar} style={AUTHOR_FACE_SIZE} fallback={initial} />}
+      ) : <AuthorAvatar author={author} />}
       <span className="tdoc-cc-who">
         {hoverCard ? <AgentAuthorName author={author} /> : <span className="login">{authorLine(author)}</span>}
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}

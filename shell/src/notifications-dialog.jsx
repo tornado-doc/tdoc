@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppButton } from './ui/button.jsx';
 import { AppSwitch } from './ui/switch.jsx';
+import { AuthorAvatar } from './document/author-face.jsx';
 import { actorName, joiner, notificationAction, notificationLabel, notificationTarget } from './notification-text.js';
 
 export { notificationLabel, notificationTarget };
@@ -140,9 +141,11 @@ export function NotificationsDialog({ open, notifications, onOpenChange, onSelec
           return (
             <div key={item.id} className={`tdoc-notif-row${item.read ? '' : ' unread'}`}>
               <button type="button" className="tdoc-notif-open" onClick={() => onSelect(item)}>
-                {item.actor?.avatar_url
-                  ? <img className="tdoc-notif-avatar" src={item.actor.avatar_url} alt="" />
-                  : <span className="tdoc-notif-avatar tdoc-notif-avatar--anon" aria-hidden="true">{actorName(item).slice(0, 1).toUpperCase()}</span>}
+                {/* Whoever acted, drawn as their comment card draws them: an
+                    agent wears its program's mark. */}
+                <span className={`tdoc-notif-avatar${item.actor?.kind === 'agent' ? ' is-agent' : ''}`}>
+                  <AuthorAvatar author={item.actor || { name: actorName(item) }} size={0} />
+                </span>
                 <span className="tdoc-notif-main">
                   <span className="tdoc-notif-line">
                     <strong>{actorName(item)}</strong> {notificationAction(item)}{joiner(item)} <span className="tdoc-notif-doc">{item.title || item.slug}</span>

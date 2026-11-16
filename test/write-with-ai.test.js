@@ -44,16 +44,28 @@ const ORIGIN = 'https://tdoc.dev';
     const sent = init.body ? JSON.parse(init.body) : null;
     calls.push({ url: u, body: sent });
     if (sent && sent.stream && streamReply) {
-      const { pieces = [], raw = null, delay = 5, status = 200 } = streamReply();
+      const { pieces = [], raw = null, delay = 5, status = 200, thoughts = [], field = 'reasoning', firstDelay = 0, finish = null, usage = null, rejectOptions = false } = streamReply();
+      // A provider that does not know stream_options refuses the request.
+      if (rejectOptions && sent.stream_options) return new Response(JSON.stringify({ error: { message: 'unknown field stream_options' } }), { status: 400, headers: { 'Content-Type': 'application/json' } });
       if (status !== 200) return new Response(JSON.stringify({ error: { message: 'down' } }), { status, headers: { 'Content-Type': 'application/json' } });
       const enc = new TextEncoder();
-      const lines = raw || [': OPENROUTER PROCESSING', ...pieces.map((p) => `data: ${JSON.stringify({ choices: [{ delta: { content: p, reasoning: 'scratch' } }] })}`), 'data: [DONE]'];
+      // `thoughts`: reasoning-only deltas first (in `field`), as a reasoning
+      // model sends before its answer. Every answer piece also carries a
+      // reasoning 'scratch', which never reaches the reader.
+      const lines = raw || [
+        ': OPENROUTER PROCESSING',
+        ...thoughts.map((t) => `data: ${JSON.stringify({ choices: [{ delta: { content: '', [field]: t } }] })}`),
+        ...pieces.map((p) => `data: ${JSON.stringify({ choices: [{ delta: { content: p, reasoning: 'scratch' } }] })}`),
+        ...(finish ? [`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: finish }] })}`] : []),
+        ...(usage ? [`data: ${JSON.stringify({ choices: [], usage })}`] : []),
+        'data: [DONE]',
+      ];
       const signal = init.signal;
       const body = new ReadableStream({
         async start(c) {
-          for (const line of lines) {
+          for (const [i, line] of lines.entries()) {
             if (signal && signal.aborted) return;
-            await new Promise((r) => setTimeout(r, delay));
+            await new Promise((r) => setTimeout(r, i === 1 && firstDelay ? firstDelay : delay));
             try { c.enqueue(enc.encode(`${line}\n\n`)); } catch { return; }
           }
           try { c.close(); } catch {}
@@ -205,10 +217,17 @@ const ORIGIN = 'https://tdoc.dev';
     const r = await writeSse(dev, { prompt: 'a streamed plan' });
     assert(r.status === 200 && /^text\/event-stream/.test(r.type) && r.nosniff === 'nosniff', `${r.status} ${r.type} ${r.text}`);
     const kinds = r.events.map((e) => e.event);
-    assert(JSON.stringify(kinds) === JSON.stringify(['delta', 'delta', 'delta', 'done']), kinds.join(','));
+    assert(JSON.stringify(kinds) === JSON.stringify(['delta', 'delta', 'delta', 'publishing', 'done']), kinds.join(','));
     assert(r.events.slice(0, 3).map((e) => e.data.text).join('') === pieces.join(''), 'deltas are not the answer, in order');
     assert(!r.text.includes('scratch'), 'reasoning reached the reader');
-    const done = r.events[3].data;
+    const done = r.events[4].data;
+    assert(done.cutoff === null, JSON.stringify(done.cutoff));
+    const tm = done.timing;
+    // The shared ai_timing record (server/ai-timing.js), with this route's extras.
+    assert(tm && tm.event === 'ai_timing' && tm.route === 'write_ai' && tm.stream === true && tm.model, JSON.stringify(tm));
+    assert(tm.upstream_headers_ms >= 0 && tm.first_token_ms >= tm.upstream_headers_ms && tm.total_ms >= tm.first_token_ms, JSON.stringify(tm));
+    // The mock's 'scratch' rides on every answer piece: counted, never shown.
+    assert(tm.reasoning_chars === 'scratch'.length * pieces.length && tm.out_chars === pieces.join('').trim().length && tm.ok === true, JSON.stringify(tm));
     assert(done.ok && done.version === 1 && done.url === `/d/${done.slug}/v/1` && done.title === 'Streamed plan', JSON.stringify(done));
     assert(done.remaining === left - 3, `charged ${left - done.remaining}`);
     const last = calls[calls.length - 1].body;
@@ -217,6 +236,118 @@ const ORIGIN = 'https://tdoc.dev';
     assert(meta.access.visibility === 'private' && meta.created_from === 'tdoc-ai');
     const html = await (await env.DOCS.get(`docs/${done.slug}/v1/index.html`)).text();
     assert(/<h2[^>]*>Steps<\/h2>/.test(html) && /<li>One<\/li>/.test(html), 'not stored as today');
+  });
+
+  // A reasoning model: its thoughts stream as `thinking` before the draft,
+  // each { text, elapsed_ms }, and are never part of the stored doc.
+  for (const field of ['reasoning', 'reasoning_content']) {
+    await t(`streamed, reasoning text in delta.${field}: thinking events with the text, then the draft; never stored`, async () => {
+      await clearRate();
+      const logs = [];
+      const log = console.log;
+      console.log = (...a) => { logs.push(a.join(' ')); };
+      const thoughts = ['Plan the ', 'SECRET-THOUGHT sections.'];
+      streamReply = () => ({ thoughts, field, pieces: ['# Thought plan\n\n', '- One\n'] });
+      let r;
+      try { r = await writeSse(dev, { prompt: 'a plan with private-words-xyz' }); } finally { console.log = log; }
+      const kinds = r.events.map((e) => e.event);
+      assert(JSON.stringify(kinds) === JSON.stringify(['thinking', 'thinking', 'delta', 'delta', 'publishing', 'done']), kinds.join(','));
+      const th = r.events.filter((e) => e.event === 'thinking').map((e) => e.data);
+      assert(th.map((d) => d.text).join('') === thoughts.join(''), JSON.stringify(th));
+      assert(th.every((d) => Number.isInteger(d.elapsed_ms) && d.elapsed_ms >= 0), JSON.stringify(th));
+      assert(!r.text.includes('scratch'), 'reasoning after the draft began reached the reader');
+      const done = r.events[5].data;
+      const tm = done.timing;
+      assert(tm.reasoning_text === true && tm.reasoning_chars === thoughts.join('').length + 'scratch'.length * 2, JSON.stringify(tm));
+      assert(tm.first_reasoning_ms != null && tm.first_reasoning_ms <= tm.first_token_ms, JSON.stringify(tm));
+      const html = await (await env.DOCS.get(`docs/${done.slug}/v1/index.html`)).text();
+      assert(!html.includes('SECRET-THOUGHT') && !html.includes('scratch'), 'reasoning stored in the doc');
+      // One line per call: the ai_timing line, carrying the extras too.
+      const timingLines = logs.filter((l) => /"event":"ai_timing"/.test(l));
+      assert(timingLines.length === 1 && !logs.some((l) => l.startsWith('[write-with-ai timing]')), logs.join('\n'));
+      const line = timingLines[0];
+      const logged = JSON.parse(line);
+      assert(logged.route === 'write_ai' && logged.reasoning_text === true && logged.first_token_ms === tm.first_token_ms, line);
+      assert(!line.includes('private-words-xyz') && !line.includes('SECRET-THOUGHT') && !/acct|@/.test(line), `the log carries more than numbers: ${line}`);
+    });
+  }
+
+  await t('streamed, a slow first token and no reasoning text: elapsed-only thinking events about once a second', async () => {
+    await clearRate();
+    streamReply = () => ({ firstDelay: 2300, raw: [': OPENROUTER PROCESSING', `data: ${JSON.stringify({ choices: [{ delta: { content: '# Slow\n' } }] })}`, 'data: [DONE]'] });
+    const r = await writeSse(dev, { prompt: 'slow' });
+    const th = r.events.filter((e) => e.event === 'thinking').map((e) => e.data);
+    assert(th.length >= 1 && th.length <= 3, `${th.length} beats`);
+    assert(th.every((d) => !('text' in d) && d.elapsed_ms >= 900), JSON.stringify(th));
+    const first = r.events.findIndex((e) => e.event === 'delta');
+    assert(first > r.events.findIndex((e) => e.event === 'thinking'), 'thinking after the draft');
+    assert(r.events.slice(first).every((e) => e.event !== 'thinking'), 'a beat after the draft began');
+    const done = r.events[r.events.length - 1];
+    assert(done.data.timing.reasoning_text === false && done.data.timing.reasoning_chars === 0, JSON.stringify(done.data.timing));
+    assert(done.event === 'done' && done.data.timing.first_token_ms >= 2000, JSON.stringify(done.data.timing));
+  });
+
+  await t('streamed: usage is asked for; finish_reason and token counts land in timing (done and the log)', async () => {
+    env.ASK_FREE_LIMIT = '300';
+    await clearRate();
+    const logs = [];
+    const log = console.log;
+    console.log = (...a) => { logs.push(a.join(' ')); };
+    streamReply = () => ({ pieces: ['# Counted\n'], finish: 'stop', usage: { prompt_tokens: 120, completion_tokens: 900, completion_tokens_details: { reasoning_tokens: 700 } } });
+    let r;
+    try { r = await writeSse(dev, { prompt: 'counted' }); } finally { console.log = log; }
+    const sentBody = calls[calls.length - 1].body;
+    assert(sentBody.stream_options && sentBody.stream_options.include_usage === true, JSON.stringify(sentBody));
+    const tm = r.events[r.events.length - 1].data.timing;
+    assert(tm.finish_reason === 'stop' && tm.cutoff === null, JSON.stringify(tm));
+    assert(JSON.stringify(tm.usage) === JSON.stringify({ prompt_tokens: 120, completion_tokens: 900, reasoning_tokens: 700 }), JSON.stringify(tm.usage));
+    const logged = JSON.parse(logs.find((l) => /"event":"ai_timing"/.test(l)));
+    assert(logged.finish_reason === 'stop' && logged.usage.reasoning_tokens === 700, JSON.stringify(logged));
+  });
+
+  await t('streamed: a provider that refuses stream_options is asked again without it', async () => {
+    await clearRate();
+    const n = calls.length;
+    streamReply = () => ({ rejectOptions: true, pieces: ['# Fallback\n'] });
+    const r = await writeSse(dev, { prompt: 'fallback' });
+    const done = r.events.find((e) => e.event === 'done');
+    assert(done && done.data.ok, r.text);
+    assert(calls.length === n + 2 && calls[n].body.stream_options && !calls[n + 1].body.stream_options, JSON.stringify(calls.slice(n).map((c) => c.body.stream_options || null)));
+    assert(done.data.timing.usage === null, 'usage without asking');
+  });
+
+  // Ended early, but with a draft: published all the same, and the dialog
+  // is told why in one line (done.cutoff, timing.cutoff).
+  for (const [name, reply, reason, message] of [
+    ['the provider hit its length limit', () => ({ pieces: ['# Long\n\nhalf a sen'], finish: 'length' }), 'length', /^Stopped early: hit the length limit\. The end may be cut off\.$/],
+    ['a content filter stopped it', () => ({ pieces: ['# Filtered\n\nsome'], finish: 'content_filter' }), 'filter', /^tdoc AI stopped this draft\.$/],
+    ['a refusal', () => ({ raw: [`data: ${JSON.stringify({ choices: [{ delta: { content: '# Refused\n' } }] })}`, `data: ${JSON.stringify({ choices: [{ delta: { refusal: 'I cannot help with that.' } }] })}`, 'data: [DONE]'] }), 'filter', /^tdoc AI stopped this draft\.$/],
+    ['our length cap (WRITE_AI_MARKDOWN_CHARS)', () => ({ pieces: ['# Huge\n\n', ...Array.from({ length: 7 }, () => 'x'.repeat(10000))] }), 'length', /length limit/],
+  ]) {
+    await t(`streamed, cut off: ${name}: published, done.cutoff says so`, async () => {
+      await clearRate();
+      const before = await docCount();
+      streamReply = reply;
+      const r = await writeSse(dev, { prompt: `cut ${reason}` });
+      const done = r.events[r.events.length - 1];
+      assert(done.event === 'done' && done.data.ok, r.text.slice(0, 300));
+      assert(done.data.cutoff && done.data.cutoff.reason === reason && message.test(done.data.cutoff.message), JSON.stringify(done.data.cutoff));
+      assert(done.data.timing.cutoff === reason, JSON.stringify(done.data.timing));
+      assert(r.events.some((e) => e.event === 'publishing'), 'no publishing event');
+      assert(await docCount() === before + 1, 'not published');
+    });
+  }
+
+  await t('streamed, cut off: the whole-draft time limit: what was written is published, done.cutoff time', async () => {
+    await clearRate();
+    env.ASK_STREAM_TOTAL_MS = '400';
+    try {
+      streamReply = () => ({ pieces: ['# Slow draft\n\n', 'line one\n', 'line two\n', 'line three\n', 'line four\n'], delay: 150 });
+      const r = await writeSse(dev, { prompt: 'too slow' });
+      const done = r.events[r.events.length - 1];
+      assert(done.event === 'done' && done.data.ok && done.data.cutoff && done.data.cutoff.reason === 'time', r.text.slice(-400));
+      assert(/time limit/.test(done.data.cutoff.message), done.data.cutoff.message);
+    } finally { delete env.ASK_STREAM_TOTAL_MS; }
   });
 
   await t('streamed: a <script> split across pieces is text in the stored doc', async () => {
@@ -288,6 +419,11 @@ const ORIGIN = 'https://tdoc.dev';
     const events = parseSse(await r.text());
     const deltas = events.filter((e) => e.event === 'delta');
     assert(deltas.length >= 3, `${deltas.length} pieces`);
+    // Its fixed reasoning first, so the thinking view can be tried there.
+    const thinking = events.filter((e) => e.event === 'thinking');
+    assert(thinking.length >= 1 && thinking.every((e) => typeof e.data.text === 'string') && events.indexOf(thinking[0]) < events.indexOf(deltas[0]), 'no preview thinking');
+    const pt = events[events.length - 1].data.timing;
+    assert(pt.model === 'preview' && pt.first_reasoning_ms != null && pt.first_token_ms >= pt.first_reasoning_ms, JSON.stringify(pt));
     assert(deltas.map((e) => e.data.text).join('').startsWith('# Preview draft'), 'not the fixed draft');
     const done = events[events.length - 1];
     assert(done.event === 'done' && done.data.url, JSON.stringify(done));

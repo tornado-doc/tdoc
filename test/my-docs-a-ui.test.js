@@ -22,6 +22,9 @@ const { chromium } = requirePlaywrightOrSkip('my-docs-a-ui.test.js');
 const JULIE = 'c3'.repeat(16);
 const BOB_AVATAR = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><rect width="28" height="28" fill="#2f7d5b"/></svg>')}`;
 const SHOTS = process.env.TDOC_SHOTS_DIR || '';
+// Who answered, as the server stamps a local Claude Code agent's reply
+// (askAgentAuthor); the record keeps only what the face and name line read.
+const CLAUDE_AUTHOR = { kind: 'agent', login: 'claude', name: 'Claude Code', avatar_url: 'https://cdn.simpleicons.org/claude/d97757', provider: 'local', cli: 'claude', owner: { display: 'julie' } };
 const H = 3600e3;
 const D = 24 * H;
 const FOLDER = 'f_1762900000000_abcdef12';
@@ -69,7 +72,7 @@ async function seed(env) {
     // The same thread, left on an older version: one item with n1, not two.
     { id: 'n3', kind: 'comment', group_key: 'comment:q4-plan', slug: 'q4-plan', version: 1, comment_id: 'c_1', thread_id: 'c_1', actor: { login: 'bob', name: 'Bob Lee', avatar_url: BOB_AVATAR }, preview: 'Starting a thread on the numbers.', title: 'Q4 plan', at: ago(D), read: false, count: 1 },
   ] }));
-  await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: ago(30 * 60e3) }] }));
+  await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: ago(30 * 60e3), author: CLAUDE_AUTHOR }] }));
 }
 
 async function startServer(worker, env) {
@@ -184,7 +187,7 @@ async function startServer(worker, env) {
         assert.equal(await q4.locator('.mda-need-more').textContent(), '+1 more');
         assert.equal(await q4.locator('.mda-need-title').textContent(), await card(page, 'q4-plan').getAttribute('data-title'));
         // Whose it is: their photo.
-        assert.equal(await q4.locator('img.mda-need-avatar').getAttribute('src'), BOB_AVATAR);
+        assert.equal(await q4.locator('.mda-need-avatar img').getAttribute('src'), BOB_AVATAR);
         const serena = needs.locator('.mda-need[data-slug="budget-2027"]');
         assert.equal(await serena.locator('.mda-need-avatar').textContent(), 'S', 'no photo: the initial');
         assert.equal(await serena.locator('.mda-need-action').textContent(), 'Answer Serena Park\u2019s question');
@@ -194,7 +197,10 @@ async function startServer(worker, env) {
         assert.equal(await agent.getAttribute('data-kind'), 'agent');
         assert.equal(await agent.locator('.mda-need-action').textContent(), 'Review the agent\u2019s reply');
         assert.equal(await agent.locator('.mda-need-link').getAttribute('href'), '/d/launch-deck?comment=c_9');
-        assert.equal(await agent.locator('.mda-need-avatar svg').count(), 1, 'an agent reply: the agent mark');
+        // Who answered, as the reply card in the thread draws them
+        // (AuthorAvatar, authorLine): Claude's mark, "name · owner".
+        assert.equal(await agent.locator('.mda-need-avatar .tdoc-agent-provider-mark svg').count(), 1, 'an agent reply: its program\u2019s mark');
+        assert.equal(await agent.locator('.mda-need-by').textContent(), 'Claude Code \u00b7 julie');
         // Every item has the check.
         assert.equal(await needs.locator('.mda-need').count(), await needs.locator('.mda-need .mda-need-done').count());
         assert.equal(await page.getByRole('tab', { name: /Needs you/ }).locator('.mda-chip-n').textContent(), '3');
@@ -228,10 +234,17 @@ async function startServer(worker, env) {
         await page.reload();
         await page.locator('.mda-need[data-slug="q4-plan"]').waitFor();
         assert.equal(await page.locator('.mda-need[data-slug="launch-deck"]').count(), 0, 'gone on the server too');
-        // Back for the views below.
+        // A reply noted before the server kept who wrote it: the generic agent mark.
         await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: new Date(Date.now() - 30 * 60e3).toISOString() }] }));
         await page.reload();
-        await page.locator('.mda-need[data-slug="launch-deck"]').waitFor();
+        const legacy = page.locator('.mda-need[data-slug="launch-deck"]').first();
+        await legacy.waitFor();
+        assert.equal(await legacy.locator('.mda-need-avatar.is-mark svg').count(), 1);
+        assert.equal(await legacy.locator('.mda-need-by').count(), 0);
+        // Back for the views below.
+        await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: new Date(Date.now() - 30 * 60e3).toISOString(), author: CLAUDE_AUTHOR }] }));
+        await page.reload();
+        await page.locator('.mda-need[data-slug="launch-deck"] .tdoc-agent-provider-mark').first().waitFor();
       });
 
       await t('1440: Needs you view lists every card; the chip is a tab', async () => {
@@ -524,6 +537,13 @@ async function startServer(worker, env) {
           assert.ok(!layout.sideways, 'nothing to swipe');
           const title = await list.locator('.mda-need-title').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
           assert.ok(title >= 15, `to-do text is ${title}px`);
+          // The same face as on desktop: Claude's mark, filling the circle.
+          const face = await list.locator('.mda-need[data-slug="launch-deck"] .mda-need-avatar').evaluate((el) => {
+            const mark = el.querySelector('.tdoc-agent-provider-mark');
+            return { box: el.getBoundingClientRect().width, mark: mark ? mark.getBoundingClientRect().width : 0 };
+          });
+          assert.equal(face.box, 32);
+          assert.equal(face.mark, 32, 'the mark fills the avatar');
           await p.getByRole('button', { name: 'See all 2' }).click();
           await p.getByRole('button', { name: 'View: Needs you' }).waitFor();
           await p.locator('.mda-needs .mda-need').first().waitFor();
