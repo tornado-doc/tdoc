@@ -20580,20 +20580,33 @@ function askHeaders(cfg) {
   return headers;
 }
 
-async function callAskModel(cfg, messages) {
+// Response time of each tdoc AI call (server/ai-timing.js, inlined by
+// bin/tdoc-bundle): one `ai_timing` log line per call, read with
+// `wrangler tail --search ai_timing`. Route, model, times, sizes and an
+// error code only; never the prompt, the doc, a slug or an account.
+/* __TDOC_AI_TIMING__ */
+function aiTimer(route, cfg, { stream = false } = {}) {
+  const engine = globalThis.TdocAiTiming;
+  if (!engine || cfg.previewMock) return engine ? engine.none : AI_TIMER_NONE;
+  try { return engine.start(route, { model: cfg.model, stream }); } catch { return engine.none; }
+}
+const AI_TIMER_NONE = { attempt() { return this; }, mark() { return this; }, done() { return null; } };
+
+async function callAskModel(cfg, messages, timing = AI_TIMER_NONE) {
   const headers = askHeaders(cfg);
   const payload = JSON.stringify({ model: cfg.model, max_tokens: cfg.maxTokens, messages });
   // One attempt, and one sequential retry only when the upstream says 5xx.
-  let out = await askAttempt(cfg, headers, payload);
-  if (!out.ok && out.status >= 500) out = await askAttempt(cfg, headers, payload);
+  let out = await askAttempt(cfg, headers, payload, timing);
+  if (!out.ok && out.status >= 500) out = await askAttempt(cfg, headers, payload, timing);
   return out;
 }
 
-async function askAttempt(cfg, headers, payload) {
+async function askAttempt(cfg, headers, payload, timing = AI_TIMER_NONE) {
   const ctl = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = ctl ? setTimeout(() => ctl.abort(), ASK_TIMEOUT_MS) : null;
   let res;
   let body = null;
+  timing.attempt();
   try {
     res = await fetch(`${cfg.base}/chat/completions`, {
       method: 'POST',
@@ -20601,6 +20614,7 @@ async function askAttempt(cfg, headers, payload) {
       body: payload,
       ...(ctl ? { signal: ctl.signal } : {}),
     });
+    timing.mark('upstream_headers');
     try { body = await res.json(); } catch {}
   } catch (e) {
     return { ok: false, status: 0, detail: e && e.name === 'AbortError' ? 'timeout' : 'network' };
@@ -20634,15 +20648,15 @@ async function askAttempt(cfg, headers, payload) {
 // The time limit is between pieces (ASK_TIMEOUT_MS), not for the whole
 // draft, and the whole draft is held to ASK_STREAM_TOTAL_MS.
 const ASK_STREAM_TOTAL_MS = 300000;
-async function streamAskModel(cfg, messages, onDelta) {
+async function streamAskModel(cfg, messages, onDelta, timing = AI_TIMER_NONE) {
   const headers = { ...askHeaders(cfg), Accept: 'text/event-stream' };
   const payload = JSON.stringify({ model: cfg.model, max_tokens: cfg.maxTokens, messages, stream: true });
-  let out = await askStreamAttempt(cfg, headers, payload, onDelta);
-  if (!out.ok && out.status >= 500 && !out.sent) out = await askStreamAttempt(cfg, headers, payload, onDelta);
+  let out = await askStreamAttempt(cfg, headers, payload, onDelta, timing);
+  if (!out.ok && out.status >= 500 && !out.sent) out = await askStreamAttempt(cfg, headers, payload, onDelta, timing);
   return out;
 }
 
-async function askStreamAttempt(cfg, headers, payload, onDelta) {
+async function askStreamAttempt(cfg, headers, payload, onDelta, timing = AI_TIMER_NONE) {
   const ctl = new AbortController();
   let idle = null;
   const arm = () => { if (idle) clearTimeout(idle); idle = setTimeout(() => ctl.abort('timeout'), ASK_TIMEOUT_MS); };
@@ -20652,13 +20666,16 @@ async function askStreamAttempt(cfg, headers, payload, onDelta) {
   let stopped = false;
   const give = async (text) => {
     if (!text || stopped) return;
+    if (!sent) timing.mark('first_token');
     answer += text;
     sent = true;
     if ((await onDelta(text)) === false) { stopped = true; ctl.abort('enough'); }
   };
+  timing.attempt();
   try {
     arm();
     const res = await fetch(`${cfg.base}/chat/completions`, { method: 'POST', headers, body: payload, signal: ctl.signal });
+    timing.mark('upstream_headers');
     const type = res.headers.get('content-type') || '';
     if (!res.ok || !type.includes('text/event-stream') || !res.body) {
       let body = null;
@@ -20911,7 +20928,9 @@ async function handleAsk(env, req, url, slug) {
   // Reserve before the call so a burst cannot spend more than the allowance;
   // a failed call gives the question back.
   if (!cfg.previewMock) await env.META.put(usedKey, String(used + 1));
-  const out = cfg.previewMock ? { ok: true, answer: ASK_PREVIEW_ANSWER } : await callAskModel(cfg, messages);
+  const timing = aiTimer('ask_answer', cfg);
+  const out = cfg.previewMock ? { ok: true, answer: ASK_PREVIEW_ANSWER } : await callAskModel(cfg, messages, timing);
+  timing.done({ ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0 });
   if (!out.ok) {
     // The model did not answer: give the question back, from the counter as
     // it is now (never the value read before the call).
@@ -21086,7 +21105,9 @@ async function handleWriteWithAi(env, req, url, ctx) {
 
   // A client that asked for server-sent events watches the draft arrive.
   if (!(req.headers.get('accept') || '').includes('text/event-stream')) {
-    const out = cfg.previewMock ? { ok: true, answer: WRITE_AI_PREVIEW_DOC } : await callAskModel(modelCfg, messages);
+    const timing = aiTimer('write_ai', modelCfg);
+    const out = cfg.previewMock ? { ok: true, answer: WRITE_AI_PREVIEW_DOC } : await callAskModel(modelCfg, messages, timing);
+    timing.done({ ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0 });
     const done = await writeAiFinish(job, out);
     return json(done.body, { status: done.status });
   }
@@ -21105,13 +21126,17 @@ async function handleWriteWithAi(env, req, url, ctx) {
       return streamed < WRITE_AI_MARKDOWN_CHARS;
     };
     let out;
+    const timing = aiTimer('write_ai', modelCfg, { stream: true });
     try {
       await writer.write(enc.encode(': writing\n\n'));
-      out = cfg.previewMock ? await writeAiPreviewStream(onDelta) : await streamAskModel(modelCfg, messages, onDelta);
+      out = cfg.previewMock ? await writeAiPreviewStream(onDelta) : await streamAskModel(modelCfg, messages, onDelta, timing);
     } catch (e) {
       gone = gone || Boolean(e && e.tdocClientGone);
       out = { ok: false, status: 0, detail: gone ? 'client_gone' : 'stream', clientGone: gone };
     }
+    timing.done(out.clientGone || gone
+      ? { ok: false, detail: 'client_gone', chars: streamed }
+      : { ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0 });
     // Left before the end: nothing is created and the draft is given back.
     if (out.clientGone || gone) {
       await refund();
@@ -22477,7 +22502,9 @@ async function handleSuggest(env, req, url, slug) {
     if (kind === 'comments') parsed.edits = parsed.edits.map((e) => ({ ...e, comment_id: fixIds[0] }));
     if (kind !== 'doc' && parsed.kind === 'answer' && kind === 'comments') parsed = { kind: 'edits', summary: '', edits: [] };
   } else {
-    const out = await callAskModel(cfg, messages);
+    const timing = aiTimer('ask_edit', cfg);
+    const out = await callAskModel(cfg, messages, timing);
+    timing.done({ ok: out.ok, status: out.status, detail: out.detail, chars: out.ok ? out.answer.length : 0 });
     if (!out.ok) {
       await askQuotaOp(env, accountKey, { kind: 'refund' });
       console.log(JSON.stringify({ event: 'suggest_failed', status: out.status || null, detail: out.detail || null }));
