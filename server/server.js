@@ -916,23 +916,24 @@ function feedbackSessionLocal(slug) {
 const LOCAL_THREAD_SEEN = new Map();
 // One read state, the local twin of the worker's markInboxRead /
 // bellThreadsRead: a thread seen reads its bell rows (a reaction on a
-// thread this request marks too), a bell row read marks its threads seen.
+// thread the page says it showed, `viewed`: id -> when, if it came before),
+// a bell row read marks its threads seen.
 const LOCAL_DOC_ACTIVITY_KINDS = ['comment', 'reply', 'mention'];
 function localRowThreads(row) {
   if (row && row.thread_at && typeof row.thread_at === 'object') return Object.entries(row.thread_at).map(([id, at]) => [id, Date.parse(at) || 0]);
   const id = row && (row.thread_id || row.comment_id);
   return id ? [[id, Date.parse(row.at) || 0]] : [];
 }
-function localInboxSeen(login, slug, seen, viewed = []) {
+function localInboxSeen(login, slug, seen, viewed = {}) {
   const file = inboxFile(login);
   const inbox = readJson(file, { items: [] });
   let changed = false;
-  const now = Date.now();
   const items = (Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
     if (!i || i.read || i.slug !== slug) return i;
     const threads = localRowThreads(i);
     const seenAll = LOCAL_DOC_ACTIVITY_KINDS.includes(i.kind) && threads.length && threads.every(([id, ms]) => (Number(seen[id]) || 0) >= ms);
-    const reacted = i.kind === 'reaction' && viewed.includes(i.thread_id || i.comment_id) && (Date.parse(i.at) || 0) <= now;
+    const lookedAt = Number(viewed[i.thread_id || i.comment_id]) || 0;
+    const reacted = i.kind === 'reaction' && lookedAt > 0 && (Date.parse(i.at) || Infinity) <= lookedAt;
     if (!seenAll && !reacted) return i;
     changed = true;
     return { ...i, read: true };
@@ -2417,7 +2418,12 @@ const server = http.createServer(async (req, res) => {
       changed = true;
     }
     if (changed) LOCAL_THREAD_SEEN.set(key, next);
-    localInboxSeen(ident.login, slug, next, Object.keys((body && body.seen && typeof body.seen === 'object') ? body.seen : {}));
+    const sent = (body && body.seen && typeof body.seen === 'object') ? body.seen : {};
+    const viewed = {};
+    for (const [id, ms] of Object.entries((body && body.viewed && typeof body.viewed === 'object') ? body.viewed : {})) {
+      if (id in sent && Number(ms) > 0) viewed[id] = Math.min(Math.floor(Number(ms)), Date.now() + 60_000);
+    }
+    localInboxSeen(ident.login, slug, next, viewed);
     return json(res, 200, { ok: true, seen: next });
   }
 

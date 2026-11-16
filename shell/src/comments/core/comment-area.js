@@ -103,15 +103,21 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
   // Marks go up in one POST: at once for a click (open, Mark as read, Mark
   // all), gathered for SEEN_BATCH_MS for read-when-seen, where a scroll marks
   // card after card. A page going away sends what is waiting.
+  // `viewed`: the threads among them this page actually showed the person
+  // (opened, in view, marked read), with when -- not the marks it re-syncs
+  // from its cache. Only those read the thread's reaction rows in the bell.
   const pending = useRef({});
+  const pendingViewed = useRef({});
   const timer = useRef(null);
   const flush = useCallback(() => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     const entries = pending.current;
+    const viewed = pendingViewed.current;
     pending.current = {};
+    pendingViewed.current = {};
     const save = transport.current.save;
     if (!syncSeen || !slug || !save || !Object.keys(entries).length) return;
-    Promise.resolve(save(slug, entries)).then((body) => {
+    Promise.resolve(save(slug, entries, viewed)).then((body) => {
       if (!body?.seen) return;
       // The server read the bell's rows for these threads too (one read
       // state): the bell on this page counts again now, not at its next poll.
@@ -123,9 +129,13 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
       if (reconciled || changed) setSeenMap(readSeenMap(slug));
     }).catch(() => {});
   }, [slug, syncSeen]);
-  const push = useCallback((entries, { batch = false } = {}) => {
+  const push = useCallback((entries, { batch = false, viewed = false } = {}) => {
     if (!syncSeen || !slug || !entries || !Object.keys(entries).length) return;
     Object.assign(pending.current, entries);
+    if (viewed) {
+      const at = Date.now();
+      for (const id of Object.keys(entries)) pendingViewed.current[id] = at;
+    }
     if (!batch) { flush(); return; }
     if (!timer.current) timer.current = setTimeout(flush, SEEN_BATCH_MS);
   }, [slug, syncSeen, flush]);
@@ -167,7 +177,7 @@ export function useCommentArea({ comments, slug, selectedId, filter = DEFAULT_FI
     }
     if (!Object.keys(entries).length) return false;
     setSeenMap(readSeenMap(slug));
-    push(entries, options);
+    push(entries, { ...options, viewed: true });
     return true;
   }, [slug, push]);
 

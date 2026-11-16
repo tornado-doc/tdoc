@@ -157,11 +157,13 @@ export function getThreadSeen(slug) {
   return request(`/api/comments/seen?${new URLSearchParams({ slug })}`);
 }
 
-export function postThreadSeen(slug, seen) {
+// `viewed` (thread id -> ms): the threads among `seen` the page showed the
+// person just now, as opposed to marks it re-syncs (comment-area).
+export function postThreadSeen(slug, seen, viewed = null) {
   return request('/api/comments/seen', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slug, seen }),
+    body: JSON.stringify({ slug, seen, ...(viewed && Object.keys(viewed).length ? { viewed } : {}) }),
   });
 }
 
