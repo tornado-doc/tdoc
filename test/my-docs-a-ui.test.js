@@ -247,12 +247,16 @@ async function startServer(worker, env) {
         await page.reload();
         await page.locator('.mda-need[data-slug="q4-plan"]').waitFor();
         assert.equal(await page.locator('.mda-need[data-slug="launch-deck"]').count(), 0, 'gone on the server too');
-        // A reply noted before the server kept who wrote it: the generic agent mark.
+        // A reply noted before the server kept who wrote it: tdoc AI's mark
+        // (tdoc's strokes, the Ask AI star on the accent badge), not a robot.
         await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: new Date(Date.now() - 30 * 60e3).toISOString() }] }));
         await page.reload();
         const legacy = page.locator('.mda-need[data-slug="launch-deck"]').first();
         await legacy.waitFor();
-        assert.equal(await legacy.locator('.mda-need-avatar.is-mark svg').count(), 1);
+        assert.equal(await legacy.locator('.mda-need-avatar.is-mark').count(), 0, 'no generic mark');
+        assert.equal(await legacy.locator('.mda-need-avatar .tdoc-agent-provider-mark.is-tdoc-ai svg.tdoc-ai-mark').count(), 1);
+        const legacyFace = await legacy.locator('.mda-need-avatar').evaluate((el) => ({ box: el.getBoundingClientRect().width, mark: el.querySelector('.tdoc-ai-mark').getBoundingClientRect().width }));
+        assert.equal(legacyFace.mark, legacyFace.box, 'the tdoc AI mark fills the avatar');
         assert.equal(await legacy.locator('.mda-need-by').count(), 0);
         // Back for the views below.
         await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: new Date(Date.now() - 30 * 60e3).toISOString(), author: CLAUDE_AUTHOR }] }));

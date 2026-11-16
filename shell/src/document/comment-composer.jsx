@@ -3,6 +3,7 @@ import { Copy, X } from 'lucide-react';
 import { AgentButtonsContext, MentionField } from './mention-field.jsx';
 import { joinAiTags, mentionsAi } from './ai-answerer.js';
 import { AgentAskRow, AskOnlyToggle, PrivateAnswer, SendToAgentToggle, agentAskHint, useAgentAsk } from './agent-ask.jsx';
+import { setupLinkProps } from './agent-choices.js';
 import { TOP_BAR_HEIGHT, copyText } from './model.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 
@@ -204,7 +205,7 @@ export function CommentComposer({
       {connectOpen && connectAgentPrompt ? (
         <div className="tdoc-connect-agent">
           <p><strong>No agent is connected yet.</strong> Connect one once (Raft or a webhook), then @agent works here.</p>
-          <a className="tdoc-connect-agent-cta ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref || '/me?view=settings#agents'}>Set up an agent</a>
+          <a className="tdoc-connect-agent-cta ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref || '/me?view=settings#agents'} {...setupLinkProps(agentSetupHref)}>Set up an agent</a>
           <details>
             <summary>Or paste this into your agent</summary>
             <code>{connectAgentPrompt}</code>

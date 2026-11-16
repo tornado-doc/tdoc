@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useId } from 'react';
+import { ASK_ICON_PATH } from './ui/ask-icon.jsx';
 
 // The two coding agents tdoc is written for, as their own marks, taken from
 // each vendor's published favicon rather than redrawn. One copy, imported by
@@ -108,3 +109,52 @@ export function AgentMarks({ size = 22 }) {
     </span>
   );
 }
+
+// tdoc AI: tdoc's own mark with a small Ask AI star in the corner. tdoc's
+// side of every conversation wears it -- tdoc AI's answers in a thread and
+// in Ask AI, and an agent reply stored before tdoc kept who wrote it (My
+// docs' Needs you, the notifications list, a team's comments). An agent
+// with real provider info keeps its own mark.
+//
+// No new art: the five strokes are assets/tdoc_logo.svg's path data, byte
+// for byte (test/tdoc-ai-mark.test.js holds them equal), drawn in
+// currentColor like the site mark; the star is ASK_ICON_PATH, the Ask AI
+// button's. Colours are tokens: the badge is --td-accent with a white star,
+// as the initial avatar (accent field, white letter). The strokes are drawn
+// a little heavier than the 436px logo's so five lines stay five lines at
+// 16-32px, and the badge is cut out of the mark (a mask, not a ring in some
+// background colour) so it reads on any field, the dark composer included.
+export const TDOC_LOGO_PATHS = [
+  'M 88.5 171.5 L 309.5 130.5',
+  'M 122.5 200.5 L 279.5 169.5',
+  'M 148.5 222 L 278.5 222',
+  'M 158.5 271.5 L 255 252.5',
+  'M 180.5 306.5 L 243 291.5',
+];
+export const TDOC_LOGO_TRANSFORM = 'translate(218.0 218.5) scale(1.55) translate(-199.0 -218.5)';
+
+export function TdocAiMark({ size = 18 }) {
+  const mask = `tdoc-ai-cut-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  return (
+    <svg className="tdoc-ai-mark" viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" focusable="false">
+      <mask id={mask} maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+        <rect width="24" height="24" fill="#fff" />
+        <circle cx={BADGE.cx} cy={BADGE.cy} r={BADGE.r + 1.1} fill="#000" />
+      </mask>
+      <g mask={`url(#${mask})`}>
+        <svg x={LOGO.x} y={LOGO.y} width={LOGO.size} height={LOGO.size} viewBox="0 0 436 436" overflow="visible">
+          <g transform={TDOC_LOGO_TRANSFORM} fill="none" stroke="currentColor" strokeWidth={LOGO.stroke} strokeLinecap="round">
+            {TDOC_LOGO_PATHS.map((d) => <path key={d} d={d} />)}
+          </g>
+        </svg>
+      </g>
+      <circle cx={BADGE.cx} cy={BADGE.cy} r={BADGE.r} style={{ fill: 'var(--td-accent, #1652f0)' }} />
+      <path d={ASK_ICON_PATH} fill="#fff"
+        transform={`translate(${BADGE.cx} ${BADGE.cy}) scale(${BADGE.star}) translate(-12 -11)`} />
+    </svg>
+  );
+}
+// The mark sits up and left of centre, inside the round face every surface
+// crops to; the badge sits in the bottom-right, inside the circle too.
+const LOGO = { x: 1.58, y: 1.18, size: 18, stroke: 16 };
+const BADGE = { cx: 17.6, cy: 17.6, r: 4, star: 0.36 };

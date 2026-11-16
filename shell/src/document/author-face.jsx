@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
-import { avatarFor, avatarInitial } from './model.js';
+import { TdocAiMark } from '../agent-marks.jsx';
+import { avatarFor, avatarInitial, isTdocAiAuthor } from './model.js';
 
 // A comment author's picture, or `fallback` (their initial) when it cannot be
 // shown. The picture is a URL on somebody else's host (GitHub, Clerk's
@@ -19,14 +20,24 @@ export function AuthorFace({ src, style, fallback }) {
 const faceSize = (size) => (size ? { width: size, height: size, maxWidth: size, maxHeight: size } : undefined);
 
 // Whoever wrote a comment or reply, as its card shows them (comment-card.jsx
-// Author): an agent with a provider wears its program's mark (Claude, Codex,
-// Raft, ...), anyone else their picture (avatarFor: an older agent reply's
-// runtime logo, tdoc's mark) or their initial. Every surface that names a
-// comment's author -- the thread, My docs' Needs you, the notifications
-// list, a team's comments -- draws them with this. `size`: px for the
-// picture; 0 leaves the size to the surface's stylesheet (which always sizes
-// the mark: .tdoc-agent-provider-mark).
+// Author): tdoc AI wears tdoc's mark with the AI badge (TdocAiMark); an
+// agent with a provider wears its program's mark (Claude, Codex, Raft, ...);
+// an agent tdoc cannot name (a record kept before tdoc stored who wrote it)
+// is tdoc's side of the conversation, so tdoc AI's mark too, never a generic
+// robot or someone else's logo; anyone else their picture (avatarFor: an
+// older agent reply's runtime logo) or their initial. Every surface that
+// names a comment's author -- the thread, Ask AI, My docs' Needs you, the
+// notifications list, a team's comments -- draws them with this. `size`: px
+// for the picture; 0 leaves the size to the surface's stylesheet (which
+// always sizes the mark: .tdoc-agent-provider-mark).
 export function AuthorAvatar({ author, size = 24 }) {
+  if (isTdocAiAuthor(author) || (author && author.kind === 'agent' && !author.provider && !avatarFor(author))) {
+    return (
+      <span className="tdoc-agent-provider-mark is-tdoc-ai" aria-hidden="true">
+        <TdocAiMark size={18} />
+      </span>
+    );
+  }
   if (author && author.kind === 'agent' && author.provider) {
     return (
       <span className="tdoc-agent-provider-mark" aria-hidden="true">
