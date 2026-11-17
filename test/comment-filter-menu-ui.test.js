@@ -1,12 +1,11 @@
-// The doc page's comment filter lives in the bar (Julie, 2026-11-16: the
-// floating "Open / Replied / Resolved / All" row and its Refresh icon sat on
-// the comment column and covered her cards). On a wide screen it is the
-// chevron beside the Comment button: the four choices with counts, Open by
-// default. The button is the mark, the count and the chevron only (Julie,
-// 2026-11-16: no word "Comment", no "· Resolved"); a choice other than Open
-// is the check in the menu and a dot on the button; nothing floats over the
-// document and the first card has nothing on top of it. On a phone the
-// drawer keeps its filter. Threads refresh by the poll (use-comment-feed.js).
+// The doc page's comment filter lives once, at the head of the side comment
+// list (Serena, 2026-11-16: the bar's chevron "Show" menu repeated the list's
+// Open / Replied / Resolved / All, and the Comment button's count and dot
+// followed the filter, so a doc with nothing open read "4" with a blue dot).
+// The Comment button is the mark and the number of open threads, nothing
+// when none is open; its dot is unread agent replies only. Nothing floats
+// over the comment column (Julie, 2026-11-16). On a phone the drawer keeps
+// the same filter. Threads refresh by the poll (use-comment-feed.js).
 // Run with: node test/comment-filter-menu-ui.test.js
 const assert = require('assert/strict');
 const { resolveTarget, requirePlaywrightOrSkip } = require('./helpers/fixture-server');
@@ -34,46 +33,77 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     return { ctx, page };
   };
   try {
-    await t('desktop: no filter row or Refresh over the comments; the filter is the Comment chevron, Open by default', async () => {
+    const label = async (page) => (await page.locator('.tdoc-comments-toggle').innerText()).replace(/\s+/g, ' ').trim();
+
+    await t('desktop: one Comment button with the open count, no chevron, no dot; the filter is the side list\'s, Open by default', async () => {
       const { ctx, page } = await open({ width: 1512, height: 823 });
-      await page.locator('.tdoc-bar .tdoc-comments-filter-menu').waitFor();
+      await page.locator('.tdoc-bar .tdoc-comments-toggle').waitFor();
+      assert.equal(await page.locator('.tdoc-comments-filter-menu, .tdoc-comments-filter-popup, .tdoc-comments-split').count(), 0,
+        'the bar still repeats the comment filter');
       assert.equal(await page.locator('.tdoc-comment-filter-dock, .tdoc-comment-filter, .tdoc-comment-refresh').count(), 0,
         'a filter or Refresh still floats over the comment column');
+      assert.equal(await label(page), '1');
+      assert.equal(await page.locator('.tdoc-comments-toggle').getAttribute('title'), 'Comments');
+      assert.equal(await page.locator('.tdoc-comments-toggle').getAttribute('aria-label'), 'Comments, 1 open');
+      assert.equal(await page.locator('.tdoc-comments-toggle-dot').count(), 0, 'a dot with nothing unread');
+      const box = await page.locator('.tdoc-comments-toggle').boundingBox();
+      assert.ok(box.width <= 60, `the Comment button is ${Math.round(box.width)}px wide`);
       assert.deepEqual(await docFilterLabels(page), ['Open (1)', 'Replied (0)', 'Resolved (4)', 'All (5)']);
       assert.equal(await (await docFilterItem(page, 'Open')).getAttribute('aria-checked'), 'true', 'Open is not the default');
       await closeDocFilterMenu(page);
-      assert.equal((await page.locator('.tdoc-comments-toggle').innerText()).replace(/\s+/g, ' ').trim(), '1');
-      assert.equal(await page.locator('.tdoc-comments-toggle').getAttribute('title'), 'Comments');
-      assert.match(await page.locator('.tdoc-comments-toggle').getAttribute('aria-label'), /^Comments/);
-      assert.equal(await page.locator('.tdoc-comments-toggle-dot').count(), 0, 'Open, the default, shows a dot');
-      const box = await page.locator('.tdoc-comments-split').boundingBox();
-      assert.ok(box.width <= 80, `the Comment button is ${Math.round(box.width)}px wide`);
       await page.locator('.tdoc-pin[data-id="open"]').waitFor();
       assert.equal(await page.locator('.tdoc-pin[data-id="resolved"]').count(), 0, 'Open shows a resolved thread');
       assert.deepEqual(page.errors, []);
       await ctx.close();
     });
 
-    await t('desktop: picking Resolved filters the pins, is checked in the menu and a dot on the button (no name); remembered; back to Open', async () => {
+    await t('desktop: picking Resolved filters the pins; the button still counts open threads, no dot; remembered; back to Open', async () => {
       const { ctx, page } = await open({ width: 1512, height: 823 });
       await pickDocFilter(page, 'Resolved');
       await page.locator('.tdoc-pin[data-id="resolved"]').waitFor();
       assert.equal(await page.locator('.tdoc-pin[data-id="open"]').count(), 0, 'Resolved still shows an open thread');
-      assert.equal((await page.locator('.tdoc-comments-toggle').innerText()).replace(/\s+/g, ' ').trim(), '4');
-      assert.equal(await page.locator('.tdoc-comments-toggle-dot').count(), 1, 'a filter other than Open has no dot');
-      assert.equal(await (await docFilterItem(page, 'Resolved')).getAttribute('aria-checked'), 'true', 'Resolved is not checked');
-      await closeDocFilterMenu(page);
+      assert.equal(await label(page), '1', 'the button counts what the filter shows, not what is open');
+      assert.equal(await page.locator('.tdoc-comments-toggle-dot').count(), 0, 'the filter put a dot on the button');
       await page.reload();
       await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
       assert.equal(await (await docFilterItem(page, 'Resolved')).getAttribute('aria-checked'), 'true', 'the choice was not remembered');
+      await closeDocFilterMenu(page);
       await pickDocFilter(page, 'Open');
       await page.locator('.tdoc-pin[data-id="open"]').waitFor();
-      assert.equal(await page.locator('.tdoc-comments-toggle-dot').count(), 0, 'Open, the default, shows a dot');
       assert.deepEqual(page.errors, []);
       await ctx.close();
     });
 
-    await t('desktop: a card scrolled to the top of the comment column has nothing on top of it, and the menu keeps it open', async () => {
+    await t('desktop: nothing open, Resolved shown (the reported case): the button is the bare mark, no "4", no dot', async () => {
+      const resolvedOnly = comments.filter((c) => c.id !== 'open');
+      const ctx = await browser.newContext({ viewport: { width: 1512, height: 823 } });
+      await ctx.addInitScript(() => { try { localStorage.setItem('tdoc.comment-filter.sample-doc', 'resolved'); } catch {} });
+      const page = await ctx.newPage();
+      page.errors = [];
+      page.on('pageerror', (e) => page.errors.push(e.message));
+      await page.route('**/api/comments*', (route) => route.fulfill({ json: resolvedOnly }));
+      await page.goto(target.url);
+      await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
+      await page.locator('.tdoc-pin[data-id="resolved"]').waitFor();
+      assert.equal(await label(page), '');
+      assert.equal(await page.locator('.tdoc-comments-toggle-count, .tdoc-comments-toggle-dot').count(), 0);
+      assert.equal(await page.locator('.tdoc-comments-toggle').getAttribute('aria-label'), 'Comments');
+      // Open, the button is a quiet grey fill, not the accent.
+      await page.locator('.tdoc-comments-toggle').click();
+      await page.locator('.tdoc-doc-side .tdoc-comment-filter').waitFor();
+      const look = await page.locator('.tdoc-comments-toggle').evaluate((el) => {
+        const accent = getComputedStyle(document.documentElement).getPropertyValue('--td-accent').trim();
+        const probe = document.createElement('span');
+        probe.style.color = accent; document.body.append(probe);
+        const accentRgb = getComputedStyle(probe).color; probe.remove();
+        return { color: getComputedStyle(el).color, accentRgb };
+      });
+      assert.notEqual(look.color, look.accentRgb, 'the open Comment button is drawn in the accent');
+      assert.deepEqual(page.errors, []);
+      await ctx.close();
+    });
+
+    await t('desktop: a card scrolled to the top of the comment column has nothing on top of it', async () => {
       const { ctx, page } = await open({ width: 1512, height: 823 }, () => { try { localStorage.setItem('tdoc.comment-filter.sample-doc', 'all'); } catch {} });
       await page.locator('.tdoc-pin[data-id="resolved"]').click();
       const card = page.locator('.tdoc-margin-comment').first();
@@ -89,11 +119,6 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
           .map(([x, y]) => `${Math.round(x)},${Math.round(y)}: ${document.elementFromPoint(x, y)?.className}`);
       });
       assert.deepEqual(covered, [], 'something sits over the first card');
-      // Pressing the filter is not a press on the page: the card stays.
-      await pickDocFilter(page, 'Resolved');
-      assert.equal(await page.locator('.tdoc-margin-comment').count(), 1, 'the filter menu closed a card it still shows');
-      await pickDocFilter(page, 'Open');
-      await page.locator('.tdoc-margin-comment').waitFor({ state: 'detached' });
       assert.deepEqual(page.errors, []);
       await ctx.close();
     });

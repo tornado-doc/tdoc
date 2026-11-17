@@ -3,7 +3,7 @@ import React, { forwardRef } from 'react';
 // The one button. Sizes and colours live in ui.css (.ui-btn*), from --td-*
 // tokens only; a surface may recolour a variant (the dark composer popover)
 // but never resize it. New buttons use this, not their own CSS.
-//   variant: primary | secondary | danger | quiet | icon (32px square, an icon only)
+//   variant: primary | secondary | danger | quiet | ghost (a toolbar button: no box until hover / pressed) | icon (32px square, an icon only)
 //   size:    m (32px) | s (28px) | l (44px, a phone page's main action)
 export const AppButton = forwardRef(function AppButton(
   { variant = 'secondary', size = 'm', className = '', type = 'button', ...props },

@@ -77,8 +77,8 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
       // (the drawer's radio, or on a wide screen the Comment button's data-filter)
       await page.waitForFunction((want) => [...document.querySelectorAll('.tdoc-comment-filter [role="radio"]')]
         .some((radio) => radio.getAttribute('aria-checked') === 'true' && radio.textContent.trim().startsWith(want))
-        || (innerWidth >= 700 && !document.querySelector('.tdoc-comments-filter-popup')
-          && document.querySelector('.tdoc-comments-toggle')?.dataset.filter === want.toLowerCase()), on ? 'Open' : 'All');
+        || (innerWidth >= 700 && document.querySelector('.tdoc-comments-toggle')?.dataset.filter === want.toLowerCase()), on ? 'Open' : 'All');
+      await closeDocFilterMenu(page);
       if (await sheet.count()) {
         await page.keyboard.press('Escape');
         await sheet.waitFor({ state: 'detached' });

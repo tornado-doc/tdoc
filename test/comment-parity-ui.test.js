@@ -171,7 +171,7 @@ async function startServer(worker, env) {
           await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
         },
         header: async (page) => {
-          // Desktop: the bar's Comment chevron menu (no floating filter row).
+          // Desktop: the side comment list's filter (no floating filter row).
           if (!phone) return openDocFilterMenu(page);
           const drawer = page.locator('#tdoc-comment-layer');
           if (!(await drawer.isVisible().catch(() => false))) await page.locator('.tdoc-fab').click();
@@ -196,7 +196,7 @@ async function startServer(worker, env) {
         },
         markAll: async (page) => (phone
           ? (await ui.doc.header(page)).getByRole('button', { name: 'Mark all as read' })
-          : (await ui.doc.header(page)).getByRole('menuitem', { name: 'Mark all as read' })),
+          : (await ui.doc.header(page)).getByRole('button', { name: 'Mark all as read' })),
       },
       widget: {
         open: async (page, target) => {

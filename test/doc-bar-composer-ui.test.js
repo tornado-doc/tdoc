@@ -411,13 +411,13 @@ async function dragSelect(page, phrase) {
       await page.locator('.tdoc-bar #tdoc-more-btn').click();
       if (await page.getByRole('menuitemradio', { name: 'Edit', exact: true }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from ⋯');
       await page.keyboard.press('Escape');
-      // The filter is the Comment button's chevron menu; nothing floats over
-      // the comment column, and a choice other than Open is a dot on the button.
+      // The filter is the side comment list's, once; nothing floats over the
+      // comment column, and the Comment button never marks the filter.
       if (await page.locator('.tdoc-comment-filter-dock, .tdoc-comment-filter-row:not(.tdoc-cpanel-filterrow)').count()) throw new Error('a floating comment filter is back');
       if (await page.locator('.tdoc-comment-refresh:not(.tdoc-cpanel .tdoc-comment-refresh)').count()) throw new Error('a floating Refresh is back');
       await pickDocFilter(page, /^Resolved/);
       await page.waitForFunction(() => document.querySelectorAll('.tdoc-pin').length === 1);
-      if (await page.locator('.tdoc-comments-toggle-dot').count() !== 1) throw new Error('the Comment button does not mark a filter other than Open');
+      if (await page.locator('.tdoc-comments-toggle-dot').count()) throw new Error('the Comment button dots a filter, not unread replies');
       if (/Comment|Resolved/.test(await page.locator('.tdoc-comments-toggle').innerText())) throw new Error('the Comment button names itself or the filter again');
       await pickDocFilter(page, /^All/);
       await page.locator('.tdoc-bar .tdoc-space-trigger').click();
@@ -696,9 +696,9 @@ async function dragSelect(page, phrase) {
         await openAskAi(page);
         const panel = page.getByRole('dialog', { name: 'Ask AI' });
         await panel.waitFor();
-        const filterBox = await page.locator('.tdoc-comments-filter-menu').boundingBox();
+        const filterBox = await page.locator('.tdoc-bar .tdoc-comments-toggle').boundingBox();
         const panelBox = await panel.boundingBox();
-        if (filterBox && panelBox && panelBox.y < filterBox.y + filterBox.height) throw new Error('Ask AI panel overlaps the comment filters');
+        if (filterBox && panelBox && panelBox.y < filterBox.y + filterBox.height) throw new Error('Ask AI panel overlaps the Comment button');
         await shot(page, 'ask-ai-reader-empty.png');
         const input = panel.getByRole('textbox', { name: 'Ask about this document' });
         if (!(await input.evaluate((el) => document.activeElement === el))) throw new Error('Ask input did not receive focus');

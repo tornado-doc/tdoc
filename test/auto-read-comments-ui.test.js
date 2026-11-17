@@ -1,7 +1,6 @@
 // Real document shell: seeing a reply clears its unread state after a full
 // second; the list action clears the rest without visiting every card.
 const assert = require('node:assert/strict');
-const { openDocFilterMenu, closeDocFilterMenu } = require('./helpers/doc-filter');
 const fs = require('node:fs');
 const path = require('node:path');
 const { resolveTarget, requirePlaywrightOrSkip } = require('./helpers/fixture-server');
@@ -69,33 +68,26 @@ let server;
         await page.close();
 
         const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-        // The side list closed: it reads what it shows, and the bar menu is under test.
+        // The side list closed: it reads what it shows, and the bar's Comment
+        // button is under test. Its dot is unread agent replies (only those).
         await desktop.addInitScript(() => { window.__TDOC_FLAGS__ = { autoReadComments: true }; localStorage.setItem('tdoc-comment-panel', '0'); });
         await desktop.goto(url, { waitUntil: 'networkidle' });
-        // Mark all as read sits in the Comment button's filter menu.
-        const markAll = async () => {
-          const menu = await openDocFilterMenu(desktop);
-          const count = await menu.getByRole('menuitem', { name: 'Mark all as read' }).count();
-          await closeDocFilterMenu(desktop);
-          return count;
-        };
-        await desktop.waitForFunction(() => document.querySelector('.tdoc-bar .tdoc-comments-filter-menu'));
-        await (await openDocFilterMenu(desktop)).getByRole('menuitem', { name: 'Mark all as read' }).waitFor();
-        await closeDocFilterMenu(desktop);
+        const unreadDot = async () => desktop.locator('.tdoc-bar .tdoc-comments-toggle .tdoc-comments-toggle-dot').count();
+        await desktop.locator('.tdoc-bar .tdoc-comments-toggle .tdoc-comments-toggle-dot').waitFor();
         if (shots) await desktop.screenshot({ path: path.join(shots, `auto-read-desktop-${name}.png`) });
         await desktop.locator('.tdoc-pin-document').click();
         await desktop.waitForFunction(() => {
           const seen = JSON.parse(localStorage.getItem('tdoc.thread-seen.hostile-body-css') || '{}');
           return ['c_seen_first', 'c_seen_second', 'c_seen_last'].every((id) => seen[id]);
         });
-        assert.equal(await markAll(), 1,
+        assert.equal(await unreadDot(), 1,
           `${name}: opening a cluster also read an unopened pin`);
         await desktop.locator('.tdoc-pin[data-id="c_seen_pin"]').click();
         await desktop.waitForFunction(() => {
           const seen = JSON.parse(localStorage.getItem('tdoc.thread-seen.hostile-body-css') || '{}');
           return Boolean(seen.c_seen_pin);
         });
-        assert.equal(await markAll(), 0,
+        assert.equal(await unreadDot(), 0,
           `${name}: opening a desktop pin left its reply unread`);
         console.log(`  ✓ ${name}: opening a desktop cluster and pin reads their replies`);
         await desktop.close();

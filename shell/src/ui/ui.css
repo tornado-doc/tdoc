@@ -1350,6 +1350,11 @@ a.ui-menu-item:visited {
 .ui-btn.ui-btn-danger:hover:not(:disabled) { background: var(--td-danger-hover, #931c14); border-color: var(--td-danger-hover, #931c14); color: #fff; }
 .ui-btn.ui-btn-quiet { height: auto; min-height: 0; padding: 2px 0; border: 0; background: none; color: var(--td-muted, #6b6a66); }
 .ui-btn.ui-btn-quiet:hover:not(:disabled) { color: var(--td-ink, #1a1a1a); background: none; }
+/* ghost: a toolbar button that is its content (mark, count) on no box until
+   hovered (grey) or pressed (a deeper grey), as the doc bar's Comment button. */
+.ui-btn.ui-btn-ghost { padding: 0 9px; border: 0; background: none; color: var(--td-ink, #1a1a1a); }
+.ui-btn.ui-btn-ghost:hover:not(:disabled) { background: var(--td-surface-2, #f7f7f5); color: var(--td-ink, #1a1a1a); }
+.ui-btn.ui-btn-ghost[aria-pressed="true"], .ui-btn.ui-btn-ghost[aria-pressed="true"]:hover:not(:disabled) { background: var(--td-surface, #f0f0ee); }
 .ui-btn.ui-btn-icon { width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; background: none; color: var(--td-muted, #6b6a66); }
 .ui-btn.ui-btn-icon:hover:not(:disabled) { background: var(--td-surface-2, #f7f7f5); color: var(--td-ink, #1a1a1a); }
 .ui-btn.ui-btn:disabled { opacity: .5; cursor: default; }

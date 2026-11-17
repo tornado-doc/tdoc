@@ -129,9 +129,9 @@ t('resolved visibility is a filter in the comments area (Open / Replied / Resolv
   assert(/className="tdoc-comment-filter"/.test(panel), 'there is no comments filter');
   assert(panel.includes('filterOptions(area.counts)') && /label: `\$\{FILTER_LABELS\[value\]\} \(\$\{counts\[value\] \|\| 0\}\)`/.test(query),
     'the filter should say how many each choice shows');
-  // On a wide doc page it is the Comment button's chevron menu, shown when
-  // there are comments to filter; no filter row floats over the comments.
-  assert(/\{comments\.comments\.length \? \(\s*<CommentFilterMenu/.test(shell), 'the filter should appear when there are comments to filter');
+  // On a wide doc page it is the side comment list's, once: no second copy
+  // in the bar (Serena, 2026-11-16), no filter row over the comments.
+  assert(!/CommentFilterMenu/.test(shell), 'the bar repeats the comment filter');
   assert(!/tdoc-comment-filter-dock/.test(shell), 'the floating filter row is back');
   assert(!/<AppSwitch\s*\n\s*id="tdoc-show-resolved"/.test(shell), 'the bar switch is back');
   // Open by default (resolved threads hidden); the choice is kept per doc.
@@ -142,7 +142,7 @@ t('resolved visibility is a filter in the comments area (Open / Replied / Resolv
 
 t('on a phone the filter heads the comments drawer, and ⋯ no longer carries it', () => {
   // The drawer is the shared panel (comments/panel/), its filter row first.
-  assert(/<MobileCommentDrawer\s+area=\{commentArea\}\s+prefs=\{listPrefs\}/.test(shell), 'the drawer does not get the filter');
+  assert(/<MobileCommentDrawer\s+area=\{commentArea\}\s+prefs=\{panelPrefs\}/.test(shell), 'the drawer does not get the filter');
   assert(/<CommentPanel/.test(read('shell/src/document/comment-layer.jsx'))
     && /tdoc-comment-filter-row tdoc-cpanel-filterrow/.test(read('shell/src/comments/panel/comment-panel.jsx')), 'the drawer does not show it');
   assert(!/data-action="show-resolved"/.test(toolbar), 'the ⋯ row is back beside the filter');

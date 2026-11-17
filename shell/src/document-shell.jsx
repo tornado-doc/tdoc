@@ -21,7 +21,6 @@ import {
 } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
 import {
-  CommentFilterMenu,
   DesktopCommentLayer,
   MobileCommentDrawer,
 } from './document/comment-layer.jsx';
@@ -88,7 +87,7 @@ import { AskAiPanel, DemoRewriteBar, DemoRewriteCta } from './document/ask-ai-pa
 import { SuggestContext, useSuggestions } from './document/suggestions.js';
 import { SuggestInlineChip, SuggestReviewBar } from './document/suggest-review-bar.jsx';
 import { useCommentArea, useCommentListPrefs } from './comments/core/comment-area.js';
-import { DEFAULT_FILTER, filterName, groupBy, matchesFilter, sortThreads } from './comments/core/comment-query.js';
+import { groupBy, matchesFilter, sortThreads } from './comments/core/comment-query.js';
 import { useCommentFeed } from './comments/core/use-comment-feed.js';
 import { useNarrowViewport } from './comments/core/narrow.js';
 import { useSheetView } from './document/sheet-view.js';
@@ -1011,6 +1010,9 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     if (openCluster?.items.some(({ comment }) => hidden(comment.id))) setOpenClusterKey(null);
     if (hidden(reanchorId)) setReanchorId(null);
   }, [bridge.send, clusters, commentsById, openClusterKey, openCommentId, reanchorId, listPrefs.setFilter]);
+  // The comment lists' filter (side panel, phone drawer) is the doc's one
+  // filter control, so a pick there also closes what it now hides.
+  const panelPrefs = useMemo(() => ({ ...listPrefs, setFilter: setCommentFilter }), [listPrefs, setCommentFilter]);
 
   useEffect(() => {
     bridge.send({ type: 'tdoc:anchors', comments: shownComments });
@@ -2180,11 +2182,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   );
   const openComment = commentArea.selected;
   const openCount = commentArea.openCount;
-  // The count on the Comment button: open threads, or what the filter shows.
-  const filterCount = commentFilter === DEFAULT_FILTER ? openCount : (commentArea.counts[commentFilter] || 0);
   // Read / Comment / Edit, at the top of ⋯ (document-toolbar.jsx).
   const modeOptions = availableModes({ canComment: config.canComment, canEdit: config.canEdit, signInToComment: Boolean(config.signInToComment) });
   const mobileUnread = commentArea.unreadCount > 0;
+  // The Comment button's dot: agent replies not read yet, while the list
+  // that shows them is closed.
+  const showUnreadDot = unreadAgentReplies > 0 && !sidePanelOpen;
   const startDocumentComment = (askAi = false) => {
     if (!config.canComment && !config.signInToComment) return;
     if (editor.mode === 'edit' && editor.dirty && !editor.modeless) {
@@ -2406,9 +2409,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       data-mode={editor.mode}
       data-visual-open={visualOpen || undefined}
       data-presenting={(visualOpen && presenting) || undefined}
-      onPointerDown={() => {
+      onPointerDown={(event) => {
         // Legacy behavior: a click anywhere outside a card, pin, or composer
         // closes the open card and cluster popover (they stop propagation).
+        // The Comment button keeps it: the list it opens shows that thread
+        // selected, and closing the list gives the card back.
+        if (event.target.closest?.('.tdoc-comments-toggle')) return;
         setOpenClusterKey(null);
         setOpenCommentId(null);
       }}
@@ -2445,32 +2451,25 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
             {editor.modeless ? <EditorSaveStatus status={editor.saveStatus} /> : null}
             {askAiAction}
             {!narrow && sidePanelAvailable ? (
-              // One Comment button, its open count on it: it opens and closes
-              // the comment list beside the doc. A new comment starts there
-              // (+ New comment), from a selection, or with double-tap Option.
-              // The Read / Comment / Edit switch that sat beside it read as a
-              // second comment button (Julie, 2026-11-10); it heads ⋯ now.
-              // The filter is the chevron beside it (CommentFilterMenu). The
-              // button is only the mark and the count (Julie, 2026-11-16: the
-              // word and "· Resolved" made it too large); a filter other than
-              // Open is a check in the menu and a small dot on the button.
-              <span className="tdoc-comments-split">
-                <AppButton variant="quiet" className="tdoc-comments-toggle" aria-pressed={sidePanelOpen ? 'true' : 'false'}
-                  aria-label={`Comments${commentFilter !== DEFAULT_FILTER ? `, showing ${filterName(commentFilter)} (${filterCount})` : (openCount ? ` (${openCount} open)` : '')}`}
-                  title="Comments" data-filter={commentFilter}
-                  onClick={() => {
-                    if (!sidePanelOpen && editor.mode === 'read') editor.changeMode('comment');
-                    setSidePanel(!sidePanelOpen);
-                  }}>
-                  <CommentIcon size={16} outline />
-                  {filterCount ? <span className="tdoc-comments-toggle-count">{filterCount}</span> : null}
-                  {commentFilter !== DEFAULT_FILTER ? <span className="tdoc-comments-toggle-dot" aria-hidden="true" /> : null}
-                </AppButton>
-                {comments.comments.length ? (
-                  <CommentFilterMenu area={commentArea} prefs={listPrefs} onChange={setCommentFilter}
-                    unreadCount={sidePanelOpen ? 0 : unreadAgentReplies} onMarkAllRead={markAllAgentRepliesRead} />
-                ) : null}
-              </span>
+              // One Comment button: the comment mark and the number of open
+              // threads (none when nothing is open). It opens and closes the
+              // comment list beside the doc; a new comment starts there (+ New
+              // comment), from a selection, or with double-tap Option. The dot
+              // is unread agent replies only, never the filter. The filter
+              // lives once, at the head of that list (CommentFilter): the bar
+              // chevron repeated it, and its count and dot followed the filter,
+              // so "Resolved" read as "4 new" (Serena, 2026-11-16).
+              <AppButton variant="ghost" className="tdoc-comments-toggle" aria-pressed={sidePanelOpen ? 'true' : 'false'}
+                aria-label={`Comments${openCount ? `, ${openCount} open` : ''}${showUnreadDot ? `, ${unreadAgentReplies} unread` : ''}`}
+                title="Comments" data-filter={commentFilter}
+                onClick={() => {
+                  if (!sidePanelOpen && editor.mode === 'read') editor.changeMode('comment');
+                  setSidePanel(!sidePanelOpen);
+                }}>
+                <CommentIcon size={16} outline />
+                {openCount ? <span className="tdoc-comments-toggle-count">{openCount}</span> : null}
+                {showUnreadDot ? <span className="tdoc-comments-toggle-dot" aria-hidden="true" /> : null}
+              </AppButton>
             ) : null}
             {/* Only the "Read only" note is left in the bar: a doc that takes
                 no comments and no edits has no mode to switch to. */}
@@ -2673,7 +2672,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         {demoBar && !drawerOpen ? <DemoRewriteBar state={demoRewriteState} agent={DEMO_AGENT.handle} onUndo={undoDemoRewrite} /> : null}
         <MobileCommentDrawer
           area={commentArea}
-          prefs={listPrefs}
+          prefs={panelPrefs}
           // shownComments, not the raw list: hiding resolved threads took the
           // pins out of the document but left every one of them in the drawer,
           // which on a phone IS the comment list.
@@ -2772,7 +2771,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           <SideResizeHandle side={sidePanelSize} label="Resize the comment list" />
           <CommentPanel
             area={commentArea}
-            prefs={listPrefs}
+            prefs={panelPrefs}
             groups={panelGroups}
             title="Comments"
             onAdd={config.canComment || config.signInToComment ? () => startPick() : null}
