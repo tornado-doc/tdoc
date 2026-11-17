@@ -184,6 +184,7 @@
       // No frame around the editable area: the caret and the editor bar say
       // it is Edit mode (a blue box around the page read as a selection).
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
+      'a[data-tdoc-video],a[data-tdoc-video] *{cursor:pointer!important;}' +
       // Modeless: a table looks as it reads; only the cell being typed in is ringed.
       'html[data-tdoc-editing] [data-tdoc-cell-caret]{outline:2px solid ' + COMMENT_ACCENT + ';outline-offset:-2px;}';
     (document.head || document.documentElement).appendChild(s);
@@ -457,6 +458,18 @@
     var dragSelection = window.getSelection();
     if (dragSelection && !dragSelection.isCollapsed
       && (Math.abs(e.clientX - pointerStartX) > 4 || Math.abs(e.clientY - pointerStartY) > 4)) return;
+    // Opted-in video controls are actions even while editing text. Only
+    // trusted clicks can invoke them, and the shell validates the post URL.
+    var videoLink = e.target.closest?.('a[data-tdoc-video][href]');
+    if (e.isTrusted && videoLink) {
+      var action = videoLink.getAttribute('data-tdoc-video');
+      if (action === 'play' || action === 'new-tab') {
+        e.preventDefault(); e.stopPropagation();
+        if (e.metaKey || e.ctrlKey || e.shiftKey) action = 'new-tab';
+        post({ type: 'tdoc:video', action: action, href: videoLink.getAttribute('href'), title: videoLink.getAttribute('data-tdoc-video-title') });
+        return;
+      }
+    }
     var commentId = interactionMode === 'comment' || modelessEdit() ? anchorIdAtPoint(e.clientX, e.clientY) : null;
     if (commentId) {
       e.preventDefault(); e.stopPropagation();

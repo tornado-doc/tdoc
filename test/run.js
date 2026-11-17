@@ -94,6 +94,7 @@ const OFFLINE = [
   'notification-read-unify.test.js', // One read state: a seen thread reads its bell rows (reactions too), a bell read marks the thread seen, stale rows reconcile when the bell loads (bounded reads)
   'shell-scan-cap.test.js',     // big docs: the page scans only the head (Cloudflare 1102)
   'inline-media.test.js',       // base64 video/audio refused at publish: link it instead
+  'social-video.test.js',       // shell-owned players accept only canonical public post URLs
   'catalog-index.test.js',      // My docs costs what the viewer owns, not the platform (1102)
   'doc-index.test.js',          // per-owner/team doc index, invite index, one-pass frame bake + per-version cache (1102)
   'scan-backfill-race.test.js', // index scans never write back a record they read: an owner's private/withdraw survives a racing scan

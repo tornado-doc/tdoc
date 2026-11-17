@@ -1083,11 +1083,10 @@ function safeJsonForScript(obj) {
 // get published. Blocking author <script>/onclick here too means what a doc
 // author sees locally matches what ships (no "worked in dev, XSS in prod"
 // surprise), and costs nothing since 0 published docs use <script>.
-function cspHeader(nonce) {
-  // frame-src 'self': the shell document embeds the author content only via the
-  // same-origin /frame route (which is itself sandboxed to an opaque origin).
-  // Locking it to 'self' means the shell can never be made to frame anything else.
-  return `script-src 'nonce-${nonce}' 'strict-dynamic'; frame-src 'self'; object-src 'none'; base-uri 'none';`;
+function cspHeader(nonce, allowVideo = false) {
+  // Match the hosted reader. Author content stays in the opaque-origin /frame.
+  const players = allowVideo ? ' https://www.instagram.com/p/ https://www.instagram.com/reel/ https://www.tiktok.com/player/v1/ https://www.youtube.com/embed/' : '';
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; frame-src 'self'${players}; object-src 'none'; base-uri 'none';`;
 }
 
 // Interactive islands (#138). Host documents keep cspHeader(); computation
@@ -2151,7 +2150,7 @@ const server = http.createServer(async (req, res) => {
     // single-origin overlay-injection path is gone — see the git history / PLAN.md.
     return send(res, 200, shellDocument(slug, Number(vStr), nonce, `http://127.0.0.1${p}`), {
       'Content-Type': 'text/html; charset=utf-8',
-      'Content-Security-Policy': cspHeader(nonce),
+      'Content-Security-Policy': cspHeader(nonce, !SITE_PAGE_SLUGS.has(slug)),
     });
   }
 

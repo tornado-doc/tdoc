@@ -66,6 +66,8 @@ async function selectParagraph(frame, id = 'editable-paragraph') {
 <section id="comment-artifact" data-tdoc-artifact><p id="artifact-copy">Commentable artifact copy.</p></section>
 <section id="edit-atomic" data-tdoc-edit-atomic><p>Explicitly locked widget copy.</p></section>
 <img alt="Atomic artifact" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">
+<p><a contenteditable="false" data-tdoc-video="play" data-tdoc-video-title="Lunch clip" href="https://www.tiktok.com/@creator/video/7688029830398496020">Play lunch clip</a>
+<a contenteditable="false" data-tdoc-video="new-tab" href="https://www.tiktok.com/@creator/video/7688029830398496020" target="_blank" rel="noopener">Open lunch clip in a new tab</a></p>
 </main></body></html>`);
   fs.writeFileSync(path.join(docRoot, 'meta.json'), JSON.stringify({
     slug, title: 'Browser editing', versions: [{ n: 1, created: new Date().toISOString() }],
@@ -162,6 +164,34 @@ async function selectParagraph(frame, id = 'editable-paragraph') {
         'Comment artifact pill and the bar Comment button use different icon geometry');
       assert(await pill.locator('svg').evaluate((icon) => getComputedStyle(icon).stroke) === 'none',
         'Comment artifact pill retained an outline around the solid icon');
+    });
+
+    await test('video links work in Edit mode without saving a change', async () => {
+      await context.route('https://www.tiktok.com/player/v1/**', (route) => route.fulfill({ body: 'player fixture' }));
+      await context.route('https://www.tiktok.com/@creator/video/**', (route) => route.fulfill({ body: 'post fixture' }));
+      await chooseMode(page, 'Edit');
+      await frame.locator('[data-tdoc-editor-root]').waitFor();
+
+      const cover = frame.getByRole('link', { name: 'Play lunch clip' });
+      await cover.click();
+      const dialog = page.getByRole('dialog', { name: 'Lunch clip' });
+      const player = dialog.locator('iframe');
+      await player.waitFor();
+      assert((await player.getAttribute('src')).includes('/player/v1/7688029830398496020?autoplay=1'), 'wrong provider video loaded');
+      assert(await frame.locator('iframe').count() === 0, 'provider player was inside the author frame');
+      assert(await page.locator('.tdoc-doc-frame').getAttribute('sandbox') === 'allow-scripts', 'author isolation changed');
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+      await player.waitFor({ state: 'detached' });
+
+      const [newTab] = await Promise.all([
+        context.waitForEvent('page', { timeout: 4_000 }),
+        frame.getByRole('link', { name: 'Open lunch clip in a new tab' }).click(),
+      ]);
+      await newTab.waitForURL('https://www.tiktok.com/@creator/video/7688029830398496020');
+      await newTab.close();
+      assert(page.url() === url, 'video link navigated the document');
+      assert(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'video action marked the document dirty');
+      await chooseMode(page, 'Comment');
     });
 
     await test('a click in blank space dismisses instead of commenting on the nearest word', async () => {
