@@ -101,6 +101,13 @@ function get(port, p, headers) {
     if (!csp.includes("base-uri 'none'")) throw new Error("CSP must set base-uri 'none'");
   });
 
+  await t('the reader permits frames only from itself and the approved video embed paths', async () => {
+    const csp = res.headers['content-security-policy'];
+    const frames = csp.match(/(?:^|; )frame-src ([^;]+);/)?.[1];
+    const expected = "'self' https://www.instagram.com/p/ https://www.instagram.com/reel/ https://www.tiktok.com/player/v1/ https://www.youtube.com/embed/";
+    if (frames !== expected) throw new Error(`unexpected reader frame sources: ${frames}`);
+  });
+
   await t('a fresh nonce is generated per response (not reused across requests)', async () => {
     const res2 = await get(PORT, `/d/${SLUG}/v/1`);
     const m2 = /script-src 'nonce-([a-f0-9]+)'/.exec(res2.headers['content-security-policy']);
@@ -135,7 +142,7 @@ function get(port, p, headers) {
     frameRes = await get(PORT, `/d/${SLUG}/v/1/frame`, { 'sec-fetch-dest': 'iframe' });
     if (frameRes.status !== 200) throw new Error(`/frame status ${frameRes.status}`);
     const csp = frameRes.headers['content-security-policy'] || '';
-    if (!/\bsandbox\b/.test(csp)) throw new Error(`/frame CSP must include a sandbox directive: ${csp}`);
+    if (!/; sandbox allow-scripts\s*;?$/.test(csp)) throw new Error(`/frame CSP must retain its opaque sandbox: ${csp}`);
   });
 
   await t('the author <script> in the /frame body does NOT carry the nonce (stays inert under the CSP)', async () => {
@@ -164,11 +171,9 @@ function get(port, p, headers) {
   const workerSrc = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
 
   await t('worker cspHeader() returns the strict nonce policy (no unsafe-inline; object-src/base-uri none)', async () => {
-    const s = workerSrc.indexOf('function cspHeader(nonce)');
+    const s = workerSrc.indexOf('function cspHeader(nonce, allowVideo = false)');
     if (s < 0) throw new Error('worker cspHeader() not found');
-    // Fixed window, not indexOf('}') — the return string contains ${nonce},
-    // whose brace would truncate the slice before 'strict-dynamic'.
-    const body = workerSrc.slice(s, s + 220);
+    const body = workerSrc.slice(s, workerSrc.indexOf('\n}', s));
     if (!body.includes("script-src 'nonce-${nonce}' 'strict-dynamic'")) throw new Error(`cspHeader missing nonce/strict-dynamic: ${body}`);
     if (!body.includes("object-src 'none'")) throw new Error("cspHeader must set object-src 'none'");
     if (!body.includes("base-uri 'none'")) throw new Error("cspHeader must set base-uri 'none'");
@@ -182,8 +187,8 @@ function get(port, p, headers) {
     const s = workerSrc.indexOf('async function serveDocVersion(');
     const e = workerSrc.indexOf('async function landingResponse', s);
     if (s < 0 || e < 0) throw new Error('serveDocVersion block not found');
-    if (!workerSrc.slice(s, e).includes("'Content-Security-Policy': cspHeader(nonce)"))
-      throw new Error("doc-view response must set 'Content-Security-Policy': cspHeader(nonce) — dropping it reopens the XSS channel the token removal relies on being closed");
+    if (!workerSrc.slice(s, e).includes("'Content-Security-Policy': cspHeader(nonce, !isLanding)"))
+      throw new Error('doc-view responses must keep the nonce policy, with video providers only on the document reader');
   });
 
   await t('worker export/fork route sets the CSP header too (same author-HTML surface as /d/)', async () => {
