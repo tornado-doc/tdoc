@@ -246,6 +246,7 @@ const BROWSER = [
   'table-scroll-ui.test.js', // wide tables draw a scrollbar and scroll sideways in their own box (bar, wheel, swipe), page still scrolls over them, desktop + phone
   'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior
   'comment-filter-menu-ui.test.js', // the doc page's filter is the Comment button's chevron menu: no floating row or Refresh over the cards, counts, named on the button, phone drawer keeps its filter
+  'comment-count-caret-ui.test.js', // the doc bar's filter caret sits beside the comment count, never over it: 1/12/123 open, the Resolved dot, doc + sheet + deck, 1512 and 720 wide; no split button on a phone
   'custom-design-theme.test.js', // custom palettes opt out of house styles and theme inversion
   'visual-viewer.test.js', // visual expansion preserves interactive state and reading mode
   'slides-scale.test.js', // slide view scales cards once: cqw type the same in WebKit and Chromium, desktop and phone
