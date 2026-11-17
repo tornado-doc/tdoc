@@ -257,6 +257,13 @@ in a standalone HTML file opened without the provider.
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
 figure. Both are `overflow-x: auto`.
 
+For an Instagram Reel or post, TikTok video, or YouTube video, put
+`data-tdoc-video="play"` on a cover link whose `href` is the public post URL.
+Give the link an accessible name and optionally set `data-tdoc-video-title`
+for the player heading. Use `target="_blank" rel="noopener"` so the cover
+still leads to the post in exported HTML. A separate link with
+`data-tdoc-video="new-tab"` opens the source while reading or editing.
+
 Use wrapping HTML/CSS for text-heavy panels and HTML captions for explanations.
 Keep SVG labels short; split longer labels into lines that fit their nodes.
 

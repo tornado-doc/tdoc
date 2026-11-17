@@ -3116,11 +3116,11 @@ function reconcileAnchors(comments, aidsInVersion, V) {
 // a maintenance trap if it ever needs to). object-src/base-uri are locked
 // down too (classic plugin/base-tag CSP-bypass vectors) — nothing else is
 // restricted, so author CSS/images/fonts/etc. are untouched.
-// frame-src 'self': the shell document embeds author content only via the
-// same-origin /frame route (itself sandboxed to an opaque origin), and can
-// never be made to frame anything else.
-function cspHeader(nonce) {
-  return `script-src 'nonce-${nonce}' 'strict-dynamic'; frame-src 'self'; object-src 'none'; base-uri 'none';`;
+// Author content stays in the opaque-origin /frame. The document reader can
+// also open an official video player in the shell after a reader clicks.
+function cspHeader(nonce, allowVideo = false) {
+  const players = allowVideo ? ' https://www.instagram.com/p/ https://www.instagram.com/reel/ https://www.tiktok.com/player/v1/ https://www.youtube.com/embed/' : '';
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; frame-src 'self'${players}; object-src 'none'; base-uri 'none';`;
 }
 
 // The author document is served from /d/<slug>/v/<n>/frame under a CSP
@@ -4733,7 +4733,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
     // without a second session lookup.
     session,
     response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, historyVisible, agent, agentView, ask: askConfig(env), folder: docFolder, seoAuthor: isLanding ? null : await docSeoAuthor(env, gate.meta, reqUrl.origin), askEditV2Preview: env.TDOC_PREVIEW === '1', ...(await devModeBoot(env, session)) }, pageUrl), {
-      headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'private, no-store', 'Vary': 'Accept', ...(agent ? { 'Link': docAgentLinkHeader(agent) } : {}) },
+      headers: { 'Content-Security-Policy': cspHeader(nonce, !isLanding), 'Cache-Control': 'private, no-store', 'Vary': 'Accept', ...(agent ? { 'Link': docAgentLinkHeader(agent) } : {}) },
     }),
   };
 }

@@ -296,6 +296,24 @@ body.tdoc-narrow .tdoc-pin-document {
 /* Opt-in diagram editor uses the shared AppDialog surface. */
 .ui-dialog-popup.tdoc-diagram-dialog { width: min(1200px, 96vw); max-width: 96vw; }
 .tdoc-diagram-dialog .ui-dialog-body { min-height: 0; }
+
+.ui-dialog-popup.tdoc-video-dialog { width: min(760px, 94vw); max-width: 94vw; }
+.ui-dialog-popup.tdoc-video-vertical { width: min(420px, 94vw); }
+.tdoc-video-player {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  aspect-ratio: 16 / 9;
+  max-height: 70dvh;
+  background: var(--td-surface-2);
+}
+.tdoc-video-vertical .tdoc-video-player { height: min(620px, 70dvh); }
+.tdoc-video-dialog .actions { align-items: center; }
+@media (max-width: 480px) {
+  .ui-dialog-popup.tdoc-video-dialog { padding: 12px; }
+  .tdoc-video-vertical .tdoc-video-player { height: min(570px, 68dvh); }
+}
 .tdoc-excalidraw-canvas { height: min(65vh, 700px); min-height: 280px; color-scheme: light; }
 @media (max-width: 700px) { .ui-dialog-popup.tdoc-diagram-dialog { padding: 12px; } .tdoc-excalidraw-canvas { height: 60dvh; } }
 @media (max-width: 700px) {

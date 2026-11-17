@@ -80,6 +80,8 @@ import { ConnectAiAppsStrip } from './connect-ai-apps.jsx';
 import { openAppLink, sendToAppLink } from './document/send-to-app.js';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
+import { socialVideo } from './document/social-video.mjs';
+import { SocialVideoDialog } from './document/social-video-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, HandoffSendTransport, NotifyHandoffPanel, agentLabel as notifyAgentLabel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
 import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, byRelevance, composerDefault, maySendToAgent, orderedAgentChoices, orderedAskAiChoices, sameTarget, sendToAgentSetup, sendToAgentState, taggedAgentSpan, targetKey } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
@@ -264,6 +266,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   const suggestRef = useRef(null);
   const openAskRef = useRef(null);
   const [diagram, setDiagram] = useState(null);
+  const [playingVideo, setPlayingVideo] = useState(null);
   const [visualOpen, setVisualOpen] = useState(false);
   // Slides presenting: full screen like a visual, but commenting stays on.
   const [presenting, setPresenting] = useState(false);
@@ -741,6 +744,16 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     },
     'tdoc:anchorHover': (message) => {
       setHoveredAnchorId(message.id && visibleCommentsById.has(message.id) ? message.id : null);
+    },
+    'tdoc:video': (message) => {
+      const video = socialVideo(message.href);
+      if (!video) return;
+      if (message.action === 'new-tab') {
+        window.open(video.source, '_blank', 'noopener,noreferrer');
+      } else if (message.action === 'play' && video.embed) {
+        const title = typeof message.title === 'string' ? message.title.trim().slice(0, 180) : '';
+        setPlayingVideo({ ...video, title });
+      }
     },
     'tdoc:navigate': (message) => {
       const href = String(message.href || '');
@@ -2562,6 +2575,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         />
       ) : null}
 
+      <SocialVideoDialog video={playingVideo} onClose={() => setPlayingVideo(null)} />
       <DiagramDialog diagram={diagram} canApply={Boolean(config.canEdit)} onClose={() => setDiagram(null)}
         onApply={async (json, svg) => {
           if (!config.canEdit) return;

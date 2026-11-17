@@ -178,7 +178,7 @@ const bundler = read('bin/tdoc-bundle');
     const start = worker.indexOf('async function serveDocVersion(');
     const block = worker.slice(start, worker.indexOf('async function landingResponse', start));
     if (!block.includes('const render = shellDocumentWorker;')) throw new Error('unified render path missing');
-    if (!block.includes("'Content-Security-Policy': cspHeader(nonce)")) throw new Error('shell CSP missing');
+    if (!block.includes("'Content-Security-Policy': cspHeader(nonce, !isLanding)")) throw new Error('shell CSP missing or applied outside the document reader');
     if (/injectOverlay/.test(block)) throw new Error('overlay render path remains');
   });
 
