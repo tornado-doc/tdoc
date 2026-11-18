@@ -72,6 +72,10 @@ async function seed(env) {
     { id: 'n2', kind: 'mention', group_key: 'mention:budget-2027', slug: 'budget-2027', version: 2, comment_id: 'c_2', thread_id: 'c_2', actor: { login: 'serena', name: 'Serena Park' }, preview: '@julie can we drop the annual line?', title: 'Budget 2027', at: ago(3 * H), read: false, count: 1 },
     // The same thread, left on an older version: one item with n1, not two.
     { id: 'n3', kind: 'comment', group_key: 'comment:q4-plan', slug: 'q4-plan', version: 1, comment_id: 'c_1', thread_id: 'c_1', actor: { login: 'bob', name: 'Bob Lee', avatar_url: BOB_AVATAR }, preview: 'Starting a thread on the numbers.', title: 'Q4 plan', at: ago(D), read: false, count: 1 },
+    // A full bell page of newer rows already read (on the doc page): the bell
+    // lists newest first, so Needs you must ask for the unread alone, not
+    // stop at the first page holding a read row (Julie, 2026-11-18).
+    ...Array.from({ length: 25 }, (_, i) => ({ id: `n_read_${i}`, kind: 'reply', group_key: `reply:c_r${i}`, slug: 'ideas', version: 2, comment_id: `c_r${i}r`, thread_id: `c_r${i}`, actor: { login: 'bob', name: 'Bob Lee' }, preview: 'Seen already.', title: 'Ideas', at: ago(10 * 60e3 + i * 1000), read: true, count: 1 })),
   ] }));
   await env.META.put('agent-unread:julie', JSON.stringify({ items: [{ slug: 'launch-deck', thread: 'c_9', at: ago(30 * 60e3), author: CLAUDE_AUTHOR }] }));
 }

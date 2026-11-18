@@ -150,7 +150,7 @@ t('replies to different parents do not merge', () => {
   assert(inbox.items.length === 2);
 });
 
-t('mark read by comment_id; page unread first', () => {
+t('mark read by comment_id; page newest first, read or not', () => {
   let inbox = box.emptyInbox();
   inbox = box.applyInboxEvent(inbox, {
     id: 'n1', kind: 'reply', slug: 'd', comment_id: 'r1', target_id: 'c1',
@@ -163,9 +163,19 @@ t('mark read by comment_id; page unread first', () => {
     id: 'n3', kind: 'comment', slug: 'other', comment_id: 'c9',
     actor: { login: 'z' }, at: 't3',
   });
+  // A read row newer than an unread one stays above it: the bell is what
+  // happened, newest first (Julie, 2026-11-18).
+  inbox = box.applyInboxEvent(inbox, {
+    id: 'n4', kind: 'reply', slug: 'd', comment_id: 'r4', target_id: 'c1',
+    actor: { login: 'a' }, at: 't4',
+  });
+  inbox = box.markInboxRead(inbox, { comment_id: 'r4' });
   const page = box.pageInbox(inbox, { offset: 0, limit: 20 });
-  assert(page.items[0].id === 'n3', 'unread should sort first');
+  assert(page.items.map((i) => i.id).join() === 'n4,n3,n1', `order ${page.items.map((i) => i.id)}`);
   assert(page.unread === 1 && page.has_more === false);
+  const waiting = box.pageInbox(inbox, { offset: 0, limit: 20, unread: true });
+  assert(waiting.items.map((i) => i.id).join() === 'n3', 'unread: the unread rows alone');
+  assert(waiting.unread === 1 && waiting.has_more === false);
 });
 
 t('mark read by comment_id does not clear other rows on the same thread', () => {
