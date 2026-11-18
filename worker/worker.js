@@ -16457,11 +16457,19 @@ function mergeInboxes(parts) {
   return { items };
 }
 
-function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE } = {}) {
+// The bell is what happened, newest first, read or not. It used to list
+// every unread row before every read one; once reading a thread on the doc
+// page read its bell row too (#1060), today's activity went read at once and
+// sank beneath weeks-old unread rows, a full page of them (Julie, 2026-11-18:
+// "everything in Notifications is so old"). Unread is the row's mark, never
+// its place. `unread: true` lists the unread rows alone, newest first: what
+// is still waiting on the person (My docs' Needs you). `unread` in the
+// answer is always the count of every unread row.
+function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE, unread: onlyUnread = false } = {}) {
   const items = inbox && Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
   const unread = items.filter(i => !i.read);
-  const read = items.filter(i => i.read);
-  const ordered = unread.concat(read);
+  const ordered = (onlyUnread ? unread : items).slice()
+    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
   const off = Math.max(0, Number(offset) || 0);
   const lim = Math.min(50, Math.max(1, Number(limit) || INBOX_PAGE));
   return {
@@ -30069,7 +30077,9 @@ const tdocHandlers = {
       if (!offset) {
         try { parts = await reconcileInboxSeen(env, s, parts); } catch {}
       }
-      return json(await redactCommentEmails(pageInbox(mergeInboxes(parts), { offset }), await emailPrivacyFor(env, s, 'me:inbox', null)));
+      // `?filter=unread`: the unread rows alone (Needs you); default all.
+      const onlyUnread = url.searchParams.get('filter') === 'unread';
+      return json(await redactCommentEmails(pageInbox(mergeInboxes(parts), { offset, unread: onlyUnread }), await emailPrivacyFor(env, s, 'me:inbox', null)));
     }
     if (p === '/api/notifications/unread' && method === 'GET') {
       const s = await getSession(env, req);

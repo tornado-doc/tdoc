@@ -306,8 +306,9 @@ export async function deleteForever(target) {
   throw new Error('Still deleting. Try again.');
 }
 
-export function listNotifications(offset = 0) {
-  const query = new URLSearchParams({ offset: String(offset) });
+// The bell's rows, newest first. `unread`: the unread rows alone (Needs you).
+export function listNotifications(offset = 0, { unread = false } = {}) {
+  const query = new URLSearchParams({ offset: String(offset), ...(unread ? { filter: 'unread' } : {}) });
   return request(`/api/notifications?${query}`);
 }
 

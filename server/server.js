@@ -1765,8 +1765,11 @@ const server = http.createServer(async (req, res) => {
     }
     const inbox = readJson(inboxFile(ident.login), { items: [] });
     const items = Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
+    // Newest first, read or not; `?filter=unread` the unread alone (the
+    // worker's pageInbox).
     const unread = items.filter(i => !i.read);
-    const ordered = unread.concat(items.filter(i => i.read));
+    const ordered = (url.searchParams.get('filter') === 'unread' ? unread : items).slice()
+      .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
     const offset = Math.max(0, Number(url.searchParams.get('offset') || 0));
     return json(res, 200, {
       items: ordered.slice(offset, offset + 20),
