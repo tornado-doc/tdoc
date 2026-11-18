@@ -28,8 +28,10 @@ import { authorLine } from '../document/comment-card.jsx';
 const INBOX_KINDS = new Set(['comment', 'reply', 'mention']);
 const INBOX_PAGES = 10;
 
-// Every unread bell row, once: unread rows come first, so paging stops at the
-// first page holding a read one. A failure leaves only the badge counts.
+// Every unread bell row, once: the server lists the unread alone
+// (filter=unread), newest first, so a read row never ends the paging early
+// and none of the bell's read rows are fetched. A failure leaves only the
+// badge counts.
 export function useNeedsInbox(enabled) {
   const [items, setItems] = useState(null);
   useEffect(() => {
@@ -39,11 +41,11 @@ export function useNeedsInbox(enabled) {
       const all = [];
       let offset = 0;
       for (let n = 0; n < INBOX_PAGES; n += 1) {
-        const page = await listNotifications(offset);
+        const page = await listNotifications(offset, { unread: true });
         const rows = Array.isArray(page?.items) ? page.items : [];
-        all.push(...rows);
+        all.push(...rows.filter((row) => row && !row.read));
         offset += rows.length;
-        if (!page?.has_more || !rows.length || rows.some((row) => row && row.read)) break;
+        if (!page?.has_more || !rows.length) break;
       }
       return all;
     })()

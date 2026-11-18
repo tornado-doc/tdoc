@@ -169,12 +169,6 @@ t('chat-driven new and edit flows require host validation', () => {
     '/tdoc edit must write through the gateway');
 });
 
-// The reader stamps `background` and `border-radius` onto every th and td at
-// zero specificity, so a table that names neither renders as a grid of rounded
-// tinted chips no matter what the style says. That failure is invisible in the
-// source, which is why the validator checks it instead of leaving it to prose.
-// The contract is "name it", not "make it transparent": a heat-map cell that
-// deliberately sets a fill is a choice, and only silence inherits a chip.
 // An <svg width="960"> renders at 960 physical pixels. The reader caps it with
 // `max-width: 100% !important`, so a figure that states no width of its own
 // looks right where tdoc serves it and runs off the right edge anywhere else,
@@ -289,35 +283,49 @@ t('a figure with a pixel width but no CSS width is rejected', () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-t('a table whose cells never name background or radius is rejected', () => {
+// Tables take the reader's look (server/reader.css). A document that redraws
+// a table's borders or its cells' fills on top of it gets the half-and-half
+// table that put a white "+" at every cell corner, so the validator says so in
+// the same words as the publish-time block check.
+t('a table restyled by the document is noted; a plain one is not', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cells-'));
-  const write = (css, body) => {
-    const f = path.join(dir, 'c' + Math.abs(css.length + body.length) + '.html');
+  let n = 0;
+  const write = (css, body, args = []) => {
+    const f = path.join(dir, 'c' + (n++) + '.html');
     fs.writeFileSync(f, `<!doctype html><html><head>
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>body { background: #fff; } ${css}</style>
       </head><body><div class="wrap"><h1>T</h1>${body}</div></body></html>`);
-    return spawnSync(path.join(BIN, 'tdoc-validate-template'), [f], { encoding: 'utf8' });
+    return spawnSync(path.join(BIN, 'tdoc-validate-template'), [f, ...args], { encoding: 'utf8' });
   };
   const TABLE = '<table><tr><th>a</th></tr><tr><td>b</td></tr></table>';
+  const RE = /Tables: use tdoc's table style; don't restyle table borders or cell backgrounds/;
   try {
-    const bare = write('.wrap th, .wrap td { border-bottom:1px solid #eee; padding:8px; }', TABLE);
-    assert(/reader's chip/.test(bare.stdout + bare.stderr),
-      'a table setting only borders and padding must be rejected');
+    const restyled = write('.notes table { border-collapse:collapse } .notes th, .notes td { border:1px solid #ddd; padding:8px }', TABLE);
+    const out = restyled.stdout + restyled.stderr;
+    assert(RE.test(out), 'collapse + cell borders must be noted: ' + out);
+    assert(/\.notes table, \.notes th, \.notes td/.test(out), 'the note names the rules: ' + out);
+    assert(restyled.status === 0, 'a note, not an error');
 
-    const reset = write('.wrap th, .wrap td { background:transparent; border-radius:0; border-bottom:1px solid #eee; }', TABLE);
-    assert(!/reader's chip/.test(reset.stdout + reset.stderr),
-      'naming both properties must satisfy the check');
+    const filled = write('@media (min-width: 600px) { tr:nth-child(2n) > td { background-color:#fafafa } }', TABLE);
+    assert(RE.test(filled.stdout + filled.stderr), 'a cell fill inside @media is noted');
 
-    // A deliberate fill is a choice the author made and can see; it passes.
-    const chosen = write('.wrap th, .wrap td { background:#fafafa; border-radius:4px; }', TABLE);
-    assert(!/reader's chip/.test(chosen.stdout + chosen.stderr),
-      'a deliberately filled cell is a choice, not an inherited chip');
+    const plain = write('.wrap p { margin:0 }', TABLE);
+    assert(!RE.test(plain.stdout + plain.stderr), 'a table left to the reader is clean');
 
-    // A document with no table has nothing to reset.
-    const notable = write('.wrap p { margin:0 }', '<p>no table here</p>');
-    assert(!/reader's chip/.test(notable.stdout + notable.stderr),
-      'a document with no table must not be asked to reset cells');
+    // Header type and the old guide's reset change nothing about the look.
+    const typed = write('.wrap th { font:600 11px ui-monospace, monospace; text-transform:uppercase } .wrap th, .wrap td { background:transparent; border-radius:0 }', TABLE);
+    assert(!RE.test(typed.stdout + typed.stderr), 'header type and a cleared fill are not a restyle');
+
+    // The reading-column scaffold every house style carries is :where().
+    const scaffold = write(':where(body th, body td) { padding:10px 14px; border:0; text-align:left }', TABLE);
+    assert(!RE.test(scaffold.stdout + scaffold.stderr), 'the :where() scaffold is not a restyle');
+
+    const notable = write('.wrap td { border:1px solid #ddd }', '<p>no table here</p>');
+    assert(!RE.test(notable.stdout + notable.stderr), 'a document with no table has nothing to restyle');
+
+    const custom = write('.notes td { border:1px solid #ddd }', TABLE, ['--custom-template']);
+    assert(!RE.test(custom.stdout + custom.stderr), 'a custom design brings its own table');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -539,11 +547,10 @@ t('tdoc validator does not mistake spelling for design', () => {
   }
 });
 
-t('tdoc validator lets a table follow the cell rule it demands', () => {
-  // check_table_cells REQUIRES background and border-radius named on th/td, or
-  // the reader's chip survives. Flagging that same rule as a global override
-  // left no way to write a passing table: omit it and one check fired, add it
-  // and the other did.
+t('tdoc validator does not call a cleared cell fill an override', () => {
+  // The older guide asked every document to write this reset. Under today's
+  // reader table it changes nothing, so existing documents that carry it
+  // must still pass --strict.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cells-'));
   try {
     const page = (extra) => `<!doctype html><html lang="en"><head>
@@ -555,7 +562,7 @@ t('tdoc validator lets a table follow the cell rule it demands', () => {
     const reset = path.join(dir, 'reset.html');
     fs.writeFileSync(reset, page('th, td { background:none; border-radius:0 }'));
     const ok = spawnSync(path.join(BIN, 'tdoc-validate-template'), [reset, '--strict'], { encoding: 'utf8' });
-    assert(ok.status === 0, `the required cell reset must not read as an override: ${ok.stderr}`);
+    assert(ok.status === 0, `a cleared cell fill must not read as an override: ${ok.stderr}`);
 
     // Narrow on purpose: the moment such a rule restyles prose, the note is right.
     const more = path.join(dir, 'more.html');

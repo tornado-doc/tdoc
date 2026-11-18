@@ -154,7 +154,7 @@ CELL_RESET_PROPERTIES = {"background", "background-color", "border-radius"}
 
 
 def is_cell_reset(selector: str, declarations) -> bool:
-    """True for a `th`/`td` rule that only undoes the reader's cell chip.
+    """True for a `th`/`td` rule that only clears a cell's fill or radius.
 
     Kept narrow on purpose: the moment such a rule sets anything else it is
     restyling prose again and the override note is correct.
@@ -443,36 +443,61 @@ def check_style_accent(html, style):
             "vocabulary is not being applied" % (len(svgs), style)]
 
 
-def check_table_cells(html, styles):
-    """A cell that never names its fill or its radius inherits a chip.
+TABLE_TAGS = {"table", "th", "td", "tr", "thead", "tbody", "tfoot"}
+TABLE_PROP = re.compile(r"^(?:border(?:-[a-z-]+)?|background(?:-[a-z-]+)?)$")
+CLEARED_VALUE = re.compile(r"^(?:0(?:px)?|none|transparent|initial|unset|revert|revert-layer)(?:\s*!important)?$")
 
-    The reader stamps `background` and `border-radius` onto every th and td at
-    zero specificity. Those survive a document rule that sets only borders and
-    padding, so a table written that way renders as a grid of rounded tinted
-    blocks whatever the style says. Nothing about the document reveals this —
-    it looks correct in the source and wrong on the page — which is why it is
-    checked rather than left to prose.
 
-    A document with no table has nothing to reset.
+def _table_target(selector):
+    """The table tag a selector finally styles, or None.
+
+    Only the last compound counts (`.notes td` styles a cell; `td .num` styles
+    a span inside one). A `:where()` rule is the house styles' zero-specificity
+    copy of the reader scaffold, not a restyle.
+    """
+    sel = selector.strip()
+    if not sel or sel.lower().startswith(":where("):
+        return None
+    flat = re.sub(r"\([^()]*\)", "()", re.sub(r"\[[^\]]*\]", "[]", sel))
+    last = re.split(r"\s*[\s>+~]\s*", flat)[-1]
+    m = re.match(r"([a-z][a-z0-9]*)", last, re.I)
+    return m.group(1).lower() if m and m.group(1).lower() in TABLE_TAGS else None
+
+
+def check_table_restyle(html, styles):
+    """Tables take the reader's look; a document does not redraw it.
+
+    The reader draws every table one way (server/reader.css): a tinted header
+    band over hairline-ruled rows, collapsed, square. A document rule that
+    restyles a table's borders, its border model or its cells' fills lays a
+    second design over that one, and the half-and-half result is what made
+    tables ugly: collapsed 1px borders over filled, rounded cells left a white
+    "+" at every corner. The publish-time block check (server/block-lint.js)
+    says the same thing with the same words. A declaration that only clears a
+    value (0, none, transparent) is not a restyle.
+
+    A document with no table has nothing to restyle.
     """
     if not re.search(r"<table[\s>]", html, re.I):
         return []
-    css = "\n".join(styles)
-    faults = []
-    for prop in ("background", "border-radius"):
-        # Any rule naming a cell and that property counts, in shorthand or long
-        # form: `background:` also matches `background-color:`, and a document
-        # is free to name them in one rule or several.
-        hit = re.search(
-            r"[^{}]*\b(?:th|td)\b[^{}]*\{[^}]*(?<![\w-])" + prop + r"[-\w]*\s*:",
-            css, re.I | re.S)
-        if not hit:
-            faults.append(prop)
-    if not faults:
+    css = re.sub(r"/\*.*?\*/", "", "\n".join(styles), flags=re.S)
+    found = []
+    for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css, flags=re.S):
+        prelude = _after_at_rule_prelude(match.group(1)).strip()
+        if not prelude or prelude.startswith("@"):
+            continue
+        if not any(TABLE_PROP.match(prop) and not CLEARED_VALUE.match(value)
+                   for prop, value in split_declarations(match.group(2))):
+            continue
+        for selector in prelude.split(","):
+            selector = re.sub(r"\s+", " ", selector.strip())
+            if _table_target(selector) and selector not in found:
+                found.append(selector)
+    if not found:
         return []
-    return ["a table's cells never set %s, so the reader's chip (a fill and an "
-            "8px radius on every th and td) survives - name it on th, td" %
-            " or ".join(faults)]
+    shown = ", ".join(found[:5]) + (", ..." if len(found) > 5 else "")
+    return ["Tables: use tdoc's table style; don't restyle table borders or cell "
+            "backgrounds (%s)" % shown]
 
 
 # A cell that refuses to wrap is a promise about its own length. Past this
@@ -860,13 +885,10 @@ def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str
                             + '; use --custom-template for an author-designed wide document'
                         )
                 elif selector_is_global(normalized):
-                    # check_table_cells REQUIRES a document with a table to name
-                    # background and border-radius on th/td, or the reader's chip
-                    # survives. Flagging that same rule as a global override left
-                    # no way to write a table that passes: reset it and this
-                    # fired, omit it and the cell check fired. A th/td rule that
-                    # sets only the reset properties is the house style being
-                    # followed, not overridden.
+                    # A th/td rule that only clears a cell's fill or radius
+                    # (what the older guide asked every document to write)
+                    # changes nothing under today's reader table, so it is not
+                    # an override worth a note.
                     if not is_cell_reset(normalized, declarations):
                         notes.append(f"global selector '{selector.strip()}' overrides the default template")
 
@@ -889,10 +911,10 @@ def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str
     errors.extend(inset)
     errors.extend(check_dark_rules(parser.styles))
     notes.extend(check_style_accent(raw, style))
-    # The cell reset is a house-style rule: tdoc tables are ruled, never filled.
-    # A caller bringing its own design system returned above with the other
-    # house checks, so this only judges documents tdoc itself authored.
-    notes.extend(check_table_cells(raw, parser.styles))
+    # Tables take the reader's look (server/reader.css). A caller bringing its
+    # own design system returned above with the other house checks, so this
+    # only judges documents drawn in tdoc's template.
+    notes.extend(check_table_restyle(raw, parser.styles))
     # A figure that states a pixel width but no CSS width overflows the column
     # wherever the reader CSS is not doing the capping (#320) — correctness.
     errors.extend(check_figure_width(raw, parser.styles))
