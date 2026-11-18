@@ -27464,6 +27464,8 @@ const tdocHandlers = {
           folder: row.folder || '',
           owner: row.owner || '',
           mine: !!row.mine,
+          // The same type mark as the hub's own rows (doc, sheet, slides).
+          doc_type: docTypeOfMeta(meta) || row.doc_type || 'doc',
           updated: row.updated || hit.updated || '',
           where: hit.where,
           snippet: hit.snippet,

@@ -24,6 +24,7 @@ const DOCS = [
   ['interview-notes', 'Interview notes — design partners', '2026-09-28', '<h1>Interview notes</h1><p>Five design partners. All of them lose docs in Slack threads; two asked for full-text search across every doc and comment.</p>'],
   ['zh-weekly', '周报 第 42 周', '2026-10-18', '<h1>周报 第 42 周</h1><p>本周收入增长稳定，新用户留存率提升到 46%。下周重点：完善全文搜索，并整理设计伙伴的反馈。</p>'],
   ['zh-pricing', '定价方案讨论', '2026-10-05', '<h1>定价方案讨论</h1><p>团队版按席位收费。目标是在不影响收入增长的前提下，降低小团队的试用门槛。</p>'],
+  ['cost-ledger', 'Cost ledger', '2026-10-02', '<h1>Cost ledger</h1><table data-tdoc-sheet="Costs"><thead><tr><th data-type="text">Item</th><th data-type="number">Amount</th></tr></thead><tbody><tr><td>Studio ledgerword rent</td><td>1200</td></tr></tbody></table>', { preview: { kind: 'sheet', kind_v: 2 } }],
   ['onboarding-copy', 'Onboarding copy', '2026-08-30', '<h1>Onboarding copy</h1><p>Shorter first screen. Never show &lt;img src=x onerror="window.__xss=1"&gt; payloadword markup to readers.</p>'],
 ];
 
@@ -34,12 +35,14 @@ async function seed(env) {
   await env.META.put(`session:${SID}`, JSON.stringify({
     login: 'alice', email: 'alice@example.com', account_id: 'acct-alice', name: 'alice', avatar_url: '', created: new Date().toISOString(),
   }));
-  for (const [slug, title, date, body] of DOCS) {
+  // A fifth entry: more meta, as a publish stamps it (the type on preview).
+  for (const [slug, title, date, body, more] of DOCS) {
     const created = `${date}T09:00:00.000Z`;
     await env.META.put(`meta:${slug}`, JSON.stringify({
       title, slug, created, versions: [{ n: 1, created }],
       hosted: { account_id: 'acct-alice', github_login: 'alice', owner_key: 'alice' },
       access: { visibility: 'unlisted', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] },
+      ...more,
     }));
     await env.DOCS.put(`docs/${slug}/v1/index.html`, `<!doctype html><html><body>${body}</body></html>`);
   }
@@ -182,6 +185,21 @@ async function startServer(worker, env, waits) {
         assert.equal(await page.locator('.text-search').count(), 0, 'an empty text section');
         await input.fill('retro');
         await page.locator('#pane-mine .doc-row[data-slug="launch-retro"]').waitFor();
+      });
+
+      await t(`${label}: each text result carries its type mark, a sheet its sheet icon`, async () => {
+        await input.fill('ledgerword');
+        const sheet = page.locator('.text-search-row[data-slug="cost-ledger"]');
+        await sheet.waitFor();
+        assert.equal(await sheet.locator('.doc-type.is-sheet').getAttribute('aria-label'), 'Sheet');
+        await input.fill('budget');
+        await page.locator('.text-search-row[data-slug="q4-planning"]').waitFor();
+        await page.locator('.text-search[aria-busy="false"]').waitFor();
+        assert.equal(await page.locator('.text-search-row[data-slug="q4-planning"] .doc-type.is-doc').count(), 1, 'a prose doc: the doc mark');
+        await input.fill('ledgerword');
+        await sheet.waitFor();
+        await page.locator('.text-search[aria-busy="false"]').waitFor();
+        await shot('search-sheet');
       });
 
       await t(`${label}: Chinese, a phrase and a two-character word`, async () => {
