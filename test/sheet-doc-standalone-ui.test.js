@@ -120,6 +120,27 @@ function waitForServer(port, timeout = 8000) {
         assert(!/Salary/.test(await grid()), 'the other tab\'s rows are gone');
       });
 
+      await test(`${label}: ?sheet=2 leaves the address once used: after a click on tab 1, a reload stays on tab 1`, async () => {
+        await page.goto('about:blank');
+        let { doc } = await open(page, '/d/budget?sheet=2');
+        // The address is what is on screen: no ?sheet=, the view names the tab.
+        await page.waitForFunction(() => !new URLSearchParams(location.search).has('sheet'));
+        // The view in the hash names the open tab ({"a":"<tab>"}, encoded).
+        const activeIn = (tab) => page.waitForFunction((t) => { let h = location.hash; for (let i = 0; i < 3; i++) { try { h = decodeURIComponent(h); } catch {} } return h.includes(`"a":"${t}"`); }, tab);
+        await activeIn('Income');
+        await doc.locator('.ts-tab', { hasText: 'Spend' }).click();
+        await activeIn('Spend');
+        await page.reload();
+        await page.locator('.tdoc-document-app').waitFor();
+        await page.frameLocator('iframe[aria-label="Document content"]').locator('.tdoc-sheet .ts-row').first().waitFor();
+        doc = page.frames().find((f) => f.url().includes('/frame'));
+        await page.waitForTimeout(300);
+        const c = await chrome(doc);
+        assert(JSON.stringify(c.tabs) === JSON.stringify(['Spend*', 'Income']), `reload stays on tab 1: ${JSON.stringify(c.tabs)} at ${page.url()}`);
+        assert(/Rent/.test(await doc.evaluate(() => document.querySelector('.tdoc-sheet .ts-grid').textContent)), 'tab 1 rows');
+        assert(!c.back && !c.expanded.on, 'still no back / full screen');
+      });
+
       await test(`${label}: a sheet in a prose doc still expands, opens on its own, and goes back to the doc`, async () => {
         await page.goto('about:blank');
         let { doc } = await open(page, '/d/plan');

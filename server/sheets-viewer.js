@@ -3245,7 +3245,14 @@
         if (alone > 0 && canExpand()) expand.alone = alone;
         applyView(d.hash, d.widths);
         if (expand.alone) { book.active = expand.alone - 1; renderAll(); setExpanded(true, true); }
-        else if (alone > 0) { book.active = alone - 1; renderAll(); }
+        else if (alone > 0) {
+          // The tab is opened once, like a click on it: the view remembers
+          // it, and the shell drops ?sheet= so the address is what is on
+          // screen (a later tab click, a reload or a copied link agree).
+          book.active = alone - 1; sel = { r: 0, c: 0, r2: 0, c2: 0 };
+          renderAll(); saveView(); relayout();
+          post({ type: 'tdoc:sheetPlain' });
+        }
         else if (d.expanded === true) setExpanded(true, true);
       } else renderAll();
     } else if (d.type === 'tdoc:sheetLayoutSaved') {

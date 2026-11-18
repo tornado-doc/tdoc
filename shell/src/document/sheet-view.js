@@ -14,6 +14,7 @@ import { readHashExpanded, readHashView, readSheetAlone, withHashExpanded, withH
 //   shell → frame { type:'tdoc:sheetConfig', editing, canEdit, hash, widths, path, expanded, alone }
 //   frame → shell { type:'tdoc:sheetView', hash, widths }
 //   frame → shell { type:'tdoc:sheetExpand', open }
+//   frame → shell { type:'tdoc:sheetPlain' }  ?sheet= on a sheet-only doc: drop it
 //
 // Full screen is in the hash too (#expand=1), so a link opens the sheet that
 // way. The sheet's own page is the same doc at ?sheet=<tab>: same version,
@@ -87,5 +88,16 @@ export function useSheetView({ slug, send, persist = true, canEdit = false }) {
     }
   }, [persist, slug]);
 
-  return { 'tdoc:sheetReady': ready, 'tdoc:sheetView': viewChanged, 'tdoc:sheetExpand': expandChanged };
+  // A sheet-only doc has no page of its own to be on: ?sheet=<tab> only
+  // picked the tab to open (the frame did), and leaves the address so a
+  // reload keeps the tab the reader moves to.
+  const plainChanged = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has('sheet')) return;
+    params.delete('sheet');
+    const search = params.toString();
+    try { history.replaceState(history.state, '', `${location.pathname}${search ? `?${search}` : ''}${location.hash}`); } catch {}
+  }, []);
+
+  return { 'tdoc:sheetReady': ready, 'tdoc:sheetView': viewChanged, 'tdoc:sheetExpand': expandChanged, 'tdoc:sheetPlain': plainChanged };
 }
