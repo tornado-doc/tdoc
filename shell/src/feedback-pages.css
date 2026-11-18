@@ -101,19 +101,67 @@
   background: var(--fb-tint); border: 1px solid color-mix(in srgb, var(--td-accent) 28%, white);
   font: 500 15px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif; }
 .tdoc-feedback-page .phone-only strong { color: var(--td-accent); }
-.tdoc-feedback-page .script-path { margin: 2rem 0 0; padding: 1rem 1.1rem; border: 1px solid var(--fb-line);
-  border-radius: 12px; background: #fafafa; }
-.tdoc-feedback-page .script-path h2 { margin-top: 0; }
-/* The two ways in, each a section the intro (and the homepage, #sdk) links
-   to; the margin keeps a jumped-to heading clear of the top bar. */
-.tdoc-feedback-page .bookmark-path,
-.tdoc-feedback-page .script-path { scroll-margin-top: 4.5rem; }
-.tdoc-feedback-page .script-path > :last-child { margin-bottom: 0; }
-.tdoc-feedback-page .script-path .code-copy { margin: 0 0 1rem; }
+/* The two ways in: a chooser at the top, then each way as a section of the
+   same weight (the SDK was a grey box under the bookmark). The margin keeps
+   a jumped-to heading clear of the top bar (the homepage links to #sdk). */
+.tdoc-feedback-page .fb-lead { font-size: 1.05rem; }
+.tdoc-feedback-page .fb-choices { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin: 1.5rem 0 .6rem; }
+.tdoc-feedback-page .fb-main a.fb-choice { display: grid; grid-template-columns: auto 1fr; column-gap: .7rem; row-gap: .1rem;
+  align-items: center; padding: .9rem 1rem; border: 1px solid var(--fb-line); border-radius: 10px; background: #fff;
+  color: var(--fb-ink); text-decoration: none; transition: border-color .12s, box-shadow .12s; }
+.tdoc-feedback-page .fb-main a.fb-choice:hover { border-color: color-mix(in srgb, var(--td-accent) 45%, white);
+  box-shadow: 0 2px 10px rgba(16,18,26,.06); }
+.tdoc-feedback-page .fb-main a.fb-choice:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
+.tdoc-feedback-page .fb-choice-icon { grid-row: span 2; display: inline-flex; align-items: center; justify-content: center;
+  width: 2.2rem; height: 2.2rem; border-radius: 8px; background: var(--td-accent-tint); color: var(--td-accent); align-self: start; }
+.tdoc-feedback-page .fb-choice-icon svg { width: 18px; height: 18px; }
+.tdoc-feedback-page .fb-choice-name { font-weight: 650; line-height: 1.3; }
+.tdoc-feedback-page .fb-choice-what { color: var(--fb-muted); font-size: .9rem; line-height: 1.4; }
+.tdoc-feedback-page .fb-rule { font-size: .9rem; margin: 0 0 .5rem; }
+.tdoc-feedback-page .fb-path { margin: 3rem 0 0; padding-top: 2rem; border-top: 1px solid var(--fb-line); scroll-margin-top: 4.5rem; }
+.tdoc-feedback-page .fb-path h2 { font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; }
+.tdoc-feedback-page .fb-path .fb-path-sub { margin: .1rem 0 1.1rem; }
+.tdoc-feedback-page .fb-path > :last-child { margin-bottom: 0; }
+
+/* The SDK's picture: a site with the widget's resting button in its corner. */
+.tdoc-feedback-page .site-demo { margin: 0 0 1.75rem; }
+.tdoc-feedback-page .site-demo-page { position: relative; height: 11rem; background: #fff; overflow: hidden; }
+.tdoc-feedback-page .site-demo-nav { display: flex; gap: .6rem; align-items: center; padding: .7rem 1rem; border-bottom: 1px solid #f0f0f2; }
+.tdoc-feedback-page .site-demo-nav i { display: block; width: 2.6rem; height: .45rem; border-radius: 4px; background: #ececf0; }
+.tdoc-feedback-page .site-demo-nav i.logo { width: 1.1rem; height: 1.1rem; border-radius: 5px; background: #d9dbe2; margin-right: auto; }
+.tdoc-feedback-page .site-demo-body { padding: 1.1rem 1rem; display: flex; flex-direction: column; align-items: flex-start; gap: .5rem; }
+.tdoc-feedback-page .site-demo-body i { display: block; height: .5rem; border-radius: 4px; background: #ececf0; }
+.tdoc-feedback-page .site-demo-body i.h { width: 45%; height: .85rem; background: #dfe1e7; }
+.tdoc-feedback-page .site-demo-body i.l { width: 70%; }
+.tdoc-feedback-page .site-demo-body i.l.short { width: 52%; }
+.tdoc-feedback-page .site-demo-target { position: relative; margin-top: .35rem; padding: .35rem .7rem; border-radius: 6px;
+  background: #2b2d33; color: #fff; font: 600 11px/1.2 -apple-system, system-ui, sans-serif;
+  outline: 2px dashed var(--td-accent); outline-offset: 3px; }
+.tdoc-feedback-page .site-demo-pin { position: absolute; right: -.75rem; top: -.8rem; width: 1.2rem; height: 1.2rem; border-radius: 50% 50% 50% 2px;
+  background: var(--td-accent); color: #fff; font: 700 10px/1.2rem -apple-system, system-ui, sans-serif; text-align: center;
+  box-shadow: 0 2px 6px var(--fb-ring); }
+.tdoc-feedback-page .site-demo-note { position: absolute; left: 11.5rem; top: 6.6rem; max-width: 13rem; padding: .45rem .6rem; border-radius: 8px;
+  background: #fff; border: 1px solid var(--fb-line); box-shadow: 0 6px 18px rgba(16,18,26,.1);
+  font: 12px/1.35 -apple-system, system-ui, sans-serif; color: var(--fb-ink); }
+.tdoc-feedback-page .site-demo-note b { display: block; font-weight: 650; margin-bottom: .1rem; }
+/* The widget's own resting button (feedback.js .tdoc-comment-pill, idle). */
+.tdoc-feedback-page .site-demo-fab { position: absolute; right: .9rem; bottom: .9rem; display: inline-flex; align-items: center; justify-content: center;
+  width: 2.1rem; height: 2.1rem; border-radius: 999px; background: #fff; color: var(--td-accent); border: 1px solid #dedee3;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 3px 10px rgba(0,0,0,.08), 0 0 0 5px var(--fb-tint); }
+.tdoc-feedback-page .site-demo-fab svg { width: 15px; height: 15px; }
+
+/* The SDK's steps, numbered like an invite's (.fb-invite-steps). */
+.tdoc-feedback-page .fb-step h3 { margin: 0 0 .5rem; font-size: 1rem; line-height: 1.6; }
+.tdoc-feedback-page .fb-step h3 code { font-weight: 500; }
+.tdoc-feedback-page .fb-step p { margin: .5rem 0 0; font-size: .92rem; }
+.tdoc-feedback-page .fb-prompt { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.tdoc-feedback-page .fb-prompt q { flex: 1 1 12rem; padding: .5rem .8rem; border: 1px solid var(--fb-line); border-radius: 8px;
+  color: var(--fb-ink); font-weight: 600; quotes: "“" "”"; }
+.tdoc-feedback-page .fb-space-pick { margin: 0 0 .5rem; }
+.tdoc-feedback-page .fb-more { display: flex; flex-direction: column; gap: .2rem; font-size: .88rem; margin: 0; padding-left: 2.6rem; }
+.tdoc-feedback-page .script-path .code-copy { margin: 0; }
 /* The whole line shows, space id included: it wraps rather than scrolls. */
 .tdoc-feedback-page .script-path .code-copy pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.tdoc-feedback-page .sdk-space q { color: var(--td-ink); font-weight: 600; }
-.tdoc-feedback-page .sdk-space .tdoc-copy-prompt { margin-left: .25rem; vertical-align: middle; }
 /* A code snippet with its Copy button: one grey box, the code scrolls, the
    button (the shared CopyPromptButton) stays put. */
 .tdoc-feedback-page .code-copy { display: flex; align-items: center; gap: .5rem; background: #f3f3f6; border-radius: 6px;
@@ -121,6 +169,13 @@
 .tdoc-feedback-page .code-copy pre { flex: 1 1 auto; min-width: 0; margin: 0; background: transparent; }
 @media (max-width: 720px) {
   .tdoc-feedback-page .phone-only { display: block; }
+  .tdoc-feedback-page .fb-choices { gap: .5rem; }
+  .tdoc-feedback-page .fb-main a.fb-choice { grid-template-columns: 1fr; align-content: start; padding: .8rem .85rem; }
+  .tdoc-feedback-page .fb-choice-icon { grid-row: auto; width: 1.9rem; height: 1.9rem; margin-bottom: .35rem; }
+  .tdoc-feedback-page .fb-path { margin-top: 2.25rem; padding-top: 1.5rem; }
+  .tdoc-feedback-page .site-demo-body i.l { width: 90%; }
+  .tdoc-feedback-page .site-demo-note { left: 8.6rem; right: 3.6rem; top: 6.3rem; max-width: none; }
+  .tdoc-feedback-page .fb-more { padding-left: 0; }
   .tdoc-feedback-page .install-desktop { display: none !important; }
   .tdoc-feedback-page .fb-main { padding-top: 2rem; }
 }
@@ -189,9 +244,13 @@
 
 /* /feedback/invite/<id>: two numbered steps, the bookmark and the site. */
 .tdoc-feedback-page .fb-invite h1 { overflow-wrap: anywhere; }
-.tdoc-feedback-page .fb-invite-steps { list-style: none; margin: 1.75rem 0 0; padding: 0; counter-reset: fb-step; }
-.tdoc-feedback-page .fb-invite-step { counter-increment: fb-step; position: relative; padding: 0 0 1.75rem 2.6rem; }
-.tdoc-feedback-page .fb-invite-step::before { content: counter(fb-step); position: absolute; left: 0; top: .05rem;
+/* Numbered steps: an invite's, and the SDK's on /feedback. */
+.tdoc-feedback-page .fb-invite-steps,
+.tdoc-feedback-page .fb-steps { list-style: none; margin: 1.75rem 0 0; padding: 0; counter-reset: fb-step; }
+.tdoc-feedback-page .fb-invite-step,
+.tdoc-feedback-page .fb-step { counter-increment: fb-step; position: relative; padding: 0 0 1.75rem 2.6rem; }
+.tdoc-feedback-page .fb-invite-step::before,
+.tdoc-feedback-page .fb-step::before { content: counter(fb-step); position: absolute; left: 0; top: .05rem;
   width: 1.7rem; height: 1.7rem; border-radius: 50%; background: var(--td-accent-tint); color: var(--td-accent);
   font: 700 .9rem/1.7rem -apple-system, system-ui, sans-serif; text-align: center; }
 .tdoc-feedback-page .fb-invite-step h2 { margin: 0 0 .6rem; font-size: 1.05rem; line-height: 1.6; overflow-wrap: anywhere; }

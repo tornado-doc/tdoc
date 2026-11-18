@@ -173,7 +173,9 @@ async function startServer(worker, env) {
     await anon.close();
 
     await t('/feedback: the bookmark is the real address, Copy copies the SDK line, the pill opens the coach', async () => {
-      const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+      // Reduced motion holds the demo pill still: below the chooser it is
+      // scrolled to, and mid-flight it sits under the bookmarks bar.
+      const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, reducedMotion: 'reduce' });
       await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
       const page = await context.newPage();
       try {

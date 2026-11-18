@@ -34,6 +34,13 @@ jobs:
         run: jq --version || sudo apt-get update && sudo apt-get install -y jq
       - name: Run offline tests
         run: npm test
+        env:
+          # Complexity guards (test/helpers/perf-budget.js) log what they
+          # measured; the step below puts it in the job summary.
+          TDOC_PERF_LOG: ${{ runner.temp }}/perf.jsonl
+      - name: Timing summary
+        if: always()
+        run: node test/perf-summary.js "$RUNNER_TEMP/perf.jsonl" 'Offline timing guards'
       # Manifest schema guard: plugin.json + marketplace.json must match the
       # field types Claude Code validates at load/install time. This class of
       # bug shipped to users 4x (#36 owner, #42 repository) — keep it pinned.
@@ -105,6 +112,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node test/run.js --browser --shard=${{ matrix.shard }}/4
+        env:
+          # Performance budgets (frame times, sort ms) warn here instead of
+          # failing: the non-blocking `perf` job enforces them.
+          TDOC_PERF: report
+          TDOC_PERF_LOG: ${{ runner.temp }}/perf.jsonl
+      - name: Timing summary
+        if: always()
+        run: node test/perf-summary.js "$RUNNER_TEMP/perf.jsonl" 'Browser timing (shard ${{ matrix.shard }}, budgets reported only)'
       - if: matrix.shard == 4
         run: |
           TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
@@ -112,6 +127,39 @@ jobs:
           TDOC_TEST_BROWSER=webkit node test/custom-design-theme.test.js
           TDOC_TEST_BROWSER=webkit node test/visual-viewer.test.js
           TDOC_TEST_BROWSER=webkit node test/reply-activity-ui.test.js
+
+  # Pure performance budgets (scroll frame times, sort and search ms on 10k
+  # rows), enforced. Shared runners vary run to run, so this job never blocks
+  # a merge (continue-on-error on the job): an overrun shows as this check
+  # failing, the run stays green, the numbers are in the job summary. Functional checks of the same tests (import,
+  # load, scroll, sort, search, save) block in the browser job above.
+  perf:
+    name: performance budgets (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Performance budgets
+        id: budgets
+        run: node test/run.js --perf
+        env:
+          TDOC_PERF_LOG: ${{ runner.temp }}/perf.jsonl
+      - name: Summary
+        if: always()
+        run: |
+          node test/perf-summary.js "$RUNNER_TEMP/perf.jsonl" 'Performance budgets (enforced, non-blocking)'
+          if [ "${{ steps.budgets.outcome }}" = "failure" ]; then
+            echo "::warning title=performance budgets::over budget or failed; see the job summary (this job does not block merging)"
+          fi
 
   shell-runtime:
     name: shell runtime
