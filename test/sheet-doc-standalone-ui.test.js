@@ -2,8 +2,10 @@
 // sheet (shared/doc-type.mjs's sheet-only rule, "Sheet" in My docs) opens as
 // a full page sheet, however it is linked. ?sheet=<tab> (the "Open on its
 // own" link, a sheet embed's Open) and #expand=1 open that tab on the doc's
-// own page: no "Open the doc" back to itself, no "Open on its own", no close
-// full screen. A sheet inside a prose doc keeps all three. Desktop and phone.
+// own page: no way back to itself, no "Open on its own", no close full
+// screen. A sheet inside a prose doc keeps all three; its way back is a
+// breadcrumb, "Doc title / Tab" (Notion's full-page database), whose title
+// closes full screen, or on the sheet's own page opens the doc. Desktop and phone.
 // TDOC_TEST_SCREENSHOTS=<dir> saves a screenshot of each state.
 const fs = require('fs');
 const os = require('os');
@@ -71,7 +73,9 @@ function waitForServer(port, timeout = 8000) {
       const h1 = document.querySelector('h1');
       return {
         expanded: window.__tdocSheets.expanded(),
-        back: named(/^Open the doc$/).length,
+        // The way back to the doc: the doc's title in the breadcrumb ("Doc / Tab").
+        back: Array.from(document.querySelectorAll('.tdoc-sheet a.ts-crumb-doc')).filter(shown).length,
+        crumbs: shown(document.querySelector('.ts-xtitle')) ? Array.from(document.querySelectorAll('.ts-xtitle > *')).map((el) => el.textContent) : null,
         alone: named(/Open (this sheet )?on its own/).length,
         close: named(/^Close full screen/).length,
         expand: named(/^Expand sheet/).length,
@@ -149,15 +153,21 @@ function waitForServer(port, timeout = 8000) {
         await doc.locator('.tdoc-sheet button[aria-label^="Expand sheet"]').click();
         await doc.waitForFunction(() => window.__tdocSheets.expanded().on);
         c = await chrome(doc);
-        assert(c.alone === 1 && c.close === 1 && !c.back, `full screen: Open on its own + close: ${JSON.stringify(c)}`);
+        assert(c.alone === 1 && c.close === 1 && c.back === 1, `full screen: Open on its own + close, and the breadcrumb: ${JSON.stringify(c)}`);
+        assert(JSON.stringify(c.crumbs) === JSON.stringify(['Plan', '/', 'Runs']), `breadcrumb Plan / Runs: ${JSON.stringify(c.crumbs)}`);
         await shot(page, `embedded-expanded-${label}`);
+        // In full screen the doc's title closes it: the doc is right there.
+        await doc.locator('.ts-xtitle a.ts-crumb-doc').click();
+        await doc.waitForFunction(() => !window.__tdocSheets.expanded().on);
+        assert(/\/d\/plan(?:\/v\/1)?$/.test(new URL(page.url()).pathname), `still on the doc: ${page.url()}`);
         await page.goto('about:blank');
         ({ doc } = await open(page, '/d/plan?sheet=1'));
         await doc.waitForFunction(() => window.__tdocSheets.expanded().alone === 1);
         c = await chrome(doc);
-        assert(c.back === 1 && !c.alone && !c.close, `own page: Open the doc only: ${JSON.stringify(c)}`);
-        const href = await doc.evaluate(() => Array.from(document.querySelectorAll('.ts-xhead a')).find((a) => !a.hidden).getAttribute('href'));
-        assert(/^\/d\/plan(?:\/v\/1)?(?:#|$)/.test(href), `Open the doc goes to the doc: ${href}`);
+        assert(c.back === 1 && !c.alone && !c.close, `own page: the breadcrumb's doc link only: ${JSON.stringify(c)}`);
+        assert(JSON.stringify(c.crumbs) === JSON.stringify(['Plan', '/', 'Runs']), `breadcrumb Plan / Runs: ${JSON.stringify(c.crumbs)}`);
+        const href = await doc.evaluate(() => document.querySelector('.ts-xtitle a.ts-crumb-doc').getAttribute('href'));
+        assert(/^\/d\/plan(?:\/v\/1)?(?:#|$)/.test(href), `the doc's title goes to the doc: ${href}`);
         await shot(page, `embedded-alone-${label}`);
       });
 

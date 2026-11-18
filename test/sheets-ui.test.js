@@ -858,10 +858,11 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       const fl = tab.frameLocator('iframe[aria-label="Document content"]');
       await fl.locator('.tdoc-sheet.is-expanded .ts-row').first().waitFor({ timeout: 15000 });
       const tf = tab.frames().find((x) => x.url().includes('/frame'));
-      const info = await tf.evaluate(() => ({ x: window.__tdocSheets.expanded(), count: document.querySelector('.ts-count').textContent, tabs: getComputedStyle(document.querySelector('.ts-tabs')).display, close: !document.querySelector('.ts-xhead button[aria-label^="Close"]').hidden, back: document.querySelector('.ts-xhead a[aria-label="Open the doc"]').getAttribute('href'), title: document.querySelector('.ts-xtitle').textContent }));
+      const info = await tf.evaluate(() => ({ x: window.__tdocSheets.expanded(), count: document.querySelector('.ts-count').textContent, tabs: getComputedStyle(document.querySelector('.ts-tabs')).display, close: !document.querySelector('.ts-xhead button[aria-label^="Close"]').hidden, back: document.querySelector('.ts-xhead a.ts-crumb-doc').getAttribute('href'), crumbs: Array.from(document.querySelectorAll('.ts-xtitle > *')).filter((el) => !el.hidden).map((el) => el.textContent) }));
       assert(info.x.on && info.x.alone === 1 && info.count === '11 of 60 rows', `the view came along: ${JSON.stringify(info)}`);
       assert(info.tabs === 'none' && !info.close && /^\/d\/prose\/v\/1#sheet=/.test(info.back), JSON.stringify(info));
-      assert(info.title === 'Runs report · Runs', info.title);
+      // A breadcrumb, as Notion shows a database opened full page: the doc (a link back), then the tab.
+      assert(JSON.stringify(info.crumbs) === JSON.stringify(['Runs report', '/', 'Runs']), JSON.stringify(info.crumbs));
       // Its own page has the doc's top bar too: the mode switch is in ⋯.
       await tab.locator('.tdoc-bar #tdoc-more-btn').click();
       await tab.getByRole('menuitemradio', { name: 'Edit', exact: true }).waitFor({ timeout: 5000 });
@@ -878,8 +879,8 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await fl.locator('.tdoc-sheet.is-expanded .ts-row').first().waitFor({ timeout: 15000 });
       const tf2 = tab.frames().find((x) => x.url().includes('/frame'));
       assert(await tf2.evaluate(() => window.__tdocSheets.active() === 1 && document.querySelector('.ts-count').textContent === '2 rows'), 'tab 2 alone');
-      // "Open the doc" goes back to the doc.
-      await fl.getByRole('link', { name: 'Open the doc' }).click();
+      // The doc's title in the breadcrumb goes back to the doc.
+      await fl.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Runs report' }).click();
       await tab.waitForURL((u) => !u.search.includes('sheet='));
       await tab.close();
     });
