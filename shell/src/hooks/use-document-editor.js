@@ -195,14 +195,16 @@ export function useDocumentEditor({
   // so the same checks and the same author, but the page stays where it is.
   // Never over an unsaved draft: that would publish it unasked. (Edit mode
   // with nothing typed yet is fine: widths dragged just before it opened.)
-  const saveInPlace = useCallback(async (baseVersion) => {
+  // `transform` (html -> html) reshapes the document before it is saved
+  // (Convert to Sheet); it throws to save nothing.
+  const saveInPlace = useCallback(async (baseVersion, transform = null) => {
     if (dirty || saving) {
       const error = new Error('Save or discard the draft first');
       error.code = 'draft_open';
       throw error;
     }
     const html = await requestDocument();
-    return saveDocumentVersion(config.slug, baseVersion, html);
+    return saveDocumentVersion(config.slug, baseVersion, transform ? transform(html) : html);
   }, [config.slug, dirty, requestDocument, saving]);
 
   const discard = useCallback(async () => {

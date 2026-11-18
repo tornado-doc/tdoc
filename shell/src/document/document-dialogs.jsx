@@ -204,6 +204,41 @@ export function PublishDialog({ open, slug, onOpenChange }) {
   );
 }
 
+// "Convert to Sheet" asks first: one sentence on what it does and that the
+// doc as it is now stays in the history. onConvert publishes the new version
+// and leaves the page for it; it throws with a message to show here.
+export function ConvertToSheetDialog({ open, onOpenChange, onConvert }) {
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) { setStatus(''); setBusy(false); } }, [open]);
+  const convert = async () => {
+    setBusy(true);
+    setStatus('Converting…');
+    try {
+      await onConvert();
+    } catch (error) {
+      setBusy(false);
+      setStatus(error.message || 'Could not convert. Try again.');
+    }
+  };
+  return (
+    <AppDialog
+      open={open}
+      onOpenChange={(next) => { if (!busy) onOpenChange(next); }}
+      title="Convert to Sheet?"
+      description="Turns this doc into a standalone sheet. The current version stays in history."
+      actions={(
+        <>
+          <AppButton disabled={busy} onClick={() => onOpenChange(false)}>Cancel</AppButton>
+          <AppButton variant="primary" data-action="confirm-convert-to-sheet" disabled={busy} onClick={convert}>Convert</AppButton>
+        </>
+      )}
+    >
+      {status ? <p role="status">{status}</p> : null}
+    </AppDialog>
+  );
+}
+
 export function MessageDialog({ message, onOpenChange }) {
   return (
     <AppDialog

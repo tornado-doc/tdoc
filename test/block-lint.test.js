@@ -126,6 +126,10 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     // A sheet doc: a title, a line on what it is, the sheet (any size).
     const doc = lint(page('<h1>Tasks</h1><p class="sheet-note">Thirty tasks.</p><p>From the Q3 export.</p>' + sheetTable('Tasks', 3) + sheetTable('People', 2)));
     assert(doc.warning === null && doc.small_sheet_count === 0, JSON.stringify(doc));
+    // A converted doc (Convert to Sheet): its old prose, headings, lists and
+    // a plain table, folded into one note, is the note, not prose.
+    const converted = lint(page('<h1>Tasks</h1><details class="sheet-note"><summary>Notes</summary><h2>Plan</h2><p>a</p><p>b</p><ul><li>c</li></ul><table><tr><td>x</td></tr></table></details>' + sheetTable('Tasks', 3)));
+    assert(converted.warning === null && converted.small_sheet_count === 0, JSON.stringify(converted));
     // Prose is three text blocks outside the sheets, or other doc content (a plain table, a figure).
     assert(lint(page('<h1>T</h1><p>a</p><p>b</p>' + sheetTable('S', 4))).small_sheet_count === 0, 'two paragraphs is still a sheet doc');
     assert(lint(page('<h1>T</h1><p>a</p><ul><li>b</li><li>c</li></ul>' + sheetTable('S', 4))).small_sheet_count === 1, 'three blocks is prose');
