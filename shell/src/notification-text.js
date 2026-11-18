@@ -11,6 +11,8 @@ export function notificationAction(item) {
   const count = Number(item.count) || 1;
   if (item.kind === 'reaction') return `reacted ${item.emoji || ''}${count > 1 ? ` and ${count - 1} more` : ''}`;
   if (item.kind === 'mention') return 'mentioned you';
+  // An agent's replies in one thread are one row (quiet: no push or email).
+  if (item.kind === 'agent_reply') return `replied${count > 1 ? ` ${count} times` : ''}`;
   if (item.kind === 'reply') return `replied${count > 1 ? ` and ${count - 1} more replied` : ''}`;
   if (item.kind === 'access_request') return 'asked for access to';
   if (item.kind === 'team_join_request') return 'asked to join';

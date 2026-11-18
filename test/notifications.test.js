@@ -43,9 +43,13 @@ vm.runInContext([
   fn('sessionLogin'),
   fn('normalizeGithubLogin'),
   fn('emptyInbox'),
+  fn('inboxRowUnread'),
   fn('inboxUnread'),
   fn('inboxRowThreads'),
   fn('noteInboxThread'),
+  fn('inboxEventThreads'),
+  fn('trimInbox'),
+  fn('inboxEventCapped'),
   fn('applyInboxEvent'),
   fn('markInboxRead'),
   fn('pageInbox'),
@@ -208,5 +212,106 @@ t('recordAuthor finds nested reply authors', () => {
   assert(box.recordAuthor(list, 'missing') === null);
 });
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+
+console.log('bell follow-ups: eviction, cap, coalesced agent rows, recipients');
+vm.runInContext('const AGENT_REPLY_ROW_CAP = 99;', box);
+vm.runInContext([fn('normalizeEmail'), fn('normalizeActorKey'), fn('isNonHumanAuthor'), fn('agentReplyBellRecipients'),
+  'function snapshotAt(c) { return c; }'].join('\n\n'), box);
+const recent = (min) => new Date(Date.now() - min * 60e3).toISOString();
+
+t('a full inbox drops read and agent rows first, never an unread person\'s row for an agent\'s', () => {
+  const humans = Array.from({ length: 150 }, (_, i) => ({ id: `h${i}`, kind: 'comment', group_key: `comment:d${i}`, slug: `d${i}`, at: recent(1000 + i), read: false, count: 1 }));
+  const agents = Array.from({ length: 50 }, (_, i) => ({ id: `a${i}`, kind: 'agent_reply', group_key: `agent_reply:x${i}`, slug: `x${i}`, at: recent(10 + i), read: false, count: 1, quiet: true }));
+  let inbox = { items: [...agents, ...humans] };
+  inbox = box.applyInboxEvent(inbox, { id: 'a_new', kind: 'agent_reply', slug: 'y', thread_id: 'c1', at: recent(0), quiet: true });
+  assert(inbox.items.length === 200, `kept ${inbox.items.length}`);
+  assert(humans.every((h) => inbox.items.some((i) => i.id === h.id)), 'an unread person\'s row was evicted for an agent row');
+  assert(!inbox.items.some((i) => i.id === 'a49'), 'the oldest agent row should go');
+  assert(inbox.items[0].id === 'a_new');
+  // A read row goes before an agent row.
+  inbox.items[100] = { ...inbox.items[100], read: true };
+  const readId = inbox.items[100].id;
+  inbox = box.applyInboxEvent(inbox, { id: 'h_new', kind: 'mention', slug: 'z', thread_id: 'c2', target_id: 'c2', at: recent(0) });
+  assert(!inbox.items.some((i) => i.id === readId), 'the read row should go first');
+  assert(inbox.items.some((i) => i.id === 'a48'), 'an agent row went before a read one');
+  // Only unread people's rows left: the oldest of them goes.
+  const full = { items: Array.from({ length: 200 }, (_, i) => ({ id: `p${i}`, kind: 'reply', group_key: `reply:${i}`, slug: 'd', at: recent(i), read: false, count: 1 })) };
+  const next = box.applyInboxEvent(full, { id: 'p_new', kind: 'reply', slug: 'd', target_id: 'new', at: recent(0) });
+  assert(next.items.length === 200 && !next.items.some((i) => i.id === 'p199') && next.items[0].id === 'p_new');
+});
+
+t('a coalesced agent event adds its count and every thread to the doc\'s row', () => {
+  let inbox = box.applyInboxEvent({ items: [] }, { id: 'n1', kind: 'agent_reply', slug: 'd', thread_id: 'c1', comment_id: 'r1', at: recent(5), quiet: true });
+  inbox = box.applyInboxEvent(inbox, { id: 'n2', kind: 'agent_reply', slug: 'd', thread_id: 'c3', comment_id: 'r3', at: recent(1), quiet: true,
+    count: 2, threads: [['c2', recent(2)], ['c3', recent(1)]] });
+  assert(inbox.items.length === 1, 'one row per doc');
+  const row = inbox.items[0];
+  assert(row.count === 3 && row.group_key === 'agent_reply:d' && row.quiet === true, JSON.stringify(row));
+  assert(Object.keys(row.thread_at).sort().join() === 'c1,c2,c3', JSON.stringify(row.thread_at));
+});
+
+t('the cap: a doc\'s unread agent row at AGENT_REPLY_ROW_CAP takes no more; read, or another doc, does', () => {
+  const ev = { kind: 'agent_reply', slug: 'd', at: recent(0) };
+  const at = (count, extra = {}) => ({ items: [{ id: 'n', kind: 'agent_reply', group_key: 'agent_reply:d', slug: 'd', at: recent(1), read: false, count, ...extra }] });
+  assert(box.inboxEventCapped(at(99), ev) === true);
+  assert(box.inboxEventCapped(at(98), ev) === false);
+  assert(box.inboxEventCapped(at(99, { read: true }), ev) === false);
+  assert(box.inboxEventCapped(at(99), { ...ev, slug: 'other' }) === false);
+  assert(box.inboxEventCapped(at(99), { ...ev, kind: 'reply' }) === false, 'people\'s rows are never capped');
+});
+
+t('agent row recipients: owner and attested people in the thread; not agents, the actor, or a deleted root\'s author', () => {
+  const human = (login) => ({ kind: 'human', login, account_id: `acct-${login}` });
+  const thread = (rootExtra = {}) => ({ root: { id: 'c1', author: human('rita'), ...rootExtra, replies: [
+    { id: 'r1', author: human('sam') },
+    { id: 'r2', author: { kind: 'agent', login: 'claude' }, agent_status: 'answered' },
+    { id: 'r3', author: { kind: 'human', login: 'nobody' } }, // no account behind the name
+    { id: 'r4', author: human('gone'), deleted: true },
+  ] } });
+  const keys = (t, o) => [...box.agentReplyBellRecipients(t, o)].join();
+  assert(keys(thread(), { owner: 'olga' }) === 'olga,rita,sam', keys(thread(), { owner: 'olga' }));
+  assert(keys(thread(), { owner: 'olga', skip: ['sam'] }) === 'olga,rita');
+  assert(keys(thread({ deleted: true }), { owner: 'olga' }) === 'olga,sam', 'a deleted root\'s author is still notified');
+});
+
+
+// Async: one batched delivery (a suggestion accepted that fixed comments in
+// several threads), each person gets only their threads, count and preview.
+const pending = (async () => {
+  const name = 'each person\'s agent row holds only their own threads, count and newest words';
+  try {
+    vm.runInContext([fn('agentReplyEvent'), 'async ' + fn('deliverAgentReplyRows'),
+      'const AGENT_REPLY_PREVIEW_MAX = 300;',
+      'var written = [];',
+      'async function loadDocMeta(env, slug) { return { title: "Plan", slug }; }',
+      'function accessFromMeta() { return {}; }',
+      'function canReadDoc() { return true; }',
+      'async function inboxReaderSession(env, who) { return { login: who }; }',
+      'function ownerActorKey() { return "olga"; }',
+      'function agentFaceAuthor(a) { return a; }',
+      'async function writeInboxEvent(env, who, ev) { written.push([who, ev]); }',
+    ].join('\n\n'), box);
+    const human = (login) => ({ kind: 'human', login, account_id: `acct-${login}` });
+    const agent = { kind: 'agent', login: 'claude', name: 'Claude Code' };
+    const thread = (id, login) => ({ root: { id, author: human(login), replies: [] } });
+    await box.deliverAgentReplyRows({}, 'plan', [
+      { thread: thread('c1', 'rita'), at: '2026-11-18T10:00:01Z', author: agent, replyId: 'r1', text: 'for rita' },
+      { thread: thread('c2', 'sam'), at: '2026-11-18T10:00:02Z', author: agent, replyId: 'r2', text: 'for sam, first' },
+      { thread: thread('c3', 'sam'), at: '2026-11-18T10:00:03Z', author: agent, replyId: 'r3', text: 'for sam, newest' },
+    ], {});
+    const by = Object.fromEntries(box.written.map(([who, ev]) => [who, [ev.count, ev.threads.map((t) => t[0]).join(), ev.preview, ev.thread_id]]));
+    const want = {
+      olga: [3, 'c1,c2,c3', 'for sam, newest', 'c3'],
+      rita: [1, 'c1', 'for rita', 'c1'],
+      sam: [2, 'c2,c3', 'for sam, newest', 'c3'],
+    };
+    assert(JSON.stringify(by) === JSON.stringify(want), JSON.stringify(by));
+    assert(box.written.length === 3, 'one write per person');
+    ok(name);
+  } catch (e) { bad(name, e.message); }
+})();
+
+pending.then(() => {
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+});

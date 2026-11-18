@@ -53,7 +53,7 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  async function open(width = 900, extra = [], notificationPermission = 'granted', requestResult = 'granted') {
+  async function open(width = 900, extra = [], notificationPermission = 'granted', requestResult = 'granted', { pages = null } = {}) {
     const context = await browser.newContext({ viewport: { width, height: 760 } });
     if (notificationPermission === 'granted') await context.grantPermissions(['notifications'], { origin: base });
     const page = await context.newPage();
@@ -96,7 +96,10 @@ async function t(name, fn) {
       }
       return r.fulfill({ json: state.email });
     });
-    await page.route('**/api/notifications?*', (r) => r.fulfill({ json: { items: state.items, unread: unread(), has_more: false } }));
+    // `pages(offset)`: the list served a page at a time, as the server does.
+    await page.route('**/api/notifications?*', (r) => r.fulfill({ json: pages
+      ? pages(Number(new URL(r.request().url()).searchParams.get('offset')) || 0)
+      : { items: state.items, unread: unread(), has_more: false } }));
     await page.route('**/api/doc/access-request', (r) => {
       const body = JSON.parse(r.request().postData());
       state.posts.push(body);
@@ -202,12 +205,42 @@ async function t(name, fn) {
       await sw.click();
       await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
       assert.equal(await page.evaluate(() => window.__alerts.length), 1, 'approval did not send the proof alert');
-      state.items = [row('n4', 'mention', 0, { actor: { login: 'claire', name: 'Claire' }, preview: 'Please check the numbers' }), ...state.items];
+      // An agent's reply arrives with it: a quiet row, in the bell, never an alert.
+      state.items = [
+        row('n5', 'agent_reply', 0, { quiet: true, actor: { kind: 'agent', login: 'claude', name: 'Claude Code' }, preview: 'Checked, the numbers hold.' }),
+        row('n4', 'mention', 0, { actor: { login: 'claire', name: 'Claire' }, preview: 'Please check the numbers' }),
+        ...state.items,
+      ];
       await page.waitForFunction(() => window.__alerts.length > 1, null, { timeout: 5_000 });
+      await page.waitForTimeout(700);
       const alerts = await page.evaluate(() => window.__alerts);
-      assert.equal(alerts.length, 2, JSON.stringify(alerts));
+      assert.equal(alerts.length, 2, `a quiet row alerted: ${JSON.stringify(alerts)}`);
       assert.equal(alerts[1].title, 'Claire mentioned you on Q3 plan');
       assert.equal(alerts[1].body, 'Please check the numbers');
+      await context.close();
+    });
+
+    await t('Load more keeps a row once when a new one shifted the pages; an agent reply reads as its agent', async () => {
+      // 21 rows; page one holds the newest 20. Then a new row arrives on top,
+      // so the server's page two (offset 20) starts with page one's last row.
+      const all = Array.from({ length: 21 }, (_, i) => row(`p${i}`, 'comment', 10 + i, { read: true }));
+      all[0] = row('p0', 'agent_reply', 10, { quiet: true, actor: { kind: 'agent', login: 'claude', name: 'Claude Code' }, preview: 'Checked, the numbers hold.' });
+      // Page one before the new row; page two after it, one row later.
+      const after = [row('fresh', 'mention', 0), ...all];
+      const pages = (offset) => (offset === 0
+        ? { items: all.slice(0, 20), unread: 0, has_more: true }
+        : { items: after.slice(offset, offset + 20), unread: 1, has_more: false });
+      const { context, page, dialog } = await open(900, [], 'granted', 'granted', { pages });
+      const rows = dialog.locator('.tdoc-notif-row');
+      assert.equal((await rows.nth(0).locator('.tdoc-notif-line').textContent()).trim(), 'Claude Code replied on Q3 plan');
+      assert.equal(await rows.nth(0).locator('.tdoc-notif-avatar.is-agent').count(), 1, 'the agent wears its mark');
+      await shot(page, 'agent-reply');
+      await dialog.getByRole('button', { name: 'Load more' }).click();
+      await page.waitForFunction(() => document.querySelectorAll('.tdoc-notif-row').length >= 21);
+      await page.waitForTimeout(200);
+      const ids = await page.evaluate(() => window.__notifications.items.map((i) => i.id));
+      assert.equal(ids.length, new Set(ids).size, `a row twice: ${ids}`);
+      assert.equal(ids.length, 21, `rows lost: ${ids}`);
       await context.close();
     });
 

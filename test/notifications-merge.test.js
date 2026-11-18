@@ -7,6 +7,10 @@ let pass = 0, fail = 0;
 async function t(n, fn) { try { await fn(); console.log(`  ✓ ${n}`); pass++; } catch (e) { console.log(`  ✗ ${n}\n    ${e.message}`); fail++; } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
+// Times an hour or two ago: a row older than 30 days no longer counts as
+// unread (INBOX_UNREAD_TTL_MS), so fixed dates would age out of the test.
+const HOUR1 = new Date(Date.now() - 2 * 3600e3).toISOString();
+const HOUR2 = new Date(Date.now() - 1 * 3600e3).toISOString();
 const item = (id, at, extra = {}) => ({ id, kind: 'mention', group_key: `mention:${id}`, slug: 'doc', version: 1, comment_id: id, thread_id: id, actor: { login: 'claire' }, preview: 'hi', title: 'Doc', at, read: false, count: 1, ...extra });
 
 (async () => {
@@ -18,8 +22,11 @@ const item = (id, at, extra = {}) => ({ id, kind: 'mention', group_key: `mention
     const env = makeEnv(mod.CommentsStore);
     const sid = 'ab'.repeat(16);
     await env.META.put(`session:${sid}`, JSON.stringify({ login: 'julie', email: 'Julie@Example.com', name: 'Julie', created: new Date().toISOString() }));
-    await env.META.put('inbox:julie', JSON.stringify({ items: [item('n_handle', '2026-10-14T10:00:00Z')] }));
-    await env.META.put('inbox:email:julie@example.com', JSON.stringify({ items: [item('n_email', '2026-10-14T11:00:00Z')] }));
+    // The doc the rows are about, readable by anyone (rows on a doc the
+    // person cannot read are listed blank and not counted).
+    await env.META.put('meta:doc', JSON.stringify({ title: 'Doc', slug: 'doc', created: HOUR1, versions: [{ n: 1, created: HOUR1 }], hosted: { github_login: 'claire', owner_key: 'claire' }, access: { visibility: 'public' } }));
+    await env.META.put('inbox:julie', JSON.stringify({ items: [item('n_handle', HOUR1)] }));
+    await env.META.put('inbox:email:julie@example.com', JSON.stringify({ items: [item('n_email', HOUR2)] }));
     return { env, cookie: `tdoc_sid=${sid}` };
   }
 
@@ -59,7 +66,7 @@ const item = (id, at, extra = {}) => ({ id, kind: 'mention', group_key: `mention
 
   await t('the same notification held in two inboxes is listed and counted once', async () => {
     const { env, cookie } = await seed();
-    await env.META.put('inbox:email:julie@example.com', JSON.stringify({ items: [item('n_handle', '2026-10-14T10:00:00Z')] }));
+    await env.META.put('inbox:email:julie@example.com', JSON.stringify({ items: [item('n_handle', HOUR1)] }));
     const list = await (await worker.fetch(req('/api/notifications', { cookie }), env, {})).json();
     assert(list.items.length === 1 && list.unread === 1, JSON.stringify(list));
   });

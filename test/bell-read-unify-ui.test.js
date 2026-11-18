@@ -17,8 +17,9 @@ const commentsFile = path.join(ROOT, SLUG, 'comments.json');
 const inboxFile = path.join(ROOT, '.inbox-tester.json');
 const original = fs.readFileSync(commentsFile, 'utf8');
 const ANCHOR = { kind: 'text', text: 'An internal link that must navigate the top page', context_before: '', context_after: '' };
-const created = '2026-08-22T00:00:00Z';
-const replied = '2026-08-22T00:05:00Z';
+// Recent: a row older than 30 days no longer counts as unread.
+const created = new Date(Date.now() - 2 * 3600e3).toISOString().replace(/\.\d+Z$/, '.000Z');
+const replied = new Date(Date.now() - 2 * 3600e3 + 5 * 60e3).toISOString().replace(/\.\d+Z$/, '.000Z');
 const seeded = [
   { id: 'c_bell_open', version: 1, text: 'Is this link right?', author: { kind: 'human', login: 'tester' }, status: 'open', created, anchor: ANCHOR,
     replies: [{ id: 'r_bell_open', text: 'Yes, checked it.', author: { kind: 'human', login: 'claire' }, created: replied }] },

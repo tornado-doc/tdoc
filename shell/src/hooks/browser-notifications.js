@@ -200,7 +200,8 @@ export function alertNewNotifications(items, { label, open }) {
   const seen = loadSeen();
   let shown = 0;
   for (const item of items || []) {
-    if (!item || item.read || !item.id || seen.has(eventKey(item))) continue;
+    // A quiet row (an agent's reply) is in the bell only, never an alert.
+    if (!item || item.read || item.quiet || !item.id || seen.has(eventKey(item))) continue;
     seen.add(eventKey(item));
     // A tab opened after a busy afternoon alerts for the newest few only.
     if (shown >= ALERT_BURST_MAX) continue;
