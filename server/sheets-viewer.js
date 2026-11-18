@@ -700,6 +700,15 @@
     return b;
   }
   function canEdit() { return config.editing && mode() === 'edit'; }
+  // Modeless editing (flag modelessEdit; the shell's tdoc:mode carries
+  // modeless:true): someone who may edit has no Read / Comment / Edit. The
+  // grid is Edit mode's, always, and keeps Comment mode's ways to comment
+  // (the cell's pill, ⌘⌥M, the column and cell menus, a click on a
+  // commented cell opens its thread) without a click on a plain cell
+  // opening a composer: that click selects, for typing.
+  // The viewer may load after the mode message: frame-probe.js marks <html>.
+  var modeless = document.documentElement.hasAttribute('data-tdoc-modeless');
+  function commenting() { return mode() === 'comment' || (modeless && mode() === 'edit'); }
   // The column grip: for whoever may edit the doc, in every mode.
   function canResize() { return config.canEditDoc; }
 
@@ -1560,7 +1569,7 @@
   var pill = null;
   function placePill() {
     if (pill) { pill.remove(); }
-    if (mode() !== 'comment' || !book || !sel.touched) return;
+    if (!commenting() || !book || !sel.touched || editor) return;
     var tab = cur();
     if (sel.r !== sel.r2 || sel.c !== sel.c2) return;
     var cell = cellAt(sel.r, sel.c), td = srcCell(tab, sel.r, sel.c);
@@ -1710,7 +1719,7 @@
       items.push({ label: o[1], checked: al === o[0], onSelect: function () { if (al !== o[0]) setLayout(tab, { cols: colChange(c, { align: o[0] }) }); } });
     });
     items.push({ label: 'Fit width to content', onSelect: function () { setLayout(tab, { cols: colChange(c, { width: fitWidth(tab, c) }) }); } });
-    if (mode() === 'comment') items.push({ label: 'Comment on this column', onSelect: function () { commentOn(col.th, anchor.getBoundingClientRect(), 'Column ' + Q.columnLetter(c) + ' · ' + col.name); } });
+    if (commenting()) items.push({ label: 'Comment on this column', onSelect: function () { commentOn(col.th, anchor.getBoundingClientRect(), 'Column ' + Q.columnLetter(c) + ' · ' + col.name); } });
     if (canEdit()) {
       items.push({ header: 'Type' });
       Q.TYPES.forEach(function (t) { items.push({ label: TYPE_LABEL[t], checked: t === type, onSelect: function () { if (t !== type) setColumnType(c, t); } }); });
@@ -1726,12 +1735,15 @@
     var ra = Math.min(sel.r, sel.r2), rb = Math.max(sel.r, sel.r2);
     if (i < ra || i > rb) { ra = rb = i; select(i, sel.c, false); }
     var n = rb - ra + 1;
-    openMenu(anchor, [
+    // Modeless: no Comment mode to switch to, so a single cell's menu
+    // comments on it (Comment mode's click; ⌘⌥M and the pill do too).
+    var one = modeless && ra === rb && sel.c === sel.c2 && sel.c >= 0;
+    openMenu(anchor, (one ? [{ label: 'Comment', onSelect: function () { sel.touched = true; commentOnCell(); } }, 'sep'] : []).concat([
       // [structure] as many rows as are selected
       { label: n > 1 ? 'Insert ' + n + ' rows above' : 'Insert row above', onSelect: function () { insertRows(cur().order[ra], n, true); } },
       { label: n > 1 ? 'Insert ' + n + ' rows below' : 'Insert row below', onSelect: function () { insertRows(cur().order[rb], n, false); } },
       { label: n > 1 ? 'Delete ' + n + ' rows' : 'Delete row', danger: true, onSelect: function () { deleteRows(ra, rb); } },
-    ].concat(S.rowItems(cur(), ra, rb)).concat(rulesExt ? rulesExt.menuItems(sel.c) : []), 'Row menu'); // [structure] hide, group, freeze; [sheet-rules]
+    ]).concat(S.rowItems(cur(), ra, rb)).concat(rulesExt ? rulesExt.menuItems(sel.c) : []), 'Row menu'); // [structure] hide, group, freeze; [sheet-rules]
   }
   // [structure] move left / right, and a delete the toast can undo:
   // server/sheets-structure.js
@@ -2735,7 +2747,7 @@
     else if (mod && k.toLowerCase() === 'f') { ui.search.focus(); ui.search.select(); }
     else if (mod && k.toLowerCase() === 'z' && canEdit()) undo(e.shiftKey);
     else if (mod && k.toLowerCase() === 'y' && canEdit()) undo(true);
-    else if (mod && e.altKey && (k.toLowerCase() === 'm' || e.code === 'KeyM') && mode() === 'comment') commentOnCell();
+    else if (mod && e.altKey && (k.toLowerCase() === 'm' || e.code === 'KeyM') && commenting()) commentOnCell();
     else if ((k === 'Delete' || k === 'Backspace') && canEdit()) clearSelection();
     else if (k === ' ' && canEdit() && tab.index.cols[sel.c].type === 'checkbox') startEdit();
     else if (k.length === 1 && !mod && !e.altKey && canEdit()) { var type = tab.index.cols[sel.c].type; if (type !== 'checkbox') { startEdit(k); } }
@@ -2843,7 +2855,7 @@
       e.preventDefault(); e.stopPropagation();
       var h = b.closest('.ts-h'), c = h ? Number(h.getAttribute('data-c')) : -1, act = b.getAttribute('data-act');
       if (act === 'sort') {
-        if (mode() === 'comment' && e.altKey) { commentOn(cur().data.columns[c].th, b.getBoundingClientRect(), 'Column ' + cur().data.columns[c].name); return; }
+        if (commenting() && e.altKey) { commentOn(cur().data.columns[c].th, b.getBoundingClientRect(), 'Column ' + cur().data.columns[c].name); return; }
         // In Edit mode a header selects its column (shift: through it), as
         // in a spreadsheet; sorting is in the column's menu. Elsewhere a
         // header sorts.
@@ -3002,15 +3014,15 @@
     // opens is not closed by the same press.
     rowsOn('click', function (e) {
       var press = cellPress; cellPress = null;
-      if (!press || mode() !== 'comment' || e.button > 0) return;
+      if (!press || !commenting() || e.button > 0) return;
       var at = cellFromEvent(e);
       if (!at || at.i !== press.i || at.c !== press.c || sel.r !== sel.r2 || sel.c !== sel.c2) return;
       if (e.target.closest('a[href],.tdoc-comment-pill')) return;
       setTimeout(function () {
-        if (mode() !== 'comment' || sel.r !== at.i || sel.c !== at.c) return;
+        if (!commenting() || sel.r !== at.i || sel.c !== at.c || editor) return;
         var td = srcCell(cur(), at.i, at.c);
         if (td && commented.has(td)) { post({ type: 'tdoc:anchorClick', id: commented.get(td)[0] }); return; }
-        commentOnCell();
+        if (!modeless) commentOnCell(); // modeless: the click selects; the pill comments
       }, 0);
     });
     rowsOn('dblclick', function (e) {
@@ -3022,6 +3034,8 @@
       var at = cellFromEvent(e);
       if (!at || !canEdit()) return;
       e.preventDefault();
+      // Modeless: the cell pressed is the one its Comment is about.
+      if (modeless && at.c >= 0 && (at.i < Math.min(sel.r, sel.r2) || at.i > Math.max(sel.r, sel.r2) || at.c < Math.min(sel.c, sel.c2) || at.c > Math.max(sel.c, sel.c2))) select(at.i, at.c, false);
       rowMenu(at.i, { left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY });
     });
     rowsOn('click', function (e) {
@@ -3189,8 +3203,10 @@
 
   // ---- shell bridge ---------------------------------------------------------------------
   window.addEventListener('message', function (e) {
-    if (e.source !== window.parent || !e.data || e.data.source !== 'tdoc-shell' || !book) return;
+    if (e.source !== window.parent || !e.data || e.data.source !== 'tdoc-shell') return;
     var d = e.data;
+    if (d.type === 'tdoc:mode') modeless = d.mode === 'edit' && d.modeless === true;
+    if (!book) return;
     if (d.type === 'tdoc:mode') {
       if (editor) commitEdit();
       closePop(true);

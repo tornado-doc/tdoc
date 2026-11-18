@@ -902,11 +902,13 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     }
   }, [config.slug]);
   // Modeless editing (flag modelessEdit): someone who may edit a prose doc
-  // types into it; sheets and slides keep Read / Comment / Edit.
+  // or a sheet types into it (a sheet's cells are always editable for them:
+  // click selects, typing or a double-click edits, and the same autosave
+  // publishes it); slides keep Read / Comment / Edit.
   const modelessFlag = isFeatureOn('modelessEdit');
   modelessFlagRef.current = modelessFlag;
   const modeless = modelessFlag && Boolean(config.canEdit) && !config.isLanding && !boot.oldVersion
-    && !docShape.sheets && !docShape.slides;
+    && !docShape.slides;
   const editor = useDocumentEditor({
     boot,
     config,

@@ -230,6 +230,7 @@ const BROWSER = [
   'diagram-controls-ui.test.js', // authored map SVG sizing cannot stretch provider controls
   'reply-activity-ui.test.js', // v2 receives v3 reply status without navigation or pulsing
   'modeless-edit-ui.test.js', // modelessEdit: type with no Edit mode, autosave -> version in place, bubble + "/" menu, table cells, commenter unchanged, two-editor conflict notice, newer version swapped in without reload (marked, reduced motion), phone, flag off unchanged
+  'sheet-modeless-edit-ui.test.js', // modelessEdit on sheets: an editor edits a cell with no mode switch or Save (click/type/Enter/Tab/double-click), autosave -> version, kept after reload; structure menus; comments via the pill / cell menu / a commented cell; a #sheet= search view kept while editing; commenter unchanged; flag off unchanged; phone
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
   'version-history-ui.test.js', // Edited opens the history panel: grouped rows, Show changes on/off remembered, Share this version, Restore, phone drawer, dev-mode numbers, suggestions row, flag off, earlier-version comment
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
