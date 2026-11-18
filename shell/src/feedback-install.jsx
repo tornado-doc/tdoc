@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
+import { Bookmark, CodeXml, MessageSquarePlus } from 'lucide-react';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
+import { AppSelect } from './ui/select.jsx';
 import './docs-hub.css';
 import './feedback-pages.css';
 
@@ -183,6 +185,53 @@ export const FEEDBACK_SDK_GUIDE = 'https://github.com/tornado-doc/tdoc/tree/main
 // What to ask an agent with tdoc connected: it calls create_feedback_space
 // and adds the line to the site (the MCP server's own instructions).
 export const FEEDBACK_SDK_PROMPT = 'Add tdoc feedback to my site';
+export const FEEDBACK_SDK_PLACEHOLDER = 'YOUR_SPACE_ID';
+export const feedbackSdkLine = (scriptSrc, space) => `<script src="${scriptSrc}" data-tdoc-space="${space || FEEDBACK_SDK_PLACEHOLDER}" async></script>`;
+
+// The SDK's picture, drawn like the bookmark's browser window: someone's
+// own site with the widget's resting button in its corner (the same round
+// white button and icon feedback.js draws) and one comment pinned on it.
+export function SiteDemo({ omnibox = 'app.example.com' }) {
+  return (
+    <div className="demo site-demo" aria-hidden="true">
+      <div className="demo-titlebar">
+        <div className="demo-dots"><i className="r" /><i className="y" /><i className="g" /></div>
+        <div className="demo-omnibox">{omnibox}</div>
+      </div>
+      <div className="site-demo-page">
+        <div className="site-demo-nav"><i className="logo" /><i /><i /><i /></div>
+        <div className="site-demo-body">
+          <i className="h" /><i className="l" /><i className="l short" />
+          <span className="site-demo-target">Start free trial<span className="site-demo-pin">1</span></span>
+        </div>
+        <div className="site-demo-note"><b>Ana</b> This button is hard to find on a phone</div>
+        <span className="site-demo-fab"><MessageSquarePlus aria-hidden="true" /></span>
+      </div>
+    </div>
+  );
+}
+
+// The viewer's own site spaces (signed in), so the one line can carry a
+// real space id instead of the placeholder. Only spaces they own that are
+// bound to a site (create_feedback_space, or Add to your site) qualify.
+function useOwnSiteSpaces(identity) {
+  const [spaces, setSpaces] = useState([]);
+  useEffect(() => {
+    if (!identity) return undefined;
+    let live = true;
+    fetch('/api/me/feedback', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!live || !data || !Array.isArray(data.spaces)) return;
+        setSpaces(data.spaces.filter((s) => s && s.mine && s.site && Array.isArray(s.site.origins) && s.site.origins.length));
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [identity]);
+  return spaces;
+}
+
+const hostOf = (origin) => { try { return new URL(origin).host; } catch { return String(origin || ''); } };
 
 export function FeedbackInstall({ boot }) {
   const { identity = null, bookmarklet, scriptSrc, host } = boot;
@@ -190,6 +239,9 @@ export function FeedbackInstall({ boot }) {
   const pill = useRef(null);
   useHandFont();
   const close = useCallback(() => setCoaching(false), []);
+  const spaces = useOwnSiteSpaces(identity);
+  const [picked, setPicked] = useState('');
+  const space = spaces.find((s) => s.slug === picked) || spaces[0] || null;
   // /feedback#sdk (the homepage links there): the page renders after load,
   // so the browser's own jump to the fragment finds nothing.
   useEffect(() => {
@@ -203,32 +255,78 @@ export function FeedbackInstall({ boot }) {
       <TopBar identity={identity} />
       <main className="fb-main">
         <h1>Comments on any web app</h1>
-        <p>Click anything on a page, say what is wrong, and hand it to a person or an agent. Two ways in: <a href="#bookmark">the bookmark</a>, to comment on any site yourself, and <a href="#sdk">the SDK</a>, one line that lets everyone who visits your own site comment.</p>
+        <p className="fb-lead">Click anything on a page, say what is wrong, and hand it to a person or an agent.</p>
 
-        <section className="bookmark-path" id="bookmark">
-          <h2>The bookmark: comment on any site yourself</h2>
-          <p className="phone-only" id="phoneOnly"><strong>Desktop only for now.</strong> The bookmark lives in a desktop browser’s bookmarks bar: open this page on a computer to get it. To let people comment from a phone, add <a href="#sdk">the SDK</a> to your site.</p>
+        <nav className="fb-choices" aria-label="Two ways in">
+          <a className="fb-choice" href="#bookmark" id="choose-bookmark">
+            <span className="fb-choice-icon"><Bookmark aria-hidden="true" /></span>
+            <span className="fb-choice-name">Bookmark</span>
+            <span className="fb-choice-what">Quick feedback, no setup. Any site.</span>
+          </a>
+          <a className="fb-choice" href="#sdk" id="choose-sdk">
+            <span className="fb-choice-icon"><CodeXml aria-hidden="true" /></span>
+            <span className="fb-choice-name">SDK</span>
+            <span className="fb-choice-what">Built into your own product. For your team, always on.</span>
+          </a>
+        </nav>
+        <p className="fb-rule muted">Quick feedback, no setup → Bookmark. Feedback built into your product → SDK.</p>
+
+        <section className="fb-path bookmark-path" id="bookmark">
+          <h2>Bookmark</h2>
+          <p className="fb-path-sub muted">Comment on any site yourself.</p>
+          <p className="phone-only" id="phoneOnly"><strong>Desktop only for now.</strong> The bookmark lives in a desktop browser’s bookmarks bar: open this page on a computer to get it. For comments from a phone, add <a href="#sdk">the SDK</a> to your site.</p>
           <div className="install-desktop" id="installDesktop">
-            <p className="device-note muted">Drag the pill onto your bookmarks bar.</p>
             <BookmarkDemo bookmarklet={bookmarklet} omnibox="localhost:3000" coaching={coaching} pillRef={pill} onTeach={() => setCoaching(true)} />
             <ol className="install-steps">
               <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
               <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
               <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> — same in Chrome and Safari (Safari calls it the Favorites bar)</li>
             </ol>
-            <p className="chrome-hint"><strong>Fullscreen tip.</strong> In Chrome, <kbd>⌘⇧F</kbd> keeps the top bar visible in fullscreen so the bookmarks bar has somewhere to live — or exit fullscreen, then drag.</p>
-            <p className="muted step-after">After that, open a site and click the bookmark. First time opens a small {host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
+            <p className="chrome-hint"><strong>Fullscreen?</strong> In Chrome, <kbd>⌘⇧F</kbd> keeps the top bar visible, or exit fullscreen, then drag.</p>
+            <p className="muted step-after">Then open a site and click the bookmark. The first time, a small {host} window connects your account. Some production sites block outside scripts; local and preview builds usually don't.</p>
           </div>
-          <p>Comments land in one shared thread on {host}, named after the site and created the first time you connect. To give feedback together, press <strong>Share</strong> on the site and send the invite link — teammates who open it join the same thread instead of starting their own.</p>
+          <p className="muted">Comments land in one thread per site on {host}. To review together, press <strong>Share</strong> on the site and send the invite link.</p>
         </section>
 
-        <section className="script-path" id="sdk">
-          <h2>The SDK: comments on your own site</h2>
-          <p>Add one line to your site’s HTML, before <code>&lt;/head&gt;</code>. Everyone who opens the site, on a computer or a phone, gets a comment button. Their comments land in a feedback space you own, and your agent can pick them up.</p>
-          <CodeCopy code={`<script src="${scriptSrc}" data-tdoc-space="YOUR_SPACE_ID" async></script>`} />
-          <p className="sdk-space">Get <code>YOUR_SPACE_ID</code> from your agent: with tdoc connected, ask it to <q>{FEEDBACK_SDK_PROMPT}</q>. It makes the space for your site’s address and adds the line for you. <CopyPromptButton text={FEEDBACK_SDK_PROMPT} label="Copy prompt" /></p>
-          <p className="muted">Already comment on the site with the bookmark? Turn that space into the site’s own in <a href="/me?view=comments">My docs → Comments</a> → <strong>Add to your site</strong>.</p>
-          <p><a href={FEEDBACK_SDK_GUIDE} target="_blank" rel="noopener">How to set it up: npm, React and Content-Security-Policy →</a></p>
+        <section className="fb-path script-path" id="sdk">
+          <h2>SDK</h2>
+          <p className="fb-path-sub muted">Feedback built into your own product.</p>
+          <SiteDemo omnibox={space ? hostOf(space.site.origins[0]) : 'app.example.com'} />
+          <ol className="fb-steps">
+            <li className="fb-step" id="sdk-ask">
+              <h3>Ask your agent</h3>
+              <div className="fb-prompt">
+                <q>{FEEDBACK_SDK_PROMPT}</q>
+                <CopyPromptButton text={FEEDBACK_SDK_PROMPT} label="Copy prompt" variant="primary" size="m" />
+              </div>
+              <p className="muted">With tdoc connected, it makes your site’s feedback space and adds the line.</p>
+            </li>
+            <li className="fb-step" id="sdk-paste">
+              <h3>Or paste one line before <code>&lt;/head&gt;</code></h3>
+              {spaces.length > 1 ? (
+                <div className="fb-space-pick">
+                  <AppSelect
+                    ariaLabel="Feedback space"
+                    value={space.slug}
+                    onChange={setPicked}
+                    options={spaces.map((s) => ({ value: s.slug, label: s.site.origins.map(hostOf).join(', ') }))}
+                  />
+                </div>
+              ) : null}
+              <CodeCopy code={feedbackSdkLine(scriptSrc, space && space.slug)} />
+              {space
+                ? <p className="muted" id="sdk-space-note">Your space for {space.site.origins.map(hostOf).join(', ')}.</p>
+                : <p className="muted" id="sdk-space-note">Your agent fills in <code>{FEEDBACK_SDK_PLACEHOLDER}</code> in step 1.</p>}
+            </li>
+            <li className="fb-step" id="sdk-arrive">
+              <h3>Comments arrive in your feedback space</h3>
+              <p className="muted">Hand them to your agent from there. Private by default: everyone on the site sees the button, but only you and the people you invite (or your team) can comment, signed in to tdoc. Open it wider in Share.</p>
+            </li>
+          </ol>
+          <p className="fb-more muted">
+            <a href={FEEDBACK_SDK_GUIDE} target="_blank" rel="noopener">npm, React and CSP guide →</a>
+            <span>Already using the bookmark there? Turn that space into the site’s own in <a href="/me?view=comments">My docs → Comments</a>.</span>
+          </p>
         </section>
       </main>
       <Coach open={coaching} target={pill} onClose={close} />
