@@ -275,6 +275,7 @@ const BROWSER = [
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'style-reader-column-render.test.js', // a house style alone yields the same reading column as a baked doc
+  'table-style-render.test.js', // the reader table (header band, ruled rows) survives an author's collapse + cell borders; old bakes get it via the serve-time patch
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
   'workspace-access-ui.test.js', // Allow page workspace ticks + Settings > Agents change/remove, checked against the server
   'connect-ai-apps-ui.test.js', // remoteMcp flag: Connect in one click on /start, /setup, Settings (Claude/ChatGPT/Cursor links) + OAuth consent page, desktop + phone
