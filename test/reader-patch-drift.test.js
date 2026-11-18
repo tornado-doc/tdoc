@@ -48,6 +48,20 @@ t('it defines the scroll wrapper, and the wrapper is what tables get put in', ()
   }
 });
 
+t('it gives already-baked docs the reader table, leaving custom designs alone', () => {
+  // Docs baked before the table change carry filled, rounded, gapped cells
+  // that break into corner gaps under an author's collapse. The patch restates
+  // reader.css's table at type specificity (beats the baked :where(), loses to
+  // any author rule), scoped away from custom designs.
+  const css = literal(worker) || '';
+  const scope = ':where(html:not([data-tdoc-design=custom]) body)';
+  assert(css.includes(scope + ' table{border-collapse:collapse;border-spacing:0}'), 'table rule missing');
+  assert(css.includes(scope + ' :is(th,td){background:transparent;border-radius:0;'), 'cell rule missing');
+  assert(css.includes(scope + ' th{background:var(--td-th-bg'), 'header band missing');
+  assert(/:where\(body table\) \{ border-collapse: collapse; border-spacing: 0;/.test(reader), 'reader.css table is not collapsed');
+  assert(/:where\(body th, body td\) \{[^}]*border-radius: 0;[^}]*border-bottom: 1px solid var\(--td-line\)/.test(reader), 'reader.css cells are not square and ruled');
+});
+
 t('the patch anchors on the opening <head>, not the closing one', () => {
   // The baked reader CSS quotes `</head>` inside a comment, so a first-match
   // replace on the closing tag drops the style INSIDE that comment, where it

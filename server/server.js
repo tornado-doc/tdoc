@@ -1213,7 +1213,13 @@ function withSheetsPending(body) {
   if (body.indexOf('data-tdoc-sheet') === -1 || body.indexOf('id="tdoc-sheets-pending"') !== -1) return body;
   return /<head[^>]*>/i.test(body) ? body.replace(/<head[^>]*>/i, (open) => `${open}${SHEETS_PENDING_STYLE}`) : SHEETS_PENDING_STYLE + body;
 }
-const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
+// The table rules restate reader.css's table look for documents baked with
+// the old one (filled cells, 8px radius, 3px gutters), which drew a white "+"
+// at every cell corner once an author collapsed the table. They sit at type
+// specificity so they beat that baked :where() block, while any author rule
+// (which always comes later in the document) still wins; custom designs are
+// left alone.
+const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}:where(html:not([data-tdoc-design=custom]) body) table{border-collapse:collapse;border-spacing:0}:where(html:not([data-tdoc-design=custom]) body) :is(th,td){background:transparent;border-radius:0;border:0;border-bottom:1px solid var(--td-line,#e8e7e3)}:where(html:not([data-tdoc-design=custom]) body) th{background:var(--td-th-bg,#f0f0ee)}';
 
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function readerCss() {
@@ -1759,8 +1765,11 @@ const server = http.createServer(async (req, res) => {
     }
     const inbox = readJson(inboxFile(ident.login), { items: [] });
     const items = Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
+    // Newest first, read or not; `?filter=unread` the unread alone (the
+    // worker's pageInbox).
     const unread = items.filter(i => !i.read);
-    const ordered = unread.concat(items.filter(i => i.read));
+    const ordered = (url.searchParams.get('filter') === 'unread' ? unread : items).slice()
+      .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
     const offset = Math.max(0, Number(url.searchParams.get('offset') || 0));
     return json(res, 200, {
       items: ordered.slice(offset, offset + 20),

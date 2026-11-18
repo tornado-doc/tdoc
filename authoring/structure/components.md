@@ -151,9 +151,9 @@ and a component that hardcodes a hex colour has crossed into the style's.
 whole block one comment anchor rather than leaving the reader to comment on
 fragments of its text.
 
-**Table** — one bordered card, ruled inside, with nothing filled. A hairline
-under each row does the work of separating them; a header sits in the muted ink
-rather than a tinted band, and numbers are tabular so a column lines up.
+**Table** — the reader draws it: a tinted header band over rows separated by
+hairlines, square corners, no fill in the body. Write the markup and no table
+CSS of your own.
 
 ```html
 <div class="tdoc-table-scroll">
@@ -161,42 +161,23 @@ rather than a tinted band, and numbers are tabular so a column lines up.
 </div>
 ```
 
-```css
-/* The reader styles every cell as a standalone chip, and a chip survives any
-   rule that does not name the two properties making it one. Name them. */
-.wrap th, .wrap td { background: transparent; border-radius: 0; }
-```
+**Don't restyle table borders or cell backgrounds.** No `border`,
+`border-collapse`, `border-spacing` or `background` on `table`, `tr`, `th` or
+`td`, not even "just a light grid". A restyle lands on top of the reader's
+table rather than replacing it, and the half-and-half result is the ugly
+table: collapsed 1px borders laid over the reader's cells drew a white "+" at
+every corner, with no header to tell apart. One look for every table is also
+what lets the reader fit, widen and card a table on a phone (below). The
+publish check (`Block check`) and `bin/tdoc-validate-template` both warn:
+"Tables: use tdoc's table style; don't restyle table borders or cell
+backgrounds." Header text may take the style's `label-type` (font, case,
+tracking, colour); that changes the words, not the table. A custom design
+(`--custom-template`) or a slide deck brings its own tables and is not asked.
 
-The header is a label, so it takes the style's `label-type` register rather
-than a smaller, greyer version of the body. Set at body size in the muted ink
-it reads as a quieter row instead of a different kind of row; in the label
-register it is unmistakable at a glance, whatever its size.
-
-Under it goes a rule in `ink`, heavier than the hairlines between rows. That
-separation is structural rather than typographic, which is why it is worth
-spending: the register already carries every typographic signal available —
-case, tracking, size, face — so making the header bolder or darker competes
-with the body text on an axis that is used up. A rule does not. A hairline in
-the same weight as the row rules below is not a header rule at all; the eye
-reads the header as one more row.
-
-**Square corners.** No radius on the table and none on its cells. A rounded
-card competes with the figures around it, and a radius on the cells is worse
-than decorative: under `border-collapse: separate` each cell is its own box, so
-a rounded one truncates the row rule at both ends and two of those meeting in
-the middle read as a break in the line rather than a continuous edge to scan
-down.
-
-Filling every cell and spacing them apart has the same effect for a different
-reason: the gutters cut the columns, leaving nothing continuous to follow. A
-fill is also the worst case for this reader — dark mode is a whole-page invert,
-so a filled cell becomes a slab where a hairline only changes colour.
-
-Reset the cell's own shape, not only the parts you are changing. A rule that
-sets borders and padding alone comes out filled and rounded anyway, because the
-fill and the radius are separate properties and nothing in that rule mentions
-them. This is the one part of a table that a document cannot leave unsaid, so
-`bin/tdoc-validate-template` fails a document whose cells never name both.
+A cell that needs emphasis (a status, a total) says it in its text: `<strong>`,
+a `.num` span, a word. A table whose colours are the data (a heat map, a
+coloured matrix) is a figure: draw it as an SVG, or make it one block with
+`data-tdoc-artifact`.
 
 **Tabular is a numeral feature, not a smaller face.** A column of figures lines
 up because the figures are tabular, and that costs nothing:
