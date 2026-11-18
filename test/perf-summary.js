@@ -13,6 +13,8 @@ try {
   rows = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
 } catch {}
 
+// A Markdown table cell: backslashes first, then the pipes that would end it.
+const cell = (v) => String(v).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 const ms = (v) => (v == null ? '' : `${Number(v).toFixed(1)} ms`);
 const out = [`### ${title}`, ''];
 if (!rows.length) out.push('No measurements were recorded.');
@@ -28,7 +30,7 @@ else {
   }
   out.push('', '| | Check | Kind | Measured | Budget | × factor | Limit |', '|---|---|---|---:|---:|---:|---:|');
   for (const r of rows) {
-    out.push(`| ${r.ok ? '✅' : r.kind === 'guard' ? '❌' : '⚠️'} | ${String(r.name).replace(/\|/g, '\\|')} | ${r.kind} | ${ms(r.ms)} | ${r.budget} ms | ${Number(r.factor).toFixed(2)} | ${ms(r.limit)} |`);
+    out.push(`| ${r.ok ? '✅' : r.kind === 'guard' ? '❌' : '⚠️'} | ${cell(r.name)} | ${r.kind} | ${ms(r.ms)} | ${r.budget} ms | ${Number(r.factor).toFixed(2)} | ${ms(r.limit)} |`);
   }
 }
 const text = out.join('\n') + '\n';
