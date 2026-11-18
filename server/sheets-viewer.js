@@ -77,7 +77,6 @@
     comment: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 2H12A10 10 0 1 1 2 12V2Z"/></svg>',
     expand: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   };
   var TYPE_LABEL = { text: 'Text', number: 'Number', date: 'Date', tags: 'Tags', checkbox: 'Checkbox', url: 'Link' };
   var TYPE_GLYPH = { text: 'Aa', number: '#', date: '▦', tags: '◉', checkbox: '☑', url: '↗' };
@@ -269,7 +268,19 @@
     '.tdoc-sheet.is-expanded .ts-tabs,.tdoc-sheet.is-expanded .ts-bar,.tdoc-sheet.is-expanded .ts-add-row{flex:none}',
     '.ts-xhead{display:flex;align-items:center;gap:8px;min-height:36px;margin:0 0 8px}',
     '.ts-xhead[hidden],.tdoc-sheet.is-expanded .ts-tabs[hidden]{display:none!important}',
-    '.ts-xtitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:600}',
+    // The breadcrumb, as a database opened full page reads in Notion: the
+    // doc's title (a link back to it), then the tab. The doc's title gives
+    // way first when the row is narrow; the tab's name stays.
+    // The same space either side of the slash: the title's hover box
+    // reaches past its words by its padding, taken back by its margins.
+    '.ts-xtitle{flex:1;min-width:0;display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:15px}',
+    '.ts-crumb-doc{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--ts-muted);text-decoration:none;border:0;background:none;font:inherit;cursor:pointer;border-radius:6px;padding:2px 4px;margin:0 -4px}',
+    '.ts-crumb-doc[hidden]{display:none}',
+    '.ts-xtitle .ts-crumb-doc:hover{color:var(--ts-accent);text-decoration:underline;text-underline-offset:3px;background:var(--ts-head)}',
+    '.ts-crumb-doc:focus-visible{outline:2px solid var(--ts-accent);outline-offset:1px}',
+    '.ts-crumb-sep[hidden],.ts-crumb-tab[hidden]{display:none}',
+    '.ts-crumb-sep{flex:none;color:var(--ts-muted)}',
+    '.ts-crumb-tab{flex:0 1 auto;min-width:3em;overflow:hidden;text-overflow:ellipsis;font-weight:600}',
     'a.ts-btn{text-decoration:none;color:inherit}',
     '.ts-xhead .ts-icon{width:32px;height:32px}',
     '.ts-xhead .ts-icon svg{width:18px;height:18px}',
@@ -647,13 +658,23 @@
     ui.expand.classList.add('ts-expand');
     ui.bar.appendChild(ui.expand);
     ui.xhead = h('div', 'ts-xhead'); ui.xhead.hidden = true;
-    ui.xtitle = h('span', 'ts-xtitle');
-    ui.back = h('a', 'ts-btn'); ui.back.innerHTML = ICON.back + '<span>Open the doc</span>'; ui.back.setAttribute('aria-label', 'Open the doc');
+    // "Doc title / Tab": the title is the way back to the doc (full screen:
+    // closes it; the sheet's own page: opens the doc), the tab is where you are.
+    ui.xtitle = h('nav', 'ts-xtitle'); ui.xtitle.setAttribute('aria-label', 'Breadcrumb');
+    // Its own page: a link to the doc (Cmd/middle click open it elsewhere,
+    // as any link in the frame). Focusable before its address arrives.
+    ui.back = h('a', 'ts-crumb-doc'); ui.back.title = 'Back to the doc'; ui.back.tabIndex = 0;
+    // Full screen: the doc is under it, so its title is a button that closes it.
+    ui.backBtn = h('button', 'ts-crumb-doc'); ui.backBtn.type = 'button'; ui.backBtn.title = 'Back to the doc (Esc)';
+    ui.backBtn.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); setExpanded(false); });
+    ui.crumbSep = h('span', 'ts-crumb-sep', '/'); ui.crumbSep.setAttribute('aria-hidden', 'true');
+    ui.crumbTab = h('span', 'ts-crumb-tab'); ui.crumbTab.setAttribute('aria-current', 'page');
+    ui.xtitle.appendChild(ui.back); ui.xtitle.appendChild(ui.backBtn); ui.xtitle.appendChild(ui.crumbSep); ui.xtitle.appendChild(ui.crumbTab);
     ui.alone = h('a', 'ts-btn'); ui.alone.target = '_blank'; ui.alone.rel = 'noopener'; ui.alone.innerHTML = ICON.external + '<span>Open on its own</span>'; ui.alone.setAttribute('aria-label', 'Open this sheet on its own page');
     ui.close = iconButton(ICON.x, 'Close full screen (Esc)', function () { setExpanded(false); });
     // Kept current with the view (renderBar), and once more when pressed.
     [ui.back, ui.alone].forEach(function (a) { a.addEventListener('pointerdown', linkHrefs); a.addEventListener('focus', linkHrefs); });
-    ui.xhead.appendChild(ui.back); ui.xhead.appendChild(ui.xtitle); ui.xhead.appendChild(ui.alone); ui.xhead.appendChild(ui.close);
+    ui.xhead.appendChild(ui.xtitle); ui.xhead.appendChild(ui.alone); ui.xhead.appendChild(ui.close);
     // grid
     ui.grid = h('div', 'ts-grid');
     ui.grid.tabIndex = 0;
@@ -779,8 +800,12 @@
     ui.expand.hidden = expand.on || expand.sheetOnly || !canExpand();
     ui.xhead.hidden = !expand.on;
     ui.close.hidden = ui.alone.hidden = !!expand.alone;
-    ui.back.hidden = !expand.alone;
-    ui.xtitle.textContent = expand.alone ? docTitle() + ' · ' + tab.name : docTitle();
+    ui.back.textContent = ui.backBtn.textContent = docTitle();
+    ui.back.hidden = !expand.alone; ui.backBtn.hidden = !!expand.alone;
+    // A tab with no name: the doc's title alone.
+    var tabName = String(tab.name || '').trim();
+    ui.crumbTab.textContent = tabName;
+    ui.crumbSep.hidden = ui.crumbTab.hidden = !tabName;
     if (expand.on) linkHrefs();
     if (rulesExt) rulesExt.bar(); // [sheet-rules]
     ui.note.hidden = !(m2 === 'edit');
@@ -3120,7 +3145,7 @@
   // history, Ask AI, Comment, Share, ⋯ with Read / Comment / Edit) and, in
   // Edit mode, the editor's bar with Save stay above it, as on every doc.
   // A doc that is only its sheet is already the sheet's own page: it has no
-  // full screen, and so no "Open the doc" back to itself (a sheet is a doc
+  // full screen, and so no breadcrumb back to itself (a sheet is a doc
   // type of its own to the person reading it).
   function canExpand() { return !expand.sheetOnly; }
   function docTitle() {
@@ -3158,7 +3183,7 @@
     var view = Q.encodeView(viewObject());
     var hash = view ? '#sheet=' + encodeURIComponent(view) : '';
     ui.alone.href = expand.path + '?sheet=' + (book.active + 1) + hash;
-    ui.back.href = expand.path + hash;
+    ui.back.setAttribute('href', expand.path + hash);
   }
   function setExpanded(on, quiet) {
     if (!book || on === expand.on || (on && !canExpand())) return;
@@ -3235,7 +3260,8 @@
       var could = config.canEditDoc;
       config.canEditDoc = d.canEdit === true;
       if (could !== config.canEditDoc) book.tabs.forEach(readLayout);
-      if (typeof d.path === 'string' && /^\/(?!\/)/.test(d.path)) expand.path = d.path;
+      // A path on this site only: not //host, not /\host (a browser reads both as another host).
+      if (typeof d.path === 'string' && /^\/(?![\/\\])/.test(d.path)) expand.path = d.path;
       if (!config.received) {
         config.received = true;
         var alone = Math.min(Math.floor(Number(d.alone) || 0), book.tabs.length);
