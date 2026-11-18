@@ -137,7 +137,9 @@ export function NotificationsDialog({ open, notifications, onOpenChange, onSelec
       {!notifications.loading && !notifications.items.length ? <p className="muted">No notifications yet.</p> : null}
       <div className="tdoc-notification-list">
         {notifications.items.map((item) => {
-          const pending = item.kind === 'access_request' && !item.resolved;
+          // A request on a doc this person no longer manages comes back blank
+          // (no_access): nothing to answer.
+          const pending = item.kind === 'access_request' && !item.resolved && !item.no_access;
           return (
             <div key={item.id} className={`tdoc-notif-row${item.read ? '' : ' unread'}`}>
               <button type="button" className="tdoc-notif-open" onClick={() => onSelect(item)}>
