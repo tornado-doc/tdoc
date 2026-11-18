@@ -70,10 +70,11 @@
     return true;
   }
   var supportsTheme = usesReaderDesign();
+  var designStyle = null;
   if (supportsTheme) {
     // Serve-time enforcement also covers older documents carrying a baked
     // wide-column rule. Custom designs never receive this constraint.
-    var designStyle = document.createElement('style');
+    designStyle = document.createElement('style');
     designStyle.setAttribute('data-tdoc-provider', '');
     designStyle.textContent = 'body > :is(.wrap,main,article,.content,.container):not(:popover-open){width:100%!important;max-width:720px!important;box-sizing:border-box!important;margin-left:auto!important;margin-right:auto!important;}';
     (document.head || document.documentElement).appendChild(designStyle);
@@ -1195,6 +1196,14 @@
     }
     if (HL) CSS.highlights.delete('tdoc-anchor-active');
     if (!target) return;
+    // A comment inside a closed <details> (a sheet doc's folded "Notes", a
+    // house details block): open it, when its comment opens (a link,
+    // its card, the list), so it lands on words that show; the pins follow.
+    // Not in Edit mode, where an opened <details> would be a change to save.
+    var inside = interactionMode === 'edit' ? null : target.element || (target.range && (target.range.startContainer.nodeType === 1 ? target.range.startContainer : target.range.startContainer.parentElement));
+    var opened = false;
+    for (var dt = inside && inside.closest ? inside.closest('details:not([open])') : null; dt; dt = dt.parentElement && dt.parentElement.closest('details:not([open])')) { dt.open = true; opened = true; }
+    if (opened) rereportPins();
     if (HL && target.range) CSS.highlights.set('tdoc-anchor-active', new Highlight(target.range));
     if (!scroll) return;
     if (target.element) hookCall('reveal', target.element);
@@ -2838,6 +2847,14 @@
   }
   prepareDiagrams();
   var shape = docShape();
+  // A sheet doc (only sheet tables, a title and a note) is a sheet page,
+  // not a reading column: in the house design its column takes the page
+  // width a sheet doc made by tdoc has (shared/sheet-markup.mjs: 72rem),
+  // whatever wrote it (an agent's markup, Convert to Sheet's title and note).
+  if (designStyle && shape.sheetDoc) {
+    designStyle.textContent = designStyle.textContent.replace('max-width:720px!important', 'max-width:72rem!important')
+      + 'body:not(:has(> .wrap, > main, > article, > .content, > .container)){max-width:72rem}';
+  }
   post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, supportsTheme: supportsTheme, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null, sheets: shape.sheets, sheetDoc: shape.sheetDoc, slides: document.querySelectorAll('[data-tdoc-slide]').length });
   reportScroll(); // initial position so the shell can evaluate at-bottom for short docs
 })();
