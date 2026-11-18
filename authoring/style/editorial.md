@@ -61,7 +61,7 @@ aside.note { border:0; border-left:2px solid #3a55f4; border-radius:0; backgroun
 :where(body > .wrap, body > main, body > article, body > .content, body > .container) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
 :where(body:not(:has(> .wrap, > main, > article, > .content, > .container))) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
 :where(body img, body video, body iframe, body svg, body canvas) { max-width: 100% !important; height: auto; box-sizing: border-box; }
-:where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; max-width: 100%; overflow-wrap: normal; }
+:where(body table) { border-collapse: collapse; border-spacing: 0; margin: 0 0 18px; font-size: 16px; max-width: 100%; overflow-wrap: normal; }
 :where(body th, body td) { padding: 10px 14px; border: 0; text-align: left; }
 :where(body th) { font-weight: 600; }
 .tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -107,7 +107,7 @@ is a pointer, not a decoration, and it lands on one element.
 | Accent fill | `fill:#eef1fb stroke:#3a55f4`, text `#2200ff` |
 | Textured variant | Hatch in `#3a55f4` over the same fill; the green `#4ba181` is reserved for a positive outcome and never used as a second accent |
 | Stacked bar | Blues `#eef1fb` / `#dbe3fa` / `#c3d0f6` with `#b3bdc9` strokes |
-| Table | `rule` hairline border, square corners; row rules in `rule`; header in `label-type` sans, `muted`, over a rule in `ink`; no fill |
+| Table | the reader's own table (a tinted header band over hairline-ruled rows, square); write no table borders, `border-collapse`/`border-spacing` or cell fills of your own. The header text may take `label-type`: sans, `muted` |
 
 The underline that marks a term in prose has no figure equivalent. Inside a
 drawing, emphasis is the accent fill.

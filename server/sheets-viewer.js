@@ -3347,7 +3347,13 @@
   }) : null;
   // Mounted: the tables are hidden by the viewer's own style now, so the
   // frame's 200-row hold (#tdoc-sheets-pending) is no longer needed.
-  if (mount()) { window.__tdocSheets.mounted = true; relayout(); }
+  if (mount()) {
+    window.__tdocSheets.mounted = true;
+    // The frame (frame-probe.js) marks the open comment's cell through
+    // hooks.activate; one opened before this mount is handed over again.
+    document.dispatchEvent(new CustomEvent('tdoc:element-hooks-ready'));
+    relayout();
+  }
   var held = document.getElementById('tdoc-sheets-pending');
   if (held) held.remove();
 })();

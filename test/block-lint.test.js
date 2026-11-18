@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { lint, KNOWN_CLASSES } = require('../server/block-lint');
 const { loadWorker, makeEnv, req } = require('./helpers/worker-harness.js');
+const { guard } = require('./helpers/perf-budget');
 
 const root = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
@@ -105,7 +106,10 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     assert(r.truncated && /first part of the doc only/.test(r.warning), 'a capped scan says so');
     const hostile = ['<div class="a' + '<'.repeat(2e6), '<div "' + 'a<b '.repeat(1e6), '<div>' + '<p '.repeat(2e6), '<div a="' + 'x '.repeat(2e6), '<div>'.repeat(1e6) + '</span>'.repeat(1e6), '<table>'.repeat(5e5)];
     const worst = Math.max(...hostile.map((h) => ms(() => lint(h))));
-    assert(sheetMs < 400 && proseMs < 1500 && worst < 1500, `sheet ${sheetMs}ms, prose ${proseMs}ms, worst hostile ${worst}ms`);
+    // Budgets scaled by the runner's measured speed (helpers/perf-budget.js).
+    guard('block lint, 8 MB sheet', sheetMs, 400);
+    guard('block lint, 5 MB prose', proseMs, 1500);
+    guard('block lint, worst hostile', worst, 1500);
   });
 
   // A sheet table of n body rows (a <thead> header, or a <th> row in the body).
@@ -151,9 +155,9 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     const headerOnly = pre + '<table data-tdoc-sheet><tr><th>a</th></tr></table>'.repeat(40000) + '</main></body></html>';
     const noTr = pre + '<table data-tdoc-sheet></table>'.repeat(60000) + '</main></body></html>';
     const times = [big, thOnly, bare].map((h) => ms(() => lint(h)));
-    assert(Math.max(...times) < 400, `times ${times.map((x) => x.toFixed(0)).join(', ')}ms`);
+    guard('sheet shape, 60k rows (worst)', Math.max(...times), 400);
     const hostile = [noCloseTd, headerOnly, noTr].map((h) => ms(() => lint(h)));
-    assert(Math.max(...hostile) < 100, `hostile ${hostile.map((x) => x.toFixed(0)).join(', ')}ms`);
+    guard('sheet shape, hostile (worst)', Math.max(...hostile), 100);
     assert(lint(page(prose + '<table data-tdoc-sheet>' + '<tr><th>x</th></tr>'.repeat(30) + '</table>')).small_sheets[0].rows === 0, 'header rows are not body rows');
     const many = lint(headerOnly);
     assert(many.small_sheet_count <= 200 && many.small_sheets.length === 5, 'at most 200 sheets are read');
@@ -227,8 +231,65 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     const quoted = '<a title="' + '<b '.repeat(300000) + '">x</a>';
     for (const [name, html] of [['openers', openers], ['no >', none], ['quoted', quoted]]) {
       const took = ms(() => lint(html));
-      assert(took < (process.env.CI ? 300 : 150), `${name}: ${took.toFixed(1)} ms`);
+      guard(`block lint, unclosed openers: ${name}`, took, 300);
     }
+  });
+
+  // The reader draws every table one way (server/reader.css). A doc's own
+  // partial restyle on top of it (collapsed 1px borders over the old filled,
+  // rounded cells) is what put a white "+" at every cell corner.
+  const styled = (css, attrs = '', body = '<h2>H</h2><p>a</p><table><tr><th>a</th></tr><tr><td>b</td></tr></table>') =>
+    `<!doctype html><html${attrs}><head><style>body{background:#fff}${css}</style><style id="tdoc-reader">:where(body th, body td){background:#f0f0ee;border-radius:8px;border:0}</style><style id="tdoc-reader-patch">:where(body) th{background:#eee}</style></head><body><main class="wrap">${body}</main></body></html>`;
+  const TABLES = /Tables: use tdoc's table style; don't restyle table borders or cell backgrounds/;
+
+  await t('author CSS restyling table borders or cell fills is told to use tdoc\'s table style', () => {
+    const r = lint(styled('.notes table{border-collapse:collapse}.notes th,.notes td{border:1px solid #d9d8d3;padding:8px}'));
+    assert(r.table_css_count === 3 && r.table_css.join('|') === '.notes table|.notes th|.notes td', JSON.stringify(r.table_css));
+    assert(/^Block check \(a warning only; the doc is published\): Tables: use tdoc's table style; don't restyle table borders or cell backgrounds \(\.notes table, \.notes th, \.notes td\)\. Guide: tdoc:\/\/authoring\/structure\/components\.md/.test(r.warning), r.warning);
+    for (const css of ['table{border-spacing:4px}', 'td.num{background:#eef}', '@media (max-width:600px){tr:nth-child(2n)>td{background-color:#fafafa}}', 'thead th{border-bottom:2px solid #111}', '.wrap  table  >  tbody  tr{border-top:1px solid #eee}']) {
+      assert(TABLES.test(lint(styled(css)).warning || ''), 'not flagged: ' + css);
+    }
+  });
+
+  await t('table type, cleared values, the :where() scaffold, tdoc\'s own styles and non-table rules are not a restyle', () => {
+    for (const css of [
+      'th{font:600 11px ui-monospace,monospace;text-transform:uppercase;color:#6b6a66}',
+      '.wrap th, .wrap td { background: transparent; border-radius: 0; }',
+      'td{border:0;background:none !important}',
+      ':where(body th, body td){padding:10px 14px;border:0;text-align:left}',
+      '.tdoc-table-scroll{border:1px solid #eee}', 'td .pill{background:#eef;border-radius:9px}', '.card{border:1px solid #eee}', '',
+    ]) {
+      const r = lint(styled(css));
+      assert(r.table_css_count === 0 && !TABLES.test(r.warning || ''), css + ' => ' + JSON.stringify(r.table_css));
+    }
+  });
+
+  await t('a custom design and a slide deck bring their own tables', () => {
+    const css = 'td{border:1px solid #ddd;background:#fafafa}';
+    assert(lint(styled(css, ' data-tdoc-design="custom"')).table_css_count === 0, 'custom design');
+    assert(lint(styled(css, '', '<section class="slide" data-tdoc-slide><table><tr><td>a</td></tr></table></section>')).table_css_count === 0, 'slide deck');
+  });
+
+  await t('the table line follows the block check lines, and its list is bounded', () => {
+    const r = lint(styled('.a td,.b td,.c td,.d td,.e td,.f td,.g td{border:1px solid}', '', '<div class="card">loose</div><table><tr><td>a</td></tr></table>'));
+    const lines = r.warning.split('\n');
+    assert(/^Block check/.test(lines[0]) && TABLES.test(lines[lines.length - 1]), r.warning);
+    assert(r.table_css_count === 7 && r.table_css.length === 5 && /\.e td, …\)/.test(r.warning), r.warning);
+  });
+
+  await t('reading author CSS stays linear on a huge or unclosed stylesheet', () => {
+    const big = styled('.x td{color:red}'.repeat(200000) + '{'.repeat(100000));
+    const unclosed = '<html><head><style>' + 'td{border:1px solid}'.repeat(100000);
+    for (const [name, html] of [['big', big], ['unclosed', unclosed]]) {
+      const took = ms(() => lint(html));
+      assert(took < (process.env.CI ? 600 : 300), `${name}: ${took.toFixed(1)} ms`);
+    }
+  });
+
+  await t('/api/upload returns the table advice with the block check', async () => {
+    const r = await upload('lint-table', 1, styled('.notes th,.notes td{border:1px solid #ddd}'));
+    assert(r.status === 200 && r.body.ok, JSON.stringify(r.body));
+    assert(TABLES.test(r.body.block_warning) && r.body.block_lint.table_css_count === 2 && r.body.block_lint.table_css[0] === '.notes th', JSON.stringify(r.body));
   });
 
   await t('the CLI prints the server\'s block warning after a successful upload', () => {

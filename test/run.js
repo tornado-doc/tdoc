@@ -10,6 +10,7 @@
 //   node test/run.js            # offline suite (default; CI uses this)
 //   node test/run.js --browser  # required local layout regressions
 //   node test/run.js --all      # also attempt network/browser suites
+//   node test/run.js --perf     # performance budgets enforced (CI perf job)
 
 const { spawnSync } = require('child_process');
 const path = require('path');
@@ -35,6 +36,7 @@ const OFFLINE = [
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
   'tdoc-ai-mark.test.js',      // tdoc AI's face: tdoc_logo.svg's strokes + the Ask AI star on an accent badge; tdoc AI and unnamed agents wear it
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
+  'perf-budget.test.js',       // timing budgets: complexity guards fail everywhere, scaled (never tightened) by the runner; perf budgets fail only where enforced (CI perf job)
   'no-async-wait-for-function.test.js', // browser tests never waitForFunction(async ...): Playwright does not await the predicate's value
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'block-lint.test.js',       // publish-time block check: loose text and non-house wrappers warned, never refused; linear on 8 MB sheets; house blocks baked
@@ -91,6 +93,7 @@ const OFFLINE = [
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
   'me-rows.test.js',            // My docs rows: doc/sheet/slides, sharing (own docs only), unread comments + agent replies without per-row reads, Recent/Starred dates, checklist on Docs below 3 docs
+  'notifications-newest-first.test.js', // the bell is newest first, read or not: a new comment/reply is the first row even when read on the doc page; pages walk every row once; ?filter=unread (Needs you) is the unread alone
   'notification-read-unify.test.js', // One read state: a seen thread reads its bell rows (reactions too), a bell read marks the thread seen, stale rows reconcile when the bell loads (bounded reads)
   'shell-scan-cap.test.js',     // big docs: the page scans only the head (Cloudflare 1102)
   'inline-media.test.js',       // base64 video/audio refused at publish: link it instead
@@ -273,6 +276,7 @@ const BROWSER = [
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'style-reader-column-render.test.js', // a house style alone yields the same reading column as a baked doc
+  'table-style-render.test.js', // the reader table (header band, ruled rows) survives an author's collapse + cell borders; old bakes get it via the serve-time patch
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
   'workspace-access-ui.test.js', // Allow page workspace ticks + Settings > Agents change/remove, checked against the server
   'connect-ai-apps-ui.test.js', // remoteMcp flag: Connect in one click on /start, /setup, Settings (Claude/ChatGPT/Cursor links) + OAuth consent page, desktop + phone
@@ -282,6 +286,7 @@ const BROWSER = [
   'write-with-agent-ui.test.js', // New › Write it with your agent (flag writeWithAgent): Send to your agent opens the new doc on the sent request; no agent: why + Connect an agent; flag off: copy line only; agentProgress off: plain Sent line, no progress pill; desktop + phone
   'agent-progress-ui.test.js', // agent progress line on the comment card (flag agentProgress): steps, current step + elapsed always shown, agent status via the poll; desktop + phone; flag off = On it
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
+  'bell-newest-first-ui.test.js', // the bell on a doc page: today's activity (read or not) above an old unread backlog; count = unread; desktop + phone
   'bell-read-unify-ui.test.js', // one read state: a thread seen on the doc page drops that page's bell count at once (no poll); a bell row read marks its thread seen; opening the doc marks nothing
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
   'ask-send-switch-ui.test.js', // Ask AI: quiet Ask ▾ / Edit ▾ mode picker in the input row (instruction input, N comments included · Choose, Send to <agent>, instruction-only becomes a whole-document comment handed off, mode remembered), long agent name on a 320/390 phone stays one row, one row per team agent, team agent answers in public; no phone paper-plane
@@ -318,6 +323,7 @@ const BROWSER = [
   'feedback-share-ui.test.js', // feedback space Share = the doc Share dialog; owner moves it to a team; site mode offers the team first; desktop + phone
   'feedback-invites-ui.test.js', // share from the widget: copy link + invite by name; landing page; Join / Keep my own; switcher; SDK Join; Reconnect without a popup; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
+  'feedback-install-ui.test.js', // /feedback: Bookmark / SDK chooser jumps to its section, SDK as a peer section (site picture, 3 steps), Copy prompt + Copy line, signed-in owner sees their real space id; desktop + phone
 ];
 
 // Existing opt-in UI suites; --all retains their broader coverage.
@@ -335,13 +341,24 @@ const EXTENDED_BROWSER = [
 ];
 
 const INTEGRATION = ['onboarding.test.js', 'publish.test.js'];
+
+// --perf: the pure performance budgets (test/helpers/perf-budget.js budget())
+// enforced, for the CI `perf` job, which does not block a merge. Elsewhere
+// TDOC_PERF=report turns an overrun into a warning; complexity guards
+// (guard()) fail everywhere. [suite, TDOC_TEST_FILTER]
+const PERF = [
+  ['sheets-ui.test.js', '10,000 rows'],
+  ['sheets-rules-ui.test.js', '10,000 rows'],
+];
 const RUNTIME = [
   'preview-workerd.test.js', // needs npm ci; real workerd WASM and font modules
   'doc-download-deps.test.js', // needs npm ci; download output read back with marked and SheetJS (CI: shell runtime job)
 ];
 const runAll = process.argv.includes('--all');
-const runBrowser = process.argv.includes('--browser');
-const allFiles = runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
+const runPerf = process.argv.includes('--perf');
+const runBrowser = process.argv.includes('--browser') || runPerf;
+const allFiles = runPerf ? PERF.map(([f]) => f) : runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
+const perfFilter = new Map(runPerf ? PERF : []);
 // --shard i/n runs every n-th suite starting at i, so CI can split the
 // browser regressions across parallel jobs (each suite starts its own server).
 const shardArg = process.argv.find((a) => a.startsWith('--shard='));
@@ -361,7 +378,8 @@ let failed = [];
 for (const f of files) {
   const p = path.join(__dirname, f);
   process.stdout.write(`\n=== ${f} ===\n`);
-  const r = spawnSync(process.execPath, [p], { stdio: 'inherit' });
+  const env = perfFilter.has(f) ? { ...process.env, TDOC_PERF: 'enforce', TDOC_TEST_FILTER: perfFilter.get(f) } : process.env;
+  const r = spawnSync(process.execPath, [p], { stdio: 'inherit', env });
   if (r.status !== 0) failed.push(f);
 }
 
