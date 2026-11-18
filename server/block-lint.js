@@ -47,6 +47,9 @@
     wrap: 1, content: 1, container: 1, 'tdoc-table-scroll': 1,
     'tdoc-tiles': 1, 'tdoc-tile': 1, 'tdoc-cards': 1, 'tdoc-card': 1,
     note: 1, 'diagram-box': 1, slide: 1, 'tdoc-artifact': 1,
+    // A sheet doc's note (shared/doc-type.mjs): what a sheet doc may hold
+    // besides its title and tables (Convert to Sheet puts old prose in one).
+    'sheet-note': 1,
   };
   // Elements whose direct text is fine: the text blocks.
   var TEXT_BLOCK = {
@@ -304,8 +307,12 @@
       if (name === 'li') { popTo('li', { ul: 1, ol: 1, menu: 1 }); parent = top(); }
       if (name === 'dt' || name === 'dd') { if (!popTo('dt', { dl: 1 })) popTo('dd', { dl: 1 }); parent = top(); }
       var sheet = name === 'table' && attrs.indexOf('data-tdoc-sheet') !== -1 && attr(attrs, SHEET_ATTR) != null;
-      if (!sheet && DOC_CONTENT[name] && !(parent && parent.exempt)) docContent = true;
-      if (PROSE_TEXT[name] && !(parent && parent.exempt) && !/(?:^|\s)sheet-note(?:\s|$)/.test(attr(attrs, CLASS_ATTR) || '')) proseBlocks++;
+      // A sheet doc's note (.sheet-note) and all it holds are not prose, as
+      // shared/doc-type.mjs's sheet-only rule reads them: a converted doc
+      // keeps its old prose in one (Convert to Sheet).
+      var inNote = !!(parent && parent.note) || (attrs.indexOf('sheet-note') !== -1 && /(?:^|\s)sheet-note(?:\s|$)/.test(attr(attrs, CLASS_ATTR) || ''));
+      if (!sheet && DOC_CONTENT[name] && !(parent && parent.exempt) && !inNote) docContent = true;
+      if (PROSE_TEXT[name] && !(parent && parent.exempt) && !inNote) proseBlocks++;
       if (SKIP[name]) {
         if (!/\/\s*$/.test(attrs)) {
           var after = skipEnd(html, name, pos), counted = false;
@@ -332,7 +339,7 @@
       var exempt = !!(parent && parent.exempt) || name === 'figure'
         || (attrs.indexOf('data-tdoc-') !== -1 && attr(attrs, ATOMIC_ATTR) != null)
         || /(?:^|\s)(?:diagram-box|tdoc-artifact)(?:\s|$)/.test(cls);
-      var el = { name: name, cls: cls, exempt: exempt, container: null };
+      var el = { name: name, cls: cls, exempt: exempt, note: inNote, container: null };
       el.container = INLINE[name] ? (parent ? parent.container : null) : el;
       if (!exempt && cls && WRAPPER[name] && name !== 'ul' && name !== 'ol' && name !== 'dl') {
         var list = cls.split(/\s+/);

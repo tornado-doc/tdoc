@@ -15,6 +15,7 @@ import {
   FolderInput,
   History,
   Share2,
+  Sheet,
   Star,
   Table2,
   Send,
@@ -303,6 +304,9 @@ export function DocumentOverflowActions({
   // The owner's "Allow sheet embeds on this page": shown only when an
   // embedded sheet here is held back because a version names no writer.
   onAllowEmbeds = null,
+  // "Convert to Sheet": for an editor of a doc that holds a sheet table and
+  // is not a sheet doc yet (flag convertToSheet); null hides it.
+  onConvertToSheet = null,
 }) {
   return (
     <>
@@ -337,6 +341,11 @@ export function DocumentOverflowActions({
       {onAllowEmbeds ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="allow-embeds" onClick={onAllowEmbeds}>
           <Table2 size={15} /> Allow sheet embeds on this page
+        </AppMenuItem>
+      ) : null}
+      {onConvertToSheet ? (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="convert-to-sheet" onClick={onConvertToSheet}>
+          <Sheet size={15} /> Convert to Sheet
         </AppMenuItem>
       ) : null}
       {config.mode === 'local' ? (

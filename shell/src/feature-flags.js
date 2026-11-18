@@ -119,6 +119,10 @@ export const FLAGS = Object.freeze({
   // for the person reading (shell/src/document/sheet-embed.js, worker
   // /api/embed/sheet). Off: the figure is its fallback link, as in an export.
   sheetEmbeds: Object.freeze({ label: 'Sheets embedded in pages (live, by reference)', owner: 'julie', added: '2026-11-11', default: false, preview: true, graduate_by: '2026-11-23' }),
+  // ⋯ › "Convert to Sheet": an editor turns a prose doc that holds sheet
+  // tables into a sheet doc (title + sheet tables, the rest of the prose in
+  // a .sheet-note), published as a new version (document/convert-to-sheet.js).
+  convertToSheet: Object.freeze({ label: 'Convert a doc to a sheet (⋯ menu)', owner: 'julie', added: '2026-11-17', default: false, preview: true, graduate_by: '2026-11-24' }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;
