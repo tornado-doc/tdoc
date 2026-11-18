@@ -22,6 +22,7 @@ const { spawn } = require('child_process');
 const { requirePlaywrightOrSkip, reservePort } = require('./helpers/fixture-server');
 const { chooseMode } = require('./helpers/doc-mode');
 const { chromium } = requirePlaywrightOrSkip('sheets-rules-ui.test.js');
+const perf = require('./helpers/perf-budget');
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 const SHOTS = process.env.TDOC_TEST_SCREENSHOTS || '';
 
@@ -414,18 +415,21 @@ async function shot(page, name) {
       const t0 = Date.now();
       const frame = await edit('big');
       const openMs = Date.now() - t0;
-      const run = () => frame.evaluate(() => new Promise((resolve) => {
+      // Once without scrolling (the browser's own frame cadence here), then 1,400px a frame.
+      const run = (stepPx) => frame.evaluate((px) => new Promise((resolve) => {
         const grid = document.querySelector('.ts-grid');
         grid.scrollTop = 0;
         const gaps = []; let last = performance.now(), n = 0;
         function step(now) {
-          gaps.push(now - last); last = now; grid.scrollTop += 1400;
+          gaps.push(now - last); last = now; grid.scrollTop += px;
           if (++n < 120) requestAnimationFrame(step);
-          else { gaps.shift(); gaps.sort((a, b) => a - b); resolve({ median: gaps[Math.floor(gaps.length / 2)], p95: gaps[Math.floor(gaps.length * 0.95)] }); }
+          else { gaps.shift(); gaps.sort((a, b) => a - b); resolve({ median: gaps[Math.floor(gaps.length / 2)], p95: gaps[Math.floor(gaps.length * 0.95)], at: grid.scrollTop, rows: document.querySelectorAll('.ts-row').length }); }
         }
         requestAnimationFrame(step);
-      }));
-      const scroll = await run();
+      }), stepPx);
+      const idle = await run(0);
+      const scroll = await run(1400);
+      assert(scroll.at > 100000 && scroll.rows < 80, `scrolled far, still virtualized: ${JSON.stringify(scroll)}`);
       const s0 = Date.now();
       await frameLoc().getByRole('button', { name: 'Points column menu' }).click();
       await frameLoc().getByRole('menuitem', { name: 'Sort descending' }).click();
@@ -443,11 +447,16 @@ async function shot(page, name) {
       const editMs = Date.now() - e0;
       // The edited row (now 2,000: neither band) is drawn where the sort put it.
       const after = await frame.evaluate(() => { const row = [...document.querySelectorAll('.ts-row')].find((x) => x.querySelector('.ts-n').textContent.trim() === '10000'); return row ? getComputedStyle(row.querySelector('.ts-c[data-c="2"]')).backgroundColor : 'not drawn'; });
-      console.log(`    (10k rows with rules: open ${openMs}ms, scroll p95 ${scroll.p95.toFixed(1)}ms (median ${scroll.median.toFixed(1)}ms), sort ${sortMs}ms, edit + re-evaluate ${editMs}ms)`);
+      console.log(`    (10k rows with rules: open ${openMs}ms, scroll p95 ${scroll.p95.toFixed(1)}ms (median ${scroll.median.toFixed(1)}ms, idle ${idle.median.toFixed(1)}ms), sort ${sortMs}ms, edit + re-evaluate ${editMs}ms)`);
       assert(top === 'rgb(227, 237, 253)', `over 50,000 is blue: ${top}`);
       assert(after === 'rgb(255, 255, 255)', `re-evaluated after the edit: ${after}`);
-      assert(scroll.median < 34 && scroll.p95 < 80, `scroll frames: ${JSON.stringify(scroll)}`);
-      assert(sortMs < 2500 && editMs < 2500, `sort ${sortMs}ms, edit ${editMs}ms`);
+      // Performance budgets (helpers/perf-budget.js): enforced in the CI perf
+      // job, reported in the blocking one. Frames scale by the idle cadence.
+      const cadence = idle.median / (1000 / 60);
+      perf.budget('sheets-rules-ui 10k: scroll frame median', scroll.median, 34, { factor: cadence });
+      perf.budget('sheets-rules-ui 10k: scroll frame p95', scroll.p95, 80, { factor: cadence });
+      perf.budget('sheets-rules-ui 10k: sort', sortMs, 2500);
+      perf.budget('sheets-rules-ui 10k: edit + re-evaluate', editMs, 2500);
       await page.getByRole('button', { name: /Discard/ }).click().catch(() => {});
     });
 

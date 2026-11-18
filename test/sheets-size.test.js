@@ -13,6 +13,7 @@ const assert = require('assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { loadWorker, makeEnv, issue, req } = require('./helpers/worker-harness');
+const { guard, bestOf } = require('./helpers/perf-budget');
 
 const O = { Origin: 'https://tdoc.dev' };
 
@@ -141,7 +142,7 @@ const O = { Origin: 'https://tdoc.dev' };
     assert.equal(r.body.error, 'slug_mismatch');
   });
 
-  await t('the size scan is linear: adversarial 2 MB inputs take under 50 ms (100 ms on CI)', async () => {
+  await t('the size scan is linear: adversarial 2 MB inputs take under 100 ms (scaled to the runner)', async () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'server.js'), 'utf8');
     const code = src.slice(src.indexOf('var SHEET_SCAN_TAGS'), src.indexOf('function maxDocumentBytes'));
     const sheetScan = new Function(`${code}; return sheetScan;`)();
@@ -157,14 +158,10 @@ const O = { Origin: 'https://tdoc.dev' };
       'bare < in a cell': '<table data-tdoc-sheet><tr><td>' + '<'.repeat(2 * MB) + '</td></tr></table>',
       'short tags in a sheet': '<table data-tdoc-sheet>' + '<b>'.repeat(650000) + '</table>',
     };
-    // 50 ms is the bound (10-20 ms on a laptop). A shared CI runner measures
-    // about 2.4x slower, so there it is 100 ms; a quadratic scan takes
-    // seconds either way.
-    const bound = process.env.CI ? 100 : 50;
+    // 10-20 ms on a laptop, up to ~40 on a CI runner; a quadratic scan takes
+    // seconds. 100 ms, scaled by the runner's measured speed, best of five.
     for (const [what, input] of Object.entries(inputs)) {
-      let best = Infinity;
-      for (let k = 0; k < 5; k++) { const t0 = process.hrtime.bigint(); sheetScan(input); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); }
-      assert(best < bound, `${what} (${input.length} chars): ${best.toFixed(1)}ms`);
+      guard(`sheet scan, ${what} (${input.length} chars)`, bestOf(5, () => sheetScan(input)), 100);
     }
     const ok = sheetScan(big);
     assert(ok.tables === 1 && ok.rows === 10000 && ok.bytes > big.length * 0.6, JSON.stringify(ok));
@@ -179,7 +176,7 @@ const O = { Origin: 'https://tdoc.dev' };
     const r = await upload('eight-mb', html);
     const ms = Date.now() - t0;
     assert.equal(r.status, 200, r.text.slice(0, 200));
-    assert(ms < 5000, `upload took ${ms}ms`);
+    guard('8 MB sheet upload', ms, 5000);
     console.log(`    (${(html.length / MB).toFixed(1)} MB upload in process, aid stamping included: ${ms}ms)`);
   });
 
@@ -191,7 +188,7 @@ const O = { Origin: 'https://tdoc.dev' };
     const ms = Date.now() - t0;
     assert.equal(r.status, 200, r.text.slice(0, 200));
     console.log(`    (${(html.length / MB).toFixed(1)} MB with 20k images: upload ${ms}ms in process)`);
-    assert(ms < 5000, `upload took ${ms}ms`);
+    guard('6 MB sheet + 20k images upload', ms, 5000);
   });
 
   await t('history: a big sheet\'s summary is its row count, not a parse', async () => {
