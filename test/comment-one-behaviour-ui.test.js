@@ -743,7 +743,8 @@ async function startServer(worker, env) {
       const panel = root.locator('.tdoc-fb-panel');
       await panel.waitFor({ timeout: 10000 });
       const handle = panel.locator('[role="separator"]');
-      assert.equal(Math.round((await panel.boundingBox()).width), 340);
+      // The doc page's side list width (COMMENT_SIDE_WIDTH).
+      assert.equal(Math.round((await panel.boundingBox()).width), 360);
       await page.waitForTimeout(300); // The panel's slide-in.
       const h = await handle.boundingBox();
       await page.mouse.move(h.x + h.width / 2, 300);
@@ -751,7 +752,7 @@ async function startServer(worker, env) {
       await page.mouse.move(h.x - 160, 300, { steps: 6 });
       await page.mouse.up();
       const wider = (await panel.boundingBox()).width;
-      assert.ok(Math.abs(wider - 500) < 6, `dragged to ${wider}`);
+      assert.ok(Math.abs(wider - 520) < 6, `dragged to ${wider}`);
       // The dock moves with it instead of going under.
       const dock = await root.locator('.tdoc-feedback-dock').boundingBox();
       const edge = (await panel.boundingBox()).x;
@@ -761,15 +762,15 @@ async function startServer(worker, env) {
       await handle.focus();
       await page.keyboard.press('End');
       assert.equal(await handle.getAttribute('aria-valuenow'), String(Math.round((await panel.boundingBox()).width)));
-      assert.ok((await panel.boundingBox()).width <= 640 && (await panel.boundingBox()).width >= 500);
+      assert.ok((await panel.boundingBox()).width <= 640 && (await panel.boundingBox()).width >= 520);
       await page.keyboard.press('Home');
-      assert.equal(Math.round((await panel.boundingBox()).width), 280);
+      assert.equal(Math.round((await panel.boundingBox()).width), 320);
       await page.keyboard.press('ArrowLeft');
-      assert.equal(Math.round((await panel.boundingBox()).width), 296);
+      assert.equal(Math.round((await panel.boundingBox()).width), 336);
       // Remembered on this device.
       await page.reload();
       await panel.waitFor({ timeout: 10000 });
-      assert.equal(Math.round((await panel.boundingBox()).width), 296);
+      assert.equal(Math.round((await panel.boundingBox()).width), 336);
       // A narrower window leaves the page room.
       await page.setViewportSize({ width: 800, height: 800 });
       await page.waitForTimeout(150);

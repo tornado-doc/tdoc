@@ -1642,7 +1642,10 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
 .tdoc-cpanel-add svg { margin-right: 2px; }
 .tdoc-cpanel .tdoc-comment-filter-row { margin: 0; justify-content: flex-start; flex-wrap: nowrap; }
 .tdoc-cpanel .tdoc-comment-filter.tdoc-seg { flex: 1 1 auto; min-width: 0; }
-.tdoc-cpanel .tdoc-comment-filter.tdoc-seg button { flex: 1 1 auto; }
+/* The options share the row and stay inside the pill: tight padding before
+   they run out of room, then an ellipsis. Never clipped by the pill's edge
+   (a narrow list once cut "All (24)" in half). */
+.tdoc-cpanel .tdoc-comment-filter.tdoc-seg button { flex: 1 1 auto; min-width: 0; padding-inline: 6px; overflow: hidden; text-overflow: ellipsis; }
 .tdoc-cpanel .tdoc-comment-query { margin: 0; }
 .tdoc-cpanel-readbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--td-line, #e8e7e3); color: var(--td-muted, #6b6a66); font-size: 12px; }
 .tdoc-cpanel-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 4px 8px 16px; }

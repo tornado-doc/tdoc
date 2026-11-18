@@ -59,7 +59,7 @@ import {
 import { copyText, isDocumentComment, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
 import { readStored, writeStored } from './safe-storage.js';
 import { SideResizeHandle, useSideWidth } from './ui/side-resize.jsx';
-import { CommentPanel } from './comments/panel/comment-panel.jsx';
+import { COMMENT_SIDE_WIDTH, CommentPanel } from './comments/panel/comment-panel.jsx';
 import { useDoubleTapOption, useEscapeLadder } from './comments/panel/keyboard.js';
 import { CommentIcon } from './ui/comment-icon.jsx';
 import { AppButton } from './ui/button.jsx';
@@ -179,7 +179,7 @@ const LIVE_SYNC_MAX_MS = 60000;
 // The doc page's side comment list (comments/panel/): resizable, open or
 // closed as the reader last left it; with no choice yet, open on a doc with
 // this many threads to read through, where pins alone are a crowd.
-const SIDE_PANEL = { storageKey: 'tdoc-comment-panel-width', initial: 360, min: 300, max: 640 };
+const SIDE_PANEL = { storageKey: 'tdoc-comment-panel-width', ...COMMENT_SIDE_WIDTH };
 const SIDE_PANEL_OPEN_KEY = 'tdoc-comment-panel';
 const SIDE_PANEL_AUTO_OPEN = 8;
 // The comment feed's longest wait on a quiet doc (use-comment-feed.js).
