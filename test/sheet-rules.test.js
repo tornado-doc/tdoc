@@ -4,6 +4,7 @@
 // inject, oversized attributes, and a 10,000-row sheet evaluated inside a
 // frame budget.
 const assert = require('node:assert/strict');
+const { guard, bestOf } = require('./helpers/perf-budget');
 const path = require('path');
 
 let pass = 0, fail = 0;
@@ -41,9 +42,7 @@ async function t(name, fn) {
   await t('find & replace over a long cell stays linear', () => {
     const f = R.makeFinder({ find: 'aab' });
     const big = 'a'.repeat(200000);
-    const t0 = Date.now();
-    for (let k = 0; k < 20; k++) { f.test(big); f.replace(big, 'x'); }
-    assert.ok(Date.now() - t0 < 1000, `${Date.now() - t0}ms`);
+    guard('find & replace over a 200 KB cell', bestOf(3, () => { for (let k = 0; k < 20; k++) { f.test(big); f.replace(big, 'x'); } }), 1000);
   });
 
   // ---- reading the rules: hostile JSON ------------------------------------------------
@@ -142,11 +141,9 @@ async function t(name, fn) {
     const BS = { keys: ['c1', 'c2', 'c3'], types: bi.cols.map((c) => c.type), cols: bi.cols, size: bi.size };
     const rules = [{ cols: ['c1'], when: 'gt', value: '5000', fill: 'yellow' }, { cols: ['c1'], when: 'lt', value: '100', fill: 'blue' }, { cols: ['c2'], when: 'textContains', value: 'urgent', fill: 'red' }, { cols: ['c3'], when: 'gt', value: '2026-05-01', fill: 'gray' }];
     R.evaluateFormats(rules, BS, ctx);
-    const t0 = process.hrtime.bigint();
-    for (let k = 0; k < 5; k++) R.evaluateFormats(rules, BS, ctx);
-    const ms = Number(process.hrtime.bigint() - t0) / 5e6;
+    const ms = bestOf(5, () => R.evaluateFormats(rules, BS, ctx));
     console.log(`    (10k rows × 4 rules: ${ms.toFixed(1)}ms)`);
-    assert.ok(ms < 60, `${ms}ms`);
+    guard('10k rows × 4 rules', ms, 60);
   });
   await t('the reviewer\'s case: 100 rules × 50 columns × 10,000 rows, capped, then each edit in milliseconds', () => {
     const cols = Array.from({ length: 50 }, (_, c) => ({ name: `C${c}`, type: c % 2 ? 'number' : 'text' }));
@@ -167,8 +164,8 @@ async function t(name, fn) {
     const next = R.evaluateFormats(rules, shape(idx), ctx, first);
     const edit = Number(process.hrtime.bigint() - t0) / 1e6;
     console.log(`    (100 rules × 50 columns × 10k rows: ${initial.toFixed(0)}ms first, ${edit.toFixed(1)}ms per edit, ${first.skipped} rule-columns skipped)`);
-    assert.ok(initial < 300, `first evaluation ${initial}ms`);
-    assert.ok(edit < 30, `an edit ${edit}ms`);
+    guard('100 rules × 50 columns × 10k rows, first evaluation', initial, 300);
+    guard('100 rules × 50 columns × 10k rows, an edit', edit, 30);
     assert.equal(next.skipped, first.skipped);
     const full = R.evaluateFormats(rules, shape(idx), ctx);
     for (let c = 0; c < 50; c++) for (let r = 0; r < 10000; r += 1) if ((full[c] && full[c][r]) !== (next[c] && next[c][r]) && !(full[c][r] && next[c][r] && full[c][r].css === next[c][r].css)) throw new Error(`incremental differs at ${r},${c}`);

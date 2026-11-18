@@ -11,6 +11,8 @@
 //     count goes to the sheet, where the comment marks its cell
 //   - a hand-written table whose rows have no ids: a body cell's comment is
 //     that cell, not its column's header
+//   - a link to a cell comment, the grid drawn only after it opened (a slow
+//     load): the cell is still marked
 //   - a phone: a link to the comment shows its cell
 // Screenshots for the PR: TDOC_TEST_SCREENSHOTS=<dir>.
 const fs = require('fs');
@@ -245,6 +247,33 @@ ${notes}
       const k = trackerComment.anchor.sheet.row.slice(1);
       assert(m.first === `Task ${k}` && m.c === '4', `marked ${JSON.stringify(m)}`);
       await page.keyboard.press('Escape');
+    });
+
+    // On a slow load the comments arrive, and the link opens its comment,
+    // before the sheets viewer has drawn the grid. The frame keeps what is
+    // open and hands it to the viewer once it mounts (this flaked on CI).
+    await test('a link to a cell comment marks the cell when the grid draws after the comment opened', async () => {
+      const ctx = await newContext({ width: 1280, height: 900 });
+      let release;
+      const held = new Promise((resolve) => { release = resolve; });
+      await ctx.route(/\/sheets-viewer\.js/, async (route) => { await held; await route.continue(); });
+      const p = await ctx.newPage();
+      p.on('pageerror', (e) => errors.push(e.message));
+      try {
+        await p.goto(`${base}/d/wide/v/1?comment=c_k1`, { waitUntil: 'commit' }); // the frame's load waits on the held viewer
+        // The card is open while the viewer is still held back.
+        await p.getByText('Is this count right?').first().waitFor({ timeout: 15000 });
+        const frame = frameOf(p);
+        assert(await frame.evaluate(() => !document.querySelector('.tdoc-sheet')), 'the grid has not drawn yet');
+        release();
+        await frame.waitForFunction(() => !!document.querySelector('.tdoc-sheet .is-comment-on'), null, { timeout: 15000 });
+        const m = await marked(frame);
+        assert(m.text === 'R1C11' && m.first === 'R1C1', `the marked cell is K1: ${JSON.stringify(m)}`);
+        assert(m.inGrid && m.onTop, `K1 is in the grid's view: ${JSON.stringify(m)}`);
+      } finally {
+        release();
+        await ctx.close();
+      }
     });
 
     await test('a phone: a link to the K1 comment shows K1 marked, in view', async () => {
