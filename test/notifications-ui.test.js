@@ -306,6 +306,15 @@ async function t(name, fn) {
       await context.close();
     });
 
+    await t('an access request on a doc this person no longer manages comes back blank, with nothing to answer', async () => {
+      const request = row('n7', 'access_request', 1, { actor: null, requester: undefined, title: '', preview: '', comment_id: undefined, read: true, no_access: true });
+      const { context, dialog } = await open(900, [request]);
+      const first = dialog.locator('.tdoc-notif-row').first();
+      assert.equal(await first.getByRole('button', { name: 'Approve', exact: true }).count(), 0, 'Approve offered on a blank request');
+      assert.equal(await first.getByRole('button', { name: 'Ignore', exact: true }).count(), 0);
+      await context.close();
+    });
+
     await t('an access request is answered on the notification: Approve closes it and says so', async () => {
       const request = row('n6', 'access_request', 1, { actor: { login: 'claire', name: 'Claire' }, requester: 'claire', preview: '', comment_id: undefined });
       const { context, page, dialog, state } = await open(900, [request]);

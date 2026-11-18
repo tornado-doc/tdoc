@@ -275,6 +275,22 @@ t('agent row recipients: owner and attested people in the thread; not agents, th
 });
 
 
+t('inboxReaderSession: one lookup per person and author per request memo; the author record is the hint', () => {
+  const ctx = vm.createContext({ calls: [] });
+  vm.runInContext([fn('inboxReaderSession'),
+    'function buildInboxReaderSession(env, k, hint) { calls.push([k, hint.accountHint, hint.githubId]); return Promise.resolve({ k }); }'].join('\n\n'), ctx);
+  const memo = new Map();
+  const a = ctx.inboxReaderSession({}, 'rita', { memo });
+  const b = ctx.inboxReaderSession({}, 'rita', { memo });
+  assert(a === b, 'not memoized');
+  ctx.inboxReaderSession({}, 'rita', { memo, author: { account_id: 'acct-rita' } });
+  ctx.inboxReaderSession({}, 'rita', { memo, author: { github_id: '123' } });
+  ctx.inboxReaderSession({}, 'rita', { memo, author: { github_id: 'not-a-number' } });
+  ctx.inboxReaderSession({}, 'rita', {});
+  const calls = JSON.stringify(ctx.calls);
+  assert(calls === JSON.stringify([['rita', '', ''], ['rita', 'acct-rita', ''], ['rita', '', '123'], ['rita', '', '']]), calls);
+});
+
 // Async: one batched delivery (a suggestion accepted that fixed comments in
 // several threads), each person gets only their threads, count and preview.
 const pending = (async () => {
