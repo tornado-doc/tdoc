@@ -10,6 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const { loadWorker, makeEnv, req, putSession, issue } = require('./helpers/worker-harness');
+const { guard, bestOf } = require('./helpers/perf-budget');
 const SAME_ORIGIN = { Origin: 'https://tdoc.dev' };
 
 let pass = 0, fail = 0;
@@ -506,14 +507,9 @@ const PROSE_WITH_SHEET = `<h1>Runs and plan</h1><p>What we ran, and what is next
     ];
     // The best of three runs: the scan, not a JIT warm-up or a GC pause
     // (test/sheets-size.test.js does the same); a quadratic one takes seconds.
+    // 50 ms scaled by the runner's measured speed (helpers/perf-budget.js).
     for (const html of hostile) {
-      let ms = Infinity;
-      for (let k = 0; k < 3; k++) {
-        const started = process.hrtime.bigint();
-        docTypeFromHtml(html);
-        ms = Math.min(ms, Number(process.hrtime.bigint() - started) / 1e6);
-      }
-      assert(ms < 50, `${ms.toFixed(1)} ms on ${JSON.stringify(html.slice(0, 40))}…`);
+      guard(`docTypeFromHtml on ${JSON.stringify(html.slice(0, 40))}…`, bestOf(3, () => docTypeFromHtml(html)), 50);
     }
   });
 

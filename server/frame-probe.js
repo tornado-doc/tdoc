@@ -1154,7 +1154,28 @@
   });
   window.addEventListener('scroll', function () { reportAnchorHover(null); }, { passive: true });
   var _activeElement = null;
+  // What the shell (or a click here) asked to have open, kept even while its
+  // anchor cannot be placed yet. A link to a comment opens it as soon as the
+  // comments load, which can be before this frame has resolved the anchor (a
+  // sheet's cell exists only once its grid has drawn); the request is not
+  // sent again, so it is applied when a later pin report resolves it, and
+  // its scroll with it. Dropping it left the cell unmarked on a slow load.
+  var _wantedAnchorId = null, _wantedScroll = false, _wantedReveal = false;
   function setActiveAnchor(id, scroll) {
+    var same = !!id && id === _wantedAnchorId;
+    _wantedReveal = !!id && (!!scroll || (same && _wantedReveal));
+    _wantedScroll = !!id && !_anchorTargets[id] && (!!scroll || (same && _wantedScroll));
+    _wantedAnchorId = id || null;
+    applyActiveAnchor(id, scroll);
+  }
+  // A viewer that draws elements itself (the sheets grid) can arrive after
+  // the comment was opened: until it has mounted, it could not mark the cell
+  // (no hooks yet, or no grid to find it in). Tell it again once it has.
+  document.addEventListener('tdoc:element-hooks-ready', function () {
+    _activeElement = null;
+    applyActiveAnchor(_wantedAnchorId, _wantedReveal && !!(_wantedAnchorId && _anchorTargets[_wantedAnchorId]));
+  });
+  function applyActiveAnchor(id, scroll) {
     var target = id && _anchorTargets[id];
     if (_activeAnchorId !== (target ? id : null)) {
       for (var i = 0; i < _flashTimers.length; i++) clearTimeout(_flashTimers[i]);
@@ -1313,7 +1334,9 @@
       if (approximate && !rect.width && !rect.height) return seat(c);
       pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), lost: approximate || undefined, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
     });
-    setActiveAnchor(_activeAnchorId, false);
+    var revealNow = _wantedScroll && !!(_wantedAnchorId && _anchorTargets[_wantedAnchorId]);
+    if (revealNow) _wantedScroll = false;
+    applyActiveAnchor(_wantedAnchorId, revealNow);
     // Frame-local: the slides presenter counts the threads on the slide shown.
     try { document.dispatchEvent(new CustomEvent('tdoc:anchors-resolved', { detail: { targets: _anchorTargets, comments: (comments || []).filter(function (c) { return c && !c.hidden && !c.deleted; }).map(function (c) { return c.id; }) } })); } catch (x) {}
     post({ type: 'tdoc:pins', pins: pins, documentComments: documentPoint,
