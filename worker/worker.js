@@ -3259,7 +3259,13 @@ function withSheetsPending(body) {
   if (body.indexOf('data-tdoc-sheet') === -1 || body.indexOf('id="tdoc-sheets-pending"') !== -1) return body;
   return /<head[^>]*>/i.test(body) ? body.replace(/<head[^>]*>/i, (open) => `${open}${SHEETS_PENDING_STYLE}`) : SHEETS_PENDING_STYLE + body;
 }
-const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
+// The table rules restate reader.css's table look for documents baked with
+// the old one (filled cells, 8px radius, 3px gutters), which drew a white "+"
+// at every cell corner once an author collapsed the table. They sit at type
+// specificity so they beat that baked :where() block, while any author rule
+// (which always comes later in the document) still wins; custom designs are
+// left alone.
+const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}:where(html:not([data-tdoc-design=custom]) body) table{border-collapse:collapse;border-spacing:0}:where(html:not([data-tdoc-design=custom]) body) :is(th,td){background:transparent;border-radius:0;border:0;border-bottom:1px solid var(--td-line,#e8e7e3)}:where(html:not([data-tdoc-design=custom]) body) th{background:var(--td-th-bg,#f0f0ee)}';
 function hasReaderBlock(html) {
   return READER_BLOCK_RE.test(html);
 }
@@ -22043,7 +22049,8 @@ function suggestNorm(s) {
 
 // The publish-time block check (server/block-lint.js, inlined by
 // bin/tdoc-bundle): loose text in wrapper <div>s, wrapper classes that are
-// not house blocks and small sheets in a prose doc, returned with a
+// not house blocks, small sheets in a prose doc and author CSS restyling
+// table borders or cell fills, returned with a
 // successful upload as advice. Never a refusal, and never the reason an
 // upload fails: any error here is no warning.
 /* __TDOC_BLOCK_LINT__ */
@@ -34138,6 +34145,8 @@ const tdocHandlers = {
             custom_design: blockLint.custom_design,
             small_sheets: blockLint.small_sheets,
             small_sheet_count: blockLint.small_sheet_count,
+            table_css: blockLint.table_css,
+            table_css_count: blockLint.table_css_count,
             truncated: blockLint.truncated,
           },
         } : {}),
