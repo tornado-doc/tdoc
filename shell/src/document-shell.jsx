@@ -587,10 +587,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     // no composer: the conflict notice says what to do.
     const current = editorRef.current;
     if (selection?.kind === 'element' && current?.modeless) {
-      current.publishFirst().then((published) => {
+      current.publishFirst().then(({ published, conflict }) => {
         if (published) { setComposer(selection); return; }
         bridgeRef.current?.({ type: 'tdoc:clearPending' });
-        showToast('Your changes are not published yet, so this comment could not be anchored. Try again in a moment.', true);
+        showToast(conflict
+          ? 'Someone else just edited this doc, so your changes are not published yet. Open the latest version (Show latest, at the top) to resolve that, then comment.'
+          : 'Your changes are not published yet, so this comment could not be anchored. Try again in a moment.', true);
       }).catch(() => {
         bridgeRef.current?.({ type: 'tdoc:clearPending' });
         showToast('Could not publish your changes before commenting', true);

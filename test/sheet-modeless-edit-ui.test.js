@@ -311,8 +311,34 @@ async function shot(page, name) {
       await cell(frame, 1, 1).dblclick();
       await frame.locator('.ts-editor').waitFor();
       assert(await frame.locator('.tdoc-comment-pill').count() === 0, 'the pill stayed on the cell being edited');
+      // Esc cancels the edit: the pill is back on the same cell at once.
       await page.keyboard.press('Escape');
+      await frame.locator('.ts-editor').waitFor({ state: 'detached' });
+      await frame.locator('.ts-row[data-i="1"] .ts-c[data-c="1"] .tdoc-comment-pill').waitFor({ timeout: 2000 });
       await context.close();
+    });
+
+    await test('a comment while someone else has published over the draft: no composer, the toast says to resolve that first', async () => {
+      reset();
+      const a = await openSheet(await newContext());
+      const b = await openSheet(await newContext({ idleMs: 1500 }));
+      await cell(a.frame, 0, 1).click();
+      await a.page.keyboard.type('Mine');
+      await a.page.keyboard.press('Enter');
+      await cell(b.frame, 1, 1).click();
+      await b.page.keyboard.type('Theirs');
+      await b.page.keyboard.press('Enter');
+      await until(() => latest() === 2, 10000);
+      assert(latest() === 2, 'the other editor did not publish');
+      await cell(a.frame, 0, 1).click();
+      await a.frame.locator('.ts-c .tdoc-comment-pill').click();
+      const toast = a.page.locator('.tdoc-shell-toast');
+      await toast.waitFor({ timeout: 10000 });
+      const text = await toast.innerText();
+      assert(/Someone else just edited this doc/.test(text) && /Show latest/.test(text) && !/Try again in a moment/.test(text), `the toast: ${text}`);
+      assert(await a.page.locator('.tdoc-popup textarea').count() === 0, 'a composer opened over an unpublished draft');
+      assert(latest() === 2, 'the draft was published over the newer version');
+      await a.page.context().close(); await b.page.context().close();
     });
 
     await test('a version published elsewhere: the "just published" strip, without loading that version in a hidden frame', async () => {

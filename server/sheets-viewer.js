@@ -2339,6 +2339,7 @@
     var ed = editor; editor = null;
     ed.input.remove();
     ui.grid.focus({ preventScroll: true });
+    placePill(); // the cell's comment pill, hidden while typing, is back
   }
   function openTagPicker(tab, r, c, cell, initial) {
     var current = tab.index.cols[c].tags[r].slice();
