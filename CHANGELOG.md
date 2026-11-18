@@ -32,6 +32,19 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **Tables have one look, and it survives a restyle.** The reader drew every
+  cell as a filled, 8px-rounded chip with 3px gutters, and its header was the
+  same grey as the body. A doc whose own CSS collapsed the table and added
+  1px cell borders (as agents often did) got a white "+" at every cell corner.
+  The reader table is now a tinted header band over hairline-ruled rows,
+  collapsed and square, so an author's collapse changes nothing and cell
+  borders draw a clean grid. Already-published docs get it through the
+  serve-time reader patch (custom designs untouched). The publish block check
+  and `bin/tdoc-validate-template` now warn: "Tables: use tdoc's table style;
+  don't restyle table borders or cell backgrounds", and the authoring guide
+  and house styles say the same (they used to ask each doc to draw its own
+  ruled table).
+
 - **An agent can say "working on it" and then "live now".** Once an agent had
   the last word on a comment, every further agent reply was skipped
   (`already_answered`) unless the last one was `partial`, so a quick "working

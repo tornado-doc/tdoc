@@ -58,7 +58,7 @@ mono  ui-monospace, "SF Mono", Menlo, monospace   (theirs is "DM Mono")
 | body text | `rgba(10,10,10,.92)` |
 | headings | `#0a0a0a` |
 | muted / links | `#737373` |
-| code / table cell | `#f0f0f0` / `#f5f5f5` |
+| code | `#f0f0f0` |
 | accent (rule, one highlighted node) | `#ff4b2e` |
 
 ## CSS
@@ -74,9 +74,9 @@ body  { background:#fff; }
 .wrap a  { color:#737373; text-decoration:underline; }
 .tag     { font:13px ui-monospace,"SF Mono",Menlo,monospace; background:#f5f5f5; color:#171717; border-radius:4px; padding:1px 6px; }
 code     { font:.85em ui-monospace,"SF Mono",Menlo,monospace; background:#f0f0f0; color:#171717; padding:1px 5px; border-radius:3px; }
-table    { border-collapse:separate; border-spacing:3px; width:100%; }
+table    { width:100%; }
 th       { color:#737373; text-align:left; font:600 11px/1 ui-monospace,Menlo,monospace; letter-spacing:.04em; text-transform:uppercase; padding:8px 10px; }
-td       { background:#f5f5f5; color:#171717; padding:9px 10px; border-radius:4px; }
+td       { color:#171717; padding:9px 10px; }
 .tdoc-tile .tdoc-tile-num { font-family:ui-monospace,Menlo,monospace; font-weight:500; }
 aside.note { border:0; border-left:3px solid #ff4b2e; border-radius:0; background:#fff5f3; }
 
@@ -89,7 +89,7 @@ aside.note { border:0; border-left:3px solid #ff4b2e; border-radius:0; backgroun
 :where(body > .wrap, body > main, body > article, body > .content, body > .container) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
 :where(body:not(:has(> .wrap, > main, > article, > .content, > .container))) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
 :where(body img, body video, body iframe, body svg, body canvas) { max-width: 100% !important; height: auto; box-sizing: border-box; }
-:where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; max-width: 100%; overflow-wrap: normal; }
+:where(body table) { border-collapse: collapse; border-spacing: 0; margin: 0 0 18px; font-size: 16px; max-width: 100%; overflow-wrap: normal; }
 :where(body th, body td) { padding: 10px 14px; border: 0; text-align: left; }
 :where(body th) { font-weight: 600; }
 .tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -148,7 +148,7 @@ the single thing the figure is about.
 | Accent fill | `fill:#fff5f3 stroke:#ff4b2e`, text `#ff4b2e` — **one node per figure** |
 | Textured variant | Diagonal hatch in `#ff4b2e` at 35% over the same fill |
 | Stacked bar | Greys `#f0f0f0` / `#e5e5e5` / `#d4d4d4` with `#a3a3a3` strokes; the segment under discussion takes the accent |
-| Table | `rule` hairline border, square corners; row rules in `rule`; header in `label-type` mono, `muted`, over a rule in `ink`; figures tabular; no fill |
+| Table | the reader's own table (a tinted header band over hairline-ruled rows, square); write no table borders, `border-collapse`/`border-spacing` or cell fills of your own. The header text may take `label-type`: mono, `muted`; figures tabular |
 
 Metric labels are mono here, including inside figures — a number set in the
 body sans reads as prose and gets skimmed.

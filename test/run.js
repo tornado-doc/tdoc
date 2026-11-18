@@ -10,6 +10,7 @@
 //   node test/run.js            # offline suite (default; CI uses this)
 //   node test/run.js --browser  # required local layout regressions
 //   node test/run.js --all      # also attempt network/browser suites
+//   node test/run.js --perf     # performance budgets enforced (CI perf job)
 
 const { spawnSync } = require('child_process');
 const path = require('path');
@@ -35,6 +36,7 @@ const OFFLINE = [
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
   'tdoc-ai-mark.test.js',      // tdoc AI's face: tdoc_logo.svg's strokes + the Ask AI star on an accent badge; tdoc AI and unnamed agents wear it
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
+  'perf-budget.test.js',       // timing budgets: complexity guards fail everywhere, scaled (never tightened) by the runner; perf budgets fail only where enforced (CI perf job)
   'no-async-wait-for-function.test.js', // browser tests never waitForFunction(async ...): Playwright does not await the predicate's value
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'block-lint.test.js',       // publish-time block check: loose text and non-house wrappers warned, never refused; linear on 8 MB sheets; house blocks baked
@@ -274,6 +276,7 @@ const BROWSER = [
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'style-reader-column-render.test.js', // a house style alone yields the same reading column as a baked doc
+  'table-style-render.test.js', // the reader table (header band, ruled rows) survives an author's collapse + cell borders; old bakes get it via the serve-time patch
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
   'workspace-access-ui.test.js', // Allow page workspace ticks + Settings > Agents change/remove, checked against the server
   'connect-ai-apps-ui.test.js', // remoteMcp flag: Connect in one click on /start, /setup, Settings (Claude/ChatGPT/Cursor links) + OAuth consent page, desktop + phone
@@ -338,13 +341,24 @@ const EXTENDED_BROWSER = [
 ];
 
 const INTEGRATION = ['onboarding.test.js', 'publish.test.js'];
+
+// --perf: the pure performance budgets (test/helpers/perf-budget.js budget())
+// enforced, for the CI `perf` job, which does not block a merge. Elsewhere
+// TDOC_PERF=report turns an overrun into a warning; complexity guards
+// (guard()) fail everywhere. [suite, TDOC_TEST_FILTER]
+const PERF = [
+  ['sheets-ui.test.js', '10,000 rows'],
+  ['sheets-rules-ui.test.js', '10,000 rows'],
+];
 const RUNTIME = [
   'preview-workerd.test.js', // needs npm ci; real workerd WASM and font modules
   'doc-download-deps.test.js', // needs npm ci; download output read back with marked and SheetJS (CI: shell runtime job)
 ];
 const runAll = process.argv.includes('--all');
-const runBrowser = process.argv.includes('--browser');
-const allFiles = runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
+const runPerf = process.argv.includes('--perf');
+const runBrowser = process.argv.includes('--browser') || runPerf;
+const allFiles = runPerf ? PERF.map(([f]) => f) : runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
+const perfFilter = new Map(runPerf ? PERF : []);
 // --shard i/n runs every n-th suite starting at i, so CI can split the
 // browser regressions across parallel jobs (each suite starts its own server).
 const shardArg = process.argv.find((a) => a.startsWith('--shard='));
@@ -364,7 +378,8 @@ let failed = [];
 for (const f of files) {
   const p = path.join(__dirname, f);
   process.stdout.write(`\n=== ${f} ===\n`);
-  const r = spawnSync(process.execPath, [p], { stdio: 'inherit' });
+  const env = perfFilter.has(f) ? { ...process.env, TDOC_PERF: 'enforce', TDOC_TEST_FILTER: perfFilter.get(f) } : process.env;
+  const r = spawnSync(process.execPath, [p], { stdio: 'inherit', env });
   if (r.status !== 0) failed.push(f);
 }
 

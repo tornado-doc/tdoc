@@ -26,7 +26,7 @@ console.log('reader-overflow (tables + diagrams stay unclipped)');
 t('overlay table style has no negative horizontal margin', () => {
   assert(!/body table[^}]*margin:\s*[^;]*-\d+px/.test(src),
     'table rule still uses a negative margin (clips inside overflow wrappers)');
-  assert(src.includes(':where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }'),
+  assert(src.includes(':where(body table) { border-collapse: collapse; border-spacing: 0; margin: 0 0 18px; font-size: 16px; }'),
     'default table margin must be 0 0 18px with no left pull');
 });
 

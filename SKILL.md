@@ -1319,7 +1319,9 @@ Tables must allocate readable columns even with long identifiers; a fixed table
 minimum width alone does not do that. Mark atomic values (amount + unit, dates,
 statuses, identifiers) with `<td data-tdoc-cell="value">5 days</td>`; leave
 paragraphs wrappable. Do not apply a single first-column percentage to unrelated
-tables. Use the chosen style's table component or deliberately reflow the table.
+tables. Tables take tdoc's own table style: don't restyle table borders or cell
+backgrounds (no `border`, `border-collapse`, `border-spacing` or `background` on
+`table`/`tr`/`th`/`td`); the publish check warns when a doc does.
 The provider protects native table cells using measured content: short values
 reserve their natural width; prose reserves up to a 12em reading measure;
 explicit value cells remain unbroken. If columns cannot fit, the table scrolls

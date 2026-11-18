@@ -65,7 +65,7 @@ aside.note { border:0; border-left:2px solid #c15f3c; background:#f4efe7; border
 :where(body > .wrap, body > main, body > article, body > .content, body > .container) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
 :where(body:not(:has(> .wrap, > main, > article, > .content, > .container))) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
 :where(body img, body video, body iframe, body svg, body canvas) { max-width: 100% !important; height: auto; box-sizing: border-box; }
-:where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; max-width: 100%; overflow-wrap: normal; }
+:where(body table) { border-collapse: collapse; border-spacing: 0; margin: 0 0 18px; font-size: 16px; max-width: 100%; overflow-wrap: normal; }
 :where(body th, body td) { padding: 10px 14px; border: 0; text-align: left; }
 :where(body th) { font-weight: 600; }
 .tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -110,7 +110,7 @@ only saturated thing on the page and it stays rationed.
 | Accent fill | `fill:#f4e3dc stroke:#e3c4b6`, text `#c15f3c` |
 | Textured variant | Sparse dot in `#e3c4b6` over the same fill |
 | Stacked bar | Paper tints `#f4efe7` / `#ece5d8` / `#dcd3c4` with `#c9bfae` strokes |
-| Table | `rule` hairline border, square corners; row rules in `rule`; header in `label-type` small-caps, `muted`, over a rule in `ink`; no fill |
+| Table | the reader's own table (a tinted header band over hairline-ruled rows, square); write no table borders, `border-collapse`/`border-spacing` or cell fills of your own. The header text may take `label-type`: small-caps, `muted` |
 
 Figure labels are the body sans, not the display serif — the serif is for
 headings, and inside a drawing it turns decorative.

@@ -22,6 +22,17 @@
 // sheet doc and is left alone. Counting stops at the 21st row, so an 8 MB
 // sheet costs no more.
 //
+// It also reads the document's own <style> CSS for rules that restyle a
+// table's borders, border model or cell fills (border*, border-collapse,
+// border-spacing, background* on table / th / td / tr and their row groups).
+// The reader draws every table in one look (server/reader.css): a tinted
+// header band over hairline-ruled rows. An author's partial restyle on top of
+// it is what made tables ugly (collapsed borders under filled cells), so a
+// house-style doc is told to leave tables alone. A custom design
+// (data-tdoc-design="custom") or a slide deck brings its own table and is not asked; neither
+// are :where() rules (the house styles' copy of the reader scaffold) or a
+// declaration that only clears a value (0, none, transparent).
+//
 // Shared by the worker (inlined by bin/tdoc-bundle at __TDOC_BLOCK_LINT__)
 // and Node tests (require).
 (function (root, factory) {
@@ -221,6 +232,65 @@
     return el.name + (el.cls ? '.' + el.cls.split(/\s+/)[0] : '');
   }
 
+  // ---- Table CSS ------------------------------------------------------------
+  var TABLE_TAGS = { table: 1, th: 1, td: 1, tr: 1, thead: 1, tbody: 1, tfoot: 1 };
+  var TABLE_PROP = /^(?:border(?:-[a-z-]+)?|background(?:-[a-z-]+)?)$/;
+  var CLEARED = /^(?:0(?:px)?|none|transparent|initial|unset|revert|revert-layer)(?:\s*!important)?$/;
+  var MAX_CSS = 512 * 1024;
+  // Author <style> blocks: not tdoc's own (the baked reader, its serve-time
+  // patch, provider styles).
+  var STYLE_OPEN = /<style\b([^>]*)>/ig;
+  var PROVIDER_STYLE = /\bid\s*=\s*["']?tdoc-|\bdata-tdoc-provider\b/i;
+  function authorCss(html) {
+    var out = '', m;
+    STYLE_OPEN.lastIndex = 0;
+    while ((m = STYLE_OPEN.exec(html)) && out.length < MAX_CSS) {
+      var from = STYLE_OPEN.lastIndex;
+      var close = html.indexOf('</style', from);
+      if (close === -1) { var lc = html.slice(from).search(/<\/style/i); close = lc === -1 ? html.length : from + lc; }
+      if (!PROVIDER_STYLE.test(m[1])) out += html.slice(from, Math.min(close, from + MAX_CSS - out.length)) + '\n';
+      STYLE_OPEN.lastIndex = close;
+    }
+    return out;
+  }
+  // The element a selector finally styles is its last compound; it is a
+  // table part when that compound starts with one of the table tags.
+  function tableTarget(sel) {
+    var t = sel.replace(/\[[^\]]*\]/g, '[]').replace(/\([^()]*\)/g, '()').trim();
+    if (!t || /^:where\(/i.test(sel.trim())) return null;
+    var parts = t.split(/\s*[\s>+~]\s*/);
+    var last = parts[parts.length - 1] || '';
+    var tag = /^([a-z][a-z0-9]*)/i.exec(last);
+    return tag && TABLE_TAGS[tag[1].toLowerCase()] ? tag[1].toLowerCase() : null;
+  }
+  // Rules of `css` (at-rule preludes such as @media are looked through) that
+  // set a table border, border model or cell fill: their selectors, deduped.
+  function tableRestyles(css) {
+    css = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    var rule = /([^{}]+)\{([^{}]*)\}/g, m, found = [], seen = {};
+    while ((m = rule.exec(css))) {
+      var prelude = m[1].replace(/^[\s\S]*[;{}]/, '').trim();
+      if (!prelude || prelude.charAt(0) === '@') continue;
+      var hits = false, decls = m[2].split(';');
+      for (var d = 0; d < decls.length && !hits; d++) {
+        var c = decls[d].indexOf(':');
+        if (c === -1) continue;
+        var prop = decls[d].slice(0, c).trim().toLowerCase();
+        var val = decls[d].slice(c + 1).trim().toLowerCase();
+        if (TABLE_PROP.test(prop) && !CLEARED.test(val)) hits = true;
+      }
+      if (!hits) continue;
+      var sels = prelude.split(',');
+      for (var k = 0; k < sels.length; k++) {
+        var sel = sels[k].replace(/\s+/g, ' ').trim();
+        if (!tableTarget(sel) || seen[sel]) continue;
+        seen[sel] = 1;
+        found.push(sel);
+      }
+    }
+    return found;
+  }
+
   function lint(input) {
     var html = String(input || '');
     var bodyAt = html.search(/<body[\s>]/i);
@@ -352,7 +422,12 @@
       .sort(function (a, b) { return b.count - a.count; });
     var prose = docContent || proseBlocks >= PROSE_BLOCKS;
     var small = prose ? sheets.filter(function (x) { return x.small; }).map(function (x) { return { name: x.name, rows: x.rows, cols: x.cols }; }) : [];
+    // A slide deck is designed slide by slide, tables included.
+    var deck = /\bdata-tdoc-slide\b/.test(html);
+    var restyled = custom || deck ? [] : tableRestyles(authorCss(html));
     var result = {
+      table_css: restyled.slice(0, MAX_SAMPLES),
+      table_css_count: restyled.length,
       loose_text: loose,
       loose_text_samples: samples,
       unknown_classes: unknown.slice(0, MAX_CLASSES),
@@ -372,13 +447,28 @@
   var SMALL = 'Small table in a doc: use a plain <table>; keep sheets for data people filter or sort, and for wide tables or long cell text';
   var SMALL_GUIDE = 'Guide: tdoc://authoring/structure/sheets.md';
 
+  var HEAD = 'Block check (a warning only; the doc is published): ';
+  var TABLES = 'Tables: use tdoc\'s table style; don\'t restyle table borders or cell backgrounds';
+  var TABLES_GUIDE = 'Guide: tdoc://authoring/structure/components.md (Table)';
+
   function format(r) {
+    var lines = blockLines(r);
+    if (r.table_css_count) {
+      var tables = TABLES + ' (' + r.table_css.map(function (s) { return snippet(s); }).join(', ')
+        + (r.table_css_count > r.table_css.length ? ', …' : '') + '). ' + TABLES_GUIDE;
+      if (!lines) return HEAD + tables;
+      lines.push(tables);
+    }
+    return lines ? lines.join('\n') : null;
+  }
+
+  function blockLines(r) {
     if (!r.loose_text && !r.unknown_class_count && !r.small_sheet_count) return null;
-    var head = 'Block check (a warning only; the doc is published): ';
+    var head = HEAD;
     var small = r.small_sheet_count ? SMALL + ' ('
       + r.small_sheets.map(function (x) { return '"' + snippet(x.name) + '" ' + x.rows + (x.rows === 1 ? ' row' : ' rows') + ' × ' + x.cols + (x.cols === 1 ? ' column' : ' columns'); }).join(', ')
       + (r.small_sheet_count > r.small_sheets.length ? ', …' : '') + '). ' + SMALL_GUIDE : null;
-    if (!r.loose_text && !r.unknown_class_count) return head + small;
+    if (!r.loose_text && !r.unknown_class_count) return [head + small];
     var parts = [];
     if (r.loose_text) {
       parts.push(r.loose_text + ' loose text run' + (r.loose_text === 1 ? '' : 's') + ' outside p/li/h*/td ('
@@ -394,7 +484,7 @@
     if (r.custom_design) lines.push('This doc is a custom design (--custom-template); a report reads better as a standard doc made of blocks.');
     lines.push(FIX);
     if (small) lines.push(small);
-    return lines.join('\n');
+    return lines;
   }
 
   return { lint: lint, KNOWN_CLASSES: Object.keys(KNOWN) };
