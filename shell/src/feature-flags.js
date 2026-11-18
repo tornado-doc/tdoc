@@ -122,7 +122,10 @@ export const FLAGS = Object.freeze({
   // ⋯ › "Convert to Sheet": an editor turns a prose doc that holds sheet
   // tables into a sheet doc (title + sheet tables, the rest of the prose in
   // a .sheet-note), published as a new version (document/convert-to-sheet.js).
-  convertToSheet: Object.freeze({ label: 'Convert a doc to a sheet (⋯ menu)', owner: 'julie', added: '2026-11-17', default: false, preview: true, graduate_by: '2026-11-24' }),
+  // On for everyone (Julie, 2026-11-17): it is explicit, confirmed, and
+  // undone by Restore in the version history. The flag is the off switch
+  // until it settles; remove it by graduate_by.
+  convertToSheet: Object.freeze({ label: 'Convert a doc to a sheet (⋯ menu)', owner: 'julie', added: '2026-11-17', default: true, graduate_by: '2026-11-24' }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

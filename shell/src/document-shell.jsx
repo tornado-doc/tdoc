@@ -1862,7 +1862,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // (document/convert-to-sheet.js), published as the next version through
   // the same save as a column width, then opened. The current version stays
   // in the history; Restore there undoes it.
-  const canConvertToSheet = convertToSheetFlag && Boolean(config.canEdit) && !config.isLanding
+  const canConvertToSheet = convertToSheetFlag && Boolean(config.canEdit) && !config.isLanding && !boot.oldVersion
     && docShape.sheets > 0 && !docShape.sheetDoc && !docShape.slides;
   const convertToSheet = async () => {
     const current = editorRef.current;
@@ -1871,7 +1871,9 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     const base = Math.max(Number(config.version) || 0, ownVersionRef.current);
     let result;
     try {
-      result = await current.saveInPlace(base, (html) => convertToSheetHtml(html).html);
+      // Open comments on the prose that moves: its note is written open.
+      const anchors = comments.comments.filter((c) => !c.deleted && c.status !== 'applied' && c.anchor).map((c) => c.anchor);
+      result = await current.saveInPlace(base, (html) => convertToSheetHtml(html, { comments: anchors }).html);
     } catch (error) {
       if (error.code === 'draft_open') throw new Error('Save or discard your draft first.');
       if (error.status === 409 && error.body?.error === 'version_conflict') throw new Error('This doc has a newer version. Open it to convert.');

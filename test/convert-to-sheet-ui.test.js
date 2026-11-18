@@ -4,10 +4,12 @@
 // copy shaped like a real task list (a title, a paragraph, one sheet with
 // comments on two cells):
 //   - the menu offers it to an editor of that doc only: not on a sheet doc,
-//     not with the flag off, not on a doc without a sheet
+//     not with the flag off (on by default; the flag is the off switch),
+//     not on a doc without a sheet
 //   - it asks first, in one sentence; Convert publishes v2 and opens it
 //   - v2 is a sheet doc: no "Open the doc", no expand, the title kept, the
-//     paragraph kept above the grid as the sheet's note
+//     paragraph kept above the grid as the sheet's note, the page width of a
+//     sheet doc (not the 720px reading column)
 //   - the cell comments are still on their cells (row id + column key)
 //   - v1 is intact in the history and still the prose doc it was
 // And the conversion itself (document/convert-to-sheet.js), in the browser:
@@ -83,6 +85,10 @@ ${taskTable()}
     ]);
   }
   writeDoc('plan', 'Raftbench plan', TASK_LIST.replace('<p>Every open task', '<h2>Context</h2><p>Why the benchmark exists, in a few lines of prose that go on long enough that they would push the sheet down the page if they stayed above it as they are.</p><ul><li>Runs nightly</li><li>Scores each agent</li></ul><p>Every open task'));
+  writeDoc('folded', 'Folded', TASK_LIST.replace(/<p>Every open task[^<]*<\/p>/, '<details class="sheet-note"><summary>Notes</summary><p>The scoring rubric lives in the repo.</p></details>'), [
+    { id: 'c_rubric', text: 'Link it?', status: 'open', author: { login: 'julie' }, created: now, version: 1,
+      anchor: { kind: 'text', text: 'scoring rubric', context_before: 'The ', context_after: ' lives in the repo.' } },
+  ]);
   const M = await import('../shared/sheet-markup.mjs');
   writeDoc('budget', 'Budget', M.sheetDocumentHtml({ title: 'Budget', sheets: [{ name: 'Spend', columns: [{ name: 'Item', type: 'text' }], rows: [{ id: 'r1', cells: ['Rent'] }] }] }));
   writeDoc('essay', 'Essay', '<!doctype html><html><head><meta charset="utf-8"><title>Essay</title></head><body><main><h1>Essay</h1><p>Only prose.</p></main></body></html>');
@@ -90,6 +96,7 @@ ${taskTable()}
   // The conversion, bundled for the browser as the shell bundles it.
   const esbuild = require('esbuild');
   const bundle = esbuild.buildSync({ entryPoints: [path.join(__dirname, '..', 'shell', 'src', 'document', 'convert-to-sheet.js')], bundle: true, write: false, format: 'iife', globalName: 'ConvertToSheet' }).outputFiles[0].text;
+  const elementJs = esbuild.buildSync({ entryPoints: [path.join(__dirname, '..', 'shell', 'src', 'comments', 'selection', 'anchors', 'element.js')], bundle: true, write: false, format: 'iife', globalName: 'Elem' }).outputFiles[0].text;
   const docType = esbuild.buildSync({ entryPoints: [path.join(__dirname, '..', 'shared', 'doc-type.mjs')], bundle: true, write: false, format: 'iife', globalName: 'DocType' }).outputFiles[0].text;
 
   const port = await reservePort();
@@ -110,9 +117,10 @@ ${taskTable()}
       await page.setContent('<!doctype html><title>x</title>');
       await page.addScriptTag({ content: bundle });
       await page.addScriptTag({ content: docType });
-      const run = (html) => page.evaluate((h) => {
+      await page.addScriptTag({ content: elementJs });
+      const run = (html, comments) => page.evaluate(([h, comments]) => {
         try {
-          const r = window.ConvertToSheet.convertToSheetHtml(h);
+          const r = window.ConvertToSheet.convertToSheetHtml(h, { comments: comments || [] });
           const d = new DOMParser().parseFromString(r.html, 'text/html');
           const note = d.querySelector('.sheet-note');
           return {
@@ -125,7 +133,7 @@ ${taskTable()}
             head: d.head.innerHTML,
           };
         } catch (error) { return { error: error.message }; }
-      }, html);
+      }, [html, comments]);
       const tablesOf = (html) => page.evaluate((h) => Array.from(new DOMParser().parseFromString(h, 'text/html').querySelectorAll('table[data-tdoc-sheet]')).map((t) => t.outerHTML), html);
 
       await test('a title, a paragraph and a sheet: the paragraph becomes a visible note under the title; the sheet is kept as it was', async () => {
@@ -156,6 +164,31 @@ ${taskTable()}
         assert(!r.error && r.sheetOnly, JSON.stringify(r));
         assert(JSON.stringify(r.order) === JSON.stringify(['note', 'T:One', 'T:Two', 'T:Three']), JSON.stringify(r.order));
         assert(/First/.test(r.note.text) && /Item/.test(r.note.text) && /More/.test(r.note.text), r.note.text);
+      });
+
+      const LONG = `<!doctype html><html><head><title>G</title></head><body><main><h1>Gallery</h1><p>Why the benchmark exists, in more words than a short intro holds, so that this note folds away into a details block below the title.</p>
+        <figure><img src="a.png" alt="Chart A"></figure><figure><img src="b.png" alt="Chart B"></figure>${taskTable()}</main></body></html>`;
+      await test('a comment on prose that folds into the note writes the note open; with none it stays closed', async () => {
+        assert((await run(LONG)).note.open === false, 'no comments: closed');
+        assert((await run(LONG, [{ kind: 'text', text: 'in more words than a short intro' }])).note.open === true, 'a comment on its words: open');
+        assert((await run(LONG, [{ kind: 'element', selector: 'main > figure:nth-of-type(1) > img', tag: 'img', text: '', accessible_name: 'Chart A' }])).note.open === true, 'a comment on an image in it: open');
+        assert((await run(LONG, [{ kind: 'element', sheet: { table: 'Tasks', row: 'r1', key: 'c1' } }, { kind: 'document' }, { kind: 'text', text: 'not in the doc' }])).note.open === false, 'cell, doc and elsewhere comments: closed');
+      });
+
+      await test('an image comment by its old path is found on the same image after the move (by its alt), never on another', async () => {
+        const out = await page.evaluate((h) => {
+          const before = new DOMParser().parseFromString(h, 'text/html');
+          const imgB = before.querySelectorAll('img')[1];
+          const anchor = { kind: 'element', ...window.Elem.describeElement(imgB) };
+          const after = new DOMParser().parseFromString(window.ConvertToSheet.convertToSheetHtml(h).html, 'text/html');
+          const hit = window.Elem.resolveElement(anchor, { root: after });
+          // Its path, read in the converted doc, is now some other element or none.
+          let byPath = null; try { byPath = after.querySelector(anchor.selector); } catch {}
+          const ghost = window.Elem.resolveElement({ ...anchor, accessible_name: 'Chart Z' }, { root: after });
+          return { selector: anchor.selector, alt: hit.element && hit.element.getAttribute('alt'), approximate: hit.approximate, byPath: byPath && byPath.getAttribute('alt'), ghost: !!ghost.element };
+        }, LONG);
+        assert(out.alt === 'Chart B' && !out.approximate, JSON.stringify(out));
+        assert(!out.ghost, `a name found nowhere attaches to nothing: ${JSON.stringify(out)}`);
       });
 
       await test('a doc with no sheet table is refused; a sheet doc converts to itself', async () => {
@@ -229,13 +262,19 @@ ${taskTable()}
         await page.keyboard.press('Escape');
       });
 
-      await test(`${label}: with the flag off it is not offered`, async () => {
+      await test(`${label}: on by default; with the flag off it is not offered`, async () => {
         const plain = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile });
         await plain.addInitScript(() => { window.__TDOC_FLAGS__ = Object.assign(window.__TDOC_FLAGS__ || {}, { convertToSheet: false }); });
         const p = await plain.newPage();
         await open(p, `/d/${slug}`);
         assert(await menu(p) === 0, 'hidden');
         await plain.close();
+        // Unpinned: on by default.
+        const byDefault = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile });
+        const q = await byDefault.newPage();
+        await open(q, `/d/${slug}`);
+        assert(await menu(q) === 1, 'on by default');
+        await byDefault.close();
       });
 
       await test(`${label}: Convert asks first, then publishes v2: a standalone sheet with its title, its paragraph as the note, the comments on their cells`, async () => {
@@ -265,6 +304,10 @@ ${taskTable()}
         assert(!c.back && !c.expand, `no back, no expand: ${JSON.stringify(c)}`);
         assert(c.title === 'Raftbench task list', `title kept: ${c.title}`);
         assert(/^Every open task for the benchmark/.test(c.note || ''), `the paragraph is the note: ${c.note}`);
+        // A sheet page, not a reading column: as wide as a sheet doc tdoc makes (72rem), all five columns in view.
+        const widths = await doc.evaluate(() => { const g = document.querySelector('.tdoc-sheet .ts-grid'); const heads = Array.from(document.querySelectorAll('.tdoc-sheet .ts-h')); const last = heads[heads.length - 1]; return { sheet: document.querySelector('.tdoc-sheet').getBoundingClientRect().width, lastRight: last ? last.getBoundingClientRect().right : 0, gridRight: g.getBoundingClientRect().right, view: innerWidth }; });
+        if (!mobile) assert(widths.sheet > 1000 && widths.lastRight <= widths.gridRight + 1, `full page width, every column in view: ${JSON.stringify(widths)}`);
+        else assert(widths.sheet > widths.view - 80, `the phone's width: ${JSON.stringify(widths)}`);
         // The comments: still listed, still on their cells.
         await doc.waitForFunction(() => window.__tdocElementHooks && typeof window.__tdocElementHooks.resolve === 'function');
         assert(await cellOf(doc, comments[0].anchor) === 'codex', 'Owner comment on r3 / Owner');
@@ -302,6 +345,18 @@ ${taskTable()}
       await test(`${label}: no page errors`, async () => { assert(!errors.length, errors.join('; ')); });
       await context.close();
     }
+    await test('a comment inside a folded note: its link opens the note and lands on its words (desktop + phone)', async () => {
+      for (const [viewport, mobile] of [[{ width: 1280, height: 860 }, false], [{ width: 390, height: 844 }, true]]) {
+        const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile });
+        const page = await context.newPage();
+        let doc = await open(page, '/d/folded');
+        assert(await doc.evaluate(() => window.__tdocSheets.expanded().sheetOnly && !document.querySelector('details.sheet-note').open), 'a sheet doc, its note folded');
+        doc = await open(page, '/d/folded?comment=c_rubric');
+        await doc.waitForFunction(() => document.querySelector('details.sheet-note').open, null, { timeout: 8000 });
+        await context.close();
+      }
+    });
+
     await test('desktop: longer prose converts into a collapsed Notes note above the sheet, which opens', async () => {
       const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
       await context.addInitScript(() => { window.__TDOC_FLAGS__ = Object.assign(window.__TDOC_FLAGS__ || {}, { convertToSheet: true }); });

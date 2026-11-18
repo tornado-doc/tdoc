@@ -35,6 +35,20 @@ const KEEP = SHEET + ',[data-tdoc-provider],script,style,template,noscript,.shee
 const MEDIA = 'img,svg,video,audio,canvas,iframe,figure,object,embed,picture,math,input,textarea,select,button,table,hr';
 export const NOTE_SHORT = 280;
 const NOTE_BLOCKS = new Set(['P', 'BLOCKQUOTE']);
+const squash = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+
+// Does the moved prose hold a comment's anchor: its quoted words, or (an
+// element comment with no words, an image) any media?
+function carriesComments(moved, anchors) {
+  const live = (anchors || []).filter((a) => a && !a.sheet && a.kind !== 'document');
+  if (!live.length) return false;
+  const text = squash(moved.map((n) => n.textContent || '').join(' '));
+  const media = moved.some((n) => n.nodeType === 1 && (n.matches(MEDIA) || n.querySelector(MEDIA)));
+  return live.some((a) => {
+    const words = squash(a.text);
+    return words ? text.includes(words) : media;
+  });
+}
 
 function meaningful(node) {
   if (node.nodeType === 3) return /\S/.test(node.data.replace(/ /g, ' '));
@@ -43,7 +57,10 @@ function meaningful(node) {
   return node.matches(MEDIA) || !!node.querySelector(MEDIA);
 }
 
-export function convertToSheetHtml(html, Parser = globalThis.DOMParser) {
+// `comments`: the doc's open comment anchors (optional). A note that would
+// fold away prose one of them is on is written open, so its highlight and
+// pin stay in view.
+export function convertToSheetHtml(html, { comments = [], Parser = globalThis.DOMParser } = {}) {
   const doc = new Parser().parseFromString(String(html || ''), 'text/html');
   const body = doc.body;
   const outside = (el) => !el.closest('[data-tdoc-provider]');
@@ -95,6 +112,7 @@ export function convertToSheetHtml(html, Parser = globalThis.DOMParser) {
     } else {
       note = doc.createElement('details');
       note.className = 'sheet-note';
+      if (carriesComments(moved, comments)) note.setAttribute('open', '');
       const summary = doc.createElement('summary');
       summary.textContent = 'Notes';
       note.appendChild(summary);

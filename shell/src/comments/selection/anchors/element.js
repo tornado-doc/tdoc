@@ -81,6 +81,18 @@ export function resolveElement(anchor, options) {
   try { bySelector = anchor.selector ? root.querySelector(anchor.selector) : null; } catch (e) { bySelector = null; }
   if (bySelector && exclude(bySelector)) bySelector = null;
   if (bySelector && scope && !scope.contains(bySelector)) bySelector = null;
+  // No words to check (an image, a chart): its name (alt, aria-label,
+  // title) when it had one, so a positional path that now lands on another
+  // image (the doc's blocks moved: Convert to Sheet's note) is not taken
+  // for it. Found elsewhere by that name; not found, not attached.
+  var name = !want && anchor.accessible_name ? String(anchor.accessible_name) : '';
+  if (name) {
+    if (bySelector && accessibleName(bySelector) === name) return { element: bySelector, approximate: hit.approximate };
+    var named = [];
+    try { named = Array.prototype.filter.call((scope || root).querySelectorAll(anchor.tag || '*'), function (el) { return !exclude(el) && accessibleName(el) === name; }); } catch (e) { named = []; }
+    if (named.length) return { element: named[0], approximate: named.length > 1 || hit.approximate };
+    return scope ? { element: scope, approximate: true } : none;
+  }
   if (bySelector && (!want || shownText(bySelector) === want)) return { element: bySelector, approximate: hit.approximate };
   if (want) {
     var candidates = [];
