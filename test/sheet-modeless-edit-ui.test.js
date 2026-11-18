@@ -68,6 +68,7 @@ async function shot(page, name) {
   };
   const versions = () => JSON.parse(fs.readFileSync(path.join(docRoot, 'meta.json'))).versions.map((v) => Number(v.n));
   const latest = () => Math.max(...versions());
+  const readComments = () => { try { return JSON.parse(fs.readFileSync(path.join(docRoot, 'comments.json'), 'utf8')); } catch { return []; } };
   const versionHtml = (n) => fs.readFileSync(path.join(docRoot, `v${n}`, 'index.html'), 'utf8');
 
   const port = await reservePort();
@@ -86,6 +87,7 @@ async function shot(page, name) {
     await context.addInitScript(([flagOn, idle]) => {
       window.__TDOC_FLAGS__ = { modelessEdit: flagOn };
       window.__TDOC_MODELESS_IDLE_MS = idle;
+      window.__TDOC_LIVE_SYNC_MS = 700;
       try { localStorage.setItem('tdoc-save-notice-dismissed', '1'); } catch {}
     }, [flag, idleMs]);
     await context.route(new RegExp(`/d/${slug}(/v/\\d+)?(\\?.*)?$`), async (route) => {
@@ -247,6 +249,89 @@ async function shot(page, name) {
       await page.locator('.tdoc-popup textarea').first().waitFor({ timeout: 5000 });
       assert(!page.errors.length, page.errors.join('\n'));
       await context.close();
+    });
+
+    await test('a comment on a row just inserted and typed publishes the draft first and anchors to that cell after reload', async () => {
+      reset();
+      const context = await newContext(); // no idle publish during the test
+      const { page, frame } = await openSheet(context);
+      await page.locator(modeSelector('edit')).waitFor();
+      await cell(frame, 2, 0).click({ button: 'right' });
+      await frame.getByRole('menuitem', { name: 'Insert row below' }).click();
+      await frame.waitForFunction(() => document.querySelectorAll('table[data-tdoc-sheet] tbody tr').length === 13);
+      await cell(frame, 3, 0).click();
+      await page.keyboard.type('Brand new task');
+      await page.keyboard.press('Enter');
+      await frame.waitForFunction(() => document.querySelectorAll('table[data-tdoc-sheet] tbody tr')[3].children[0].textContent === 'Brand new task');
+      const rowId = await frame.evaluate(() => document.querySelectorAll('table[data-tdoc-sheet] tbody tr')[3].getAttribute('data-row'));
+      assert(rowId, 'the inserted row has no id');
+      assert(latest() === 1, 'the draft published before the comment');
+      // The pill on the new cell: the draft becomes v2 before the composer opens.
+      await cell(frame, 3, 0).click();
+      await frame.locator('.ts-c .tdoc-comment-pill').click();
+      const composer = page.locator('.tdoc-popup textarea').first();
+      await composer.waitFor({ timeout: 10000 });
+      assert(latest() === 2 && versionHtml(2).includes('Brand new task'), 'the composer opened before the draft was published');
+      await composer.fill('Is this one real?');
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
+      let saved = null;
+      for (let k = 0; k < 50 && !saved; k++) { saved = readComments().find((c) => c.text === 'Is this one real?'); if (!saved) await page.waitForTimeout(100); }
+      assert(saved, 'the comment was not saved');
+      assert(Number(saved.version) === 2, `the comment was filed on v${saved.version}, not the version with its row`);
+      assert(JSON.stringify(saved.anchor || {}).includes(rowId), `the comment does not name the new row ${rowId}: ${JSON.stringify(saved.anchor)}`);
+      // ⌘⌥M on a cell typed just now publishes it too.
+      await cell(frame, 5, 1).click();
+      await page.keyboard.type('Quinn');
+      await page.keyboard.press('Enter');
+      await cell(frame, 5, 1).click();
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Alt+KeyM' : 'Control+Alt+KeyM');
+      await page.locator('.tdoc-popup textarea').first().waitFor({ timeout: 10000 });
+      assert(latest() === 3 && versionHtml(3).includes('>Quinn<'), '⌘⌥M opened the composer before the draft was published');
+      await page.keyboard.press('Escape');
+      // Reload: the comment marks the new row's cell.
+      await page.reload({ waitUntil: 'networkidle' });
+      const fresh = await (await page.locator('iframe.tdoc-doc-frame').elementHandle()).contentFrame();
+      await fresh.locator('.tdoc-sheet .ts-row').first().waitFor({ timeout: 15000 });
+      await fresh.locator('.ts-row[data-i="3"] .ts-c[data-c="0"].has-comment').waitFor({ timeout: 8000 });
+      assert(await cellText(fresh, 3, 0) === 'Brand new task', 'the commented row is not the new one');
+      await cell(fresh, 3, 0).click();
+      await fresh.waitForFunction(() => !!document.querySelector('.ts-row[data-i="3"] .ts-c[data-c="0"].is-comment-on'), null, { timeout: 5000 });
+      await page.getByText('Is this one real?').first().waitFor({ timeout: 5000 });
+      assert(!page.errors.length, page.errors.join('\n'));
+      await context.close();
+    });
+
+    await test('the comment pill hides while a cell is being typed in', async () => {
+      reset();
+      const context = await newContext();
+      const { page, frame } = await openSheet(context);
+      await page.locator(modeSelector('edit')).waitFor();
+      await cell(frame, 1, 1).click();
+      await frame.locator('.ts-c .tdoc-comment-pill').waitFor();
+      await cell(frame, 1, 1).dblclick();
+      await frame.locator('.ts-editor').waitFor();
+      assert(await frame.locator('.tdoc-comment-pill').count() === 0, 'the pill stayed on the cell being edited');
+      await page.keyboard.press('Escape');
+      await context.close();
+    });
+
+    await test('a version published elsewhere: the "just published" strip, without loading that version in a hidden frame', async () => {
+      reset();
+      const writer = await newContext({ idleMs: 1500 });
+      const reader = await newContext();
+      const a = await openSheet(writer);
+      const c = await openSheet(reader);
+      const loads = [];
+      c.page.on('request', (r) => { if (/\/v\/\d+\/frame/.test(r.url())) loads.push(r.url()); });
+      await cell(a.frame, 0, 1).click();
+      await a.page.keyboard.type('Elsewhere');
+      await a.page.keyboard.press('Enter');
+      await until(() => latest() === 2, 10000);
+      assert(latest() === 2, 'the writer did not publish');
+      await c.page.locator('.tdoc-oldver-strip').waitFor({ timeout: 15000 });
+      await c.page.waitForTimeout(1500);
+      assert(!loads.length, `the sheet loaded the newer version to swap it: ${loads.join(', ')}`);
+      await writer.close(); await reader.close();
     });
 
     await test('a search view in the #hash keeps working while editing', async () => {

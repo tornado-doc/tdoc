@@ -65,6 +65,7 @@ export function flashEdited() {
 export function useModelessEdit({
   enabled, // modeless editing for this person on this doc
   liveSwap, // the flag is on: newer versions replace the page in place
+  canSwap = true, // false for a doc the frame never swaps (a sheet, slides): the strip at once, nothing loaded
   config,
   editor,
   send,
@@ -164,6 +165,14 @@ export function useModelessEdit({
       return () => window.clearTimeout(again);
     }
     const n = latest;
+    // A sheet or a deck is never swapped in (frame-probe.js swapBody refuses
+    // live content): do not load the version only to be told so.
+    if (!canSwap) {
+      failed.current.add(n);
+      setFailedCount((c) => c + 1);
+      onSwapFailed?.(n);
+      return undefined;
+    }
     swapping.current = n;
     (async () => {
       let retry = false;
@@ -202,7 +211,7 @@ export function useModelessEdit({
     })();
     return undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveSwap, latest, current, editor.dirty, busy, bubble, slash, imageOpen, editor.saveStatus, tick]);
+  }, [liveSwap, canSwap, latest, current, editor.dirty, busy, bubble, slash, imageOpen, editor.saveStatus, tick]);
 
   // The "vN was just published" strip, with the flag on: never for a
   // reader (the page is swapped in place); for someone with a draft, the

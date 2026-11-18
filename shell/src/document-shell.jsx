@@ -412,9 +412,13 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     location.reload();
   }, []);
 
+  // A page that published itself in place (modeless autosave, a sheet's
+  // column width) comments on the version it is now.
+  const commentVersionNow = useCallback(() => Math.max(Number(config.version) || 0, ownVersionRef.current), [config.version]);
   const comments = useComments({
     slug: config.slug,
     version: config.version,
+    versionNow: commentVersionNow,
     onUnauthorized: signIn,
     demo: !!config.demoComments,
     identity: config.identity,
@@ -574,8 +578,27 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       bridgeRef.current?.({ type: 'tdoc:clearPending' });
       return;
     }
+    // Modeless editing: a comment on an element (a sheet's cell, row or
+    // column; the cell pill, ⌘⌥M, a cell or column menu) anchors to what is
+    // on screen, which may be a draft: a cell just typed, a row just
+    // inserted. The draft publishes first, as the selection bubble's Comment
+    // does for text (modeless-edit.jsx), so the comment is filed on a
+    // version that has it. If it cannot publish (someone else published),
+    // no composer: the conflict notice says what to do.
+    const current = editorRef.current;
+    if (selection?.kind === 'element' && current?.modeless) {
+      current.publishFirst().then((published) => {
+        if (published) { setComposer(selection); return; }
+        bridgeRef.current?.({ type: 'tdoc:clearPending' });
+        showToast('Your changes are not published yet, so this comment could not be anchored. Try again in a moment.', true);
+      }).catch(() => {
+        bridgeRef.current?.({ type: 'tdoc:clearPending' });
+        showToast('Could not publish your changes before commenting', true);
+      });
+      return;
+    }
     setComposer(selection);
-  }, [comments.moveAnchor, config.canComment, config.signInToComment]);
+  }, [comments.moveAnchor, config.canComment, config.signInToComment, showToast]);
 
   const sendToFrame = useCallback((message) => bridgeRef.current?.(message), []);
   // Download: Word, CSV and Excel are built from the document's HTML, which
@@ -2015,6 +2038,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   const modelessEdit = useModelessEdit({
     enabled: editor.modeless,
     liveSwap: modelessFlag && !boot.oldVersion,
+    canSwap: !docShape.sheets && !docShape.slides,
     config,
     editor,
     send: bridge.send,

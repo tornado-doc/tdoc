@@ -319,6 +319,19 @@ export function useDocumentEditor({
   }, [config.slug, modeless, requestDocumentMessage, send]);
   const publishRef = useRef(publish);
   publishRef.current = publish;
+  // Before a comment on an element (a sheet's cell, column or row): what it
+  // anchors to has to be in a published version, or a comment on a cell
+  // just typed or a row just inserted would be filed against a version
+  // without it. Publishes the draft now; true once the page on screen is
+  // the published version (nothing to publish, or published), false when
+  // it could not be (a conflict, an error).
+  const publishFirst = useCallback(async () => {
+    if (!modeless) return true;
+    if (publishingRef.current) await publishingRef.current;
+    await publish({ force: true });
+    const doc = await requestDocumentMessage();
+    return typeof doc.bodyHtml !== 'string' || publishedHtml.current == null || doc.bodyHtml === publishedHtml.current;
+  }, [modeless, publish, requestDocumentMessage]);
 
   // Typing: "Saving…" while the draft settles, "Saved" once it has; the
   // version follows after the idle wait.
@@ -404,6 +417,7 @@ export function useDocumentEditor({
     modeMessage,
     saveStatus,
     publish,
+    publishFirst,
     // When the person last typed (modeless): a newer version waits for a pause.
     lastTypedAt: () => lastTypedRef.current,
     dirty,

@@ -2308,6 +2308,7 @@
     grow();
     input.addEventListener('input', grow);
     editor = { input: input, tab: tab, r: r, c: c, i: i };
+    if (pill) pill.remove(); // the cell being typed in shows no comment pill
     input.focus({ preventScroll: true });
     if (initial == null) input.select(); else input.setSelectionRange(input.value.length, input.value.length);
     input.addEventListener('keydown', function (e) {
