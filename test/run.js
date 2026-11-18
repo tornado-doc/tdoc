@@ -320,6 +320,7 @@ const BROWSER = [
   'feedback-share-ui.test.js', // feedback space Share = the doc Share dialog; owner moves it to a team; site mode offers the team first; desktop + phone
   'feedback-invites-ui.test.js', // share from the widget: copy link + invite by name; landing page; Join / Keep my own; switcher; SDK Join; Reconnect without a popup; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
+  'feedback-install-ui.test.js', // /feedback: Bookmark / SDK chooser jumps to its section, SDK as a peer section (site picture, 3 steps), Copy prompt + Copy line, signed-in owner sees their real space id; desktop + phone
 ];
 
 // Existing opt-in UI suites; --all retains their broader coverage.
