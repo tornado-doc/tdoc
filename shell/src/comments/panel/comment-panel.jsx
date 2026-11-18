@@ -191,3 +191,11 @@ export function CommentPanel({
     </section>
   );
 }
+
+// The side list's width on a wide screen, the same on every surface that
+// docks it to the right edge (the doc page's side panel, the feedback
+// widget's): where it starts, and how far its edge drags (ui/side-resize.jsx).
+// Each surface remembers its own drag under its own storage key. The
+// narrowest still fits the filter row with two-digit counts ("Open (12)"
+// ... "All (24)") without an ellipsis.
+export const COMMENT_SIDE_WIDTH = { initial: 360, min: 320, max: 640 };

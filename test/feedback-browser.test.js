@@ -748,7 +748,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
               closeHit: document.getElementById('tdoc-feedback-root').shadowRoot.elementFromPoint(x.x + x.width / 2, x.y + x.height / 2) === close,
             };
           });
-          assert(layout.panel.right === width && layout.panel.left === (width <= 700 ? 0 : width - 340)
+          assert(layout.panel.right === width && layout.panel.left === (width <= 700 ? 0 : width - 360)
             && layout.close.right <= width && layout.closeHit,
           `feedback panel is clipped or under the top bar at ${width}px: ${JSON.stringify(layout)}`);
           await me.screenshot({ path: path.join(os.tmpdir(), `tdoc-feedback-panel-${width}.png`) });

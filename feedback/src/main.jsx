@@ -7,7 +7,7 @@ import { CommentThreadList } from '../../shell/src/document/comment-thread-list.
 import { CommentPinFace, commentPinState } from '../../shell/src/document/comment-pin.jsx';
 import { useCommentArea, useCommentListPrefs } from '../../shell/src/comments/core/comment-area.js';
 import { groupBy } from '../../shell/src/comments/core/comment-query.js';
-import { CommentPanel } from '../../shell/src/comments/panel/comment-panel.jsx';
+import { COMMENT_SIDE_WIDTH, CommentPanel } from '../../shell/src/comments/panel/comment-panel.jsx';
 import { CommentSheet, SheetContent } from '../../shell/src/comments/panel/comment-sheet.jsx';
 import { AgentActivityButton, agentActivitySummary } from '../../shell/src/comments/panel/agent-activity.jsx';
 import { useDoubleTapOption, useEscapeLadder } from '../../shell/src/comments/panel/keyboard.js';
@@ -126,7 +126,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-toast.bad { background: #b42318; }
     #tdoc-feedback-root .tdoc-pin.is-active { outline: 2px solid #1652f0; outline-offset: 2px; }
     #tdoc-feedback-root .tdoc-fb-panel {
-      position: fixed; top: 0; right: 0 !important; bottom: 0; width: min(340px, 100vw); max-width: 100vw; z-index: 2147483644; pointer-events: auto;
+      position: fixed; top: 0; right: 0 !important; bottom: 0; width: min(360px, 100vw); max-width: 100vw; z-index: 2147483644; pointer-events: auto;
       display: flex; flex-direction: column; background: #fff; color: #1a1a1a;
       border-left: 1px solid #e8e7e3; box-shadow: -8px 0 28px rgba(0,0,0,.08);
       font: 13px/1.45 system-ui, -apple-system, sans-serif;
@@ -1172,10 +1172,11 @@ ${uiCss}
     }
   }
 
-  // The panel's width, dragged by its edge (ui/side-resize.jsx). A phone gets
-  // the whole screen and no handle.
+  // The panel's width, dragged by its edge (ui/side-resize.jsx): the doc
+  // page's side list width (COMMENT_SIDE_WIDTH), so the same list fits the
+  // same filter row. A phone gets the shared bottom sheet and no handle.
   const SITE_SEEN = { load: getThreadSeen, save: null };
-  const PANEL_WIDTH = { storageKey: 'tdoc-feedback-panel-width', initial: 340, min: 280, max: 640 };
+  const PANEL_WIDTH = { storageKey: 'tdoc-feedback-panel-width', ...COMMENT_SIDE_WIDTH };
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
   const labelOf = (anchor) => {
     const a = anchor || {};
