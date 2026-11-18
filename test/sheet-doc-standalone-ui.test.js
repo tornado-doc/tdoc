@@ -74,8 +74,16 @@ function waitForServer(port, timeout = 8000) {
       return {
         expanded: window.__tdocSheets.expanded(),
         // The way back to the doc: the doc's title in the breadcrumb ("Doc / Tab").
-        back: Array.from(document.querySelectorAll('.tdoc-sheet a.ts-crumb-doc')).filter(shown).length,
-        crumbs: shown(document.querySelector('.ts-xtitle')) ? Array.from(document.querySelectorAll('.ts-xtitle > *')).map((el) => el.textContent) : null,
+        back: Array.from(document.querySelectorAll('.tdoc-sheet .ts-crumb-doc')).filter(shown).length,
+        crumbs: shown(document.querySelector('.ts-xtitle')) ? Array.from(document.querySelectorAll('.ts-xtitle > *')).filter(shown).map((el) => el.textContent) : null,
+        // "Plan / Runs": as much space before the slash as after it (the words, not the hover box).
+        spacing: (() => {
+          const doc = Array.from(document.querySelectorAll('.ts-xtitle .ts-crumb-doc')).find(shown), sep = document.querySelector('.ts-crumb-sep'), tab = document.querySelector('.ts-crumb-tab');
+          if (!doc || !shown(sep) || !shown(tab)) return null;
+          const r = document.createRange(); r.selectNodeContents(doc);
+          const words = r.getBoundingClientRect(), s = sep.getBoundingClientRect(), t = tab.getBoundingClientRect();
+          return { before: Math.round(s.left - words.right), after: Math.round(t.left - s.right) };
+        })(),
         alone: named(/Open (this sheet )?on its own/).length,
         close: named(/^Close full screen/).length,
         expand: named(/^Expand sheet/).length,
@@ -155,9 +163,19 @@ function waitForServer(port, timeout = 8000) {
         c = await chrome(doc);
         assert(c.alone === 1 && c.close === 1 && c.back === 1, `full screen: Open on its own + close, and the breadcrumb: ${JSON.stringify(c)}`);
         assert(JSON.stringify(c.crumbs) === JSON.stringify(['Plan', '/', 'Runs']), `breadcrumb Plan / Runs: ${JSON.stringify(c.crumbs)}`);
+        assert(c.spacing && Math.abs(c.spacing.before - c.spacing.after) <= 1 && c.spacing.before >= 4, `even space around the slash: ${JSON.stringify(c.spacing)}`);
         await shot(page, `embedded-expanded-${label}`);
+        // Hovered, the title reads as a link.
+        if (!mobile) {
+          await doc.locator('.ts-xtitle button.ts-crumb-doc').hover();
+          const look = await doc.evaluate(() => { const st = getComputedStyle(document.querySelector('.ts-xtitle button.ts-crumb-doc')); return { line: st.textDecorationLine, color: st.color }; });
+          assert(look.line === 'underline' && look.color === 'rgb(22, 82, 240)', `underlined, in the accent colour, on hover: ${JSON.stringify(look)}`);
+          await shot(page, `embedded-expanded-hover-${label}`);
+        }
+        // Keyboard: the title is a button in the tab order.
+        assert(await doc.evaluate(() => { const b = document.querySelector('.ts-xtitle button.ts-crumb-doc'); return b.tabIndex >= 0 && !b.disabled; }), 'focusable');
         // In full screen the doc's title closes it: the doc is right there.
-        await doc.locator('.ts-xtitle a.ts-crumb-doc').click();
+        await doc.locator('.ts-xtitle button.ts-crumb-doc').click();
         await doc.waitForFunction(() => !window.__tdocSheets.expanded().on);
         assert(/\/d\/plan(?:\/v\/1)?$/.test(new URL(page.url()).pathname), `still on the doc: ${page.url()}`);
         await page.goto('about:blank');
@@ -166,6 +184,7 @@ function waitForServer(port, timeout = 8000) {
         c = await chrome(doc);
         assert(c.back === 1 && !c.alone && !c.close, `own page: the breadcrumb's doc link only: ${JSON.stringify(c)}`);
         assert(JSON.stringify(c.crumbs) === JSON.stringify(['Plan', '/', 'Runs']), `breadcrumb Plan / Runs: ${JSON.stringify(c.crumbs)}`);
+        assert(c.spacing && Math.abs(c.spacing.before - c.spacing.after) <= 1, `even space around the slash: ${JSON.stringify(c.spacing)}`);
         const href = await doc.evaluate(() => document.querySelector('.ts-xtitle a.ts-crumb-doc').getAttribute('href'));
         assert(/^\/d\/plan(?:\/v\/1)?(?:#|$)/.test(href), `the doc's title goes to the doc: ${href}`);
         await shot(page, `embedded-alone-${label}`);
