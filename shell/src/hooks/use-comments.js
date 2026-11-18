@@ -19,7 +19,10 @@ function demoAuthor(identity) {
   return identity || { login: 'you', name: 'You' };
 }
 
-export function useComments({ slug, version, onChange, onUnauthorized, demo = false, identity = null }) {
+// `versionNow`: the version a new comment is made on when the page has
+// moved past `version` in place (modeless autosave publishes without a
+// reload); `version` otherwise.
+export function useComments({ slug, version, versionNow = null, onChange, onUnauthorized, demo = false, identity = null }) {
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
   // The list as of the last refresh, readable the moment an await resolves.
@@ -97,11 +100,11 @@ export function useComments({ slug, version, onChange, onUnauthorized, demo = fa
     }
     return mutate(() => createComment({
       slug,
-      version,
+      version: (versionNow && versionNow()) || version,
       text: text.trim(),
       anchor: selection ? anchorFromSelection(selection) : null,
     }), { show: (list, made) => withPostedComment(list, made) });
-  }, [applyLocal, demo, identity, mutate, slug, version]);
+  }, [applyLocal, demo, identity, mutate, slug, version, versionNow]);
 
   const addReply = useCallback(async (parentId, text) => {
     if (demo) {

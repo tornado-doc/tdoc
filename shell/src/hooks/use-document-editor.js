@@ -274,6 +274,11 @@ export function useDocumentEditor({
   useEffect(() => { baseRef.current = Math.max(baseRef.current, Number(config.version) || 0); }, [config.version]);
   useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
 
+  // Nothing to publish: the body is what was last published, or the frame
+  // has not sent its baseline yet (editing is not on, so nothing changed).
+  const unchanged = (doc) => publishedHtml.current == null
+    || (typeof doc.bodyHtml === 'string' && doc.bodyHtml === publishedHtml.current);
+
   // `force` (the tab going away): the last keystrokes may not have reached
   // the dirty flag yet, so the frame's own body decides.
   const publish = useCallback(async ({ keepalive = false, force = false } = {}) => {
@@ -283,7 +288,7 @@ export function useDocumentEditor({
     const run = (async () => {
       try {
         const doc = await requestDocumentMessage();
-        if (typeof doc.bodyHtml === 'string' && publishedHtml.current != null && doc.bodyHtml === publishedHtml.current) return false;
+        if (unchanged(doc)) return false;
         setSaveStatus('publishing');
         const result = await saveDocumentVersion(config.slug, baseRef.current, doc.html, { keepalive });
         const n = Number(result?.version) || 0;
@@ -319,6 +324,21 @@ export function useDocumentEditor({
   }, [config.slug, modeless, requestDocumentMessage, send]);
   const publishRef = useRef(publish);
   publishRef.current = publish;
+  // Before a comment on an element (a sheet's cell, column or row): what it
+  // anchors to has to be in a published version, or a comment on a cell
+  // just typed or a row just inserted would be filed against a version
+  // without it. Publishes the draft now; true once the page on screen is
+  // the published version (nothing to publish, or published), false when
+  // it could not be: { published: false, conflict } (someone else published
+  // meanwhile, autosave is paused until that is resolved), or an error.
+  const publishFirst = useCallback(async () => {
+    if (!modeless) return { published: true };
+    if (publishingRef.current) await publishingRef.current;
+    await publish({ force: true });
+    const doc = await requestDocumentMessage();
+    if (unchanged(doc)) return { published: true };
+    return { published: false, conflict: pausedRef.current };
+  }, [modeless, publish, requestDocumentMessage]);
 
   // Typing: "Saving…" while the draft settles, "Saved" once it has; the
   // version follows after the idle wait.
@@ -404,6 +424,7 @@ export function useDocumentEditor({
     modeMessage,
     saveStatus,
     publish,
+    publishFirst,
     // When the person last typed (modeless): a newer version waits for a pause.
     lastTypedAt: () => lastTypedRef.current,
     dirty,

@@ -97,6 +97,7 @@
   // published with data-tdoc-interaction-mode="edit" on <html> must not open
   // in Edit mode's chrome (the slide bar, edit-only styles) for its readers.
   document.documentElement.removeAttribute('data-tdoc-interaction-mode');
+  document.documentElement.removeAttribute('data-tdoc-modeless');
   // Site pages (home, pricing, start, templates, privacy) load the frame with
   // ?tdoc_site=1. They read as an ordinary website: a normal cursor, no
   // document chrome on visuals, and no comment on a bare click. Selecting text
@@ -1677,6 +1678,9 @@
     if (next === 'edit') endPick(true);
     if (!modeless) hideBubble();
     document.documentElement.setAttribute('data-tdoc-interaction-mode', next);
+    // For the sheets viewer (sheets-viewer.js), which may load after this.
+    if (modeless) document.documentElement.setAttribute('data-tdoc-modeless', '');
+    else document.documentElement.removeAttribute('data-tdoc-modeless');
     clearSelectingCursor();
     if (HL) {
       if (next === 'comment' || modeless) {
@@ -2118,6 +2122,7 @@
     clone.removeAttribute('data-tdoc-presenting');
     clone.removeAttribute('data-tdoc-visual-open');
     clone.removeAttribute('data-tdoc-interaction-mode');
+    clone.removeAttribute('data-tdoc-modeless');
     return '<!doctype html>\n' + clone.outerHTML;
   }
 
