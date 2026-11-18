@@ -28,6 +28,7 @@ import {
 import {
   MentionReachDialog,
   MessageDialog,
+  ConvertToSheetDialog,
   PublishDialog,
   QuotaBumpDialog,
   ShareDialog,
@@ -931,6 +932,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // click selects, typing or a double-click edits, and the same autosave
   // publishes it); slides keep Read / Comment / Edit.
   const modelessFlag = isFeatureOn('modelessEdit');
+  const convertToSheetFlag = isFeatureOn('convertToSheet');
   modelessFlagRef.current = modelessFlag;
   const modeless = modelessFlag && Boolean(config.canEdit) && !config.isLanding && !boot.oldVersion
     && !docShape.slides;
@@ -1855,6 +1857,33 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     }
   };
 
+  // Convert to Sheet (flag convertToSheet): the doc as the editor would save
+  // it, with its prose moved into a note under the title
+  // (document/convert-to-sheet.js), published as the next version through
+  // the same save as a column width, then opened. The current version stays
+  // in the history; Restore there undoes it.
+  const canConvertToSheet = convertToSheetFlag && Boolean(config.canEdit) && !config.isLanding && !boot.oldVersion
+    && docShape.sheets > 0 && !docShape.sheetDoc && !docShape.slides;
+  const convertToSheet = async () => {
+    const current = editorRef.current;
+    if (!current) throw new Error('The doc is still loading. Try again.');
+    const { convertToSheetHtml } = await import('./document/convert-to-sheet.js');
+    const base = Math.max(Number(config.version) || 0, ownVersionRef.current);
+    let result;
+    try {
+      // Open comments on the prose that moves: its note is written open.
+      const anchors = comments.comments.filter((c) => !c.deleted && c.status !== 'applied' && c.anchor).map((c) => c.anchor);
+      result = await current.saveInPlace(base, (html) => convertToSheetHtml(html, { comments: anchors }).html);
+    } catch (error) {
+      if (error.code === 'draft_open') throw new Error('Save or discard your draft first.');
+      if (error.status === 409 && error.body?.error === 'version_conflict') throw new Error('This doc has a newer version. Open it to convert.');
+      if (error.status === 409 && error.body?.error === 'save_in_progress') throw new Error('The doc was just updated. Try again in a moment.');
+      throw error;
+    }
+    const n = Number(result?.version) || 0;
+    location.href = result?.url || `/d/${encodeURIComponent(config.slug)}${n ? `/v/${n}` : ''}`;
+  };
+
   const download = () => {
     const anchor = document.createElement('a');
     anchor.href = `/d/${encodeURIComponent(config.slug)}/v/${config.version}/export?download=1`;
@@ -2534,6 +2563,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
             onHistory={historyEnabled ? () => changeHistory(true) : null}
             mode={editor.modeless ? null : { modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
             onAllowEmbeds={embedsHeld ? () => setDialog({ type: 'allow-embeds' }) : null}
+            onConvertToSheet={canConvertToSheet ? () => setDialog({ type: 'convert-sheet' }) : null}
           />
         )}
         onThemeChange={(nextTheme) => {
@@ -2897,6 +2927,11 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         sheets={dialog?.type === 'allow-embeds' ? sheetEmbed.sheets() : []}
         onOpenChange={(open) => !open && setDialog(null)}
         onAllowed={embedsAllowed}
+      />
+      <ConvertToSheetDialog
+        open={dialog?.type === 'convert-sheet'}
+        onOpenChange={(open) => !open && setDialog(null)}
+        onConvert={convertToSheet}
       />
       <DeleteDocumentDialog
         open={dialog?.type === 'delete'}

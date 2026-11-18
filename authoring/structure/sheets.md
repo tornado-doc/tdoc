@@ -61,6 +61,24 @@ After, a plain table, with the 21-item inventory as its own sheet doc:
 <p>EGI's stock list: <a href="https://tdoc.dev/d/egi-inventory">EGI inventory (21 items)</a>.</p>
 ```
 
+### A sheet doc
+
+A doc whose body holds only a title (`<h1>`), an optional note
+(`class="sheet-note"`, whatever it contains) and sheet tables is a sheet doc:
+My docs lists it as a Sheet, and it opens as a full-page sheet with no
+"Open the doc". Any other text, image or plain table outside those makes it
+a prose doc with the sheet embedded.
+
+To turn a prose doc that is mostly one sheet into a sheet doc, publish a new
+version that keeps the `<h1>` and every sheet table unchanged (their
+`data-name`, `data-row` and `data-key` are what the cell comments are
+anchored to) and moves the rest of the prose, in order, into one note right
+under the title: a line or two as
+`<div class="sheet-note"><p>…</p></div>`, anything longer folded away as
+`<details class="sheet-note"><summary>Notes</summary>…</details>`. An editor
+in the browser does the same with ⋯ › "Convert to Sheet". The old version
+stays in the history.
+
 The rest of this guide is the sheet itself.
 
 ## The markup
