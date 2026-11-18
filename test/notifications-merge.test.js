@@ -22,6 +22,9 @@ const item = (id, at, extra = {}) => ({ id, kind: 'mention', group_key: `mention
     const env = makeEnv(mod.CommentsStore);
     const sid = 'ab'.repeat(16);
     await env.META.put(`session:${sid}`, JSON.stringify({ login: 'julie', email: 'Julie@Example.com', name: 'Julie', created: new Date().toISOString() }));
+    // The doc the rows are about, readable by anyone (rows on a doc the
+    // person cannot read are listed blank and not counted).
+    await env.META.put('meta:doc', JSON.stringify({ title: 'Doc', slug: 'doc', created: HOUR1, versions: [{ n: 1, created: HOUR1 }], hosted: { github_login: 'claire', owner_key: 'claire' }, access: { visibility: 'public' } }));
     await env.META.put('inbox:julie', JSON.stringify({ items: [item('n_handle', HOUR1)] }));
     await env.META.put('inbox:email:julie@example.com', JSON.stringify({ items: [item('n_email', HOUR2)] }));
     return { env, cookie: `tdoc_sid=${sid}` };

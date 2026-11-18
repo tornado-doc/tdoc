@@ -274,5 +274,44 @@ t('agent row recipients: owner and attested people in the thread; not agents, th
   assert(keys(thread({ deleted: true }), { owner: 'olga' }) === 'olga,sam', 'a deleted root\'s author is still notified');
 });
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+
+// Async: one batched delivery (a suggestion accepted that fixed comments in
+// several threads), each person gets only their threads, count and preview.
+const pending = (async () => {
+  const name = 'each person\'s agent row holds only their own threads, count and newest words';
+  try {
+    vm.runInContext([fn('agentReplyEvent'), 'async ' + fn('deliverAgentReplyRows'),
+      'const AGENT_REPLY_PREVIEW_MAX = 300;',
+      'var written = [];',
+      'async function loadDocMeta(env, slug) { return { title: "Plan", slug }; }',
+      'function accessFromMeta() { return {}; }',
+      'function canReadDoc() { return true; }',
+      'async function inboxReaderSession(env, who) { return { login: who }; }',
+      'function ownerActorKey() { return "olga"; }',
+      'function agentFaceAuthor(a) { return a; }',
+      'async function writeInboxEvent(env, who, ev) { written.push([who, ev]); }',
+    ].join('\n\n'), box);
+    const human = (login) => ({ kind: 'human', login, account_id: `acct-${login}` });
+    const agent = { kind: 'agent', login: 'claude', name: 'Claude Code' };
+    const thread = (id, login) => ({ root: { id, author: human(login), replies: [] } });
+    await box.deliverAgentReplyRows({}, 'plan', [
+      { thread: thread('c1', 'rita'), at: '2026-11-18T10:00:01Z', author: agent, replyId: 'r1', text: 'for rita' },
+      { thread: thread('c2', 'sam'), at: '2026-11-18T10:00:02Z', author: agent, replyId: 'r2', text: 'for sam, first' },
+      { thread: thread('c3', 'sam'), at: '2026-11-18T10:00:03Z', author: agent, replyId: 'r3', text: 'for sam, newest' },
+    ], {});
+    const by = Object.fromEntries(box.written.map(([who, ev]) => [who, [ev.count, ev.threads.map((t) => t[0]).join(), ev.preview, ev.thread_id]]));
+    const want = {
+      olga: [3, 'c1,c2,c3', 'for sam, newest', 'c3'],
+      rita: [1, 'c1', 'for rita', 'c1'],
+      sam: [2, 'c2,c3', 'for sam, newest', 'c3'],
+    };
+    assert(JSON.stringify(by) === JSON.stringify(want), JSON.stringify(by));
+    assert(box.written.length === 3, 'one write per person');
+    ok(name);
+  } catch (e) { bad(name, e.message); }
+})();
+
+pending.then(() => {
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+});

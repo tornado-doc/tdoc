@@ -16040,6 +16040,9 @@ const DOC_ACTIVITY_INBOX_KINDS = new Set(['comment', 'reply', 'mention']);
 // An agent reply row is not in My docs' counts -- the agent-unread record
 // carries it there (noteAgentUnread) -- so it is not a doc-activity kind.
 const INBOX_THREAD_KINDS = new Set([...DOC_ACTIVITY_INBOX_KINDS, 'agent_reply']);
+// Rows that carry a doc's title or words: on a doc the person can no longer
+// read they are listed blank and not counted (inboxHiddenSlugs).
+const INBOX_DOC_CONTENT_KINDS = new Set([...INBOX_THREAD_KINDS, 'reaction', 'access_granted', 'feedback_invite']);
 
 // Accepts either shape of actor key. normalizeGithubLogin rejects anything
 // with an "@" in it, so routing an email identity through it alone silently
@@ -16538,8 +16541,11 @@ function mergeInboxes(parts) {
 // access request is not a to-do there and must not eat its pages.
 // A row too old to count as unread (inboxRowUnread) is listed as read.
 // `unread` in the answer is always the count of every unread row.
-function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE, unread: onlyUnread = false, now = Date.now() } = {}) {
+// `hidden`: docs this person can no longer read (inboxHiddenSlugs): their
+// rows are listed blank (blankInboxRow), not counted, not in `unread: true`.
+function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE, unread: onlyUnread = false, now = Date.now(), hidden = null } = {}) {
   const items = (inbox && Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [])
+    .map((i) => (hidden && hidden.has(i.slug) && INBOX_DOC_CONTENT_KINDS.has(i.kind) ? blankInboxRow(i) : i))
     .map((i) => (i.read || inboxRowUnread(i, now) ? i : { ...i, read: true, aged: true }));
   const unread = items.filter(i => !i.read);
   const ordered = (onlyUnread ? unread.filter((i) => DOC_ACTIVITY_INBOX_KINDS.has(i.kind)) : items).slice()
@@ -16553,25 +16559,40 @@ function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE, unread: onlyUnread =
   };
 }
 
-// A row about a doc's comments, on a doc this person can no longer read (a
-// collaborator removed, a member who left the team, a doc deleted): kept in
-// the list, without the doc's title or anyone's words. Checked per page, one
-// record read per doc on it.
-const INBOX_DOC_CONTENT_KINDS = new Set(['comment', 'reply', 'mention', 'reaction', 'agent_reply']);
-async function hideUnreadableInboxRows(env, session, page) {
-  const slugs = [...new Set((page.items || []).filter((i) => i && INBOX_DOC_CONTENT_KINDS.has(i.kind) && isValidSlug(i.slug)).map((i) => i.slug))];
-  if (!slugs.length) return page;
-  const readable = new Map(await Promise.all(slugs.map(async (slug) => {
+// The docs among these rows' that this person can no longer read (a
+// collaborator removed, a member who left the team, a doc deleted or in
+// Trash). Fail closed: a record that cannot be read counts as unreadable
+// (and is asked again next time). One record read per doc, kept a minute
+// per person in the isolate, so the bell's 30-second poll costs little.
+const INBOX_READABLE_TTL_MS = 60 * 1000;
+const INBOX_READABLE_CACHE_MAX = 5000;
+const inboxReadableCache = new Map();
+async function inboxHiddenSlugs(env, session, rows, { now = Date.now() } = {}) {
+  const slugs = [...new Set((rows || []).filter((i) => i && INBOX_DOC_CONTENT_KINDS.has(i.kind) && isValidSlug(i.slug)).map((i) => i.slug))];
+  const hidden = new Set();
+  if (!slugs.length) return hidden;
+  const who = actorKeys(session).join(',') || sessionPrincipal(session) || '';
+  await Promise.all(slugs.map(async (slug) => {
+    const key = `${who}\n${slug}`;
+    const hit = inboxReadableCache.get(key);
+    if (hit && hit.until > now) { if (!hit.ok) hidden.add(slug); return; }
     let meta = null;
-    try { meta = await loadDocMeta(env, slug); } catch { return [slug, true]; }
-    return [slug, Boolean(meta) && canReadDoc(accessFromMeta(meta), session, env, meta)];
-  })));
-  return {
-    ...page,
-    items: page.items.map((i) => (i && INBOX_DOC_CONTENT_KINDS.has(i.kind) && readable.get(i.slug) === false
-      ? { ...i, title: '', preview: '', no_access: true }
-      : i)),
-  };
+    try { meta = await loadDocMeta(env, slug); } catch { hidden.add(slug); return; }
+    const ok = Boolean(meta) && canReadDoc(accessFromMeta(meta), session, env, meta);
+    if (inboxReadableCache.size >= INBOX_READABLE_CACHE_MAX) inboxReadableCache.clear();
+    inboxReadableCache.set(key, { ok, until: now + INBOX_READABLE_TTL_MS });
+    if (!ok) hidden.add(slug);
+  }));
+  return hidden;
+}
+
+// A row on a doc this person can no longer read: kept in its place, without
+// the doc's title, anyone's words, who wrote them or which threads.
+function blankInboxRow(row) {
+  const out = { ...row, title: '', preview: '', actor: null, read: true, no_access: true };
+  delete out.thread_at;
+  delete out.emoji;
+  return out;
 }
 
 // Reddit-style: top-level comment → doc owner; reply → direct parent author
@@ -17337,19 +17358,33 @@ function agentReplyBellRecipients(thread, { owner = '', skip = [] } = {}) {
   return out;
 }
 
-// A recipient's actor key as a session canReadDoc can judge: the key, and on
-// a team doc the account's teams (a member who left reads no more).
-async function inboxReaderSession(env, key, meta) {
+// A recipient's actor key as the session they would sign in with, for
+// canReadDoc: their account (an email-born owner is the owner by account,
+// not by login), every identity linked to it (a GitHub user invited by
+// email address matches the invite), their address, and their teams (a
+// member who left reads no more).
+async function inboxReaderSession(env, key) {
   const k = String(key || '');
   const session = k.startsWith('email:') ? { email: k.slice(6) } : { login: k };
-  if (meta && meta.workspace_id) {
-    let accountId = null;
-    try { accountId = await sessionAccountId(env, session); } catch { accountId = null; }
-    if (accountId) {
-      session.account_id = accountId;
-      session.team_ids = await loadAccountTeamIds(env, accountId);
-    }
+  let accountId = null;
+  try { accountId = await sessionAccountId(env, session); } catch { accountId = null; }
+  if (!accountId) return session;
+  if (session.login) {
+    try {
+      const rec = await lookupHostedAccount(env, session.login);
+      const email = normalizeEmail(rec && rec.email);
+      if (email) session.email = email;
+    } catch {}
   }
+  let group = null;
+  try { group = await accountGroup(env, accountId); } catch { group = null; }
+  // A deleted account, or one whose record cannot be read: the bare key only.
+  if (!group || group.unavailable || group.deleted_at) return session;
+  session.account_id = group.canonical || accountId;
+  session.linked_account_ids = group.ids.filter((id) => id !== session.account_id);
+  session.linked_actor_keys = group.actor_keys;
+  session.team_ids = await loadAccountTeamIds(env, session.account_id);
+  try { session.reborn = await loadReborn(env, actorKeys(session)); } catch {}
   return session;
 }
 
@@ -17368,24 +17403,35 @@ async function deliverAgentReplyRows(env, slug, replies, { skip = [] } = {}) {
   const access = accessFromMeta(meta);
   const skipKeys = skip.map(normalizeActorKey).filter(Boolean);
   const owner = ownerActorKey(meta, env);
-  const keys = [];
-  for (const r of replies) for (const k of agentReplyBellRecipients(r.thread, { owner, skip: skipKeys })) if (!keys.includes(k)) keys.push(k);
-  const newest = replies.slice().sort((a, b) => String(a.at || '').localeCompare(String(b.at || ''))).pop();
-  const face = agentFaceAuthor(newest.author) || { kind: 'agent', login: 'agent', name: 'Agent' };
-  const ev = {
-    kind: 'agent_reply', slug, comment_id: newest.replyId || newest.thread.root.id, thread_id: newest.thread.root.id,
-    threads: replies.map((r) => [r.thread.root.id, r.at]), count: replies.length,
-    actor: face, preview: String(newest.text || '').slice(0, AGENT_REPLY_PREVIEW_MAX),
-    title: meta.title || slug, at: newest.at, quiet: true,
-  };
-  for (const who of keys) {
+  // Each person's own replies: the threads they are in (the owner, all).
+  const mine = new Map();
+  for (const r of replies) {
+    for (const k of agentReplyBellRecipients(r.thread, { owner, skip: skipKeys })) {
+      if (!mine.has(k)) mine.set(k, []);
+      mine.get(k).push(r);
+    }
+  }
+  for (const [who, theirs] of mine) {
     try {
-      if (!canReadDoc(access, await inboxReaderSession(env, who, meta), env, meta)) continue;
-      await writeInboxEvent(env, who, ev);
+      if (!canReadDoc(access, await inboxReaderSession(env, who), env, meta)) continue;
+      await writeInboxEvent(env, who, agentReplyEvent(slug, meta, theirs));
     } catch (error) {
       console.error('[notifications] agent reply row failed:', error && error.message ? error.message : error);
     }
   }
+}
+
+// One person's inbox event for the agent replies they are owed: their count,
+// their threads, the newest of theirs as the preview.
+function agentReplyEvent(slug, meta, replies) {
+  const newest = replies.slice().sort((a, b) => String(a.at || '').localeCompare(String(b.at || ''))).pop();
+  return {
+    kind: 'agent_reply', slug, comment_id: newest.replyId || newest.thread.root.id, thread_id: newest.thread.root.id,
+    threads: replies.map((r) => [r.thread.root.id, r.at]), count: replies.length,
+    actor: agentFaceAuthor(newest.author) || { kind: 'agent', login: 'agent', name: 'Agent' },
+    preview: String(newest.text || '').slice(0, AGENT_REPLY_PREVIEW_MAX),
+    title: (meta && meta.title) || slug, at: newest.at, quiet: true,
+  };
 }
 async function loadAgentUnread(env, session) {
   const keys = [...new Set(actorKeys(session).map(agentUnreadKey).filter(Boolean))];
@@ -30270,7 +30316,13 @@ const tdocHandlers = {
       }
       // `?filter=unread`: the unread rows alone (Needs you); default all.
       const onlyUnread = url.searchParams.get('filter') === 'unread';
-      const page = await hideUnreadableInboxRows(env, s, pageInbox(mergeInboxes(parts), { offset, unread: onlyUnread }));
+      // Docs no longer readable: those of the unread rows (the count, and
+      // Needs you's list), then those of the rows on this page.
+      const merged = mergeInboxes(parts);
+      const hiddenUnread = await inboxHiddenSlugs(env, s, merged.items.filter((i) => inboxRowUnread(i)));
+      let page = pageInbox(merged, { offset, unread: onlyUnread, hidden: hiddenUnread });
+      const hiddenPage = await inboxHiddenSlugs(env, s, page.items);
+      if (hiddenPage.size) page = { ...page, items: page.items.map((i) => (i.no_access || !(hiddenPage.has(i.slug) && INBOX_DOC_CONTENT_KINDS.has(i.kind)) ? i : blankInboxRow(i))) };
       return json(await redactCommentEmails(page, await emailPrivacyFor(env, s, 'me:inbox', null)));
     }
     if (p === '/api/notifications/unread' && method === 'GET') {
@@ -30278,7 +30330,9 @@ const tdocHandlers = {
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       let parts = await loadViewerInboxes(env, s);
       try { parts = await reconcileInboxSeen(env, s, parts); } catch {}
-      return json({ unread: inboxUnread(mergeInboxes(parts)) });
+      const merged = mergeInboxes(parts);
+      const hidden = await inboxHiddenSlugs(env, s, merged.items.filter((i) => inboxRowUnread(i)));
+      return json({ unread: pageInbox(merged, { limit: 1, hidden }).unread });
     }
     if (p === '/api/notifications/read' && method === 'POST') {
       // A page's own request only: another site cannot clear someone's bell.
@@ -31392,6 +31446,7 @@ const tdocHandlers = {
       } else {
         if (lastAdmin) return json({ error: 'last_admin' }, { status: 409 });
         team.members = team.members.filter((m) => m.account_id !== target.account_id);
+        inboxReadableCache.clear();
         await saveTeam(env, team);
         await setAccountTeam(env, target.account_id, team.id, false);
         await syncTeamSeats(env, team);
@@ -34479,6 +34534,8 @@ const tdocHandlers = {
     }
 
     if (p === '/api/doc/access' && method === 'PATCH') {
+      // Who can read changes: this isolate's bell stops trusting what it knew.
+      inboxReadableCache.clear();
       // Body is parsed before auth so we can pass slug into the hosted ACL
       // gate. Cap Content-Length first — an access patch is always tiny; do
       // not buffer an arbitrary JSON body for an anonymous caller.

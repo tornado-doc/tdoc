@@ -216,6 +216,61 @@ function eq(a, b, m) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Er
     eq([rows[0].title, rows[0].preview, rows[0].no_access], ['', '', true]);
   });
 
+  await t('an email-born owner gets agent rows on their own private doc', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const email = 'olga@example.com';
+    await env.META.put(`account-email:${email}`, JSON.stringify({ account_id: 'acct-olga', created: '2026-01-01T00:00:00.000Z' }));
+    const sid = 'ab'.repeat(16);
+    await env.META.put(`session:${sid}`, JSON.stringify({ email, account_id: 'acct-olga', name: 'Olga', created: new Date().toISOString() }));
+    const olga = `tdoc_sid=${sid}`;
+    const minted = await call(env, '/api/hosted/token', { method: 'POST', cookie: olga, body: { label: 'olga' } });
+    assert(minted.status === 200 && minted.body.token, `token ${minted.status} ${minted.text}`);
+    const up = await call(env, '/api/upload', { method: 'POST', token: minted.body.token, body: { slug: 'olga-doc', version: 1, html: PROSE } });
+    assert(up.status === 200, `upload ${up.status} ${up.text}`);
+    const meta = JSON.parse(await env.META.get('meta:olga-doc'));
+    assert(!meta.hosted.github_login, `precondition: no GitHub login on the doc: ${JSON.stringify(meta.hosted)}`);
+    const priv = await call(env, '/api/doc/access', { method: 'PATCH', cookie: olga, headers: SAME_ORIGIN, body: { slug: 'olga-doc', access: { visibility: 'private' } } });
+    assert(priv.status === 200, `access ${priv.status} ${priv.text}`);
+    const c = await call(env, '/api/comments', { method: 'POST', cookie: olga, body: { slug: 'olga-doc', version: 1, text: 'check this', anchor: { kind: 'text', text: 'A sentence' } } });
+    assert(c.status === 200, `comment ${c.status} ${c.text}`);
+    const r = await call(env, '/api/agent/reply', { method: 'POST', token: minted.body.token, body: { slug: 'olga-doc', parent_id: c.body.id, text: 'Checked.', status: 'answered', agent_login: 'claude' } });
+    assert(r.status === 200, `agent reply ${r.status} ${r.text}`);
+    const rows = (await bell(env, olga)).items.filter((i) => i.kind === 'agent_reply');
+    eq(rows.map((i) => [i.slug, i.preview, i.read, !!i.no_access]), [['olga-doc', 'Checked.', false, false]], 'the owner got no row');
+  });
+
+  await t('a GitHub user invited by email address gets agent rows', async () => {
+    const { env, owner, token } = await seed();
+    // Gina signs in with GitHub; her account's address is the one invited.
+    const sid = 'cd'.repeat(16);
+    await env.META.put('hosted-account:gina', JSON.stringify({ account_id: 'acct-gina', github_login: 'gina', email: 'gina@example.com', created: '2026-01-01T00:00:00.000Z' }));
+    await env.META.put(`session:${sid}`, JSON.stringify({ login: 'gina', email: 'gina@example.com', account_id: 'acct-gina', name: 'Gina', created: new Date().toISOString() }));
+    const gina = `tdoc_sid=${sid}`;
+    const share = await call(env, '/api/doc/access', { method: 'PATCH', cookie: owner, headers: SAME_ORIGIN, body: { slug: 'u-doc', access: { visibility: 'private', allowed_users: ['gina@example.com'] } } });
+    assert(share.status === 200, `share ${share.status} ${share.text}`);
+    const c = await comment(env, gina, 'invited by address');
+    await agentReply(env, token, c.id, 'Answer for Gina.');
+    const rows = (await bell(env, gina)).items.filter((i) => i.kind === 'agent_reply');
+    eq(rows.map((i) => [i.preview, !!i.no_access]), [['Answer for Gina.', false]], 'the email-invited GitHub user got no row');
+  });
+
+  await t('rows on a doc that is gone are blank (fail closed), not counted, and not in filter=unread', async () => {
+    const at = new Date(Date.now() - 60e3).toISOString();
+    const { env, owner } = await seed([
+      { ...row('n_gone', 'reply', at), slug: 'gone-doc', title: 'Secret plan', preview: 'secret words', thread_at: { c_n_gone: at }, actor: { login: 'mallory', name: 'Mallory' } },
+      { ...row('n_granted', 'access_granted', at), slug: 'gone-doc', title: 'Secret plan' },
+      row('n_here', 'comment', at),
+    ]);
+    const page = await bell(env, owner);
+    const gone = page.items.find((i) => i.id === 'n_gone');
+    eq([gone.title, gone.preview, gone.actor, gone.thread_at, gone.read, gone.no_access], ['', '', null, undefined, true, true]);
+    eq(page.items.find((i) => i.id === 'n_granted').title, '', 'an access_granted title on a gone doc');
+    eq(page.unread, 1, 'a row on a gone doc counts');
+    eq((await call(env, '/api/notifications/unread', { cookie: owner })).body.unread, 1);
+    eq((await bell(env, owner, '?filter=unread')).items.map((i) => i.id), ['n_here']);
+    assert(!JSON.stringify(page).includes('Secret') && !JSON.stringify(page).includes('mallory'), 'title, words or author leaked');
+  });
+
   await t('rows on a doc the person can no longer read keep no title or words', async () => {
     const { env, owner, reader, token } = await seed();
     const share = (allowed) => call(env, '/api/doc/access', { method: 'PATCH', cookie: owner, body: { slug: 'u-doc', access: { visibility: 'private', allowed_users: allowed } } });

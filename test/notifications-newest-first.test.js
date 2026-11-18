@@ -27,7 +27,7 @@ const DAY = 864e5;
 const backlog = (n, { readEvery = 0 } = {}) => Array.from({ length: n }, (_, i) => {
   const at = new Date(Date.now() - 14 * DAY - i * 3600e3).toISOString();
   return {
-    id: `n_old_${i}`, kind: ['comment', 'reply', 'mention'][i % 3], group_key: `old:${i}`, slug: 'old-doc', version: 1,
+    id: `n_old_${i}`, kind: ['comment', 'reply', 'mention'][i % 3], group_key: `old:${i}`, slug: 'u-doc', version: 1,
     comment_id: `c_old_${i}`, thread_id: `c_old_${i}`, actor: { login: 'claire', name: 'Claire' }, preview: 'old',
     title: 'Old doc', at, read: readEvery ? i % readEvery === 0 : false, count: 1,
   };
