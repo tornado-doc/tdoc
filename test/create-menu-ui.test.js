@@ -383,6 +383,35 @@ async function startServer(worker, env) {
         }
       });
 
+      if (sheets) {
+        await t(`${tag}: Blank sheet makes a sheet doc and opens it ready to type into; My docs marks it a sheet`, async () => {
+          await page.goto(`${base}/me`);
+          const popup = await open('Sheet');
+          await press(popup.getByRole('menuitem', { name: /Blank sheet/ }));
+          await page.waitForURL(/\/d\/[^/]+\/v\/1(?:[?#]|$)/, { timeout: 15000 });
+          const slug = new URL(page.url()).pathname.split('/')[2];
+          const frame = page.frameLocator('iframe[aria-label="Document content"]');
+          await frame.locator('.tdoc-sheet').first().waitFor({ timeout: 15000 });
+          const doc = page.frames().find((f) => f.url().includes('/frame'));
+          await doc.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'edit');
+          // Ready to edit: the grid's Add row, and a full page sheet (no
+          // full screen or "Open the doc" chrome: it is the doc).
+          await frame.getByRole('button', { name: 'Add row' }).waitFor();
+          const shape = await doc.evaluate(() => window.__tdocSheets.expanded());
+          assert.ok(shape.sheetOnly && !shape.on, `a sheet doc, not an overlay: ${JSON.stringify(shape)}`);
+          assert.equal(await frame.getByRole('link', { name: 'Open the doc' }).count() + await frame.locator('.ts-xhead:not([hidden])').count(), 0, 'nothing to go back to');
+          const html = await env.DOCS.get(`docs/${slug}/v1/index.html`).then((o) => o.text());
+          assert.match(html, /<table[^>]*data-tdoc-sheet/, 'stored as a sheet table');
+          await shot('blank-sheet-edit');
+          await page.goto(`${base}/me`);
+          const row = page.locator(`[data-slug="${slug}"]`).first();
+          await row.waitFor();
+          assert.equal(await row.locator('.doc-type.is-sheet').count(), 1, 'the new sheet carries the sheet icon');
+          assert.equal(await row.locator('.doc-type').first().getAttribute('aria-label'), 'Sheet');
+          await shot('blank-sheet-in-my-docs');
+        });
+      }
+
       assert.deepEqual(errors, [], `page errors: ${errors.join('; ')}`);
     } finally {
       await context.close();

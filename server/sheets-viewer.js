@@ -904,7 +904,8 @@
     var first = FX.firstRow(tab, Math.max(0, rowAtY(tab, top) - OVERSCAN)); // [format] a merge's top row
     var last = Math.min(n - 1, rowAtY(tab, top + viewH) + OVERSCAN);
     var cols = tab.widths.length > 30 ? visibleCols(tab) : [0, tab.widths.length - 1];
-    var key = first + ':' + last + ':' + cols[0] + ':' + cols[1] + ':' + (tab.tops ? tab.tops[n] : 0);
+    // The open tab is part of the key: two tabs of the same shape draw the same window.
+    var key = book.active + ':' + first + ':' + last + ':' + cols[0] + ':' + cols[1] + ':' + (tab.tops ? tab.tops[n] : 0);
     if (!force && key === rendered.key) return false;
     rendered.key = key;
     var html = rowsHtml(tab, first, last, cols);
@@ -3118,7 +3119,10 @@
   // Full screen is the doc frame's whole area: the page's top bar (title,
   // history, Ask AI, Comment, Share, ⋯ with Read / Comment / Edit) and, in
   // Edit mode, the editor's bar with Save stay above it, as on every doc.
-  function canExpand() { return true; }
+  // A doc that is only its sheet is already the sheet's own page: it has no
+  // full screen, and so no "Open the doc" back to itself (a sheet is a doc
+  // type of its own to the person reading it).
+  function canExpand() { return !expand.sheetOnly; }
   function docTitle() {
     var h1 = document.querySelector('h1:not([data-tdoc-provider] h1)');
     return cleanName((h1 && h1.textContent) || document.title || 'Sheet');
@@ -3234,10 +3238,14 @@
       if (typeof d.path === 'string' && /^\/(?!\/)/.test(d.path)) expand.path = d.path;
       if (!config.received) {
         config.received = true;
-        var alone = Math.floor(Number(d.alone) || 0);
-        if (alone > 0) expand.alone = Math.min(alone, book.tabs.length);
+        var alone = Math.min(Math.floor(Number(d.alone) || 0), book.tabs.length);
+        // ?sheet=<tab> on a sheet-only doc (a link from "Open on its own", a
+        // sheet embed's Open) opens that tab on the doc's page: there is no
+        // other page to be "on its own" from. #expand=1 is let go likewise.
+        if (alone > 0 && canExpand()) expand.alone = alone;
         applyView(d.hash, d.widths);
         if (expand.alone) { book.active = expand.alone - 1; renderAll(); setExpanded(true, true); }
+        else if (alone > 0) { book.active = alone - 1; renderAll(); }
         else if (d.expanded === true) setExpanded(true, true);
       } else renderAll();
     } else if (d.type === 'tdoc:sheetLayoutSaved') {

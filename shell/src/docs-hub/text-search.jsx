@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { day, docHref } from './rows.jsx';
+import { DocTypeIcon, day, docHref } from './rows.jsx';
 
 // Full-text search: the title filter above answers as you type; this asks
 // the server for the words inside documents and their comments, a moment
@@ -73,6 +73,7 @@ export function TextSearchResults({ search, exclude, pathFor }) {
               <a key={item.slug} className="doc-row text-search-row" href={docHref(item)} data-slug={item.slug}>
                 <div className="doc-info">
                   <div className="doc-title-line">
+                    <DocTypeIcon doc={item} />
                     <Marked className="doc-title" segments={item.title_marks || [{ text: item.title, hit: false }]} />
                   </div>
                   {item.snippet && item.snippet.length ? (

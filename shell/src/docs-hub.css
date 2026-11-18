@@ -457,7 +457,7 @@
 .text-search-row { align-items: flex-start; color: inherit; text-decoration: none; }
 .text-search-row:hover { background: var(--td-surface); text-decoration: none; }
 .text-search-row:hover .doc-title { color: var(--td-accent); }
-.text-search-row .doc-title-line { display: block; }
+.text-search-row .doc-title-line { align-items: center; }
 .text-search-snippet { margin: 3px 0 0; color: var(--td-ink); font-size: 13px; line-height: 1.5; opacity: .86; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .text-search-where { color: var(--td-muted); }
