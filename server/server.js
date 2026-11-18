@@ -317,6 +317,14 @@ function e2eIdentity() {
   if (!E2E_USER) return null;
   return { login: E2E_USER, name: E2E_USER, avatar_url: '' };
 }
+// Unread as the person sees it: not read and under 30 days old (the
+// worker's inboxRowUnread).
+function localRowUnread(row) {
+  if (!row || row.read) return false;
+  const at = Date.parse(row.at || '');
+  return !(at && Date.now() - at > 30 * 864e5);
+}
+
 function inboxFile(login) {
   return path.join(ROOT, `.inbox-${String(login).toLowerCase()}.json`);
 }
@@ -1764,12 +1772,14 @@ const server = http.createServer(async (req, res) => {
       if (login === ident.login) localInboxSeen(login, slug, seen);
     }
     const inbox = readJson(inboxFile(ident.login), { items: [] });
-    const items = Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
-    // Newest first, read or not; `?filter=unread` the unread alone (the
-    // worker's pageInbox).
+    // Newest first, read or not (ties by id); a row past the unread age is
+    // listed read; `?filter=unread` the unread comment, reply and mention
+    // rows alone (the worker's pageInbox).
+    const items = (Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [])
+      .map((i) => (i.read || localRowUnread(i) ? i : { ...i, read: true, aged: true }));
     const unread = items.filter(i => !i.read);
-    const ordered = (url.searchParams.get('filter') === 'unread' ? unread : items).slice()
-      .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+    const ordered = (url.searchParams.get('filter') === 'unread' ? unread.filter((i) => ['comment', 'reply', 'mention'].includes(i.kind)) : items).slice()
+      .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')) || String(b.id || '').localeCompare(String(a.id || '')));
     const offset = Math.max(0, Number(url.searchParams.get('offset') || 0));
     return json(res, 200, {
       items: ordered.slice(offset, offset + 20),
@@ -1782,7 +1792,7 @@ const server = http.createServer(async (req, res) => {
     if (!ident) return json(res, 401, { error: 'sign_in_required' });
     const inbox = readJson(inboxFile(ident.login), { items: [] });
     const items = Array.isArray(inbox.items) ? inbox.items : [];
-    return json(res, 200, { unread: items.filter(i => i && !i.read).length });
+    return json(res, 200, { unread: items.filter(localRowUnread).length });
   }
   if (p === '/api/notifications/read' && req.method === 'POST') {
     const ident = e2eIdentity();

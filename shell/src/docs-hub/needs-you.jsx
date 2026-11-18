@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, MessageSquareText } from 'lucide-react';
 import { AppButton } from '../ui/button.jsx';
+import { appendUnique } from '../notification-rows.js';
 import { listNotifications, markDocNotificationsRead, markNotificationsRead, postThreadSeen } from '../document/api.js';
 import { actorName, notificationTarget } from '../notification-text.js';
 import { absoluteTime, relativeTime } from './row-meta.js';
@@ -28,9 +29,10 @@ import { authorLine } from '../document/comment-card.jsx';
 const INBOX_KINDS = new Set(['comment', 'reply', 'mention']);
 const INBOX_PAGES = 10;
 
-// Every unread bell row, once: the server lists the unread alone
-// (filter=unread), newest first, so a read row never ends the paging early
-// and none of the bell's read rows are fetched. A failure leaves only the
+// Every unread comment, reply and mention row, once: the server lists those
+// alone (filter=unread; reactions and access requests are not to-dos here and
+// do not eat the pages), newest first, so a read row never ends the paging
+// early and none of the bell's read rows are fetched. A failure leaves only the
 // badge counts.
 export function useNeedsInbox(enabled) {
   const [items, setItems] = useState(null);
@@ -38,12 +40,13 @@ export function useNeedsInbox(enabled) {
     if (!enabled) return undefined;
     let live = true;
     (async () => {
-      const all = [];
+      let all = [];
       let offset = 0;
       for (let n = 0; n < INBOX_PAGES; n += 1) {
         const page = await listNotifications(offset, { unread: true });
         const rows = Array.isArray(page?.items) ? page.items : [];
-        all.push(...rows.filter((row) => row && !row.read));
+        // Once each, by id: a row arriving mid-paging repeats one across pages.
+        all = appendUnique(all, rows.filter((row) => row && !row.read));
         offset += rows.length;
         if (!page?.has_more || !rows.length) break;
       }

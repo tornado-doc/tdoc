@@ -9,6 +9,7 @@ import {
   setEmailNotifications,
 } from '../document/api.js';
 import { notificationLabel, notificationTarget } from '../notifications-dialog.jsx';
+import { appendUnique } from '../notification-rows.js';
 import { THREAD_SEEN_EVENT } from '../comments/core/thread-seen.js';
 import {
   alertNewNotifications,
@@ -70,7 +71,9 @@ export function useNotifications(enabled) {
     try {
       const offset = append ? items.length : 0;
       const result = await listNotifications(offset);
-      setItems((current) => append ? [...current, ...(result.items || [])] : result.items || []);
+      // A row that arrived between two page loads shifts the pages by one,
+      // so the next page can repeat the last row: kept once, by id.
+      setItems((current) => (append ? appendUnique(current, result.items) : result.items || []));
       setUnread(Number(result.unread) || 0);
       setHasMore(Boolean(result.has_more));
     } finally {

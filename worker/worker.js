@@ -16026,6 +16026,20 @@ const INBOX_MAX = 200;
 // The threads one grouped inbox row lists (inboxRowThreads).
 const INBOX_ROW_THREADS_MAX = 50;
 const INBOX_PAGE = 20;
+// An unread row older than this no longer counts or shows as unread: it
+// stays in the list, untinted (inboxRowUnread). Rows nothing clears --
+// reactions on threads never reopened, threads read before the server kept
+// read state -- kept the bell at 44 for weeks (Julie, 2026-11-18). Applied
+// when the inbox is read, never written back.
+const INBOX_UNREAD_TTL_MS = 30 * 864e5;
+// A person's comment activity on a doc: what My docs' badge counts and Needs
+// you lists as to-dos.
+const DOC_ACTIVITY_INBOX_KINDS = new Set(['comment', 'reply', 'mention']);
+// Rows about a thread's activity, read when the thread is seen (and seeing
+// them in the bell marks the thread seen): the above, and an agent's reply.
+// An agent reply row is not in My docs' counts -- the agent-unread record
+// carries it there (noteAgentUnread) -- so it is not a doc-activity kind.
+const INBOX_THREAD_KINDS = new Set([...DOC_ACTIVITY_INBOX_KINDS, 'agent_reply']);
 
 // Accepts either shape of actor key. normalizeGithubLogin rejects anything
 // with an "@" in it, so routing an email identity through it alone silently
@@ -16068,6 +16082,10 @@ function inboxGroupKey(kind, slug, targetId) {
   if (kind === 'mention') return `mention:${targetId || slug}`;
   if (kind === 'comment') return `comment:${slug}`;
   if (kind === 'reply') return `reply:${targetId}`;
+  // An agent's replies on one doc are one row ("Claude Code replied 3 times
+  // on Plan"), as people's comments are: per thread they could crowd out
+  // the inbox and write it once per thread.
+  if (kind === 'agent_reply') return `agent_reply:${slug}`;
   if (kind === 'reaction') return `reaction:${targetId}`;
   // One row per person asking: each is approved or ignored on its own.
   if (kind === 'access_request') return targetId ? `access_request:${slug}:${targetId}` : `access_request:${slug}`;
@@ -16101,15 +16119,62 @@ function noteInboxThread(row, thread, at) {
   row.thread_at = map;
 }
 
-function inboxUnread(inbox) {
+// Unread as the person sees it: not read, and not older than
+// INBOX_UNREAD_TTL_MS.
+function inboxRowUnread(row, now = Date.now()) {
+  if (!row || row.read) return false;
+  const at = Date.parse(row.at || '');
+  return !(at && now - at > INBOX_UNREAD_TTL_MS);
+}
+
+function inboxUnread(inbox, now = Date.now()) {
   const items = inbox && Array.isArray(inbox.items) ? inbox.items : [];
-  return items.filter(i => i && !i.read).length;
+  return items.filter(i => inboxRowUnread(i, now)).length;
+}
+
+// The threads one event speaks for, as [thread id, at]: `threads` when it
+// carries several (an agent's replies coalesced into one write), else its own.
+function inboxEventThreads(ev) {
+  if (Array.isArray(ev.threads) && ev.threads.length) {
+    return ev.threads.filter((t) => Array.isArray(t) && typeof t[0] === 'string' && t[0]).map(([id, at]) => [id, at || ev.at]);
+  }
+  const id = ev.thread_id || ev.comment_id;
+  return id ? [[id, ev.at]] : [];
+}
+
+// The inbox kept to INBOX_MAX rows. What goes first: read rows, rows too old
+// to count, and agent replies (quiet, and My docs keeps them too), oldest
+// first; a person's unread row only when nothing else is left. A busy agent
+// never pushes out the unread comment somebody left you.
+function trimInbox(items) {
+  const list = items.filter(Boolean);
+  if (list.length <= INBOX_MAX) return list;
+  const now = Date.now();
+  const spare = (i) => !inboxRowUnread(i, now) || i.kind === 'agent_reply';
+  const order = list.map((row, n) => ({ row, n }))
+    .sort((a, b) => (spare(b.row) - spare(a.row)) || String(a.row.at || '').localeCompare(String(b.row.at || '')) || (b.n - a.n));
+  const drop = new Set(order.slice(0, list.length - INBOX_MAX).map((x) => x.row));
+  return list.filter((row) => !drop.has(row));
+}
+
+// At most this many unread agent replies on one doc in one person's bell
+// row: past it the row is left as it is (no write), until they read it.
+const AGENT_REPLY_ROW_CAP = 99;
+function inboxEventCapped(inbox, ev) {
+  if (!ev || ev.kind !== 'agent_reply') return false;
+  const gk = inboxGroupKey(ev.kind, ev.slug, ev.target_id || ev.comment_id);
+  const evAt = Date.parse(ev.at || '') || Date.now();
+  const row = (inbox && Array.isArray(inbox.items) ? inbox.items : []).find((i) => i && i.group_key === gk && inboxRowUnread(i, evAt));
+  return Boolean(row && (Number(row.count) || 1) >= AGENT_REPLY_ROW_CAP);
 }
 
 function applyInboxEvent(inbox, ev) {
   const items = inbox && Array.isArray(inbox.items) ? inbox.items.slice() : [];
   const gk = inboxGroupKey(ev.kind, ev.slug, ev.target_id || ev.comment_id);
-  const existing = items.find(i => i && !i.read && i.group_key === gk);
+  // An unread row too old to count (inboxRowUnread) takes no new event: the
+  // new one starts its own row, counted from one.
+  const evAt = Date.parse(ev.at || '') || Date.now();
+  const existing = items.find(i => i && i.group_key === gk && inboxRowUnread(i, evAt));
   if (existing) {
     // Every thread the row now speaks for, with its newest time: a grouped
     // "commented" row covers several, and reading one of them on the page
@@ -16120,17 +16185,17 @@ function applyInboxEvent(inbox, ev) {
       if (covered) existing.thread_at = Object.fromEntries(covered.map(([id, ms]) => [id, new Date(ms).toISOString()]));
       else existing.threads_capped = true;
     }
-    existing.count = (Number(existing.count) || 1) + 1;
+    existing.count = (Number(existing.count) || 1) + Math.max(1, Math.floor(Number(ev.count)) || 1);
     existing.at = ev.at;
     existing.actor = ev.actor || existing.actor;
     existing.comment_id = ev.comment_id || existing.comment_id;
     existing.thread_id = ev.thread_id || existing.thread_id;
-    if (!existing.threads_capped) noteInboxThread(existing, ev.thread_id || ev.comment_id, ev.at);
+    if (!existing.threads_capped) for (const [thread, at] of inboxEventThreads(ev)) noteInboxThread(existing, thread, at);
     existing.preview = ev.preview != null ? ev.preview : existing.preview;
     if (ev.emoji) existing.emoji = ev.emoji;
     existing.version = ev.version || existing.version;
     const rest = items.filter(i => i !== existing);
-    return { items: [existing, ...rest].slice(0, INBOX_MAX) };
+    return { items: trimInbox([existing, ...rest]) };
   }
   const row = {
     id: ev.id,
@@ -16140,20 +16205,24 @@ function applyInboxEvent(inbox, ev) {
     version: ev.version || 1,
     comment_id: ev.comment_id,
     thread_id: ev.thread_id || ev.comment_id,
-    ...(ev.thread_id || ev.comment_id ? { thread_at: { [ev.thread_id || ev.comment_id]: ev.at } } : {}),
+    ...(inboxEventThreads(ev).length ? { thread_at: Object.fromEntries(inboxEventThreads(ev).slice(0, INBOX_ROW_THREADS_MAX)) } : {}),
+    ...(inboxEventThreads(ev).length > INBOX_ROW_THREADS_MAX ? { threads_capped: true } : {}),
     actor: ev.actor || null,
     preview: ev.preview || '',
     title: ev.title || ev.slug,
     ...(ev.team_id ? { team_id: ev.team_id } : {}),
     at: ev.at,
     read: false,
-    count: 1,
+    count: Math.max(1, Math.floor(Number(ev.count)) || 1),
     emoji: ev.emoji || null,
     ...(ev.requester ? { requester: ev.requester } : {}),
+    // A quiet row (an agent's reply) is in the bell and its count, never
+    // pushed, emailed or raised as a desktop alert.
+    ...(ev.quiet ? { quiet: true } : {}),
     // A feedback invite leads off tdoc, to the site (notificationTarget).
     ...(ev.kind === 'feedback_invite' && typeof ev.link === 'string' && /^https?:\/\//.test(ev.link) ? { link: ev.link } : {}),
   };
-  return { items: [row, ...items].slice(0, INBOX_MAX) };
+  return { items: trimInbox([row, ...items]) };
 }
 
 // `slug`: every unread comment, reply and mention row on that doc (My docs'
@@ -16176,7 +16245,7 @@ function markInboxRead(inbox, { ids, comment_id, slug, seen, viewed, ids_at } = 
     if (Array.isArray(ids) && ids.includes(i.id)) return { ...i, read: true };
     if (comment_id && i.comment_id === comment_id) return { ...i, read: true };
     if (ids_at && typeof ids_at === 'object' && !i.read && typeof ids_at[i.id] === 'string' && ids_at[i.id] === i.at) return { ...i, read: true };
-    if (slug && !i.read && i.slug === slug && DOC_ACTIVITY_INBOX_KINDS.has(i.kind)) {
+    if (slug && !i.read && i.slug === slug && INBOX_THREAD_KINDS.has(i.kind)) {
       if (!seen) return { ...i, read: true };
       // Read only when every thread the row covers has been seen up to its
       // newest activity; a row that does not know its threads in full waits
@@ -16205,8 +16274,8 @@ async function markInboxSeen(env, session, slug, seen, viewed = null) {
     // A row here that does not know its threads is decided only by
     // reconcileInboxSeen: this doc is taken off the round's done list so the
     // next pass checks it again -- only this doc, not the whole round.
-    const undecided = part.inbox && part.inbox.seen_checked && (part.inbox.items || []).some((i) => i && !i.read
-      && i.slug === slug && DOC_ACTIVITY_INBOX_KINDS.has(i.kind) && !inboxRowThreads(i));
+    const undecided = part.inbox && part.inbox.seen_checked && (part.inbox.items || []).some((i) => inboxRowUnread(i)
+      && i.slug === slug && INBOX_THREAD_KINDS.has(i.kind) && !inboxRowThreads(i));
     const mark = undecided ? { ...base, recheck: slug } : base;
     const next = applyInboxRead(part.inbox, mark);
     if (JSON.stringify(next) === JSON.stringify(part.inbox)) continue;
@@ -16266,7 +16335,7 @@ function bellThreadsRead(items, mark) {
   const out = new Map();
   after.items.forEach((row, n) => {
     const was = before.items[n];
-    if (!row || !was || was.read || !row.read || !DOC_ACTIVITY_INBOX_KINDS.has(row.kind) || !isValidSlug(row.slug)) return;
+    if (!row || !was || was.read || !row.read || !INBOX_THREAD_KINDS.has(row.kind) || !isValidSlug(row.slug)) return;
     const threads = inboxRowThreads(row) || [[row.thread_id || row.comment_id, Date.parse(row.at) || 0]];
     for (const [id, ms] of threads) {
       if (typeof id !== 'string' || !THREAD_SEEN_ID_RE.test(id) || !(ms > 0)) continue;
@@ -16328,7 +16397,7 @@ const INBOX_RECONCILE_DONE_MAX = 200;
 // left to the bell), so one unreadable doc never keeps a round open.
 const INBOX_RECONCILE_READ_TRIES = 3;
 function unreadSeenRows(parts) {
-  return mergeInboxes(parts).items.filter((i) => i && !i.read && DOC_ACTIVITY_INBOX_KINDS.has(i.kind) && isValidSlug(i.slug));
+  return mergeInboxes(parts).items.filter((i) => inboxRowUnread(i) && INBOX_THREAD_KINDS.has(i.kind) && isValidSlug(i.slug));
 }
 async function reconcileInboxSeen(env, session, parts, { now = Date.now() } = {}) {
   if (!parts.length) return parts;
@@ -16453,7 +16522,7 @@ function mergeInboxes(parts) {
       items.push(item);
     }
   }
-  items.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  items.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')) || String(b.id || '').localeCompare(String(a.id || '')));
   return { items };
 }
 
@@ -16462,20 +16531,46 @@ function mergeInboxes(parts) {
 // page read its bell row too (#1060), today's activity went read at once and
 // sank beneath weeks-old unread rows, a full page of them (Julie, 2026-11-18:
 // "everything in Notifications is so old"). Unread is the row's mark, never
-// its place. `unread: true` lists the unread rows alone, newest first: what
-// is still waiting on the person (My docs' Needs you). `unread` in the
-// answer is always the count of every unread row.
-function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE, unread: onlyUnread = false } = {}) {
-  const items = inbox && Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
+// its place. Equal times fall back to the id, so a page boundary between
+// them is the same on every request.
+// `unread: true` lists what is still waiting on the person (My docs' Needs
+// you): unread comment, reply and mention rows only -- a reaction or an
+// access request is not a to-do there and must not eat its pages.
+// A row too old to count as unread (inboxRowUnread) is listed as read.
+// `unread` in the answer is always the count of every unread row.
+function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE, unread: onlyUnread = false, now = Date.now() } = {}) {
+  const items = (inbox && Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [])
+    .map((i) => (i.read || inboxRowUnread(i, now) ? i : { ...i, read: true, aged: true }));
   const unread = items.filter(i => !i.read);
-  const ordered = (onlyUnread ? unread : items).slice()
-    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  const ordered = (onlyUnread ? unread.filter((i) => DOC_ACTIVITY_INBOX_KINDS.has(i.kind)) : items).slice()
+    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')) || String(b.id || '').localeCompare(String(a.id || '')));
   const off = Math.max(0, Number(offset) || 0);
   const lim = Math.min(50, Math.max(1, Number(limit) || INBOX_PAGE));
   return {
     items: ordered.slice(off, off + lim),
     unread: unread.length,
     has_more: off + lim < ordered.length,
+  };
+}
+
+// A row about a doc's comments, on a doc this person can no longer read (a
+// collaborator removed, a member who left the team, a doc deleted): kept in
+// the list, without the doc's title or anyone's words. Checked per page, one
+// record read per doc on it.
+const INBOX_DOC_CONTENT_KINDS = new Set(['comment', 'reply', 'mention', 'reaction', 'agent_reply']);
+async function hideUnreadableInboxRows(env, session, page) {
+  const slugs = [...new Set((page.items || []).filter((i) => i && INBOX_DOC_CONTENT_KINDS.has(i.kind) && isValidSlug(i.slug)).map((i) => i.slug))];
+  if (!slugs.length) return page;
+  const readable = new Map(await Promise.all(slugs.map(async (slug) => {
+    let meta = null;
+    try { meta = await loadDocMeta(env, slug); } catch { return [slug, true]; }
+    return [slug, Boolean(meta) && canReadDoc(accessFromMeta(meta), session, env, meta)];
+  })));
+  return {
+    ...page,
+    items: page.items.map((i) => (i && INBOX_DOC_CONTENT_KINDS.has(i.kind) && readable.get(i.slug) === false
+      ? { ...i, title: '', preview: '', no_access: true }
+      : i)),
   };
 }
 
@@ -17071,7 +17166,7 @@ function docSharingFields(meta) {
 // threads an agent answered that the person has not opened since; see
 // noteAgentUnread). Both come from the person's own records, read whole once
 // per load -- never a comment or read-state read per row.
-const DOC_ACTIVITY_INBOX_KINDS = new Set(['comment', 'reply', 'mention']);
+// (DOC_ACTIVITY_INBOX_KINDS: with the inbox constants above.)
 async function viewerDocActivity(env, session) {
   const [inboxes, agentParts] = await Promise.all([loadViewerInboxes(env, session), loadAgentUnread(env, session)]);
   const out = new Map();
@@ -17080,7 +17175,7 @@ async function viewerDocActivity(env, session) {
     return out.get(slug);
   };
   for (const item of mergeInboxes(inboxes).items) {
-    if (!item || item.read || !isValidSlug(item.slug) || !DOC_ACTIVITY_INBOX_KINDS.has(item.kind)) continue;
+    if (!inboxRowUnread(item) || !isValidSlug(item.slug) || !DOC_ACTIVITY_INBOX_KINDS.has(item.kind)) continue;
     forSlug(item.slug).comments += Math.max(1, Math.floor(Number(item.count)) || 1);
   }
   const threads = new Set();
@@ -17191,16 +17286,106 @@ function agentReplyRecipient(thread, { skip = [] } = {}) {
 // Notes an agent's reply for its recipient. Never fails the reply; a person
 // flooded with agent replies is noted at most 60 times an hour.
 // `author`: the reply's author, so My docs can show who answered.
-async function noteAgentReply(env, thread, { slug, at, author = null, skip = [], ctx = null }) {
-  const who = agentReplyRecipient(thread, { skip });
-  if (!who || !thread || !thread.root) return;
+async function noteAgentReply(env, thread, { slug, at, author = null, skip = [], ctx = null, replyId = '', text = '' }) {
+  return noteAgentReplies(env, slug, [{ thread, at, author, replyId, text }], { skip, ctx });
+}
+
+// Several agent replies on one doc from one request (a suggestion accepted
+// that fixes several comments): each is noted for My docs as before, and
+// the bell gets one write per person for all of them. After the response
+// when the request has a ctx.
+async function noteAgentReplies(env, slug, replies, { skip = [], ctx = null } = {}) {
+  const list = (replies || []).filter((r) => r && r.thread && r.thread.root);
+  if (!list.length) return;
   const work = (async () => {
-    if (await rateLimited(env, `agent-unread:${who}`, AGENT_UNREAD_WRITES_PER_HOUR, 3600)) return;
-    await noteAgentUnread(env, who, { slug, thread: thread.root.id, at, author });
-  })().catch((error) => {
-    console.error('[agent-unread] note failed:', error && error.message ? error.message : error);
-  });
+    for (const { thread, at, author } of list) {
+      const who = agentReplyRecipient(thread, { skip });
+      if (!who) continue;
+      try {
+        if (await rateLimited(env, `agent-unread:${who}`, AGENT_UNREAD_WRITES_PER_HOUR, 3600)) continue;
+        await noteAgentUnread(env, who, { slug, thread: thread.root.id, at, author });
+      } catch (error) {
+        console.error('[agent-unread] note failed:', error && error.message ? error.message : error);
+      }
+    }
+    try { await deliverAgentReplyRows(env, slug, list, { skip }); } catch (error) {
+      console.error('[notifications] agent reply row failed:', error && error.message ? error.message : error);
+    }
+  })();
   if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(work); else await work;
+}
+
+// Who gets a bell row for an agent's reply: the doc's owner and every person
+// who wrote in the thread -- real, attested people only (agentReplyRecipient's
+// rule), never an agent, never whoever just acted (`skip`), and not the
+// author of a root comment since deleted. Whether each may still read the
+// doc is checked by the caller (deliverAgentReplyRows).
+function agentReplyBellRecipients(thread, { owner = '', skip = [] } = {}) {
+  const root = thread && thread.root;
+  const snap = root ? (snapshotAt(root, Infinity) || root) : null;
+  const out = [];
+  const add = (key) => { if (key && !skip.includes(key) && !out.includes(key)) out.push(key); };
+  add(normalizeActorKey(owner));
+  if (!snap) return out;
+  const consider = (author, record) => {
+    if (!author || isNonHumanAuthor(author) || author.imported || (record && record.agent_status)) return;
+    if (!(typeof author.account_id === 'string' && author.account_id) && !(typeof author.github_id === 'string' && author.github_id)) return;
+    add(normalizeActorKey(author.login));
+  };
+  if (!snap.deleted && !root.deleted) consider(snap.author || root.author, null);
+  for (const reply of snap.replies || []) if (reply && !reply.deleted) consider(reply.author, reply);
+  return out;
+}
+
+// A recipient's actor key as a session canReadDoc can judge: the key, and on
+// a team doc the account's teams (a member who left reads no more).
+async function inboxReaderSession(env, key, meta) {
+  const k = String(key || '');
+  const session = k.startsWith('email:') ? { email: k.slice(6) } : { login: k };
+  if (meta && meta.workspace_id) {
+    let accountId = null;
+    try { accountId = await sessionAccountId(env, session); } catch { accountId = null; }
+    if (accountId) {
+      session.account_id = accountId;
+      session.team_ids = await loadAccountTeamIds(env, accountId);
+    }
+  }
+  return session;
+}
+
+// An agent's reply is a quiet bell row (Julie's call, 2026-11-18): in the
+// bell and its count, one row per doc ("Claude Code replied 3 times on
+// Plan"), never pushed or emailed (writeInboxEvent `quiet`). Only for people
+// who can still read the doc: a collaborator removed, or a member who left
+// the team, gets nothing. Seeing the threads reads it (INBOX_THREAD_KINDS);
+// reading it in the bell marks them seen and clears My docs' agent-reply
+// note with it. One inbox write per person per call, none once their row
+// holds AGENT_REPLY_ROW_CAP unread replies (inboxEventCapped).
+const AGENT_REPLY_PREVIEW_MAX = 300;
+async function deliverAgentReplyRows(env, slug, replies, { skip = [] } = {}) {
+  const meta = await loadDocMeta(env, slug);
+  if (!meta || !replies.length) return;
+  const access = accessFromMeta(meta);
+  const skipKeys = skip.map(normalizeActorKey).filter(Boolean);
+  const owner = ownerActorKey(meta, env);
+  const keys = [];
+  for (const r of replies) for (const k of agentReplyBellRecipients(r.thread, { owner, skip: skipKeys })) if (!keys.includes(k)) keys.push(k);
+  const newest = replies.slice().sort((a, b) => String(a.at || '').localeCompare(String(b.at || ''))).pop();
+  const face = agentFaceAuthor(newest.author) || { kind: 'agent', login: 'agent', name: 'Agent' };
+  const ev = {
+    kind: 'agent_reply', slug, comment_id: newest.replyId || newest.thread.root.id, thread_id: newest.thread.root.id,
+    threads: replies.map((r) => [r.thread.root.id, r.at]), count: replies.length,
+    actor: face, preview: String(newest.text || '').slice(0, AGENT_REPLY_PREVIEW_MAX),
+    title: meta.title || slug, at: newest.at, quiet: true,
+  };
+  for (const who of keys) {
+    try {
+      if (!canReadDoc(access, await inboxReaderSession(env, who, meta), env, meta)) continue;
+      await writeInboxEvent(env, who, ev);
+    } catch (error) {
+      console.error('[notifications] agent reply row failed:', error && error.message ? error.message : error);
+    }
+  }
 }
 async function loadAgentUnread(env, session) {
   const keys = [...new Set(actorKeys(session).map(agentUnreadKey).filter(Boolean))];
@@ -17242,6 +17427,8 @@ async function writeInboxEvent(env, who, ev, { ctx = null, origin = '' } = {}) {
     who, ev: { id: `n_${Date.now()}_${rand(4)}`, ...ev, at: ev.at || new Date().toISOString() },
   });
   if (!row) return null;
+  // A quiet row (an agent's reply) is only in the bell: no push, no email.
+  if (ev.quiet) return row;
   const recipient = key.slice('inbox:'.length);
   const out = Promise.all([
     pushInboxRow(env, recipient, row).catch((error) => {
@@ -17271,6 +17458,7 @@ const SERIAL_KV_OPS = {
   async inbox_append(env, { who, ev }) {
     const { key, inbox } = await loadInbox(env, who);
     if (!key) return null;
+    if (inboxEventCapped(inbox, ev)) return null;
     const next = applyInboxEvent(inbox, ev);
     await env.META.put(key, JSON.stringify(next));
     return next.items[0];
@@ -21292,7 +21480,7 @@ async function askedComment(env, slug, session, meta, commentId) {
 
 // One answer, posted under the comment that asked. agentReplyGate keeps it
 // to one answer per human turn, as for every agent reply.
-async function postThreadAnswer(env, slug, { thread, parentId, agent, text, version, uniqueKey = null }) {
+async function postThreadAnswer(env, slug, { thread, parentId, agent, text, version, uniqueKey = null, ctx = null }) {
   const gate = agentReplyGate(thread.root, agent.login, text);
   if (!gate.allowed) return { skipped: true, reason: gate.reason };
   const V = coerceBodyVersion(version, thread.root.created_in || 1);
@@ -21316,7 +21504,7 @@ async function postThreadAnswer(env, slug, { thread, parentId, agent, text, vers
   if (res.status === 409) return { duplicate: true };
   if (res.status === 202 && res.body && res.body.skipped) return { skipped: true, reason: res.body.reason };
   // The asker sees the answer on the doc's row in My docs until they open it.
-  if (res.status === 200) await noteAgentReply(env, thread, { slug, at: now, author: agent });
+  if (res.status === 200) await noteAgentReply(env, thread, { slug, at: now, author: agent, replyId, text, ctx });
   return res.status === 200 ? { reply: res.body } : { failed: res.status };
 }
 
@@ -21327,7 +21515,7 @@ function tdocAiAuthor(owner, scope) {
   return { kind: 'agent', login: 'tdoc-ai', name: 'tdoc AI', avatar_url: '/tdoc_logo.png', ...(owner ? { owner } : {}), scope };
 }
 
-async function handleAsk(env, req, url, slug) {
+async function handleAsk(env, req, url, slug, ctx = null) {
   const cfg = askConfig(env);
   if (!cfg.available) return json({ error: 'ask_unavailable' }, { status: 503 });
   if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
@@ -21426,6 +21614,7 @@ async function handleAsk(env, req, url, slug) {
       agent: tdocAiAuthor(owner, meta.workspace_id ? 'team' : 'personal'),
       text: out.answer,
       version: asked,
+      ctx,
     });
     // The model ran: the question is spent either way, even if the answer
     // could not be posted or another one landed first.
@@ -21939,7 +22128,7 @@ async function putAiAsk(env, slug, accountKey, rec) {
 // kept is posted -- the browser never supplies the answer's text.
 //   POST /api/docs/<slug>/ask/publish       { ask_id, comment_id }  tdoc AI
 //   POST /api/docs/<slug>/my-agent/publish  { ask_id, comment_id }  own agent
-async function handleAskPublish(env, req, url, slug, kind) {
+async function handleAskPublish(env, req, url, slug, kind, ctx = null) {
   if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
   if (req.headers.get('authorization')) return json({ error: 'browser_session_required' }, { status: 403 });
   if (req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') {
@@ -21967,7 +22156,7 @@ async function handleAskPublish(env, req, url, slug, kind) {
     if (ask.published) return json({ error: 'already_public', reply_id: ask.published }, { status: 409 });
     if (!sameQuestion(asking, ask.question)) return json({ error: 'not_the_question', message: 'Make public posts the answer under the question it answered.' }, { status: 409 });
     const owner = await agentOwner(env, accountId, credentialKey(session));
-    const posted = await postThreadAnswer(env, slug, { thread: asking.thread, parentId: body.comment_id, agent: tdocAiAuthor(owner, scope), text: ask.answer, version: ask.version, uniqueKey: `publish:${askId}` });
+    const posted = await postThreadAnswer(env, slug, { thread: asking.thread, parentId: body.comment_id, agent: tdocAiAuthor(owner, scope), text: ask.answer, version: ask.version, uniqueKey: `publish:${askId}`, ctx });
     if (posted.duplicate) return json({ error: 'already_public' }, { status: 409 });
     if (posted.failed) return json({ error: 'reply_failed' }, { status: 502 });
     if (posted.reply) await putAiAsk(env, slug, accountKey, { ...ask, published: posted.reply.id });
@@ -21986,7 +22175,7 @@ async function handleAskPublish(env, req, url, slug, kind) {
   const author = ask.runner && ask.team_agent
     ? teamAgentAskAuthor({ team_agent: { ...ask.team_agent, team_name: teamOf ? teamOf.name : '' } }, ask.recipient, named, env)
     : await askAgentAuthor(env, accountId, credentialKey(session), ask.recipient, named, scope);
-  const posted = await postThreadAnswer(env, slug, { thread: asking.thread, parentId: body.comment_id, agent: author, text: ask.answer.text, uniqueKey: `publish:${askId}` });
+  const posted = await postThreadAnswer(env, slug, { thread: asking.thread, parentId: body.comment_id, agent: author, text: ask.answer.text, uniqueKey: `publish:${askId}`, ctx });
   if (posted.duplicate) return json({ error: 'already_public' }, { status: 409 });
   if (posted.failed) return json({ error: 'reply_failed' }, { status: 502 });
   if (posted.reply) await putAgentAsk(env, slug, { ...ask, comment_id: body.comment_id, reply_id: posted.reply.id });
@@ -23207,7 +23396,7 @@ async function saveVersionAsPerson(env, slug, op) {
 // person gets a message and presses again.
 const SUGGEST_ACCEPT_ATTEMPTS = 3;
 const SUGGEST_ACCEPT_WAIT_MS = 1000;
-async function handleSuggestionDecision(env, req, url, slug, id, decision) {
+async function handleSuggestionDecision(env, req, url, slug, id, decision, ctx = null) {
   const gate = await suggestEditorGate(env, req, url, slug);
   if (gate.error) return gate.error;
   const { session } = gate;
@@ -23310,6 +23499,7 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
   const cur = settled.ok ? settled.set : set;
   const fixed = settled.ok ? settled.fixed : [];
   const applied = [];
+  const noted = [];
   if (fixed.length) {
     const comments = await readComments(env, slug);
     ensureMigrated(comments);
@@ -23335,11 +23525,12 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
       });
       if (res.status === 200) {
         applied.push(cid);
-        // Whoever accepted has just seen it; anybody else waiting on the
-        // thread sees it on the doc's row in My docs.
-        await noteAgentReply(env, thread, { slug, at: now, author: agent, skip: actorKeys(session).map(normalizeActorKey).filter(Boolean) });
+        noted.push({ thread, at: now, author: agent, replyId, text });
       }
     }
+    // Whoever accepted has just seen them; anybody else waiting on these
+    // threads sees them in My docs and, in one bell write each, the bell.
+    await noteAgentReplies(env, slug, noted, { skip: actorKeys(session).map(normalizeActorKey).filter(Boolean), ctx });
   }
   return json({ ok: true, version, url: `/d/${slug}/v/${version}`, accepted: good.map((e) => e.id), stale: stale.map((e) => e.id), applied_comments: applied, suggestion: view(cur) });
 }
@@ -24071,7 +24262,7 @@ async function publishLockRefusal(env, req, actor, slug, meta) {
   }, { status: 403 });
 }
 
-async function handleAgentAsk(env, req, action) {
+async function handleAgentAsk(env, req, action, ctx = null) {
   const auth = await requireUploadAuth(req, env);
   if (!auth.ok) return auth.response;
   if (auth.actor.kind !== 'hosted' || !auth.actor.account_id) return json({ error: 'account_token_required' }, { status: 403 });
@@ -24135,7 +24326,7 @@ async function handleAgentAsk(env, req, action) {
         const author = teamAgentId
           ? teamAgentAskAuthor(auth.actor, prev.recipient, body, env)
           : await askAgentAuthor(env, auth.actor.account_id, credentialKey(auth.actor), prev.recipient, body, meta && meta.workspace_id ? 'team' : 'personal');
-        const posted = await postThreadAnswer(env, slug, { thread, parentId: prev.comment_id, agent: author, text });
+        const posted = await postThreadAnswer(env, slug, { thread, parentId: prev.comment_id, agent: author, text, ctx });
         if (posted.failed) return json({ error: 'reply_failed' }, { status: 502 });
         replyId = posted.reply ? posted.reply.id : null;
       }
@@ -30079,7 +30270,8 @@ const tdocHandlers = {
       }
       // `?filter=unread`: the unread rows alone (Needs you); default all.
       const onlyUnread = url.searchParams.get('filter') === 'unread';
-      return json(await redactCommentEmails(pageInbox(mergeInboxes(parts), { offset, unread: onlyUnread }), await emailPrivacyFor(env, s, 'me:inbox', null)));
+      const page = await hideUnreadableInboxRows(env, s, pageInbox(mergeInboxes(parts), { offset, unread: onlyUnread }));
+      return json(await redactCommentEmails(page, await emailPrivacyFor(env, s, 'me:inbox', null)));
     }
     if (p === '/api/notifications/unread' && method === 'GET') {
       const s = await getSession(env, req);
@@ -31661,7 +31853,7 @@ const tdocHandlers = {
       const handOffMatch = p.match(/^\/api\/docs\/([^/]+)\/hand-off\/?$/);
       if (handOffMatch && method === 'POST') return handleHandOff(env, req, url, handOffMatch[1], ctx);
       const publishMatch = p.match(/^\/api\/docs\/([^/]+)\/(ask|my-agent)\/publish\/?$/);
-      if (publishMatch && method === 'POST') return handleAskPublish(env, req, url, publishMatch[1], publishMatch[2] === 'ask' ? 'ai' : 'agent');
+      if (publishMatch && method === 'POST') return handleAskPublish(env, req, url, publishMatch[1], publishMatch[2] === 'ask' ? 'ai' : 'agent', ctx);
       // AI suggestions: tdoc AI proposes edits shown in the doc; an editor
       // accepts (publishes) or rejects them (handleSuggest and below).
       // Dev mode only (askEditV2Allowed): for anybody else these paths are
@@ -31673,7 +31865,7 @@ const tdocHandlers = {
         if (suggestMatch) return handleSuggest(env, req, url, suggestMatch[1]);
         if (suggestionsMatch && method === 'GET') return handleSuggestionsList(env, req, url, suggestionsMatch[1]);
         if (suggestionsMatch) return handleProposeEdits(env, req, url, suggestionsMatch[1]);
-        return handleSuggestionDecision(env, req, url, decisionMatch[1], decisionMatch[2], decisionMatch[3]);
+        return handleSuggestionDecision(env, req, url, decisionMatch[1], decisionMatch[2], decisionMatch[3], ctx);
       }
       // Version history: the grouped rows, what each changed (lazily, cached),
       // and Restore (a person's browser save of an older version's bytes).
@@ -31684,7 +31876,7 @@ const tdocHandlers = {
       const restoreMatch = method === 'POST' ? p.match(/^\/api\/docs\/([^/]+)\/versions\/([1-9]\d{0,6})\/restore\/?$/) : null;
       if (restoreMatch) return handleVersionRestore(env, req, url, restoreMatch[1], restoreMatch[2]);
       const askMatch = p.match(/^\/api\/docs\/([^/]+)\/ask\/?$/);
-      if (askMatch && (method === 'POST' || method === 'GET')) return handleAsk(env, req, url, askMatch[1]);
+      if (askMatch && (method === 'POST' || method === 'GET')) return handleAsk(env, req, url, askMatch[1], ctx);
       if (p === '/api/write-with-ai' && (method === 'POST' || method === 'GET')) return handleWriteWithAi(env, req, url, ctx);
       // Send to my agent: the reader's own agents only (see handleMyAgent).
       const cancelMatch = p.match(/^\/api\/docs\/([^/]+)\/my-agent\/cancel\/?$/);
@@ -31692,7 +31884,7 @@ const tdocHandlers = {
       const myAgentMatch = p.match(/^\/api\/docs\/([^/]+)\/my-agent\/?$/);
       if (myAgentMatch && (method === 'POST' || method === 'GET')) return handleMyAgent(env, req, url, myAgentMatch[1]);
       const agentAskMatch = p.match(/^\/api\/agent\/ask-(ack|reply|done)$/);
-      if (agentAskMatch && method === 'POST') return handleAgentAsk(env, req, agentAskMatch[1]);
+      if (agentAskMatch && method === 'POST') return handleAgentAsk(env, req, agentAskMatch[1], ctx);
     }
 
     // A doc in Trash has no thread to write to, edit or react on until it is
@@ -33294,7 +33486,7 @@ const tdocHandlers = {
       }
       // The person waiting on this thread sees it on the doc's row in My
       // docs until they open the thread. Never fails the reply.
-      if (res.status === 200) await noteAgentReply(env, thread, { slug, at: now, author: agent, ctx });
+      if (res.status === 200) await noteAgentReply(env, thread, { slug, at: now, author: agent, ctx, replyId, text: replyText });
       // And the handoff that carried these comments learns when the first
       // agent reply landed, so its history can say sent → delivered → on it
       // → replied → published instead of stopping at "On it".
