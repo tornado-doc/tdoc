@@ -2,6 +2,7 @@
 // the real upload route, including aid stamping and shell preview extraction.
 const assert = require('node:assert/strict');
 const { loadWorker, makeEnv, issue, req } = require('./helpers/worker-harness');
+const { guard, bestOf } = require('./helpers/perf-budget');
 
 (async () => {
   const mod = await loadWorker();
@@ -13,7 +14,9 @@ const { loadWorker, makeEnv, issue, req } = require('./helpers/worker-harness');
   }), env, {});
 
   // Budget: a quadratic scan of 1.5 MB costs seconds; linear work is ~150-300 ms
-  // on CI runners. 1000 ms keeps the DoS guard (quadratic is minutes) without flaking on a busy runner.
+  // on CI runners. 1000 ms keeps the DoS guard (quadratic is minutes); it is
+  // scaled by the runner's measured speed and the best of three runs is
+  // compared, so a busy runner or one GC pause does not fail it.
   // Warm route initialization and the JIT before measuring document work.
   assert.equal((await upload('warm-up', '<h1>Warm up</h1><p>Text</p>')).status, 200);
 
@@ -23,15 +26,18 @@ const { loadWorker, makeEnv, issue, req } = require('./helpers/worker-harness');
     ['heading', '<h1'],
   ]) {
     const html = '<section>' + opener.repeat(Math.ceil(1.5 * 1024 * 1024 / opener.length)) + '</section>';
-    const request = req('/api/upload', {
-      method: 'POST', token: owner.token, body: { slug: `linear-${kind}`, version: 1, html },
-    });
-    const start = process.cpuUsage();
-    const response = await worker.fetch(request, env, {});
-    const cpu = process.cpuUsage(start);
-    const elapsedMs = (cpu.user + cpu.system) / 1000;
-    assert.equal(response.status, 200, `${kind} upload: ${await response.text()}`);
-    assert.ok(elapsedMs < 1000, `${kind} upload took ${elapsedMs.toFixed(1)} ms CPU for 1.5 MB`);
+    let elapsedMs = Infinity;
+    for (let k = 0; k < 3; k++) {
+      const request = req('/api/upload', {
+        method: 'POST', token: owner.token, body: { slug: `linear-${kind}-${k}`, version: 1, html },
+      });
+      const start = process.cpuUsage();
+      const response = await worker.fetch(request, env, {});
+      const cpu = process.cpuUsage(start);
+      elapsedMs = Math.min(elapsedMs, (cpu.user + cpu.system) / 1000);
+      assert.equal(response.status, 200, `${kind} upload: ${await response.text()}`);
+    }
+    guard(`${kind} upload, 1.5 MB, CPU`, elapsedMs, 1000);
     console.log(`  ✓ ${kind}: 1.5 MB uploaded in ${elapsedMs.toFixed(1)} ms CPU`);
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

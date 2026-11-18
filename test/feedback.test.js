@@ -730,10 +730,13 @@ const APP = 'http://localhost:3000';
     // The one line keeps its Copy button (#793): clipboard, the execCommand
     // fallback, and selecting the snippet when both fail.
     const install = fs.readFileSync(path.join(ROOT, 'shell/src/feedback-install.jsx'), 'utf8');
-    assert(install.includes('<CodeCopy code={`<script src="${scriptSrc}" data-tdoc-space="YOUR_SPACE_ID" async></script>`} />'), 'the SDK line has no Copy button beside it');
-    // Two ways in, each its own section the homepage links to (#sdk): the
-    // bookmark, and the SDK with how to get a space id and the setup guide.
+    assert(install.includes('<CodeCopy code={feedbackSdkLine(scriptSrc, space && space.slug)} />'), 'the SDK line has no Copy button beside it');
+    assert(install.includes("FEEDBACK_SDK_PLACEHOLDER = 'YOUR_SPACE_ID'") && install.includes('data-tdoc-space="${space || FEEDBACK_SDK_PLACEHOLDER}"'), 'the SDK line lost its placeholder');
+    // Two ways in, chosen at the top (#bookmark / #sdk) and each its own
+    // section the homepage links to (#sdk): the bookmark, and the SDK with
+    // how to get a space id and the setup guide.
     assert(install.includes('id="bookmark"') && install.includes('id="sdk"'), 'no #bookmark / #sdk sections');
+    assert(install.includes('href="#bookmark" id="choose-bookmark"') && install.includes('href="#sdk" id="choose-sdk"'), 'no chooser at the top');
     assert(install.includes("FEEDBACK_SDK_GUIDE = 'https://github.com/tornado-doc/tdoc/tree/main/packages/feedback#readme'") && install.includes('href={FEEDBACK_SDK_GUIDE}'), 'no link to the SDK setup guide');
     assert(install.includes('<CopyPromptButton text={FEEDBACK_SDK_PROMPT}'), 'no copyable prompt for the agent');
     assert(install.includes('navigator.clipboard') && install.includes("execCommand('copy')") && install.includes('Press ⌘C'), 'Copy button has no clipboard code or fallback');

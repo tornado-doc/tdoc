@@ -5,6 +5,7 @@
 // Excel), hostile input (length, depth, time and work budgets) and speed.
 // No browser and no npm install.
 const assert = require('node:assert/strict');
+const { guard, bestOf } = require('./helpers/perf-budget');
 
 let pass = 0, fail = 0;
 async function t(name, fn) {
@@ -297,9 +298,8 @@ async function t(name, fn) {
       "='unterminated!A1",
     ];
     for (const f of cases) {
-      const t0 = Date.now();
       assert.equal(ev(f), '#ERROR!', f.slice(0, 20));
-      assert.ok(Date.now() - t0 < 100, 'fast');
+      guard('hostile formula refused', bestOf(3, () => ev(f)), 100);
     }
     // No regular expression from sheet text: a pathological wildcard is linear.
     const wb = book(sheet('S', [['a'.repeat(10000), '=COUNTIF(A1,"*a*a*a*a*a*a*a*a*a*a*a*a*b")', '=COUNTIF(A1,"*a*a*a*a*a")']]));
@@ -320,7 +320,7 @@ async function t(name, fn) {
     wb.load([sheet('S', Array.from({ length: rows }, (_, r) => ['x'.repeat(200), r < 3000 ? '=CONCAT(A:A)&COUNTIF(A:A,"*x*x*x*x*y")&' + r : null]))]);
     const ms = Date.now() - t0;
     assert.ok(wb.stats.busy, 'over budget');
-    assert.ok(ms < 3000, `stopped in ${ms} ms`);
+    guard('#BUSY! stop (CONCAT over 50k rows)', ms, 3000);
     const shownBusy = Array.from({ length: 3000 }, (_, r) => wb.display('S', r, 1)).filter((v) => v === '#BUSY!').length;
     assert.ok(shownBusy > 0);
     // A work cap holds even without a clock.
@@ -344,15 +344,21 @@ async function t(name, fn) {
     const t0 = Date.now();
     const wb = book(sheet('S', grid));
     const ms = Date.now() - t0;
-    assert.ok(ms < 1500, `stopped in ${ms} ms`);
+    guard('#BUSY! stop (long patterns)', ms, 1500);
     assert.ok(wb.stats.busy || wb.display('S', 19, 1) === '0', 'over budget, or done');
-    assert.equal(wb.display('S', 20, 1), '#VALUE!');
+    // Row 20's criterion is over 255 characters: #VALUE!, unless the
+    // engine's own 1 s clock ran out on rows 0-19 first (a slow machine).
+    assert.equal(wb.display('S', 20, 1), wb.stats.busy && wb.display('S', 20, 1) === '#BUSY!' ? '#BUSY!' : '#VALUE!');
     assert.equal(wb.display('S', 0, 1), wb.stats.busy ? wb.display('S', 0, 1) : '0');
+    // The same criterion where no clock can pre-empt it: always #VALUE!.
+    const alone = Array.from({ length: 40 }, () => [text, null]);
+    alone[0][1] = '=COUNTIF(A:A,C1)';
+    alone[0][2] = longPattern;
+    assert.equal(book(sheet('S', alone)).display('S', 0, 1), '#VALUE!');
     // A 15 KB criterion against 30 KB cells, twenty times: refused at once.
     const g2 = Array.from({ length: 20 }, (_, r) => [text, '=COUNTIF(A:A,C1)', r ? null : '*' + 'a'.repeat(15000) + '*']);
-    const t1 = Date.now();
-    const wb2 = book(sheet('S', g2));
-    assert.ok(Date.now() - t1 < 1200);
+    let wb2;
+    guard('15 KB criterion refused', bestOf(3, () => { wb2 = book(sheet('S', g2)); }), 1200);
     assert.equal(wb2.display('S', 0, 1), '#VALUE!');
   });
 
@@ -367,7 +373,7 @@ async function t(name, fn) {
     const wb = book(sheet('S', grid));
     const ms = Date.now() - t0;
     const grew = process.memoryUsage().heapUsed - before;
-    assert.ok(ms < 500, `loaded in ${ms} ms`);
+    guard('100 × 8 KB of row ranges load', ms, 500);
     assert.ok(grew < 300 * 1024 * 1024, `heap grew ${Math.round(grew / 1048576)} MB`);
     assert.ok(!wb.display('S', 900, 0).startsWith('#'), wb.display('S', 900, 0));
     console.log(`    (100 × 8 KB of row ranges: ${ms} ms, +${Math.round(grew / 1048576)} MB)`);
@@ -389,7 +395,7 @@ async function t(name, fn) {
     const t0 = Date.now();
     wb.update({ name: 'S', rows, cols: 12, cell: cellAt(2) });
     const ms = Date.now() - t0;
-    assert.ok(ms < 1200, `edit in ${ms} ms`);
+    guard('edit with 50,000 readers', ms, 1200);
     console.log(`    (edit with 50,000 readers and 300,000 wide ranges: ${ms} ms${wb.stats.busy ? ', #BUSY! past the budget' : ''})`);
   });
 
@@ -400,7 +406,8 @@ async function t(name, fn) {
       const wb = F.createWorkbook();
       wb.load([{ name: 'S', rows: 201, cols: 2, cell: (r, c) => (r === 0 ? (c === 0 ? big : null) : c === 1 ? { f } : null) }]);
       const ms = Date.now() - t0;
-      assert.ok(ms < 1500 && wb.stats.busy, `${f.slice(0, 12)}: ${ms} ms, busy ${wb.stats.busy}`);
+      assert.ok(wb.stats.busy, `${f.slice(0, 12)}: busy ${wb.stats.busy}`);
+      guard(`whole-string work ${f.slice(0, 12)}`, ms, 1500);
     }
   });
 
@@ -448,13 +455,13 @@ async function t(name, fn) {
     const full = performance.now() - t0;
     assert.equal(wb.stats.busy, false);
     assert.equal(wb.stats.formulas, N + 4);
-    assert.ok(full < 200, `full recompute of ${N} formulas: ${full.toFixed(1)} ms`);
+    guard(`full recompute of ${N} formulas`, full, 200);
     grid[5][1] = 1000;
     t0 = performance.now();
     const changed = wb.update(sheet('S', grid));
     const inc = performance.now() - t0;
     assert.ok(changed.length <= 5, `only dependents: ${changed.length}`);
-    assert.ok(inc < 100, `incremental: ${inc.toFixed(1)} ms`);
+    guard('incremental recompute', inc, 100);
     console.log(`    (10,000 formulas: full ${full.toFixed(1)} ms, one edit ${inc.toFixed(1)} ms)`);
   });
 

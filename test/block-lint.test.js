@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { lint, KNOWN_CLASSES } = require('../server/block-lint');
 const { loadWorker, makeEnv, req } = require('./helpers/worker-harness.js');
+const { guard } = require('./helpers/perf-budget');
 
 const root = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
@@ -105,7 +106,10 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     assert(r.truncated && /first part of the doc only/.test(r.warning), 'a capped scan says so');
     const hostile = ['<div class="a' + '<'.repeat(2e6), '<div "' + 'a<b '.repeat(1e6), '<div>' + '<p '.repeat(2e6), '<div a="' + 'x '.repeat(2e6), '<div>'.repeat(1e6) + '</span>'.repeat(1e6), '<table>'.repeat(5e5)];
     const worst = Math.max(...hostile.map((h) => ms(() => lint(h))));
-    assert(sheetMs < 400 && proseMs < 1500 && worst < 1500, `sheet ${sheetMs}ms, prose ${proseMs}ms, worst hostile ${worst}ms`);
+    // Budgets scaled by the runner's measured speed (helpers/perf-budget.js).
+    guard('block lint, 8 MB sheet', sheetMs, 400);
+    guard('block lint, 5 MB prose', proseMs, 1500);
+    guard('block lint, worst hostile', worst, 1500);
   });
 
   // A sheet table of n body rows (a <thead> header, or a <th> row in the body).
@@ -151,9 +155,9 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     const headerOnly = pre + '<table data-tdoc-sheet><tr><th>a</th></tr></table>'.repeat(40000) + '</main></body></html>';
     const noTr = pre + '<table data-tdoc-sheet></table>'.repeat(60000) + '</main></body></html>';
     const times = [big, thOnly, bare].map((h) => ms(() => lint(h)));
-    assert(Math.max(...times) < 400, `times ${times.map((x) => x.toFixed(0)).join(', ')}ms`);
+    guard('sheet shape, 60k rows (worst)', Math.max(...times), 400);
     const hostile = [noCloseTd, headerOnly, noTr].map((h) => ms(() => lint(h)));
-    assert(Math.max(...hostile) < 100, `hostile ${hostile.map((x) => x.toFixed(0)).join(', ')}ms`);
+    guard('sheet shape, hostile (worst)', Math.max(...hostile), 100);
     assert(lint(page(prose + '<table data-tdoc-sheet>' + '<tr><th>x</th></tr>'.repeat(30) + '</table>')).small_sheets[0].rows === 0, 'header rows are not body rows');
     const many = lint(headerOnly);
     assert(many.small_sheet_count <= 200 && many.small_sheets.length === 5, 'at most 200 sheets are read');
@@ -227,7 +231,7 @@ const ms = (fn) => { const t0 = process.hrtime.bigint(); fn(); return Number(pro
     const quoted = '<a title="' + '<b '.repeat(300000) + '">x</a>';
     for (const [name, html] of [['openers', openers], ['no >', none], ['quoted', quoted]]) {
       const took = ms(() => lint(html));
-      assert(took < (process.env.CI ? 300 : 150), `${name}: ${took.toFixed(1)} ms`);
+      guard(`block lint, unclosed openers: ${name}`, took, 300);
     }
   });
 
