@@ -143,6 +143,49 @@ function eq(a, b, m) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Er
     eq((await inbox(env, 'rita')).map((i) => i.preview), ['answer for the first rita'], 'the comment\'s own author was judged as the new handle holder');
   });
 
+  await t('the owner @mentions someone new on a private doc: invited and told, even when KV still returns the record from before', async () => {
+    const { env, owner } = await seed({ visibility: 'private', allowed_users: [] });
+    await person(env, 'nina');
+    const before = await env.META.get('meta:u-doc');
+    // KV is eventually consistent: reads of the record during this request
+    // return it as it was before the invite was written.
+    const get = env.META.get.bind(env.META);
+    env.META.get = async (k) => (k === 'meta:u-doc' ? before : get(k));
+    try {
+      await comment(env, owner, '@nina can you look at this?');
+    } finally { env.META.get = get; }
+    assert(JSON.parse(await env.META.get('meta:u-doc')).access.allowed_users.includes('nina'), 'precondition: nina was invited');
+    eq((await inbox(env, 'nina')).map((i) => i.kind), ['mention'], 'the invited person was not told');
+  });
+
+  await t('a team doc shared with nobody in the team: its admin (the owner) still gets comment and agent-reply rows', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const ann = await issue(worker, env, 'ann');
+    const team = (await call(env, '/api/teams', { method: 'POST', cookie: ann.cookie, headers: SAME_ORIGIN, body: { name: 'Acme' } })).body.team;
+    eq((await call(env, '/api/upload', { method: 'POST', token: ann.token, body: { slug: 'team-plan', version: 1, html: PROSE } })).status, 200);
+    eq((await call(env, '/api/team/move', { method: 'POST', cookie: ann.cookie, headers: SAME_ORIGIN, body: { team: team.id, slugs: ['team-plan'] } })).status, 200);
+    const priv = await call(env, '/api/doc/access', { method: 'PATCH', cookie: ann.cookie, headers: SAME_ORIGIN, body: { slug: 'team-plan', access: { visibility: 'private', team: false, allowed_users: ['rita'] } } });
+    eq(priv.status, 200, priv.text);
+    const rita = await person(env, 'rita');
+    const c = await comment(env, rita, 'outside question', null, 'team-plan');
+    eq((await inbox(env, 'ann')).filter((i) => i.kind === 'comment').length, 1, 'the team admin got no comment row');
+    const a = await call(env, '/api/agent/reply', { method: 'POST', token: ann.token, body: { slug: 'team-plan', parent_id: c.id, text: 'Agent answer.', status: 'answered', agent_login: 'claude' } });
+    eq(a.status, 200, a.text);
+    eq((await inbox(env, 'ann')).filter((i) => i.kind === 'agent_reply').length, 1, 'the team admin got no agent row');
+  });
+
+  await t('an author known by a GitHub id that no longer resolves is not matched by the bare handle', async () => {
+    const { env, owner } = await seed({ visibility: 'private', allowed_users: ['rita'] });
+    // Rita commented without an account: her record carries the attested id.
+    await env.META.put(`session:${hex('e')}`, JSON.stringify({ login: 'rita', name: 'rita', idp: { provider: 'github', sub: '555' }, created: new Date().toISOString() }));
+    const rita = `tdoc_sid=${hex('e')}`;
+    const c = await comment(env, rita, 'question');
+    const rec = JSON.parse(await env.META.get('meta:u-doc'));
+    assert(rec, 'precondition: doc');
+    await comment(env, owner, 'answer', c.id);
+    eq((await inbox(env, 'rita')).length, 0, 'the bare handle matched the invite');
+  });
+
   console.log('bell list and poll');
 
   await t('an access request is blank for someone who no longer manages the doc, and has no Approve to offer', async () => {
@@ -179,6 +222,34 @@ function eq(a, b, m) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Er
     eq(first, 40);
     const second = (await call(env, '/api/notifications/unread', { cookie: owner })).body.unread;
     eq(second, 20, 'the next poll did not move on to the next docs');
+    eq((await call(env, '/api/notifications/unread', { cookie: owner })).body.unread, 0, 'the count did not settle');
+  });
+
+  await t('past the cap, polls keep moving on to docs never checked after earlier answers expire', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await person(env, 'owner');
+    const at = (i) => new Date(Date.now() - (i + 1) * 60e3).toISOString();
+    const created = new Date().toISOString();
+    for (let i = 0; i < 50; i++) await env.META.put(`meta:pub-${i}`, JSON.stringify({ title: 't', slug: `pub-${i}`, created, versions: [{ n: 1, created }], hosted: { github_login: 'claire', owner_key: 'claire' }, access: { visibility: 'public' } }));
+    await env.META.put('inbox:owner', JSON.stringify({ items: Array.from({ length: 50 }, (_, i) => ({
+      id: `p${i}`, kind: 'comment', group_key: `comment:p${i}`, slug: `pub-${i}`, title: 't', preview: 'p', at: at(i), read: false, count: 1,
+    })) }));
+    const realNow = Date.now;
+    let shift = 0;
+    Date.now = () => realNow() + shift;
+    try {
+      const readsOf = async () => {
+        env.META.gets.length = 0;
+        await call(env, '/api/notifications/unread', { cookie: owner });
+        return env.META.gets.filter((k) => /^meta:pub-\d+$/.test(k)).map((k) => Number(k.slice(9))).sort((a, b) => a - b);
+      };
+      eq(await readsOf(), Array.from({ length: 20 }, (_, i) => i));
+      shift = 61e3; // every answer so far has expired
+      eq(await readsOf(), Array.from({ length: 20 }, (_, i) => i + 20), 'the poll re-read the docs it had already checked');
+      shift = 122e3;
+      const third = await readsOf();
+      assert([40, 41, 42, 43, 44, 45, 46, 47, 48, 49].every((n) => third.includes(n)), `docs 40-49 never reached: ${third}`);
+    } finally { Date.now = realNow; }
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

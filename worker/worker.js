@@ -16570,6 +16570,10 @@ function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE, unread: onlyUnread =
 // (its rows are counted, never shown blank or in full by this call alone:
 // the page itself is always checked in full) and is read on a later call.
 const INBOX_READABLE_TTL_MS = 60 * 1000;
+// A doc this person cannot read rarely becomes readable again (and an access
+// change in this isolate clears the cache): kept longer, so a bell with many
+// docs settles instead of re-reading the same ones.
+const INBOX_UNREADABLE_TTL_MS = 10 * 60 * 1000;
 const INBOX_READABLE_CACHE_MAX = 5000;
 const INBOX_GATE_READS_MAX = 20;
 const inboxReadableCache = new Map();
@@ -16581,17 +16585,23 @@ async function inboxRowGate(env, session, rows, { now = Date.now(), maxReads = I
   const verdict = new Map();
   if (slugs.length) {
     const who = actorKeys(session).join(',') || sessionPrincipal(session) || '';
-    const fresh = [];
+    // Docs never checked first, then those whose answer expired, newest
+    // rows' docs first in each: past the cap, each call moves on to docs the
+    // last ones did not reach, so the count settles for any number of docs.
+    const never = [];
+    const expired = [];
     for (const slug of slugs) {
       const hit = inboxReadableCache.get(`${who}\n${slug}`);
       if (hit && hit.until > now) verdict.set(slug, hit);
-      else if (fresh.length < maxReads) fresh.push(slug);
+      else (hit ? expired : never).push(slug);
     }
+    const fresh = [...never, ...expired].slice(0, maxReads);
     await Promise.all(fresh.map(async (slug) => {
       let meta = null;
       try { meta = await loadDocMeta(env, slug); } catch { verdict.set(slug, { read: false, manage: false }); return; }
       const read = Boolean(meta) && canReadDoc(accessFromMeta(meta), session, env, meta);
-      const entry = { read, manage: read && isDocOwnerSession(env, session, meta), until: now + INBOX_READABLE_TTL_MS };
+      const manage = read && isDocOwnerSession(env, session, meta);
+      const entry = { read, manage, until: now + (read ? INBOX_READABLE_TTL_MS : INBOX_UNREADABLE_TTL_MS) };
       if (inboxReadableCache.size >= INBOX_READABLE_CACHE_MAX) inboxReadableCache.clear();
       inboxReadableCache.set(`${who}\n${slug}`, entry);
       verdict.set(slug, entry);
@@ -17404,11 +17414,17 @@ function inboxReaderSession(env, key, { author = null, memo = null } = {}) {
 async function buildInboxReaderSession(env, k, { accountHint = '', githubId = '' } = {}) {
   const session = k.startsWith('email:') ? { email: k.slice(6) } : { login: k };
   if (githubId && session.login) session.idp = { provider: 'github', sub: githubId };
+  // With an author hint the person is that account or nobody: when it no
+  // longer resolves (deleted, or the GitHub id belongs to no account), the
+  // bare handle is not matched against the invite list -- someone else may
+  // hold it now. Public and link-shared docs still read for anyone.
+  const hinted = Boolean(accountHint || githubId);
+  const bare = () => (hinted ? {} : (k.startsWith('email:') ? { email: k.slice(6) } : { login: k }));
   let accountId = accountHint || null;
   if (!accountId) {
     try { accountId = await sessionAccountId(env, session); } catch { accountId = null; }
   }
-  if (!accountId) return session;
+  if (!accountId) return bare();
   if (session.login) {
     // The handle's account record gives its address -- only when it is the
     // account found above, not whoever holds the handle now.
@@ -17421,14 +17437,14 @@ async function buildInboxReaderSession(env, k, { accountHint = '', githubId = ''
   let group = null;
   try { group = await accountGroup(env, accountId); } catch { group = null; }
   // A deleted account, or one whose record cannot be read: the bare key only.
-  if (!group || group.unavailable || group.deleted_at) {
-    delete session.email;
-    return k.startsWith('email:') ? { email: k.slice(6) } : { login: k };
-  }
+  if (!group || group.unavailable || group.deleted_at) return bare();
   session.account_id = group.canonical || accountId;
   session.linked_account_ids = group.ids.filter((id) => id !== session.account_id);
   session.linked_actor_keys = group.actor_keys;
   session.team_ids = await loadAccountTeamIds(env, session.account_id);
+  // As sign-in sets them: a team doc's owners are its team's admins
+  // (isDocOwnerSession), whatever its sharing says about members.
+  try { session.team_admin_ids = await loadAdminTeamIds(env, session.account_id, session.team_ids); } catch { session.team_admin_ids = []; }
   try { session.reborn = await loadReborn(env, actorKeys(session)); } catch {}
   return session;
 }
@@ -17646,9 +17662,17 @@ async function deliverInbox(env, recipientLogin, ev, delivery = {}) {
   // left the team, or the author of an old comment on a doc since made
   // private. Judged as they would sign in (inboxReaderSession). Fail closed:
   // a doc record that cannot be read tells nobody.
-  let meta = null;
-  try { meta = await loadDocMeta(env, ev.slug); } catch { meta = null; }
-  if (!meta) return;
+  // `delivery.meta`: the doc record as this request left it -- a mention by
+  // the owner may just have added the person to allowed_users, and a KV
+  // read right after that write can still return the record before it.
+  let meta = delivery.meta || null;
+  if (!meta) {
+    try { meta = await loadDocMeta(env, ev.slug); } catch { meta = null; }
+  }
+  if (!meta) {
+    console.warn('[notifications] doc record missing or unreadable; nobody told', JSON.stringify({ slug: ev.slug, kind: ev.kind }));
+    return;
+  }
   const access = accessFromMeta(meta);
   const authors = delivery.authors || {};
   const at = ev.at || new Date().toISOString();
@@ -32239,7 +32263,7 @@ const tdocHandlers = {
           // the parent's author found by their GitHub id when it is known.
           const parentRec = parent_id ? recordAuthor(priorList, parent_id) : null;
           const delivery = {
-            ctx, origin: url.origin, readers: new Map(),
+            ctx, origin: url.origin, readers: new Map(), meta: metaNow,
             authors: parentRec && parentRec.login ? { [normalizeActorKey(parentRec.login)]: parentRec } : {},
           };
           if (mentions.length) {
@@ -32477,7 +32501,7 @@ const tdocHandlers = {
           thread_id: thread && thread.root && thread.root.id, target_id: comment_id,
           actor: personRef(s),
           title: (meta && meta.title) || slug, emoji,
-        }, { ctx, origin: url.origin, authors: target && target.login ? { [normalizeActorKey(target.login)]: target } : {} });
+        }, { ctx, origin: url.origin, ...(meta ? { meta } : {}), authors: target && target.login ? { [normalizeActorKey(target.login)]: target } : {} });
       }
       return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
     }
