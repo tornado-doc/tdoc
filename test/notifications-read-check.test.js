@@ -186,6 +186,16 @@ function eq(a, b, m) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Er
     eq((await inbox(env, 'rita')).length, 0, 'the bare handle matched the invite');
   });
 
+  await t('a GitHub-id author with no account still hears about a sign-in-required link doc', async () => {
+    const { env, owner } = await seed({ visibility: 'unlisted', signin_required: true });
+    assert(JSON.parse(await env.META.get('meta:u-doc')).access.signin_required === true, 'precondition: sign-in required');
+    await env.META.put(`session:${hex('f')}`, JSON.stringify({ login: 'sam', name: 'sam', idp: { provider: 'github', sub: '777' }, created: new Date().toISOString() }));
+    const sam = `tdoc_sid=${hex('f')}`;
+    const c = await comment(env, sam, 'spectator question');
+    await comment(env, owner, 'answer for sam', c.id);
+    eq((await inbox(env, 'sam')).map((i) => i.preview), ['answer for sam'], 'a signed-in spectator was treated as nobody');
+  });
+
   console.log('bell list and poll');
 
   await t('an access request is blank for someone who no longer manages the doc, and has no Approve to offer', async () => {
@@ -203,6 +213,37 @@ function eq(a, b, m) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Er
     eq([mine.items[0].title, mine.items[0].no_access, mine.unread], ['Plan', undefined, 1], 'the owner lost their request');
     const theirs = (await call(env, '/api/notifications', { cookie: exOwner })).body;
     eq([theirs.items[0].title, theirs.items[0].actor, theirs.items[0].requester, theirs.items[0].no_access, theirs.unread], ['', null, undefined, true, 0]);
+  });
+
+  await t('a cached can\'t-read answer gives way to a newer row: re-invited by a mention, the rows show again', async () => {
+    const { env, owner } = await seed({ visibility: 'private', allowed_users: ['rita'] });
+    const rita = await person(env, 'rita');
+    const c = await comment(env, rita, 'question');
+    await comment(env, owner, 'first answer', c.id);
+    eq((await share(env, owner, { visibility: 'private', allowed_users: [] })).status, 200);
+    let page = (await call(env, '/api/notifications', { cookie: rita })).body;
+    eq(page.items.map((i) => !!i.no_access), [true], 'removed: blank');
+    // The owner names her again: the invite is written by the comment, not
+    // the access route, so nothing clears this isolate's cache.
+    await comment(env, owner, '@rita back in, see above');
+    page = (await call(env, '/api/notifications', { cookie: rita })).body;
+    eq(page.items.map((i) => [i.kind, !!i.no_access]), [['mention', false], ['reply', false]], 'the newer row did not refresh the answer');
+    eq(page.unread, 2);
+  });
+
+  await t('a failed doc read hides the row this time only; it is not kept as can\'t-read', async () => {
+    const { env, owner } = await seed();
+    const at = new Date(Date.now() - 60e3).toISOString();
+    await env.META.put('inbox:owner', JSON.stringify({ items: [{ id: 'n1', kind: 'comment', group_key: 'comment:u-doc', slug: 'u-doc', title: 'Plan', preview: 'words', at, read: false, count: 1 }] }));
+    const get = env.META.get.bind(env.META);
+    let failing = true;
+    env.META.get = async (k) => { if (failing && k === 'meta:u-doc') throw new Error('kv down'); return get(k); };
+    let page = (await call(env, '/api/notifications', { cookie: owner })).body;
+    eq([page.items[0].no_access, page.unread], [true, 0], 'fail closed');
+    failing = false;
+    env.META.get = get;
+    page = (await call(env, '/api/notifications', { cookie: owner })).body;
+    eq([page.items[0].no_access, page.items[0].preview, page.unread], [undefined, 'words', 1], 'the failed read was kept as can\'t-read');
   });
 
   await t('the unread poll reads at most 20 doc records a call, newest first', async () => {

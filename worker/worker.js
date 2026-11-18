@@ -16588,20 +16588,32 @@ async function inboxRowGate(env, session, rows, { now = Date.now(), maxReads = I
     // Docs never checked first, then those whose answer expired, newest
     // rows' docs first in each: past the cap, each call moves on to docs the
     // last ones did not reach, so the count settles for any number of docs.
+    // An answer is stale once one of the doc's rows is newer than it: a
+    // mention that re-invited the person, a team rejoined, a doc restored
+    // from Trash, an access change made in another isolate.
+    const newest = new Map();
+    for (const i of rows || []) {
+      if (!i || !isValidSlug(i.slug)) continue;
+      const t = Date.parse(i.at || '') || 0;
+      if (t > (newest.get(i.slug) || 0)) newest.set(i.slug, t);
+    }
     const never = [];
     const expired = [];
     for (const slug of slugs) {
       const hit = inboxReadableCache.get(`${who}\n${slug}`);
-      if (hit && hit.until > now) verdict.set(slug, hit);
+      if (hit && hit.until > now && !((newest.get(slug) || 0) > (hit.checked || 0))) verdict.set(slug, hit);
       else (hit ? expired : never).push(slug);
     }
     const fresh = [...never, ...expired].slice(0, maxReads);
     await Promise.all(fresh.map(async (slug) => {
+      // readDocRecord throws on a failed read: hidden this time, never kept
+      // (a missing or trashed doc is an answer, and is kept).
       let meta = null;
-      try { meta = await loadDocMeta(env, slug); } catch { verdict.set(slug, { read: false, manage: false }); return; }
+      try { meta = await readDocRecord(env, slug); } catch { verdict.set(slug, { read: false, manage: false }); return; }
+      if (meta && isTrashedMeta(meta)) meta = null;
       const read = Boolean(meta) && canReadDoc(accessFromMeta(meta), session, env, meta);
       const manage = read && isDocOwnerSession(env, session, meta);
-      const entry = { read, manage, until: now + (read ? INBOX_READABLE_TTL_MS : INBOX_UNREADABLE_TTL_MS) };
+      const entry = { read, manage, checked: now, until: now + (read ? INBOX_READABLE_TTL_MS : INBOX_UNREADABLE_TTL_MS) };
       if (inboxReadableCache.size >= INBOX_READABLE_CACHE_MAX) inboxReadableCache.clear();
       inboxReadableCache.set(`${who}\n${slug}`, entry);
       verdict.set(slug, entry);
@@ -17418,8 +17430,13 @@ async function buildInboxReaderSession(env, k, { accountHint = '', githubId = ''
   // longer resolves (deleted, or the GitHub id belongs to no account), the
   // bare handle is not matched against the invite list -- someone else may
   // hold it now. Public and link-shared docs still read for anyone.
+  // A GitHub id with no account is still someone signed in with GitHub (a
+  // spectator): they read what any signed-in person reads ("require sign-in"
+  // link docs), under a principal no invite list or owner stamp can hold --
+  // `github-id:<n>` is neither a GitHub login nor an address.
   const hinted = Boolean(accountHint || githubId);
-  const bare = () => (hinted ? {} : (k.startsWith('email:') ? { email: k.slice(6) } : { login: k }));
+  const bare = () => (!hinted ? (k.startsWith('email:') ? { email: k.slice(6) } : { login: k })
+    : githubId && !accountHint ? { login: `github-id:${githubId}` } : {});
   let accountId = accountHint || null;
   if (!accountId) {
     try { accountId = await sessionAccountId(env, session); } catch { accountId = null; }
