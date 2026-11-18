@@ -735,6 +735,7 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       const v2 = fs.readFileSync(path.join(root, bigSlug, 'v2', 'index.html'), 'utf8');
       assert(/<td>Edited at 10k<\/td>/.test(v2) && (v2.match(/<tr data-row=/g) || []).length === 10000, 'v2 has the edit and every row');
       console.log(`    (10k × 20: import ${importMs}ms, ${(stored / 1048576).toFixed(1)} MB, open ${loadMs}ms, scroll median ${scroll.median.toFixed(1)}ms p95 ${scroll.p95.toFixed(1)}ms (idle frame ${idle.median.toFixed(1)}ms), sort ${sortMs.toFixed(0)}ms, search ${searchMs.toFixed(0)}ms, save ${saveMs}ms)`);
+      perf.settle();
     });
 
     await test('a phone: no sideways page scroll, the grid scrolls itself, menus are bottom sheets', async () => {

@@ -457,6 +457,7 @@ async function shot(page, name) {
       perf.budget('sheets-rules-ui 10k: scroll frame p95', scroll.p95, 80, { factor: cadence });
       perf.budget('sheets-rules-ui 10k: sort', sortMs, 2500);
       perf.budget('sheets-rules-ui 10k: edit + re-evaluate', editMs, 2500);
+      perf.settle();
       await page.getByRole('button', { name: /Discard/ }).click().catch(() => {});
     });
 

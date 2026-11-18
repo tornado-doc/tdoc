@@ -37,6 +37,10 @@ t('a budget fails when enforced (the default), warns when reported', () => {
   const gh = run("P.budget('frame', 50, 34, { factor: 1 });", { TDOC_PERF: 'report', GITHUB_ACTIONS: 'true' });
   assert.match(gh.out, /^::warning title=perf budget::frame: 50\.0ms/m, 'an annotation on the run');
   assert.equal(run("P.budget('frame', 50, 34, { factor: 1.5 });").status, 0, 'a calibrated factor scales the budget');
+  // Enforced: every budget is measured, then settle() fails with all overruns.
+  const both = run("P.budget('frame', 50, 34, { factor: 1 }); P.budget('sort', 900, 600, { factor: 1 }); try { P.settle(); } catch (e) { console.log('SETTLED ' + e.message.split('\\n').length); process.exit(3); }");
+  assert.equal(both.status, 3, both.out);
+  assert.match(both.out, /SETTLED 2/);
 });
 t('every measurement goes to TDOC_PERF_LOG, and the summary reads it', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-perf-'));

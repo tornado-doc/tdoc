@@ -347,8 +347,15 @@ async function t(name, fn) {
     const ms = Date.now() - t0;
     guard('#BUSY! stop (long patterns)', ms, 1500);
     assert.ok(wb.stats.busy || wb.display('S', 19, 1) === '0', 'over budget, or done');
-    assert.equal(wb.display('S', 20, 1), '#VALUE!');
+    // Row 20's criterion is over 255 characters: #VALUE!, unless the
+    // engine's own 1 s clock ran out on rows 0-19 first (a slow machine).
+    assert.equal(wb.display('S', 20, 1), wb.stats.busy && wb.display('S', 20, 1) === '#BUSY!' ? '#BUSY!' : '#VALUE!');
     assert.equal(wb.display('S', 0, 1), wb.stats.busy ? wb.display('S', 0, 1) : '0');
+    // The same criterion where no clock can pre-empt it: always #VALUE!.
+    const alone = Array.from({ length: 40 }, () => [text, null]);
+    alone[0][1] = '=COUNTIF(A:A,C1)';
+    alone[0][2] = longPattern;
+    assert.equal(book(sheet('S', alone)).display('S', 0, 1), '#VALUE!');
     // A 15 KB criterion against 30 KB cells, twenty times: refused at once.
     const g2 = Array.from({ length: 20 }, (_, r) => [text, '=COUNTIF(A:A,C1)', r ? null : '*' + 'a'.repeat(15000) + '*']);
     const t1 = Date.now();

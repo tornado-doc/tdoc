@@ -12,7 +12,10 @@
 //                             long a sort takes in the browser. Worth watching,
 //                             not worth a red build when a shared runner is
 //                             busy. TDOC_PERF decides what an overrun does:
-//                               enforce (default, and the CI `perf` job): fails
+//                               enforce (default, and the CI `perf` job): the
+//                                       test fails at settle() (or the
+//                                       process exits 1), after every budget
+//                                       in it was measured
 //                               report  (the blocking CI jobs): a warning
 //                                       annotation, the test goes on
 //
@@ -23,10 +26,12 @@ const fs = require('fs');
 // The calibration workload: a few MB of markup built, scanned by a regex,
 // hashed, split into rows and round-tripped through JSON: the kind of work
 // the guarded code does (string building, regex, allocation, GC).
-// REFERENCE_MS is its best-of-five on a typical GitHub ubuntu-latest runner,
-// the machine the budgets below were tuned on, so a typical runner measures
-// a factor of 1 and a slow or busy one measures more.
-const REFERENCE_MS = 150;
+// REFERENCE_MS is its best-of-five on a typical GitHub ubuntu-latest runner
+// (52-72 ms there, Node 22; ~100 ms in the Playwright container; 150-200 ms
+// on a loaded laptop that also runs the guarded code ~2.5x slower than CI),
+// the machine the budgets were tuned on: a typical runner measures a factor
+// of 1, a slow or busy one more.
+const REFERENCE_MS = 70;
 function workload() {
   const parts = [];
   for (let i = 0; i < 60000; i++) parts.push(`<tr data-row="r${i}"><td>${'x'.repeat(i % 40)}</td><td>${i * 7}</td></tr>`);
@@ -97,10 +102,25 @@ function budget(name, ms, limit, opts = {}) {
   record({ kind: 'budget', name, ms, budget: limit, factor: f, calibrationMs: opts.factor != null ? null : calibrationMs, limit: scaled, ok, mode: m });
   if (ok) return true;
   const text = `${name}: ${fmt(ms)}, over its ${fmt(scaled)} budget (${limit}ms × ${f.toFixed(2)} ${opts.factor != null ? 'calibrated' : 'runner'} factor)`;
-  if (m === 'enforce') throw new Error(text);
+  if (m === 'enforce') { overruns.push(text); return false; }
   // A GitHub annotation on the run, without failing it.
   console.log(process.env.GITHUB_ACTIONS ? `::warning title=perf budget::${text}` : `    ⚠ perf (not failing, TDOC_PERF=report): ${text}`);
   return false;
 }
 
-module.exports = { runnerFactor, bestOf, guard, budget, REFERENCE_MS, workload };
+// Enforced overruns are collected, so one slow frame does not hide the sort
+// and search numbers after it; settle() at the end of a test fails it with
+// all of them. Unsettled ones still fail the process.
+const overruns = [];
+function settle() {
+  if (!overruns.length) return;
+  const text = overruns.splice(0).join('\n');
+  throw new Error(text);
+}
+process.on('exit', (code) => {
+  if (!overruns.length) return;
+  console.log(`  ✗ performance budgets over:\n    ${overruns.join('\n    ')}`);
+  if (!code) process.exitCode = 1;
+});
+
+module.exports = { runnerFactor, bestOf, guard, budget, settle, REFERENCE_MS, workload };
