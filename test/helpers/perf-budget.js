@@ -58,16 +58,28 @@ function bestOf(n, fn) {
 }
 
 let factor = null, calibrationMs = null;
+// The most a budget is ever loosened. A runner measured slower than this is
+// not a normal busy runner: the guards run at MAX_FACTOR and say so with a
+// warning annotation, so a broken calibration can never silently waive them.
+const MAX_FACTOR = 4;
+function clampFactor(raw, source) {
+  const f = Math.max(1, raw);
+  if (f <= MAX_FACTOR) return f;
+  const text = `runner factor ${raw.toFixed(2)} (${source}) is over the ${MAX_FACTOR}x cap; budgets are scaled by ${MAX_FACTOR} only`;
+  console.log(process.env.GITHUB_ACTIONS ? `::warning title=perf calibration::${text}` : `    ⚠ perf: ${text}`);
+  return MAX_FACTOR;
+}
 // How much slower this machine is than a typical CI runner, measured now, in
-// this process: >= 1, so a fast machine never gets a tighter budget than the
-// one written. TDOC_PERF_FACTOR pins it (to reproduce a CI number).
+// this process: 1 to MAX_FACTOR, so a fast machine never gets a tighter
+// budget than the one written. TDOC_PERF_FACTOR pins it (to reproduce a CI
+// number), within the same bounds.
 function runnerFactor() {
   if (factor != null) return factor;
   const pinned = Number(process.env.TDOC_PERF_FACTOR);
-  if (pinned > 0) return (factor = Math.max(1, pinned));
+  if (pinned > 0) return (factor = clampFactor(pinned, 'TDOC_PERF_FACTOR'));
   workload(); // warm the JIT
   calibrationMs = bestOf(5, workload);
-  factor = Math.max(1, calibrationMs / REFERENCE_MS);
+  factor = clampFactor(calibrationMs / REFERENCE_MS, `calibration ${calibrationMs.toFixed(1)}ms vs ${REFERENCE_MS}ms`);
   return factor;
 }
 
@@ -93,9 +105,9 @@ function guard(name, ms, budget) {
 }
 
 // opts.factor: a calibration of its own (a browser's frame cadence, say)
-// instead of the Node runner factor; never below 1.
+// instead of the Node runner factor; clamped like it.
 function budget(name, ms, limit, opts = {}) {
-  const f = Math.max(1, opts.factor != null ? opts.factor : runnerFactor());
+  const f = opts.factor != null ? clampFactor(opts.factor, `${name}: calibrated`) : runnerFactor();
   const scaled = limit * f;
   const ok = ms < scaled;
   const m = mode();
@@ -123,4 +135,4 @@ process.on('exit', (code) => {
   if (!code) process.exitCode = 1;
 });
 
-module.exports = { runnerFactor, bestOf, guard, budget, settle, REFERENCE_MS, workload };
+module.exports = { runnerFactor, bestOf, guard, budget, settle, REFERENCE_MS, MAX_FACTOR, workload };

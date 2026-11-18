@@ -23,6 +23,15 @@ t('the runner factor is measured and never below 1; TDOC_PERF_FACTOR pins it', (
   assert.equal(run('if (P.runnerFactor() !== 2.5) process.exit(2);', { TDOC_PERF_FACTOR: '2.5' }).status, 0);
   assert.equal(run('if (P.runnerFactor() !== 1) process.exit(2);', { TDOC_PERF_FACTOR: '0.2' }).status, 0, 'a fast machine never tightens');
 });
+t('the factor is capped at MAX_FACTOR, with a warning, never silently loosened further', () => {
+  const r = run('if (P.runnerFactor() !== P.MAX_FACTOR) process.exit(2);', { TDOC_PERF_FACTOR: '50', GITHUB_ACTIONS: 'true' });
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /^::warning title=perf calibration::runner factor 50\.00 \(TDOC_PERF_FACTOR\) is over the 4x cap/m);
+  assert.notEqual(run("P.guard('x', 500, 100);", { TDOC_PERF_FACTOR: '50' }).status, 0, 'a guard at 5x its budget still fails');
+  const b = run("P.budget('frame', 200, 34, { factor: 12 }); try { P.settle(); } catch { process.exit(3); }");
+  assert.equal(b.status, 3, 'a calibrated factor is capped too');
+  assert.match(b.out, /over the 4x cap/);
+});
 t('a guard passes under its scaled budget and fails over it, in any mode', () => {
   assert.equal(run("P.guard('x', 150, 100);", { TDOC_PERF_FACTOR: '2' }).status, 0, '150 < 100 × 2');
   const over = run("P.guard('x', 250, 100);", { TDOC_PERF_FACTOR: '2', TDOC_PERF: 'report' });

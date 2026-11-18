@@ -129,9 +129,9 @@ jobs:
           TDOC_TEST_BROWSER=webkit node test/reply-activity-ui.test.js
 
   # Pure performance budgets (scroll frame times, sort and search ms on 10k
-  # rows), enforced. Shared runners vary run to run, so this job reports and
-  # never blocks a merge: the numbers and any overrun are in its summary and
-  # on the run as a warning. Functional checks of the same tests (import,
+  # rows), enforced. Shared runners vary run to run, so this job never blocks
+  # a merge (continue-on-error on the job): an overrun shows as this check
+  # failing, the run stays green, the numbers are in the job summary. Functional checks of the same tests (import,
   # load, scroll, sort, search, save) block in the browser job above.
   perf:
     name: performance budgets (non-blocking)
@@ -150,7 +150,6 @@ jobs:
       - run: npm ci
       - name: Performance budgets
         id: budgets
-        continue-on-error: true
         run: node test/run.js --perf
         env:
           TDOC_PERF_LOG: ${{ runner.temp }}/perf.jsonl
@@ -158,7 +157,7 @@ jobs:
         if: always()
         run: |
           node test/perf-summary.js "$RUNNER_TEMP/perf.jsonl" 'Performance budgets (enforced, non-blocking)'
-          if [ "${{ steps.budgets.outcome }}" != "success" ]; then
+          if [ "${{ steps.budgets.outcome }}" = "failure" ]; then
             echo "::warning title=performance budgets::over budget or failed; see the job summary (this job does not block merging)"
           fi
 

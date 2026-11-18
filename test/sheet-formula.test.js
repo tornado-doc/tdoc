@@ -5,7 +5,7 @@
 // Excel), hostile input (length, depth, time and work budgets) and speed.
 // No browser and no npm install.
 const assert = require('node:assert/strict');
-const { guard } = require('./helpers/perf-budget');
+const { guard, bestOf } = require('./helpers/perf-budget');
 
 let pass = 0, fail = 0;
 async function t(name, fn) {
@@ -298,9 +298,8 @@ async function t(name, fn) {
       "='unterminated!A1",
     ];
     for (const f of cases) {
-      const t0 = Date.now();
       assert.equal(ev(f), '#ERROR!', f.slice(0, 20));
-      guard('hostile formula refused', Date.now() - t0, 100);
+      guard('hostile formula refused', bestOf(3, () => ev(f)), 100);
     }
     // No regular expression from sheet text: a pathological wildcard is linear.
     const wb = book(sheet('S', [['a'.repeat(10000), '=COUNTIF(A1,"*a*a*a*a*a*a*a*a*a*a*a*a*b")', '=COUNTIF(A1,"*a*a*a*a*a")']]));
@@ -358,9 +357,8 @@ async function t(name, fn) {
     assert.equal(book(sheet('S', alone)).display('S', 0, 1), '#VALUE!');
     // A 15 KB criterion against 30 KB cells, twenty times: refused at once.
     const g2 = Array.from({ length: 20 }, (_, r) => [text, '=COUNTIF(A:A,C1)', r ? null : '*' + 'a'.repeat(15000) + '*']);
-    const t1 = Date.now();
-    const wb2 = book(sheet('S', g2));
-    guard('15 KB criterion refused', Date.now() - t1, 1200);
+    let wb2;
+    guard('15 KB criterion refused', bestOf(3, () => { wb2 = book(sheet('S', g2)); }), 1200);
     assert.equal(wb2.display('S', 0, 1), '#VALUE!');
   });
 
