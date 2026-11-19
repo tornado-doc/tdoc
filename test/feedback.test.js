@@ -878,7 +878,7 @@ const APP = 'http://localhost:3000';
     });
   }
 
-  await t('the widget learns its viewer\'s dev flags: always a list, empty while no widget flag is dev-only', async () => {
+  await t('the widget learns its viewer\'s dev flags: always a list, only the widget\'s dev-only flags, only in dev mode', async () => {
     const env = makeEnv(mod.CommentsStore);
     env.TDOC_DEBUG_ACCOUNTS = 'dev@tdoc.test,off@tdoc.test';
     const cookieFor = async (login, email) => {
@@ -901,8 +901,9 @@ const APP = 'http://localhost:3000';
     // feedbackAreaSelect, feedbackDocFramePick and agentProgress graduated
     // (2026-11-16): on for everyone from feature-flags.js, so no session
     // names them, dev mode or not.
+    // copyForAgent (dev mode, 2026-11-19) is the one the widget reads now.
     const dev = await cookieFor('devy', 'dev@tdoc.test');
-    assert((await flagsOf(dev)).length === 0, 'dev mode on still gets graduated flags');
+    assert(JSON.stringify(await flagsOf(dev)) === JSON.stringify(['copyForAgent']), 'dev mode on: only the widget\'s dev-only flags');
     const off = await cookieFor('offy', 'off@tdoc.test');
     await env.META.put('dev-mode:off@tdoc.test', 'off');
     assert((await flagsOf(off)).length === 0, 'dev mode switched off got flags');

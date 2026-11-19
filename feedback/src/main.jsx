@@ -11,6 +11,7 @@ import { COMMENT_SIDE_WIDTH, CommentPanel } from '../../shell/src/comments/panel
 import { CommentSheet, SheetContent } from '../../shell/src/comments/panel/comment-sheet.jsx';
 import { AgentActivityButton, agentActivitySummary } from '../../shell/src/comments/panel/agent-activity.jsx';
 import { useDoubleTapOption, useEscapeLadder } from '../../shell/src/comments/panel/keyboard.js';
+import { CopyForAgentContext, useCopyForAgent } from '../../shell/src/comments/panel/copy-for-agent.jsx';
 import { findElement, selectorFor as sharedSelectorFor } from '../../shell/src/comments/selection/anchors/element.js';
 import { enclosingFor as sharedEnclosingFor, regionOf, regionRect, toRect as sharedToRect } from '../../shell/src/comments/selection/anchors/region.js';
 import { captureTextAnchor, collectTextNodes, findTextRange } from '../../shell/src/comments/selection/anchors/text-range.js';
@@ -1594,6 +1595,21 @@ ${uiCss}
       seenTransport: space ? SITE_SEEN : undefined,
     });
     const unreadComments = area.unread;
+    // Copy for agent (flag copyForAgent): ⋯ on a thread and on the list, C
+    // and H while the list or a thread is open (comments/panel/copy-for-agent.jsx).
+    // The tdoc link is the thread on the space's own page.
+    const [markersHidden, setMarkersHidden] = useState(false);
+    const copyForAgent = useCopyForAgent({
+      enabled: flagOn('copyForAgent', session),
+      area,
+      selectedId: listId || openId,
+      title: document.title,
+      pageUrl: canonical(),
+      linkFor: (c) => (slug && c && c.id ? `${base}/d/${encodeURIComponent(slug)}?comment=${encodeURIComponent(c.id)}` : ''),
+      say,
+      markers: { hidden: markersHidden, toggle: () => setMarkersHidden((h) => !h) },
+      keysEnabled: shown && (panelOpen || Boolean(openId)),
+    });
     const teamMember = Boolean(surface?.teamMember);
     // Who may send to an agent: the server's rule, shared with the doc page
     // and the space page (agent-choices.js maySendToAgent).
@@ -2188,6 +2204,7 @@ ${uiCss}
     };
 
     return (
+      <CopyForAgentContext.Provider value={copyForAgent}>
       <AgentMentionContext.Provider value={agentMentions}>
         {(picking || reanchorId) && !selected ? (
           <div className="tdoc-fb-banner" role="status">
@@ -2201,7 +2218,7 @@ ${uiCss}
         {marquee(drag, 'Comment on this area')}
         {marquee(areaBox)}
         {!selected ? marquee(openSpot) : null}
-        {pins.map(({ comment, element }) => {
+        {(copyForAgent && markersHidden ? [] : pins).map(({ comment, element }) => {
           if (!element) return null;
           const rect = spotOf(comment, element);
           if (!rect || rect.bottom < 0 || rect.top > innerHeight) return null;
@@ -2351,6 +2368,7 @@ ${uiCss}
           />
         ) : null}
       </AgentMentionContext.Provider>
+      </CopyForAgentContext.Provider>
     );
   }
 

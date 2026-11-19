@@ -2524,16 +2524,23 @@
     suggFocus(id, false);
     post({ type: 'tdoc:suggestAction', id: id, action: 'focus' });
   }, true);
-  // Option (for double-tap Option: start a comment) and Esc (step back one
-  // level) are the shell's keys too: a key pressed in the doc lands here, so
-  // it is passed on. Not while typing in the doc, and never in Edit mode.
+  // Option (for double-tap Option: start a comment), Esc (step back one
+  // level), C and H (copy for agent, hide markers; the shell decides if they
+  // mean anything now) are the shell's keys too: a key pressed in the doc
+  // lands here, so it is passed on. Not while typing in the doc, and never
+  // in Edit mode.
   document.addEventListener('keydown', function (e) {
     var key = String(e.key || '');
-    if (key !== 'Alt' && key !== 'Escape') return;
+    var letter = key.toLowerCase();
+    if (key !== 'Alt' && key !== 'Escape' && letter !== 'c' && letter !== 'h') return;
     if (key === 'Escape' && (picking || gesture.pressing())) { gesture.cancel(); endPick(true); e.preventDefault(); return; }
     if (e.repeat || e.ctrlKey || e.metaKey || e.shiftKey || interactionMode === 'edit') return;
+    if (key.length === 1 && (e.altKey || e.isComposing)) return;
+    if (key.length === 1) key = letter;
     var t = e.target;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(String(t.tagName || '')))) return;
+    // A letter in a sheet's grid is typing into a cell.
+    if (key.length === 1 && t && t.closest && t.closest('[data-tdoc-sheet], [role="grid"], [contenteditable]')) return;
     post({ type: 'tdoc:key', key: key });
   }, true);
   // ⌘K opens Ask AI (the shell decides; only where the flag is on). ⌘↵ and
@@ -2597,6 +2604,14 @@
       try { var s0 = window.getSelection(); if (s0) s0.removeAllRanges(); } catch (x0) {}
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
+    // H in the shell: the comment highlights go and come back with the pins.
+    else if (d.type === 'tdoc:marksHidden') {
+      document.documentElement.toggleAttribute('data-tdoc-marks-hidden', !!d.hidden);
+      if (HL) {
+        if (d.hidden) { CSS.highlights.delete('tdoc-anchor'); CSS.highlights.delete('tdoc-anchor-moved'); CSS.highlights.delete('tdoc-anchor-active'); }
+        else { CSS.highlights.set('tdoc-anchor', _anchorHighlight); CSS.highlights.set('tdoc-anchor-moved', _movedHighlight); }
+      }
+    }
     else if (d.type === 'tdoc:mode') setInteractionMode(d.mode, d);
     else if (d.type === 'tdoc:startPick') startPick();
     else if (d.type === 'tdoc:cancelPick') endPick(false);

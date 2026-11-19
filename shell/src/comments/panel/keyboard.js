@@ -46,3 +46,75 @@ export function useDoubleTapOption(onDouble, { enabled = true, target = typeof d
     return () => target.removeEventListener('keydown', keydown, true);
   }, [enabled, target]);
 }
+
+// Single keys while a comment surface is open (comments/panel/copy-for-agent.jsx):
+// C copies the selected thread for an agent (all open threads when none is
+// selected), H hides / shows the comment markers. Esc is the ladder above.
+// Letters are the host page's too (the widget runs on other sites, the doc
+// is someone's page), so they are taken only while the comment list or a
+// thread is open, never with a modifier (⌘C stays copy), never while a key
+// repeats or an IME is composing, and never from a place that takes typing.
+export const COMMENT_SHORTCUTS = Object.freeze([
+  Object.freeze({ key: 'C', action: 'copy', label: 'Copy for agent' }),
+  Object.freeze({ key: 'H', action: 'markers', label: 'Hide / show markers' }),
+  Object.freeze({ key: 'Esc', action: 'close', label: 'Close' }),
+]);
+
+const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="searchbox"], [role="combobox"], [role="spinbutton"]';
+// A menu or list box reads letters as type-ahead; a letter there is its own.
+const OWN_KEYS = '[role="menu"], [role="menubar"], [role="listbox"], [role="tree"], [role="grid"]';
+
+// True where a letter is text being typed (or a widget's own letter): form
+// fields, anything editable, ARIA text boxes, menus and lists.
+export function isTypingTarget(target) {
+  if (!target || typeof target !== 'object') return false;
+  if (target.isContentEditable) return true;
+  const el = target.nodeType === 1 ? target : target.parentElement;
+  if (!el || typeof el.closest !== 'function') return false;
+  return Boolean(el.closest(TYPING) || el.closest(OWN_KEYS));
+}
+
+// The action a keydown asks for, or null. Pure (tests call it with plain
+// objects): the innermost target is composedPath()[0], so a field inside
+// a shadow root (the widget) is seen as the field, not as its host.
+export function commentShortcutFor(event) {
+  if (!event || event.defaultPrevented || event.isComposing || event.repeat) return null;
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null;
+  const key = String(event.key || '');
+  if (key.length !== 1) return null;
+  const inner = (typeof event.composedPath === 'function' && event.composedPath()[0]) || event.target;
+  if (isTypingTarget(inner)) return null;
+  const active = typeof document !== 'undefined' ? deepActiveElement(document) : null;
+  if (active && active !== inner && isTypingTarget(active)) return null;
+  const lower = key.toLowerCase();
+  if (lower === 'c') return 'copy';
+  if (lower === 'h') return 'markers';
+  return null;
+}
+
+function deepActiveElement(doc) {
+  let el = doc.activeElement;
+  while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
+  return el;
+}
+
+// handlers: { copy, markers } (a missing one leaves its key to the page).
+// Window capture, as the Esc ladder: the host page does not also act on a
+// key we took.
+export function useCommentShortcuts(handlers, { enabled = true } = {}) {
+  const ref = useRef(handlers);
+  ref.current = handlers;
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return undefined;
+    const keydown = (event) => {
+      const action = commentShortcutFor(event);
+      const run = action && ref.current && ref.current[action];
+      if (!run) return;
+      event.preventDefault();
+      event.stopPropagation();
+      run(event);
+    };
+    window.addEventListener('keydown', keydown, true);
+    return () => window.removeEventListener('keydown', keydown, true);
+  }, [enabled]);
+}

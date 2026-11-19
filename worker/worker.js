@@ -10783,8 +10783,9 @@ async function createFeedbackSiteSpace(env, req, session, { origins, team, title
 // can read this answer. UI only -- nothing the server allows depends on it.
 // feedbackAreaSelect, feedbackDocFramePick and agentProgress graduated
 // (default: true, 2026-11-16), so none is left here; a new dev-mode flag the
-// widget reads goes on this list.
-const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze([]);
+// widget reads goes on this list. copyForAgent: Copy for agent and the
+// C / H keys in the widget (feedback/src/main.jsx).
+const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['copyForAgent']);
 async function feedbackDevFlags(env, session) {
   if (!session || !FEEDBACK_WIDGET_DEV_FLAGS.length) return [];
   let dev = null;
