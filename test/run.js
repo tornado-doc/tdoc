@@ -303,6 +303,8 @@ const BROWSER = [
   'ask-edit-feedback-ui.test.js', // Ask/Edit v2 feedback: @agent in a comment or reply asks for suggestions (phone drawer, ⌘⇧Enter), nothing changes outside dev mode, a reply box is not held by delivery, rewrites read as blocks, edits stay text
   'suggest-accept-ui.test.js', // a suggestion's Accept in the real shell: readable refusals, decided rows leave silently, the list stays true without a refresh, Accept lands on /v/N
   'suggest-overlap-ui.test.js', // pending suggestions on the same words (copies, overlapping finds) show once each, never one inside another; Reject takes exact copies; the held-back one then shows; Accept publishes
+  'suggest-accept-all-ui.test.js', // Accept all is one call and one version: with KV a step behind, every set lands and nothing stays pending on the version the page moves to; an exact copy is accepted with its twin
+  'needs-you-edits-ui.test.js', // Needs you: "Review N edits" for a doc with suggestions waiting on this person, desktop + phone; opens the doc with the review on the first; deciding or Mark done takes it away until new edits
   'ask-edit-v2-gate-ui.test.js', // Ask/Edit v2 is dev-mode only: not on the list (desktop + phone), flag pinned, switch off -> Ask AI and comments exactly as before, no suggestions request; dev mode on is the control
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
   'comment-overflow-ask-dismiss-ui.test.js', // a long markdown reply (inline code, paths, a code block) never scrolls a comment card, its thread or an Ask AI answer sideways; Ask AI closes on a click in the document or Escape and keeps the draft; V1 + V2, desktop + phone
