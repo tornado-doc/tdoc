@@ -501,6 +501,111 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(stored.every((x) => x.edits[0].state === 'accepted' && x.edits[0].version === 2), JSON.stringify(stored));
   });
 
+  // Review of #1090: one edit that cannot land never sinks the rest of an Accept all.
+  const acceptAllOf = async (slug, html, pairs) => {
+    const up = await call('/api/upload', { method: 'POST', token: alice.token, body: { slug, version: 1, html } });
+    assert(up.status === 200, up.text);
+    const ids = [];
+    for (const [find, replace] of pairs) {
+      const r = await call(`/api/docs/${slug}/suggestions`, { method: 'POST', token: alice.token, body: { edits: [{ find, replace }] } });
+      assert(r.status === 200 && r.body.suggestion, r.text);
+      ids.push(r.body.suggestion.id);
+    }
+    const a = await call(`/api/docs/${slug}/suggestions/accept`, { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { sets: ids.map((id) => ({ id })) } });
+    const stored = env.COMMENTS.stateFor(slug).storage.map.get('suggestions');
+    const state = (id) => stored.find((x) => x.id === id).edits[0].state;
+    const latest = async () => {
+      const meta = JSON.parse(env.META.map.get(`meta:${slug}`));
+      const n = Math.max(...meta.versions.map((v) => v.n));
+      return { n, html: await (await env.DOCS.get(`docs/${slug}/v${n}/index.html`)).text() };
+    };
+    return { a, ids, state, latest };
+  };
+
+  await t('Accept all: an edit that would make a widget path is dropped alone; the rest land', async () => {
+    const { a, ids, state, latest } = await acceptAllOf('poison',
+      '<h1>P</h1><p>Path /d/poison/v/1&#x2F;widget/a.html and note</p><p>Good alpha here.</p><p>Good beta here.</p>',
+      [['and note', 'and notes'], ['Good alpha here.', 'Fine alpha here.'], ['Good beta here.', 'Fine beta here.']]);
+    assert(a.status === 200 && a.body.version === 2, a.text);
+    const poisoned = a.body.sets.find((x) => x.id === ids[0]);
+    assert(poisoned.stale.length === 1 && poisoned.dropped[0].reason === 'unsafe', JSON.stringify(poisoned));
+    assert(state(ids[0]) === 'stale' && state(ids[1]) === 'accepted' && state(ids[2]) === 'accepted');
+    const { html } = await latest();
+    assert(/Fine alpha here\./.test(html) && /Fine beta here\./.test(html) && /and note</.test(html), html);
+  });
+
+  await t('Accept all: provider markup is refused when proposed; nothing of it reaches Accept', async () => {
+    await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'markup', version: 1, html: '<h1>M</h1><p>Alpha one.</p>' } });
+    const r = await call('/api/docs/markup/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Alpha one.', replace: 'Alpha data-tdoc-provider one.' }] } });
+    assert(r.status !== 200 || !r.body.suggestion || r.body.suggestion.edits.length === 0, r.text);
+  });
+
+  await t('Accept all: provider markup already stored (made before the propose check) is dropped alone; the rest land', async () => {
+    await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'markup2', version: 1, html: '<h1>M</h1><p>Alpha one.</p><p>Beta two.</p>' } });
+    const ok = await call('/api/docs/markup2/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Beta two.', replace: 'Beta 2.' }] } });
+    assert(ok.status === 200, ok.text);
+    const st = env.COMMENTS.stateFor('markup2').storage;
+    const list = st.map.get('suggestions');
+    const old = { ...JSON.parse(JSON.stringify(list[0])), id: 's_old_markup', edits: [{ id: 'e1', find: 'Alpha one.', replace: 'Alpha data-tdoc-provider one.', state: 'pending' }] };
+    st.map.set('suggestions', [old, ...list]);
+    const a = await call('/api/docs/markup2/suggestions/accept', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { sets: [{ id: 's_old_markup' }, { id: ok.body.suggestion.id }] } });
+    assert(a.status === 200 && a.body.version === 2, a.text);
+    assert(a.body.sets.find((x) => x.id === 's_old_markup').dropped[0].reason === 'unsafe', a.text);
+    const html = await (await env.DOCS.get('docs/markup2/v2/index.html')).text();
+    assert(/Beta 2\./.test(html) && !/data-tdoc-provider/.test(html), html);
+  });
+
+  await t('Accept all: over the size cap, the set that does it is dropped; the rest land', async () => {
+    const big = 'x'.repeat(4000);
+    const before = env.TDOC_HOSTED_MAX_UPLOAD_BYTES;
+    await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'sized', version: 1, html: '<h1>S</h1><p>Small one.</p><p>Small two.</p>' } });
+    const r1 = await call('/api/docs/sized/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Small one.', replace: 'Small 1.' }] } });
+    const r2 = await call('/api/docs/sized/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Small two.', replace: `Small ${big.slice(0, 2900)}.` }] } });
+    assert(r1.status === 200 && r2.status === 200, r1.text + r2.text);
+    const base = (await (await env.DOCS.get('docs/sized/v1/index.html')).text()).length;
+    env.TDOC_HOSTED_MAX_UPLOAD_BYTES = String(base + 1000);
+    try {
+      const a = await call('/api/docs/sized/suggestions/accept', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { sets: [{ id: r1.body.suggestion.id }, { id: r2.body.suggestion.id }] } });
+      assert(a.status === 200 && a.body.version === 2, a.text);
+      assert(a.body.sets.find((x) => x.id === r2.body.suggestion.id).dropped[0].reason === 'too_large', a.text);
+    } finally { if (before === undefined) delete env.TDOC_HOSTED_MAX_UPLOAD_BYTES; else env.TDOC_HOSTED_MAX_UPLOAD_BYTES = before; }
+    const html = await (await env.DOCS.get('docs/sized/v2/index.html')).text();
+    assert(/Small 1\./.test(html) && /Small two\./.test(html), html);
+  });
+
+  await t('Accept all: overlapping edits do not depend on their order; the later one lands on the text the first made', async () => {
+    // Set A rewrites a phrase; set B (sent first) edits a word inside a longer
+    // span that A's find overlaps. After A lands, B's find is still there once.
+    const { a, ids, state, latest } = await acceptAllOf('overlap',
+      '<h1>O</h1><p>Keep the red apple and the green pear.</p>',
+      [['the red apple and', 'the ripe red apple and'], ['apple and the green pear', 'apple and the yellow pear']]);
+    assert(a.status === 200, a.text);
+    const { html } = await latest();
+    assert(state(ids[0]) === 'accepted', JSON.stringify(a.body));
+    // The second planned again on the new text: it no longer matches exactly
+    // once (still "apple and the green pear") -> it lands too.
+    assert(state(ids[1]) === 'accepted' && /ripe red apple and the yellow pear/.test(html), `${state(ids[1])} ${html}`);
+  });
+
+  await t('owner notes: one that arrives after a newer one is ignored; Mark done holds until the count grows', async () => {
+    const name = 'suggest-pending:acct:order-test';
+    const op = async (o) => (await env.COMMENTS.get(name).fetch('https://do/suggest-pending', { method: 'POST', body: JSON.stringify({ slug: name, op: o }) })).json();
+    await op({ kind: 'note', slug: 'ord', count: 3, before: 0, seq: 1 });
+    await op({ kind: 'note', slug: 'ord', count: 0, before: 3, seq: 3 });
+    await op({ kind: 'note', slug: 'ord', count: 2, before: 3, seq: 2 }); // late
+    assert((await op({ kind: 'read' })).items.length === 0, 'a late note brought it back');
+    await op({ kind: 'note', slug: 'ord', count: 2, before: 0, seq: 4 });
+    await op({ kind: 'done', slug: 'ord' });
+    await op({ kind: 'note', slug: 'ord', count: 1, before: 2, seq: 5 });
+    assert((await op({ kind: 'read' })).items.length === 0, 'a smaller count undid Mark done');
+    await op({ kind: 'note', slug: 'ord', count: 2, before: 1, seq: 6 });
+    const r = await op({ kind: 'read' });
+    assert(r.items.length === 1 && r.items[0].count === 2, JSON.stringify(r));
+    // Not reachable as a doc: the name is no slug.
+    const odd = await (await env.COMMENTS.get('plan').fetch('https://do/suggest-pending', { method: 'POST', body: JSON.stringify({ slug: 'plan', op: { kind: 'read' } }) })).json();
+    assert(odd.ok === false, JSON.stringify(odd));
+  });
+
   await t('Accept all: only editors, same-site, and named sets', async () => {
     const r = await call('/api/docs/all/suggestions/accept', { method: 'POST', cookie: bob.cookie, headers: ORIGIN, body: { sets: [{ id: 's_x' }] } });
     assert(r.status === 403, r.text);
@@ -516,8 +621,10 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(up.status === 200, up.text);
     const r = await call('/api/docs/noted/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Red here.', replace: 'Red there.' }, { find: 'Blue here.', replace: 'Blue there.' }] } });
     assert(r.status === 200, r.text);
-    const noted = () => [...env.META.map.entries()].filter(([k]) => k.startsWith('suggest-pending:agent-account:'))
-      .flatMap(([, v]) => JSON.parse(v).items).filter((i) => i.slug === 'noted');
+    // The owner's own Durable Object (suggest-pending:<by>), never a KV record.
+    assert(![...env.META.map.keys()].some((k) => k.startsWith('suggest-pending:')), 'a KV pending record was written');
+    const noted = () => [...env.COMMENTS.states.entries()].filter(([k]) => k.startsWith('suggest-pending:agent-account:'))
+      .map(([, st]) => (st.storage.map.get('suggest_pending') || {}).noted).filter((d) => d && d.count > 0);
     assert(noted().length === 1 && noted()[0].count === 2, JSON.stringify(noted()));
     const id = r.body.suggestion.id;
     const one = await call(`/api/docs/noted/suggestions/${id}/reject`, { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { edit_ids: [r.body.suggestion.edits[0].id] } });

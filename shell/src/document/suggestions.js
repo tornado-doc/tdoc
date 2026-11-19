@@ -27,6 +27,16 @@ export function suggestionErrorText(error) {
   return error?.body?.message || 'Could not do that. Try again.';
 }
 
+// What a dropped edit tells the person, from why it was dropped (the
+// server's `dropped: [{ id, reason }]`): an edit unsafe to apply, one that
+// would make the doc too large, or text that changed.
+export function droppedText(dropped) {
+  const reasons = new Set((dropped || []).map((d) => d && d.reason));
+  if (reasons.has('unsafe')) return 'A suggestion could not be applied safely and was dropped. Ask again to regenerate it.';
+  if (reasons.has('too_large')) return 'A suggestion would make the doc too large and was left out.';
+  return 'Part of the text changed since; that suggestion was dropped. Ask again to regenerate it.';
+}
+
 export function useSuggestions({ slug, version, enabled, send, onToast, onPublished, onAccepted }) {
   const [sets, setSets] = useState([]);
   const [shown, setShown] = useState({});
@@ -184,7 +194,8 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
         try {
           const body = await acceptSuggestions(slug, [...bySet].map(([id, editIds]) => ({ id, editIds })));
           for (const r of body.sets || []) settle(r.id, r);
-          if ((body.sets || []).some((r) => r.stale?.length)) onToast?.('Part of the text changed since; that suggestion was dropped. Ask again to regenerate it.', true);
+          const gone = (body.sets || []).flatMap((r) => r.dropped || []);
+          if (gone.length) onToast?.(droppedText(gone), true);
           if (body.version) lastVersion = body.version;
         } catch (error) {
           for (const r of error.body?.sets || []) settle(r.id, { stale: r.stale, suggestion: r.suggestion });
@@ -197,7 +208,7 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
           const done = decision === 'accept' ? body.accepted || [] : body.rejected || [];
           for (const id of done) send({ type: 'tdoc:suggestSettle', id: `${setId}:${id}`, accepted: decision === 'accept' });
           for (const id of body.stale || []) send({ type: 'tdoc:suggestSettle', id: `${setId}:${id}`, accepted: false });
-          if (body.stale?.length) onToast?.('Part of the text changed since; that suggestion was dropped. Ask again to regenerate it.', true);
+          if (body.stale?.length || body.dropped?.length) onToast?.(droppedText(body.dropped), true);
           if (body.version) lastVersion = Math.max(lastVersion, body.version);
           if (body.suggestion) replaceSet(body.suggestion);
         } catch (error) {
