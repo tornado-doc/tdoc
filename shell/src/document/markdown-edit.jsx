@@ -46,6 +46,13 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
   viewRef.current = view;
   const lib = useRef(null);
   const seenEpoch = useRef(frameEpoch);
+  // Whether the view can show now (Edit on a prose doc). Text kept while it
+  // can't (Read, Comment) stays out of the editor's reads until it can.
+  const availableRef = useRef(available);
+  availableRef.current = available;
+  // Markdown kept from Edit because it could not be converted: tried once,
+  // on leaving Edit, and not again until Edit is back.
+  const kept = useRef(false);
   const timer = useRef(0);
   const dirtyText = useRef(false);
   const lastSent = useRef(null);
@@ -158,36 +165,34 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
     if (next) await open();
   }, [close, open, prefKey]);
 
-  // Edit mode on, or a fresh page (a save, a discard): open the view if it
-  // was the person's choice, otherwise only learn whether it could open.
+  // Edit mode on, or a fresh page (a save, a discard): the view opens if it
+  // was the person's choice. Nothing is converted otherwise: whether a doc
+  // can be shown as Markdown is learnt when the switch is used.
   useEffect(() => {
+    if (frameEpoch !== seenEpoch.current) {
+      seenEpoch.current = frameEpoch;
+      // A new page in the frame. Markdown kept from Edit that could not be
+      // converted stays (it comes back with Edit); typing on its way to the
+      // old page (Discard) is dropped with it.
+      if (!(viewRef.current && dirtyText.current && kept.current)) {
+        cancel();
+        if (viewRef.current) { viewRef.current = null; setView(null); }
+      }
+    }
     if (!available) {
       // Leaving Edit: what was typed goes to the page first. Markdown that
       // can't be converted is kept (not shown) and comes back with Edit;
       // flush has said why, and leaving the page asks first (below).
-      if (viewRef.current) close();
+      if (viewRef.current && !kept.current && !close()) kept.current = true;
       return undefined;
     }
-    // A new page in the frame (first load, Discard, a reload): typing still
-    // on its way belonged to the old one.
-    if (frameEpoch !== seenEpoch.current) {
-      seenEpoch.current = frameEpoch;
-      cancel();
-      if (viewRef.current) { viewRef.current = null; setView(null); }
-    }
+    kept.current = false;
     let cancelled = false;
     const id = window.setTimeout(async () => {
       if (cancelled) return;
       // Back in Edit with Markdown still waiting to be fixed: that text.
       if (viewRef.current && dirtyText.current) { setView(viewRef.current); return; }
-      if (wanted) { await open({ quiet: true }); return; }
-      try {
-        const [mod, bodyHtml] = await Promise.all([loadConverter(), editor.requestBody()]);
-        if (cancelled) return;
-        lib.current = mod;
-        const result = mod.toMarkdown(bodyHtml);
-        setBlocked(result.ok ? '' : result.reason);
-      } catch {}
+      if (wanted && !viewRef.current) await open({ quiet: true });
     }, 250);
     return () => { cancelled = true; window.clearTimeout(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,9 +202,9 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
   // swapped in): the view reopens on it, unless typing is still on its way.
   useEffect(() => {
     editor.setMarkdownHooks({
-      beforeSerialize: () => flush(),
+      beforeSerialize: () => { if (availableRef.current) flush(); },
       onSnapshot: (message) => {
-        if (!viewRef.current) return;
+        if (!viewRef.current || !availableRef.current) return;
         if (message.requestId && inFlight.current.has(message.requestId)) {
           inFlight.current.delete(message.requestId);
           ours.current.add(message.bodyHtml);
@@ -224,7 +229,7 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
   useEffect(() => {
     const warn = (event) => {
       if (!viewRef.current || !dirtyText.current) return;
-      if (flushQuietly()) return;
+      if (!kept.current && flushQuietly()) return;
       event.preventDefault();
       event.returnValue = '';
     };

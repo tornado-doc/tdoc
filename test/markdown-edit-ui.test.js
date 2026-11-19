@@ -109,10 +109,15 @@ const SHEET = `<!doctype html>
       } catch {}
     }, [flag, modeless, idleMs, storage]);
     await context.route(/\/d\/[a-z0-9]+\/v\/\d+(\?.*)?$/, async (route) => {
-      const response = await route.fetch();
-      const body = (await response.text()).replace(/window\.__TDOC_SHELL__ = (.*?);<\/script>/,
-        (_, json) => `window.__TDOC_SHELL__ = ${JSON.stringify({ ...JSON.parse(json), mode: 'published' })};</script>`);
-      await route.fulfill({ response, body });
+      // A navigation can drop the response mid-read (a save's reload).
+      try {
+        const response = await route.fetch();
+        const body = (await response.text()).replace(/window\.__TDOC_SHELL__ = (.*?);<\/script>/,
+          (_, json) => `window.__TDOC_SHELL__ = ${JSON.stringify({ ...JSON.parse(json), mode: 'published' })};</script>`);
+        await route.fulfill({ response, body });
+      } catch {
+        await route.continue().catch(() => {});
+      }
     });
     return context;
   }
@@ -309,13 +314,43 @@ const SHEET = `<!doctype html>
       await context.close();
     });
 
-    await test('a doc made only of house blocks: the switch is disabled and says why', async () => {
+    await test('opening Edit converts nothing; a doc made only of house blocks says why when the switch is used, then it is disabled', async () => {
       reset('dash');
       const context = await newContext();
       const { page } = await openDoc(context, 'dash');
+      const loaded = [];
+      page.on('request', (request) => { if (/markdown-source/.test(request.url())) loaded.push(request.url()); });
       await chooseMode(page, 'Edit');
+      await mdSwitch(page).waitFor();
+      await page.waitForTimeout(800);
+      assert(!loaded.length, 'opening Edit loaded the converter');
+      assert(!(await mdSwitch(page).isDisabled()), 'the switch is disabled before anyone used it');
+      await mdSwitch(page).click();
+      await page.locator('.tdoc-shell-toast', { hasText: 'Markdown can' }).first().waitFor({ timeout: 4000 });
       await page.waitForFunction(() => document.querySelector('.tdoc-md-switch[title*="Markdown can"]'), null, { timeout: 4000 });
-      assert(await mdSwitch(page).isDisabled(), 'the switch is enabled on a doc Markdown cannot show');
+      assert(await mdSwitch(page).isDisabled(), 'the switch stays usable on a doc Markdown cannot show');
+      assert(await page.locator('.tdoc-md-source').count() === 0, 'the source view opened');
+      await context.close();
+    });
+
+    await test('Markdown kept from Edit survives the page reloading in Read, and comes back with Edit', async () => {
+      reset('notes');
+      const context = await newContext({ storage: { 'tdoc-edit-view:owner': 'markdown' } });
+      const { page } = await openDoc(context, 'notes', '?edit=1');
+      await source(page).waitFor();
+      const md = await source(page).inputValue();
+      const bad = md.replace('The end.', `The end.\n\n${'> '.repeat(40)}deep`);
+      await source(page).fill(bad);
+      await page.locator('.tdoc-shell-toast', { hasText: 'nested too deeply' }).first().waitFor({ timeout: 3000 });
+      await chooseMode(page, 'Read');
+      await page.waitForTimeout(400);
+      // The frame loads its page again (as after allowing embeds).
+      await page.evaluate(() => { const f = document.querySelector('iframe.tdoc-doc-frame'); f.src = f.src; });
+      await page.waitForTimeout(1500);
+      await chooseMode(page, 'Edit');
+      await source(page).waitFor({ timeout: 4000 });
+      assert(await source(page).inputValue() === bad, 'the kept Markdown was dropped when the page reloaded');
+      await page.close({ runBeforeUnload: false });
       await context.close();
     });
 

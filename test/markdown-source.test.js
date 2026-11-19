@@ -217,8 +217,8 @@ const assert = require('assert/strict');
     const r = toMarkdown('<p>A</p>');
     for (const [text, why] of [
       ['> '.repeat(5000) + 'x', /nested too deeply/],
-      ['*a '.repeat(8000), /unclosed \* or _/],
-      ['_a '.repeat(8000), /unclosed \* or _/],
+      ['*a '.repeat(8000), /too much \* or _/],
+      ['_a '.repeat(8000), /too much \* or _/],
       [Array.from({ length: 60 }, (_, i) => `${' '.repeat(i * 2)}- x`).join('\n'), /nested too deeply/],
       ['- '.repeat(400) + 'x', /nested too deeply/],
     ]) {
@@ -289,6 +289,54 @@ const assert = require('assert/strict');
     assert.ok(out.includes('<table data-tdoc-sheet="s1-copy1" data-name="Budget (copy)">'), out);
     assert.equal(out.split(fig).length - 1, 1);
     assert.equal(out.split(sheet).length - 1, 1);
+  });
+
+  // Second delta review of #1089 -------------------------------------------
+  t('the emphasis guard bounds the work whatever comes before the delimiters', () => {
+    const r = toMarkdown('<p>Intro</p>\n<p>Outro</p>\n');
+    const gens = [',*a ', '.*a', '!*a', ':*a ', '._a ', 'a*b ', '*a_ ', 'a**b ', '~a '];
+    for (const part of gens) {
+      const t0 = Date.now();
+      assert.throws(() => fromMarkdown(`${r.markdown}\n\n${part.repeat(6000)}\n`, r.snapshot), (e) => e instanceof MarkdownTooComplex, part);
+      assert.ok(Date.now() - t0 < 500, `${part}: ${Date.now() - t0} ms`);
+    }
+    for (const wrap of [(x) => `# ${x}`, (x) => `- ${x}`, (x) => `> ${x}`, (x) => `|h|\n|-|\n|${x}|`, (x) => `[${x}](https://x.dev)`]) {
+      assert.throws(() => fromMarkdown(`${r.markdown}\n\n${wrap(',*a '.repeat(6000))}\n`, r.snapshot), (e) => e instanceof MarkdownTooComplex);
+    }
+    // Escaped delimiters are text, never counted.
+    fromMarkdown(`${r.markdown}\n\n${',\\*a '.repeat(3000)}\n`, r.snapshot);
+  });
+
+  t('agent-written pages open fast: a block too heavy to read back stays HTML; image alt * is escaped', () => {
+    const docs = [
+      '<p>' + '<img src="a.png" alt=",*a"> '.repeat(6000) + '</p>',
+      '<p>' + ',<em>a </em>b'.repeat(6000) + '</p>',
+      '<p>' + ',*a '.repeat(6000) + '</p>',
+      '<p>' + '<code>*</code>,*'.repeat(6000) + '</p>',
+      '<p>' + '<strong>a</strong><em>b</em>'.repeat(6000) + '</p>',
+    ];
+    for (const body of docs) {
+      const t0 = Date.now();
+      const r = toMarkdown(`<p>Intro</p>\n${body}\n<p>Outro</p>\n`);
+      assert.ok(Date.now() - t0 < 2000, `${body.slice(0, 40)}: ${Date.now() - t0} ms`);
+      assert.equal(r.ok, true);
+      const t1 = Date.now();
+      fromMarkdown(r.markdown.replace('Intro', 'Intro!'), r.snapshot);
+      assert.ok(Date.now() - t1 < 1000, `edit nearby: ${Date.now() - t1} ms`);
+    }
+    const md = globalThis.TDOC_SHELL_BUILDER.documentMarkdown('<p>See <img src="a.png" alt="a *b* _c_"> here</p>', {});
+    assert.ok(md.includes('[image: a \\*b\\* \\_c\\_]'), md);
+  });
+
+  t('every block rewritten at once keeps each block\'s own aid (past the comparison budget, in order)', () => {
+    let html = '';
+    for (let i = 0; i < 2000; i++) html += `<p data-tdoc-aid="a${i}">alpha beta gamma delta epsilon zeta eta theta ${i}</p>\n`;
+    const r = toMarkdown(html);
+    const t0 = Date.now();
+    const out = fromMarkdown(r.markdown.replace(/theta (\d+)/g, 'theta $1 changed'), r.snapshot).bodyHtml;
+    assert.ok(Date.now() - t0 < 2000, `${Date.now() - t0} ms`);
+    assert.ok(out.includes('<p data-tdoc-aid="a1234">alpha beta gamma delta epsilon zeta eta theta 1234 changed</p>'));
+    assert.equal((out.match(/data-tdoc-aid/g) || []).length, 2000);
   });
 
   if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

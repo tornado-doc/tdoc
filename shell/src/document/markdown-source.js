@@ -363,6 +363,9 @@ function blockMarkdown(node, html) {
   const same = (text) => {
     try { return canonical(parseFragment(markdownToHtml(text)), true) === want; } catch { return false; }
   };
+  // Bounded before marked reads it: a block too heavy to read back stays
+  // HTML (an agent can write 6,000 images with `*` in their alt text).
+  try { guardMarkdown(md); } catch { return null; }
   const light = relaxEscapes(md);
   if (light !== md && same(light)) return light;
   return same(md) ? md : null;
@@ -564,6 +567,7 @@ function alignBlocks(a, b) {
 }
 
 const MAX_LIKENESS_PAIRS = 250_000;
+const LIKENESS_WINDOW = 6;
 // How alike two blocks' words are (0..1): an edited block keeps the
 // attributes of the block it replaced only when it is that block.
 function words(text) {
@@ -658,9 +662,23 @@ export function fromMarkdown(markdown, snapshot) {
     // A rewrite of thousands of blocks at once: past the budget, edited
     // blocks start without the originals' attributes rather than freeze
     // the page (never with a wrong block's).
-    compared += olds.length * news.length;
-    if (compared > MAX_LIKENESS_PAIRS) return;
     const oldWords = new Map(olds.map((o) => [o, words(segs[o].md)]));
+    compared += olds.length * news.length;
+    if (compared > MAX_LIKENESS_PAIRS) {
+      // Thousands rewritten at once: in order, each edited block looks at
+      // the next few originals only (linear), with the same 50% bar.
+      let at = 0;
+      for (const nn of news) {
+        const mine = words(blocks[nn].text);
+        let best = -1, score = 0.5;
+        for (let k = at; k < Math.min(olds.length, at + LIKENESS_WINDOW); k++) {
+          const sc = likeness(mine, oldWords.get(olds[k]));
+          if (sc >= score) { best = k; score = sc; }
+        }
+        if (best !== -1) { replaces.set(nn, olds[best]); at = best + 1; }
+      }
+      return;
+    }
     const taken = new Set();
     for (const nn of news) {
       const mine = words(blocks[nn].text);
@@ -730,17 +748,37 @@ export class MarkdownTooComplex extends Error {}
 const MAX_MD_CHARS = 4_000_000;
 const MAX_QUOTE_DEPTH = 16;
 const MAX_LIST_DEPTH = 16;
-// Emphasis that marked takes seconds on: OPENERS (a * or _ run before a
-// word, after a space) that wait for closers, in one run of inline text
-// (measured: 1,000 such openers 0.3 s, 2,000 1-2 s; paired emphasis,
-// snake_case, `**kwargs` closed later in the run's shape, links, brackets,
-// tables and long lists stay linear). A paragraph, a heading, a list item
-// and a table row are runs of their own; code (fenced or indented) is not
-// inline text and is never counted; and only runs with a line that is not
-// in the doc as it opened are checked, so text that was already there is
-// never refused.
-const MAX_OPENERS_PER_RUN = 400;
-const OPENER = /(?:^|[\s([{"'>~-])(?:\*+|_+)(?=[^\s*_])/g;
+// Emphasis is where marked's work grows with the square of the input:
+// delimiter runs that could open or close (measured: 1,000 unclosed openers
+// 0.3 s, 2,000 1-2 s, and the punctuation before them does not matter).
+// So the guard bounds the work, not a pattern: in one run of inline text
+// it counts every `*` / `~` run except one with spaces on both sides, and
+// every `_` run except one inside a word (snake_case), skipping escaped
+// ones. A paragraph, a heading, a list item and a table row are runs of
+// their own; code (fenced or indented) is not inline text and is never
+// counted; and only runs with a line that is not in the doc as it opened
+// are checked, so text that was already there is never refused.
+const MAX_DELIMITERS_PER_RUN = 800;
+const ALNUM = /[\p{L}\p{N}]/u;
+function delimiterRuns(line) {
+  let n = 0;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c !== '*' && c !== '_' && c !== '~') continue;
+    let j = i;
+    while (j + 1 < line.length && line[j + 1] === c) j++;
+    let slashes = 0;
+    for (let k = i - 1; k >= 0 && line[k] === '\\'; k--) slashes++;
+    const before = i > 0 ? line[i - 1] : ' ';
+    const after = j + 1 < line.length ? line[j + 1] : ' ';
+    const escaped = slashes % 2 === 1 && i === j;
+    const spaced = /\s/.test(before) && /\s/.test(after);
+    const inWord = c === '_' && ALNUM.test(before) && ALNUM.test(after);
+    if (!escaped && !spaced && !inWord) n++;
+    i = j;
+  }
+  return n;
+}
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const MARKER = /^([ \t]*)((?:>[ \t]?)*)[ \t]*((?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$))/;
@@ -754,7 +792,7 @@ export function guardMarkdown(md, known = null) {
   let inCode = false;
   let stack = [];
   const endRun = () => {
-    if (runNew && run > MAX_OPENERS_PER_RUN) throw new MarkdownTooComplex('A paragraph has too much unclosed * or _ formatting to convert');
+    if (runNew && run > MAX_DELIMITERS_PER_RUN) throw new MarkdownTooComplex('A paragraph has too much * or _ formatting to convert');
     run = 0; runNew = false;
   };
   let start = 0;
@@ -795,9 +833,7 @@ export function guardMarkdown(md, known = null) {
       stack = [];
     }
     if (/^[ \t]*(?:#{1,6}[ \t]|\|)/.test(line)) endRun();
-    OPENER.lastIndex = 0;
-    let m;
-    while ((m = OPENER.exec(line))) { run++; OPENER.lastIndex = m.index + m[0].length; }
+    run += delimiterRuns(line);
     if (isNew) runNew = true;
     if (/^[ \t]*#{1,6}[ \t]/.test(line)) endRun();
     prevBlank = false;
