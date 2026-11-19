@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, MessageSquareText } from 'lucide-react';
+import { Check, MessageSquareText, Sparkles } from 'lucide-react';
 import { AppButton } from '../ui/button.jsx';
 import { appendUnique } from '../notification-rows.js';
-import { listNotifications, markDocNotificationsRead, markNotificationsRead, postThreadSeen } from '../document/api.js';
+import { listNotifications, markDocNotificationsRead, markNotificationsRead, markSuggestPendingDone, postThreadSeen } from '../document/api.js';
 import { actorName, notificationTarget } from '../notification-text.js';
 import { absoluteTime, relativeTime } from './row-meta.js';
 import { docHref } from './rows.jsx';
@@ -12,7 +12,9 @@ import { authorLine } from '../document/comment-card.jsx';
 // "Needs you" on My docs: what is waiting on this person, from the data the
 // rows' unread badges already come from -- the bell's unread comment, reply
 // and mention rows (/api/notifications, the same inbox the badge counts) and
-// the agent replies not opened yet (doc.activity.agent / agent_threads).
+// the agent replies not opened yet (doc.activity.agent / agent_threads), and
+// the suggested edits waiting on them (doc.activity.suggestions: "Review 3
+// edits", opening the doc with its review bar on the first one).
 //
 // One item per doc and thread: every row about the same thread (a comment,
 // the replies after it, a mention in it -- whichever version each was left
@@ -63,6 +65,7 @@ export function useNeedsInbox(enabled) {
       ids.has(item.id) || (card.allOfDoc && item.slug === card.slug && INBOX_KINDS.has(item.kind)) ? { ...item, read: true } : item
     )));
     const work = [];
+    if (card.kind === 'edits') work.push(markSuggestPendingDone(card.slug));
     if (card.ids.length) work.push(markNotificationsRead(card.ids));
     else if (card.allOfDoc) work.push(markDocNotificationsRead(card.slug));
     if (card.threads.length) {
@@ -89,6 +92,15 @@ function inboxAction(card) {
 
 function agentAction(count) {
   return count === 1 ? 'Review the agent\u2019s reply' : `Review ${count} agent replies`;
+}
+
+function editsAction(count) {
+  return count === 1 ? 'Review 1 edit' : `Review ${count} edits`;
+}
+
+// The doc as it is now, with its suggestions up for review (suggestions.js).
+export function editsHref(slug) {
+  return `/d/${encodeURIComponent(slug)}?suggestions=1`;
 }
 
 // Items for one space. `docs`: the docs this space lists (and any other row
@@ -169,6 +181,14 @@ export function needsCards({ inbox, docs, inSpace }) {
         });
       }
     }
+    const edits = Math.max(0, Number(activity.suggestions) || 0);
+    if (edits) {
+      cards.set(`e:${doc.slug}`, {
+        key: `e:${doc.slug}`, kind: 'edits', slug: doc.slug, doc, count: edits,
+        action: editsAction(edits),
+        quote: '', at: activity.suggestions_at || '', href: editsHref(doc.slug), ids: [], threads: [],
+      });
+    }
     if (comments && !docsWithRows.has(doc.slug)) {
       // The badge counted it but the bell's rows did not load.
       cards.set(`c:${doc.slug}`, {
@@ -188,6 +208,8 @@ export function needsCards({ inbox, docs, inSpace }) {
 // server kept who wrote it: tdoc AI's mark, as AuthorAvatar draws any agent
 // it cannot name.
 function NeedAvatar({ card }) {
+  // Suggested edits: the mark the doc's review bar carries.
+  if (card.kind === 'edits') return <span className="mda-need-avatar is-mark" aria-hidden="true"><Sparkles size={14} /></span>;
   const author = card.kind === 'agent' ? (card.author || { kind: 'agent' }) : card.kind === 'comments' ? null : (card.actor || { name: card.who });
   if (author) return <span className={`mda-need-avatar is-face${author.kind === 'agent' ? ' is-agent' : ''}`}><AuthorAvatar author={author} size={0} /></span>;
   return <span className="mda-need-avatar is-mark" aria-hidden="true"><MessageSquareText size={14} /></span>;
@@ -198,7 +220,7 @@ function NeedAvatar({ card }) {
 // words and when sit under it in grey.
 function NeedCard({ card, onDone }) {
   const when = relativeTime(card.at);
-  const more = card.kind !== 'comment' || card.threadsCount === 1 ? card.count - 1 : 0;
+  const more = card.kind === 'edits' ? 0 : card.kind !== 'comment' || card.threadsCount === 1 ? card.count - 1 : 0;
   // The agent by name and whose it is ("name · owner"), as on its reply.
   const by = card.kind === 'agent' && card.author ? authorLine(card.author) : '';
   const agentNote = card.agentAuthor ? `${authorLine(card.agentAuthor)} replied` : 'an agent replied';

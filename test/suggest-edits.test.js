@@ -469,6 +469,68 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert((state === 'accepted') === published, `state ${state}, published ${published}, ${a.status}/${b.status}`);
   });
 
+  // Julie, 11-16: "Accept all" and suggestions still show. One publish per set,
+  // back to back, read the doc before the last one showed in KV and was refused.
+  await t('Accept all: several sets land in ONE version, each settled; an exact copy is accepted with its twin', async () => {
+    const up = await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'all', version: 1, html: '<h1>All</h1><p>One here.</p><p>Two here.</p><p>Three here.</p>' } });
+    assert(up.status === 200, up.text);
+    const ids = [];
+    for (const [find, replace] of [['One here.', 'One there.'], ['Two here.', 'Two there.'], ['Two here.', 'Two there.'], ['Three here.', 'Three there.']]) {
+      const r = await call('/api/docs/all/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find, replace }] } });
+      assert(r.status === 200, r.text);
+      ids.push(r.body.suggestion.id);
+    }
+    // KV a step behind, as Cloudflare's can be: every read of the record is the one before the last write.
+    const get0 = env.META.get.bind(env.META);
+    const put0 = env.META.put.bind(env.META);
+    let prior = env.META.map.get('meta:all');
+    env.META.get = async (k) => (k === 'meta:all' ? prior : get0(k));
+    env.META.put = async (k, v, o) => { if (k === 'meta:all') prior = env.META.map.get(k); return put0(k, v, o); };
+    try {
+      const a = await call('/api/docs/all/suggestions/accept', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { sets: ids.map((id) => ({ id })) } });
+      assert(a.status === 200 && a.body.version === 2, a.text);
+      assert(a.body.sets.length === 4 && a.body.sets.every((x) => x.accepted.length === 1 && !x.stale.length), a.text);
+    } finally { env.META.get = get0; env.META.put = put0; }
+    const meta = JSON.parse(env.META.map.get('meta:all'));
+    assert(meta.versions.length === 2, `versions ${meta.versions.length}`);
+    const html = await (await env.DOCS.get('docs/all/v2/index.html')).text();
+    assert(/One there\./.test(html) && /<p>Two there\.<\/p>/.test(html) && /Three there\./.test(html), html);
+    const list = await call('/api/docs/all/suggestions', { cookie: alice.cookie });
+    assert(list.body.suggestions.length === 0, JSON.stringify(list.body));
+    const stored = env.COMMENTS.stateFor('all').storage.map.get('suggestions');
+    assert(stored.every((x) => x.edits[0].state === 'accepted' && x.edits[0].version === 2), JSON.stringify(stored));
+  });
+
+  await t('Accept all: only editors, same-site, and named sets', async () => {
+    const r = await call('/api/docs/all/suggestions/accept', { method: 'POST', cookie: bob.cookie, headers: ORIGIN, body: { sets: [{ id: 's_x' }] } });
+    assert(r.status === 403, r.text);
+    const tok = await call('/api/docs/all/suggestions/accept', { method: 'POST', token: alice.token, headers: ORIGIN, body: { sets: [{ id: 's_x' }] } });
+    assert(tok.status === 403, tok.text);
+    const none = await call('/api/docs/all/suggestions/accept', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { sets: [] } });
+    assert(none.status === 400, none.text);
+  });
+
+  // Needs you's "Review N edits": the person's own record, per doc, follows the suggestions.
+  await t('pending edits are noted for whose they are, follow every decision, and leave with the last one', async () => {
+    const up = await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'noted', version: 1, html: '<h1>Noted</h1><p>Red here.</p><p>Blue here.</p>' } });
+    assert(up.status === 200, up.text);
+    const r = await call('/api/docs/noted/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Red here.', replace: 'Red there.' }, { find: 'Blue here.', replace: 'Blue there.' }] } });
+    assert(r.status === 200, r.text);
+    const noted = () => [...env.META.map.entries()].filter(([k]) => k.startsWith('suggest-pending:agent-account:'))
+      .flatMap(([, v]) => JSON.parse(v).items).filter((i) => i.slug === 'noted');
+    assert(noted().length === 1 && noted()[0].count === 2, JSON.stringify(noted()));
+    const id = r.body.suggestion.id;
+    const one = await call(`/api/docs/noted/suggestions/${id}/reject`, { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { edit_ids: [r.body.suggestion.edits[0].id] } });
+    assert(one.status === 200, one.text);
+    assert(noted()[0].count === 1, JSON.stringify(noted()));
+    const a = await call(`/api/docs/noted/suggestions/${id}/accept`, { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: {} });
+    assert(a.status === 200, a.text);
+    assert(noted().length === 0, JSON.stringify(noted()));
+    // Mark done is a same-site browser call.
+    const tok = await call('/api/suggestions/pending/done', { method: 'POST', token: alice.token, headers: ORIGIN, body: { slug: 'noted' } });
+    assert(tok.status === 403, tok.text);
+  });
+
   await t('suggestions live in the Durable Object, not KV, where there is one', async () => {
     assert(![...env.META.map.keys()].some((k) => k.startsWith('suggestions:')), 'a KV suggestions key was written');
   });

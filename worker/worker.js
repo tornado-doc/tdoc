@@ -17231,12 +17231,23 @@ function docSharingFields(meta) {
 // per load -- never a comment or read-state read per row.
 // (DOC_ACTIVITY_INBOX_KINDS: with the inbox constants above.)
 async function viewerDocActivity(env, session) {
-  const [inboxes, agentParts] = await Promise.all([loadViewerInboxes(env, session), loadAgentUnread(env, session)]);
+  const [inboxes, agentParts, suggestParts] = await Promise.all([
+    loadViewerInboxes(env, session), loadAgentUnread(env, session),
+    loadViewerSuggestPending(env, session).catch(() => []),
+  ]);
   const out = new Map();
   const forSlug = (slug) => {
-    if (!out.has(slug)) out.set(slug, { comments: 0, agent: 0, threads: [] });
+    if (!out.has(slug)) out.set(slug, { comments: 0, agent: 0, threads: [], suggestions: 0, suggestions_at: '' });
     return out.get(slug);
   };
+  // Suggested edits waiting on this person (Needs you: "Review N edits").
+  for (const part of suggestParts) {
+    for (const item of part.items) {
+      const entry = forSlug(item.slug);
+      entry.suggestions += Math.max(0, Math.floor(Number(item.count)) || 0);
+      if (String(item.at || '') > entry.suggestions_at) entry.suggestions_at = String(item.at);
+    }
+  }
   for (const item of mergeInboxes(inboxes).items) {
     if (!inboxRowUnread(item) || !isValidSlug(item.slug) || !DOC_ACTIVITY_INBOX_KINDS.has(item.kind)) continue;
     forSlug(item.slug).comments += Math.max(1, Math.floor(Number(item.count)) || 1);
@@ -17259,11 +17270,11 @@ async function viewerDocActivity(env, session) {
 // Needs you can open the newest and mark them seen (POST /api/comments/seen).
 const DOC_ACTIVITY_AGENT_THREADS = 20;
 function docActivityFields(entry) {
-  if (!entry || (!entry.comments && !entry.agent)) return {};
+  if (!entry || (!entry.comments && !entry.agent && !entry.suggestions)) return {};
   const threads = (entry.threads || [])
     .slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
     .slice(0, DOC_ACTIVITY_AGENT_THREADS);
-  return { activity: { comments: entry.comments, agent: entry.agent, ...(threads.length ? { agent_threads: threads } : {}) } };
+  return { activity: { comments: entry.comments, agent: entry.agent, ...(threads.length ? { agent_threads: threads } : {}), ...(entry.suggestions ? { suggestions: entry.suggestions, suggestions_at: entry.suggestions_at } : {}) } };
 }
 
 // An agent's reply is not a notification (no bell row, push or email), yet
@@ -22351,6 +22362,7 @@ function sameQuestion(asking, question) {
 //   GET  /api/docs/<slug>/suggestions                   -> { suggestions }   (editors)
 //   POST /api/docs/<slug>/suggestions                   { edits, summary?, comment_id?, instruction? }  (agents: propose_edits)
 //   POST /api/docs/<slug>/suggestions/<id>/accept       { edit_ids? } -> { version, accepted, stale }
+//   POST /api/docs/<slug>/suggestions/accept            { sets: [{ id, edit_ids? }] } -> { version, sets }  (Accept all: one version)
 //   POST /api/docs/<slug>/suggestions/<id>/reject       { edit_ids? }
 //
 // Edits are text, never markup: a find is matched against the document's
@@ -23175,7 +23187,30 @@ function suggestionIsOpen(set) {
 function pruneSuggestions(list) {
   return [...list.filter(suggestionIsOpen), ...list.filter((x) => !suggestionIsOpen(x))].slice(0, SUGGEST_SETS_MAX);
 }
+// Pending edits per owner (set.by): whose they are for Needs you.
+function suggestionsPendingBy(list) {
+  const out = {};
+  for (const set of list) {
+    if (typeof set.by !== 'string' || !set.by) continue;
+    const n = set.edits.filter((e) => e.state === 'pending').length;
+    if (n) out[set.by] = (out[set.by] || 0) + n;
+  }
+  return out;
+}
 function applySuggestionsOp(stored, op) {
+  const before = suggestionsPendingBy(cleanSuggestionList(stored));
+  const next = applySuggestionsOpInner(stored, op);
+  if (!next.changed || !next.result || !next.result.ok) return next;
+  // Owners whose pending count moved, with the new count (0: none left).
+  const after = suggestionsPendingBy(next.list);
+  const moved = {};
+  for (const by of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if ((before[by] || 0) !== (after[by] || 0)) moved[by] = { count: after[by] || 0, before: before[by] || 0 };
+  }
+  if (Object.keys(moved).length) next.result = { ...next.result, pending_by: moved };
+  return next;
+}
+function applySuggestionsOpInner(stored, op) {
   const list = cleanSuggestionList(stored);
   const kind = op && op.kind;
   const find = () => list.find((x) => x.id === (op && op.id));
@@ -23231,6 +23266,84 @@ function applySuggestionsOp(stored, op) {
   return { changed: false, list, result: { ok: false, error: 'bad_suggestions_op' } };
 }
 async function suggestionsOp(env, slug, op) {
+  const out = await suggestionsOpRaw(env, slug, op);
+  if (out && out.pending_by && typeof out.pending_by === 'object') {
+    await notePendingSuggestions(env, slug, out.pending_by).catch((e) => console.error('[suggestions] pending note failed (ignored):', e && e.message ? e.message : String(e)));
+  }
+  return out;
+}
+
+// Needs you's "Review N edits": which docs hold suggestions waiting on a
+// person, without a Durable Object read per My docs row. Each change to a doc's
+// suggestions names the owners (set.by: the account that asked tdoc AI, or the
+// account whose agent sent them) whose pending count moved; their small record
+// (suggest-pending:<by>) keeps the doc's count. A count going up (new edits)
+// puts the doc back even after Mark done; going down only updates it; none
+// left takes it off.
+const SUGGEST_PENDING_MAX = 100;
+const SUGGEST_PENDING_TTL_SECONDS = 30 * 86400;
+function suggestPendingKey(by) {
+  return typeof by === 'string' && by && by.length <= 200 ? `suggest-pending:${by}` : null;
+}
+function suggestPendingItems(raw) {
+  let parsed = null;
+  try { parsed = JSON.parse(raw || 'null'); } catch {}
+  const items = parsed && Array.isArray(parsed.items) ? parsed.items : [];
+  const cutoff = Date.now() - SUGGEST_PENDING_TTL_SECONDS * 1000;
+  return items.filter((i) => i && isValidSlug(i.slug) && Number(i.count) > 0 && Date.parse(i.at) > cutoff);
+}
+async function notePendingSuggestions(env, slug, moved) {
+  for (const [by, m] of Object.entries(moved)) {
+    const key = suggestPendingKey(by);
+    if (!key) continue;
+    const items = suggestPendingItems(await env.META.get(key));
+    const at = items.findIndex((i) => i.slug === slug);
+    const count = Math.max(0, Number(m && m.count) || 0);
+    const grew = count > (Number(m && m.before) || 0);
+    let next = items;
+    if (!count) next = items.filter((i) => i.slug !== slug);
+    else if (at >= 0) next = items.map((i, k) => (k === at ? { ...i, count, ...(grew ? { at: new Date().toISOString() } : {}) } : i));
+    else if (grew) next = [{ slug, count, at: new Date().toISOString() }, ...items].slice(0, SUGGEST_PENDING_MAX);
+    if (next === items) continue;
+    if (next.length) await env.META.put(key, JSON.stringify({ items: next }), { expirationTtl: SUGGEST_PENDING_TTL_SECONDS });
+    else await env.META.delete(key);
+  }
+}
+// The records a signed-in person reads: their account's own (tdoc AI) and the
+// one for agents on their account (propose_edits). Dev mode only, as the
+// suggestions themselves are.
+async function viewerSuggestPendingKeys(env, session) {
+  if (!sessionPrincipal(session) || session.feedback) return [];
+  if (!(await askEditV2Allowed(env, session))) return [];
+  const accountKey = await askAccountKey(env, session);
+  const accountId = await sessionAccountId(env, session).catch(() => null);
+  return [suggestPendingKey(accountKey), accountId ? suggestPendingKey(`agent-account:${accountId}`) : null].filter(Boolean);
+}
+async function loadViewerSuggestPending(env, session) {
+  const keys = await viewerSuggestPendingKeys(env, session);
+  return Promise.all(keys.map(async (key) => ({ key, items: suggestPendingItems(await env.META.get(key)) })));
+}
+// Needs you's Mark done on "Review N edits": the doc leaves the person's
+// records until new edits arrive. The suggestions themselves stay.
+//   POST /api/suggestions/pending/done   { slug }
+async function handleSuggestPendingDone(env, req, url) {
+  if (req.headers.get('authorization')) return json({ error: 'browser_session_required' }, { status: 403 });
+  if (req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') return json({ error: 'cross_origin' }, { status: 403 });
+  const session = await getSession(env, req);
+  if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+  let body = {};
+  try { body = await req.json(); } catch {}
+  const slug = body && typeof body.slug === 'string' ? body.slug : '';
+  if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+  for (const part of await loadViewerSuggestPending(env, session)) {
+    const kept = part.items.filter((i) => i.slug !== slug);
+    if (kept.length === part.items.length) continue;
+    if (kept.length) await env.META.put(part.key, JSON.stringify({ items: kept }), { expirationTtl: SUGGEST_PENDING_TTL_SECONDS });
+    else await env.META.delete(part.key);
+  }
+  return json({ ok: true });
+}
+async function suggestionsOpRaw(env, slug, op) {
   if (env.COMMENTS) {
     try {
       const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
@@ -23564,71 +23677,132 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision, ctx =
     if (r.error === 'nothing_pending') return json({ error: 'nothing_pending', suggestion: view(r.set) }, { status: 409 });
     return suggestionsUnavailable();
   }
-  // Accept: read the set, apply its pending edits to the latest version and
-  // save that as this person's version. The version store takes one save
-  // per base version, so two accepts racing cannot both publish on the same
-  // base; the loser plans again on the latest the store names, since this read
-  // may be the stale one (an edit already in it no longer matches and is reported
-  // stale, never applied twice). The store refuses a save when its own read is
-  // stale, so that retry cannot write one: KV is given a moment, then the person
-  // is told and the suggestion stays pending. The set is settled in one step
-  // afterwards.
+  const out = await acceptSuggestionSets(env, slug, gate, [{ id, edit_ids: wanted }], ctx);
+  if (out.error) return out.error;
+  const one = out.sets[0];
+  return json({ ok: true, version: out.version, url: out.url, accepted: one.accepted, stale: one.stale, applied_comments: out.applied_comments, suggestion: one.suggestion });
+}
+
+// Accept all: every set named, in ONE version. One publish per set, back to
+// back, raced the doc's own record: the next save read the doc before the one
+// just written showed (KV lags a write by up to a minute), was refused as
+// save_in_progress, and the rest stayed pending on the version the page moved
+// to (Julie, 11-16: "Accept all" and suggestions still show).
+//   POST /api/docs/<slug>/suggestions/accept   { sets: [{ id, edit_ids? }] }
+//     -> { ok, version, url, sets: [{ id, accepted, stale, suggestion }], applied_comments }
+async function handleSuggestionsAcceptMany(env, req, url, slug, ctx = null) {
+  const gate = await suggestEditorGate(env, req, url, slug);
+  if (gate.error) return gate.error;
+  const spaceRefusal = feedbackSpaceVersionRefusal(gate.meta);
+  if (spaceRefusal) return spaceRefusal;
+  let body = {};
+  try { body = await req.json(); } catch {}
+  const asked = Array.isArray(body && body.sets) ? body.sets : [];
+  const seen = new Set();
+  const wanted = [];
+  for (const x of asked) {
+    const sid = x && typeof x.id === 'string' && /^[A-Za-z0-9_]{1,60}$/.test(x.id) ? x.id : '';
+    if (!sid || seen.has(sid)) continue;
+    seen.add(sid);
+    wanted.push({ id: sid, edit_ids: Array.isArray(x.edit_ids) ? x.edit_ids.filter((e) => typeof e === 'string').slice(0, SUGGEST_MAX_EDITS * 2) : null });
+  }
+  if (!wanted.length || wanted.length > SUGGEST_SETS_MAX) return json({ error: 'bad_request', message: 'Name the suggestions to accept.' }, { status: 400 });
+  const out = await acceptSuggestionSets(env, slug, gate, wanted, ctx);
+  if (out.error) return out.error;
+  return json({ ok: true, version: out.version, url: out.url, sets: out.sets, applied_comments: out.applied_comments });
+}
+
+// Accept: read the sets, apply their pending edits to the latest version
+// together and save that as this person's ONE version. The version store takes
+// one save per base version, so two accepts racing cannot both publish on the
+// same base; the loser plans again on the latest the store names, since this read
+// may be the stale one (an edit already in it no longer matches and is reported
+// stale, never applied twice). The store refuses a save when its own read is
+// stale, so that retry cannot write one: KV is given a moment, then the person
+// is told and the suggestions stay pending. Each set is settled in one step
+// afterwards. The same edit proposed twice (two sets, the same find and
+// replace) lands once and is accepted in both.
+async function acceptSuggestionSets(env, slug, gate, wanted, ctx) {
+  const { session } = gate;
+  const view = (x) => suggestionView(x, gate.mine(x));
   let latest = gate.latest;
   let named = 0;
-  let set = null;
-  let good = [];
-  let stale = [];
+  let sets = [];
+  let good = [];   // [{ set, edit }]
+  let copies = []; // [{ set, edit }] the same words as an edit in `good`
+  let stale = [];  // [{ set, edit }]
   let saved = null;
   for (let attempt = 0; attempt < SUGGEST_ACCEPT_ATTEMPTS; attempt++) {
     if (attempt) {
       await new Promise((done) => setTimeout(done, SUGGEST_ACCEPT_WAIT_MS));
       const meta = await loadDocMeta(env, slug);
-      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      if (!meta) return { error: json({ error: 'not_found' }, { status: 404 }) };
       latest = Math.max(latestVersionNumber(meta), named);
     }
-    const got = await suggestionsOp(env, slug, { kind: 'get', id });
-    if (!got.ok) return got.error === 'suggestion_not_found' ? json({ error: 'suggestion_not_found' }, { status: 404 }) : suggestionsUnavailable();
-    set = got.set;
-    // The set was made on the version it names, so a read older than that is KV
-    // behind: a plan on it would call good edits stale for good.
-    latest = Math.max(latest, Number(set.base_version) || 0);
-    const pick = set.edits.filter((e) => e.state === 'pending' && (!wanted || wanted.includes(e.id)));
-    if (!pick.length) return json({ error: 'nothing_pending', suggestion: view(set) }, { status: 409 });
-    const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
-    if (!obj) return json({ error: 'not_found' }, { status: 404 });
-    const html = await obj.text();
-    const plan = suggestPlan(html, pick);
-    const staleIdx = new Set(plan.failed.map((f) => f.index));
-    good = pick.filter((_, i) => !staleIdx.has(i));
-    stale = pick.filter((_, i) => staleIdx.has(i));
-    if (!good.length) {
-      const marked = await suggestionsOp(env, slug, { kind: 'stale', id, edit_ids: stale.map((e) => e.id) });
-      return json({ error: 'original_changed', message: 'The document changed since this was suggested. Regenerate it.', stale: stale.map((e) => e.id), suggestion: view(marked.ok ? marked.set : set) }, { status: 409 });
+    sets = [];
+    for (const w of wanted) {
+      const got = await suggestionsOp(env, slug, { kind: 'get', id: w.id });
+      if (!got.ok) {
+        // One named set gone (replaced, cleared) while others are not: the rest still land.
+        if (got.error === 'suggestion_not_found' && wanted.length > 1) continue;
+        return { error: got.error === 'suggestion_not_found' ? json({ error: 'suggestion_not_found' }, { status: 404 }) : suggestionsUnavailable() };
+      }
+      sets.push({ set: got.set, wanted: w.edit_ids });
     }
+    // A set was made on the version it names, so a read older than that is KV
+    // behind: a plan on it would call good edits stale for good.
+    for (const x of sets) latest = Math.max(latest, Number(x.set.base_version) || 0);
+    const pick = sets.flatMap((x) => x.set.edits.filter((e) => e.state === 'pending' && (!x.wanted || x.wanted.includes(e.id))).map((edit) => ({ set: x.set, edit })));
+    if (!pick.length) {
+      const first = sets[0] && sets[0].set;
+      return { error: json({ error: 'nothing_pending', ...(first ? { suggestion: view(first) } : {}) }, { status: sets.length ? 409 : 404 }) };
+    }
+    const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
+    if (!obj) return { error: json({ error: 'not_found' }, { status: 404 }) };
+    const html = await obj.text();
+    const plan = suggestPlan(html, pick.map((p) => p.edit));
+    const failedAt = new Map(plan.failed.map((f) => [f.index, f.reason]));
+    good = pick.filter((_, i) => !failedAt.has(i));
+    const same = (a, b) => suggestNorm(a.find) === suggestNorm(b.find) && suggestNorm(a.replace) === suggestNorm(b.replace);
+    copies = pick.filter((p, i) => failedAt.get(i) === 'overlaps' && good.some((g) => same(g.edit, p.edit)));
+    stale = pick.filter((p, i) => failedAt.has(i) && !copies.includes(p));
+    const markStale = async (list, extra) => {
+      const bySet = new Map();
+      for (const p of list) { if (!bySet.has(p.set.id)) bySet.set(p.set.id, { set: p.set, ids: [] }); bySet.get(p.set.id).ids.push(p.edit.id); }
+      const marked = [];
+      for (const [sid, x] of bySet) {
+        const r = await suggestionsOp(env, slug, { kind: 'stale', id: sid, edit_ids: x.ids });
+        marked.push({ id: sid, stale: x.ids, set: r.ok ? r.set : x.set });
+      }
+      const first = marked[0];
+      return { error: json({ ...extra, stale: first ? first.stale : [], suggestion: first ? view(first.set) : null, sets: marked.map((m) => ({ id: m.id, accepted: [], stale: m.stale, suggestion: view(m.set) })) }, { status: 409 }) };
+    };
+    if (!good.length) return markStale(stale, { error: 'original_changed', message: 'The document changed since this was suggested. Regenerate it.' });
     // plan.next applies exactly the edits that did not fail, checked.
     const nextHtml = plan.next;
-    if (!nextHtml) return json({ error: 'version_write_failed' }, { status: 500 });
+    if (!nextHtml) return { error: json({ error: 'version_write_failed' }, { status: 500 }) };
     // The save rewrites this version's widget paths (/d/<slug>/v/<n>/widget/)
     // everywhere; an edit must not make a new one (by splicing text, or by
     // writing back an entity-encoded "/" as itself).
     const widgetPath = `/d/${slug}/v/${latest}/widget/`;
     if (nextHtml.split(widgetPath).length > html.split(widgetPath).length) {
-      const marked = await suggestionsOp(env, slug, { kind: 'stale', id, edit_ids: good.map((e) => e.id) });
-      return json({ error: 'unsafe_edit', message: 'This suggestion cannot be applied safely.', suggestion: view(marked.ok ? marked.set : set) }, { status: 409 });
+      return markStale([...good, ...copies], { error: 'unsafe_edit', message: 'This suggestion cannot be applied safely.' });
     }
     // The browser save's own checks, for the version this would make.
-    if (utf8ByteLength(nextHtml) > hostedMaxUploadBytes(env, nextHtml)) return json({ error: 'payload_too_large' }, { status: 413 });
-    if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(nextHtml) && !/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(html)) return json({ error: 'provider_markup_forbidden' }, { status: 400 });
-    const who = set.agent && set.agent.name ? set.agent.name : 'AI';
+    if (utf8ByteLength(nextHtml) > hostedMaxUploadBytes(env, nextHtml)) return { error: json({ error: 'payload_too_large' }, { status: 413 }) };
+    if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(nextHtml) && !/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(html)) return { error: json({ error: 'provider_markup_forbidden' }, { status: 400 }) };
+    const agents = [...new Set(good.map((g) => (g.set.agent && g.set.agent.name) || 'AI'))];
+    const who = agents.length === 1 ? agents[0] : 'AI';
     // Named from what changed, not from words the model chose.
-    const pairs = good.slice(0, 2).map((e) => `“${askCut(e.find, 40)}” → “${askCut(e.replace, 40) || '(removed)'}”`).join('; ');
+    const pairs = good.slice(0, 2).map((g) => `“${askCut(g.edit.find, 40)}” → “${askCut(g.edit.replace, 40) || '(removed)'}”`).join('; ');
+    const logins = [...new Set(good.map((g) => (g.set.agent && g.set.agent.login ? String(g.set.agent.login).slice(0, 80) : 'agent')))];
     saved = await saveVersionAsPerson(env, slug, {
       baseVersion: latest,
       html: nextHtml,
       actorLogin: sessionLogin(session) || '',
       actorAccount: (session && session.account_id) || '',
       prompt: `Accepted ${who} suggestion${good.length > 1 ? `s (${good.length})` : ''}: ${pairs}`.slice(0, 200),
-      suggested_by: set.agent && set.agent.login ? String(set.agent.login).slice(0, 80) : 'agent',
+      suggested_by: logins.length === 1 ? logins[0] : 'agent',
       keep_title: true,
     });
     const refused = saved.status === 409 && saved.body ? saved.body.error : '';
@@ -23636,25 +23810,31 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision, ctx =
     if (refused === 'version_conflict') named = Number(saved.body.latestVersion) || 0;
   }
   if (saved.status !== 200 || !saved.body || !saved.body.ok) {
-    return json(saved.body || { error: 'version_write_failed' }, { status: saved.status || 500 });
+    return { error: json(saved.body || { error: 'version_write_failed' }, { status: saved.status || 500 }) };
   }
   const version = saved.body.version;
-  // Settled in one step: what landed is accepted (even if a racing accept
-  // had marked it stale), what did not match is stale, and the comments
+  // Each set settled in one step: what landed is accepted (even if a racing
+  // accept had marked it stale), what did not match is stale, and the comments
   // these edits fix come back once each.
-  const settled = await suggestionsOp(env, slug, { kind: 'settle', id, accepted: good.map((e) => e.id), stale: stale.map((e) => e.id), version });
-  const cur = settled.ok ? settled.set : set;
-  const fixed = settled.ok ? settled.fixed : [];
+  const results = [];
   const applied = [];
   const noted = [];
-  if (fixed.length) {
+  for (const { set } of sets) {
+    const mineGood = [...good, ...copies].filter((g) => g.set.id === set.id).map((g) => g.edit);
+    const mineStale = stale.filter((g) => g.set.id === set.id).map((g) => g.edit);
+    if (!mineGood.length && !mineStale.length) continue;
+    const settled = await suggestionsOp(env, slug, { kind: 'settle', id: set.id, accepted: mineGood.map((e) => e.id), stale: mineStale.map((e) => e.id), version });
+    const cur = settled.ok ? settled.set : set;
+    const fixed = settled.ok ? settled.fixed : [];
+    results.push({ id: set.id, accepted: mineGood.map((e) => e.id), stale: mineStale.map((e) => e.id), suggestion: view(cur) });
+    if (!fixed.length) continue;
     const comments = await readComments(env, slug);
     ensureMigrated(comments);
     for (const cid of fixed) {
       const thread = findCommentThread(comments, cid);
       if (!thread || !thread.parentIsRoot) continue;
-      const mine = good.filter((e) => e.comment_id === cid);
-      const shown = (mine.length ? mine : good).slice(0, 3).map((e) => `“${askCut(e.find, 60)}” → “${askCut(e.replace, 80) || '(removed)'}”`).join('; ');
+      const mine = mineGood.filter((e) => e.comment_id === cid);
+      const shown = (mine.length ? mine : mineGood).slice(0, 3).map((e) => `“${askCut(e.find, 60)}” → “${askCut(e.replace, 80) || '(removed)'}”`).join('; ');
       // Signed with whose agent it was, beside the agent's own name.
       const ownerName = set.agent && set.agent.owner && set.agent.owner.display ? String(set.agent.owner.display).slice(0, 80) : '';
       const text = `Applied${ownerName ? ` (${set.agent.name || 'Agent'} · ${ownerName})` : ''}: ${shown} (v${version})`.slice(0, 1200);
@@ -23675,11 +23855,11 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision, ctx =
         noted.push({ thread, at: now, author: agent, replyId, text });
       }
     }
-    // Whoever accepted has just seen them; anybody else waiting on these
-    // threads sees them in My docs and, in one bell write each, the bell.
-    await noteAgentReplies(env, slug, noted, { skip: actorKeys(session).map(normalizeActorKey).filter(Boolean), ctx });
   }
-  return json({ ok: true, version, url: `/d/${slug}/v/${version}`, accepted: good.map((e) => e.id), stale: stale.map((e) => e.id), applied_comments: applied, suggestion: view(cur) });
+  // Whoever accepted has just seen them; anybody else waiting on these
+  // threads sees them in My docs and, in one bell write each, the bell.
+  if (noted.length) await noteAgentReplies(env, slug, noted, { skip: actorKeys(session).map(normalizeActorKey).filter(Boolean), ctx });
+  return { version, url: `/d/${slug}/v/${version}`, sets: results, applied_comments: applied };
 }
 
 // propose_edits / tdoc-propose: an agent sends its edits as suggestions
@@ -32019,7 +32199,10 @@ const tdocHandlers = {
       const suggestMatch = method === 'POST' ? p.match(/^\/api\/docs\/([^/]+)\/suggest\/?$/) : null;
       const suggestionsMatch = method === 'GET' || method === 'POST' ? p.match(/^\/api\/docs\/([^/]+)\/suggestions\/?$/) : null;
       const decisionMatch = method === 'POST' ? p.match(/^\/api\/docs\/([^/]+)\/suggestions\/([A-Za-z0-9_]{1,60})\/(accept|reject)\/?$/) : null;
-      if ((suggestMatch || suggestionsMatch || decisionMatch) && await askEditV2RequestAllowed(env, req)) {
+      if (p === '/api/suggestions/pending/done' && method === 'POST') return handleSuggestPendingDone(env, req, url);
+      const acceptManyMatch = method === 'POST' ? p.match(/^\/api\/docs\/([^/]+)\/suggestions\/accept\/?$/) : null;
+      if ((suggestMatch || suggestionsMatch || decisionMatch || acceptManyMatch) && await askEditV2RequestAllowed(env, req)) {
+        if (acceptManyMatch) return handleSuggestionsAcceptMany(env, req, url, acceptManyMatch[1], ctx);
         if (suggestMatch) return handleSuggest(env, req, url, suggestMatch[1]);
         if (suggestionsMatch && method === 'GET') return handleSuggestionsList(env, req, url, suggestionsMatch[1]);
         if (suggestionsMatch) return handleProposeEdits(env, req, url, suggestionsMatch[1]);

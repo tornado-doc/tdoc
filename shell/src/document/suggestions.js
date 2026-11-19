@@ -1,5 +1,5 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { decideSuggestion, listSuggestions, suggestEdits } from './api.js';
+import { acceptSuggestions, decideSuggestion, listSuggestions, suggestEdits } from './api.js';
 
 // AI suggestions in the doc (flag askEditV2). The server keeps each set of
 // edits tdoc AI proposed ({ id, edits:[{ id, find, replace, state }] });
@@ -123,12 +123,22 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
     },
   }), [showAll, send]);
 
+  // Opened from Needs you ("Review N edits": /d/<slug>?suggestions=1): the
+  // first suggestion is scrolled to, once; the address keeps no trace of it.
+  const reviewAsked = useRef(typeof location !== 'undefined' && new URLSearchParams(location.search).get('suggestions') === '1');
+  useEffect(() => {
+    if (!reviewAsked.current) return;
+    const url = new URL(location.href);
+    url.searchParams.delete('suggestions');
+    history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
   useEffect(() => {
     // Keep the review bar on a suggestion that is still there, or one the
     // frame has yet to report on; one it could not show gives way.
     if (activeKey && ordered.some((p) => p.key === activeKey)) return;
     if (activeKey && pending.some((p) => p.key === activeKey) && !shown[activeKey]) return;
-    if (ordered.length) focus(ordered[0].key, false);
+    if (ordered.length) { focus(ordered[0].key, reviewAsked.current); reviewAsked.current = false; }
     else setActiveKey(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ordered.map((p) => p.key).join('|'), activeKey, shown]);
@@ -146,13 +156,12 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
     setDeciding(true);
     decidingNow.current = true;
     listRead.current++;
-    // Rejecting one rejects its exact copies waiting behind it (the same
-    // edit proposed again), so the same words do not come straight back.
-    if (decision === 'reject') {
-      const same = (a, b) => a.edit.find === b.edit.find && a.edit.replace === b.edit.replace;
-      const picked = pending.filter((p) => keys.includes(p.key));
-      keys = [...keys, ...pending.filter((p) => !keys.includes(p.key) && shown[p.key]?.conflict && picked.some((q) => same(p, q))).map((p) => p.key)];
-    }
+    // Deciding one decides its exact copies waiting behind it (the same edit
+    // proposed again), so the same words do not come straight back: rejected
+    // with it, or accepted with it (the server lands the words once).
+    const same = (a, b) => a.edit.find === b.edit.find && a.edit.replace === b.edit.replace;
+    const picked = pending.filter((p) => keys.includes(p.key));
+    keys = [...keys, ...pending.filter((p) => !keys.includes(p.key) && shown[p.key]?.conflict && picked.some((q) => same(p, q))).map((p) => p.key)];
     const bySet = new Map();
     for (const key of keys) {
       const p = pending.find((x) => x.key === key);
@@ -161,8 +170,28 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
       bySet.get(p.set.id).push(p.edit.id);
     }
     let lastVersion = 0;
+    const settle = (setId, body) => {
+      for (const id of body.accepted || []) send({ type: 'tdoc:suggestSettle', id: `${setId}:${id}`, accepted: true });
+      for (const id of body.stale || []) send({ type: 'tdoc:suggestSettle', id: `${setId}:${id}`, accepted: false });
+      if (body.suggestion) replaceSet(body.suggestion);
+    };
     try {
-      for (const [setId, editIds] of bySet) {
+      // Accepting from several sets (Accept all, or one with its copies) is ONE
+      // call and ONE version. One publish per set, back to back, outran the
+      // doc's record on the server: the later ones were refused and stayed
+      // pending on the version the page moved to.
+      if (decision === 'accept' && bySet.size > 1) {
+        try {
+          const body = await acceptSuggestions(slug, [...bySet].map(([id, editIds]) => ({ id, editIds })));
+          for (const r of body.sets || []) settle(r.id, r);
+          if ((body.sets || []).some((r) => r.stale?.length)) onToast?.('Part of the text changed since; that suggestion was dropped. Ask again to regenerate it.', true);
+          if (body.version) lastVersion = body.version;
+        } catch (error) {
+          for (const r of error.body?.sets || []) settle(r.id, { stale: r.stale, suggestion: r.suggestion });
+          const text = suggestionErrorText(error);
+          if (text) onToast?.(text, true);
+        }
+      } else for (const [setId, editIds] of bySet) {
         try {
           const body = await decideSuggestion(slug, setId, decision, editIds);
           const done = decision === 'accept' ? body.accepted || [] : body.rejected || [];
