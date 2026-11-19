@@ -534,10 +534,13 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(/Fine alpha here\./.test(html) && /Fine beta here\./.test(html) && /and note</.test(html), html);
   });
 
-  await t('Accept all: provider markup is refused when proposed; nothing of it reaches Accept', async () => {
-    await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'markup', version: 1, html: '<h1>M</h1><p>Alpha one.</p>' } });
+  await t('propose: reader markup or a widget path in a replacement is refused by name, alone or among good edits', async () => {
+    await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'markup', version: 1, html: '<h1>M</h1><p>Alpha one.</p><p>Beta two.</p>' } });
     const r = await call('/api/docs/markup/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Alpha one.', replace: 'Alpha data-tdoc-provider one.' }] } });
-    assert(r.status !== 200 || !r.body.suggestion || r.body.suggestion.edits.length === 0, r.text);
+    assert(r.status === 400 && r.body.error === 'edit_refused' && r.body.dropped[0].reason === 'reader_markup', r.text);
+    const mixed = await call('/api/docs/markup/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Alpha one.', replace: 'Alpha id="tdoc-frame-probe" one.' }, { find: 'Beta two.', replace: 'Beta 2.' }] } });
+    assert(mixed.status === 200 && mixed.body.suggestion.edits.length === 1, mixed.text);
+    assert(mixed.body.dropped.some((d) => d.reason === 'reader_markup' && /Alpha one/.test(d.find)), mixed.text);
   });
 
   await t('Accept all: provider markup already stored (made before the propose check) is dropped alone; the rest land', async () => {
@@ -555,22 +558,29 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(/Beta 2\./.test(html) && !/data-tdoc-provider/.test(html), html);
   });
 
-  await t('Accept all: over the size cap, the set that does it is dropped; the rest land', async () => {
-    const big = 'x'.repeat(4000);
+  await t('Accept all: over the size cap, the set that grows the doc most is left out (still pending); the rest land', async () => {
     const before = env.TDOC_HOSTED_MAX_UPLOAD_BYTES;
-    await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'sized', version: 1, html: '<h1>S</h1><p>Small one.</p><p>Small two.</p>' } });
-    const r1 = await call('/api/docs/sized/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Small one.', replace: 'Small 1.' }] } });
-    const r2 = await call('/api/docs/sized/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Small two.', replace: `Small ${big.slice(0, 2900)}.` }] } });
-    assert(r1.status === 200 && r2.status === 200, r1.text + r2.text);
+    await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'sized', version: 1, html: `<h1>S</h1><p>Small one.</p><p>Small two.</p><p>Long three ${'y'.repeat(300)}.</p>` } });
+    const prop = async (find, replace) => (await call('/api/docs/sized/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find, replace }] } })).body.suggestion.id;
+    const r1 = await prop('Small one.', 'Small 1.');
+    const r2 = await prop('Small two.', `Small ${'x'.repeat(2900)}.`);
+    const r3 = await prop(`Long three ${'y'.repeat(300)}.`, 'Short three.');
     const base = (await (await env.DOCS.get('docs/sized/v1/index.html')).text()).length;
     env.TDOC_HOSTED_MAX_UPLOAD_BYTES = String(base + 1000);
     try {
-      const a = await call('/api/docs/sized/suggestions/accept', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { sets: [{ id: r1.body.suggestion.id }, { id: r2.body.suggestion.id }] } });
-      assert(a.status === 200 && a.body.version === 2, a.text);
-      assert(a.body.sets.find((x) => x.id === r2.body.suggestion.id).dropped[0].reason === 'too_large', a.text);
+      const a = await call('/api/docs/sized/suggestions/accept', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { sets: [{ id: r2 }, { id: r1 }, { id: r3 }] } });
+      assert(a.status === 200 && a.body.version === 2, a.text.slice(0, 400));
+      assert(a.body.sets.find((x) => x.id === r2).dropped[0].reason === 'too_large', a.text.slice(0, 400));
+      const stored = env.COMMENTS.stateFor('sized').storage.map.get('suggestions');
+      const st = (id) => stored.find((x) => x.id === id).edits[0].state;
+      assert(st(r1) === 'accepted' && st(r3) === 'accepted' && st(r2) === 'pending', `${st(r1)} ${st(r2)} ${st(r3)}`);
+      // At the cap with nothing else to land: refused, nothing marked.
+      const again = await call('/api/docs/sized/suggestions/accept', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { sets: [{ id: r2 }] } });
+      assert(again.status === 413, again.text.slice(0, 300));
+      assert(env.COMMENTS.stateFor('sized').storage.map.get('suggestions').find((x) => x.id === r2).edits[0].state === 'pending');
     } finally { if (before === undefined) delete env.TDOC_HOSTED_MAX_UPLOAD_BYTES; else env.TDOC_HOSTED_MAX_UPLOAD_BYTES = before; }
     const html = await (await env.DOCS.get('docs/sized/v2/index.html')).text();
-    assert(/Small 1\./.test(html) && /Small two\./.test(html), html);
+    assert(/Small 1\./.test(html) && /Small two\./.test(html) && /Short three\./.test(html), html);
   });
 
   await t('Accept all: overlapping edits do not depend on their order; the later one lands on the text the first made', async () => {
@@ -604,6 +614,58 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     // Not reachable as a doc: the name is no slug.
     const odd = await (await env.COMMENTS.get('plan').fetch('https://do/suggest-pending', { method: 'POST', body: JSON.stringify({ slug: 'plan', op: { kind: 'read' } }) })).json();
     assert(odd.ok === false, JSON.stringify(odd));
+  });
+
+  await t('Accept all: an overlapping edit planned again never lands on words another edit inserted', async () => {
+    // A rewrites "one two" into text holding "two three"; B ("two three")
+    // overlapped A. After A, "two three" is unique again, but only inside A's
+    // words: B is dropped, not applied there.
+    const { a, ids, state, latest } = await acceptAllOf('moved',
+      '<h1>M</h1><p>one two three</p>',
+      [['one two', 'zero two three four'], ['two three', 'TWO THREE']]);
+    assert(a.status === 200, a.text);
+    assert(state(ids[0]) === 'accepted' && state(ids[1]) === 'stale', `${state(ids[0])} ${state(ids[1])}`);
+    const { html } = await latest();
+    assert(/zero two three four three/.test(html) && !/TWO THREE/.test(html), html);
+  });
+
+  await t('Accept all worst case (224 KB doc, 40 sets of 12, one widget splice, cap just above): bounded, under 2.5 s', async () => {
+    const paras = [];
+    for (let i = 0; i < 2600; i++) paras.push(`<p>Paragraph ${i} holds words for the plan and more words after them, row ${i}.</p>`);
+    const html = `<!doctype html><html><body><h1>Big</h1><p>Path /d/bigdoc/v/1&#x2F;widget/a.html and note</p>${paras.join('')}</body></html>`;
+    const up = await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'bigdoc', version: 1, html } });
+    assert(up.status === 200, up.text);
+    const stored = (await (await env.DOCS.get('docs/bigdoc/v1/index.html')).text());
+    assert(stored.length > 200000, `doc is ${stored.length}`);
+    const one = await call('/api/docs/bigdoc/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'and note', replace: 'and notes' }] } });
+    assert(one.status === 200, one.text);
+    const st = env.COMMENTS.stateFor('bigdoc').storage;
+    const tmpl = st.map.get('suggestions')[0];
+    const list = [tmpl];
+    for (let k = 0; k < 39; k++) {
+      const edits = [];
+      for (let j = 0; j < 12; j++) { const i = k * 12 + j; edits.push({ id: `e${j + 1}`, find: `Paragraph ${i} holds`, replace: `Para ${i} holds a little more`, state: 'pending' }); }
+      list.push({ ...JSON.parse(JSON.stringify(tmpl)), id: `s_big_${k}`, edits });
+    }
+    st.map.set('suggestions', list);
+    const before = env.TDOC_HOSTED_MAX_UPLOAD_BYTES;
+    env.TDOC_HOSTED_MAX_UPLOAD_BYTES = String(stored.length + 200);
+    const started = Date.now();
+    let a;
+    try {
+      a = await call('/api/docs/bigdoc/suggestions/accept', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { sets: list.map((x) => ({ id: x.id })) } });
+    } finally { if (before === undefined) delete env.TDOC_HOSTED_MAX_UPLOAD_BYTES; else env.TDOC_HOSTED_MAX_UPLOAD_BYTES = before; }
+    const ms = Date.now() - started;
+    console.log(`    worst case: ${ms} ms, status ${a.status}`);
+    // 2.5 s here (about 1 s measured); a shared CI runner is given more room.
+    const limit = process.env.CI ? 6000 : 2500;
+    assert(ms < limit, `took ${ms} ms (limit ${limit})`);
+    assert([200, 413, 422].includes(a.status), a.text.slice(0, 300));
+    if (a.status !== 200) {
+      // Refused: nothing saved, nothing marked.
+      assert(JSON.parse(env.META.map.get('meta:bigdoc')).versions.length === 1);
+      assert(st.map.get('suggestions').every((x) => x.id === tmpl.id ? true : x.edits.every((e) => e.state === 'pending')));
+    }
   });
 
   await t('Accept all: only editors, same-site, and named sets', async () => {
@@ -722,6 +784,23 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
   const parserSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'html-parser', 'parse5.js'), 'utf8');
   const workerSrc = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8').replace('/* __TDOC_HTML_PARSER__ */', () => parserSrc);
   const S = new Function(`${workerSrc.slice(workerSrc.indexOf('const SUGGEST_MAX_EDITS'), workerSrc.indexOf('// The edits a model or an agent sent'))}\nreturn { suggestPlan, suggestTextMap, suggestParse, SUGGEST_MAX_HTML, SUGGEST_MAX_RAW };`)();
+  // The Accept planner itself (planSuggestionAccept), on the same parser.
+  const P = new Function(`${workerSrc.slice(workerSrc.indexOf('const SUGGEST_MAX_EDITS'), workerSrc.indexOf('// The edits a model or an agent sent'))}\n${workerSrc.slice(workerSrc.indexOf('const SUGGEST_PLAN_PASSES'), workerSrc.indexOf('function setsOfDropped'))}\nreturn { planSuggestionAccept, SUGGEST_PLAN_TOO_MUCH };`)();
+  await t('planner: a work budget it cannot keep refuses (throws), never runs on', async () => {
+    const html = '<!doctype html><html><body><p>One here.</p><p>Two here.</p></body></html>';
+    const pick = ['One here.', 'Two here.'].map((find, k) => ({ set: { id: `s${k}` }, edit: { id: 'e1', find, replace: find.replace('here', 'there') } }));
+    const ok = P.planSuggestionAccept(html, pick, { widgetPath: '/d/x/v/1/widget/', overBy: () => -1 });
+    assert(ok.good.length === 2 && /One there/.test(ok.next), JSON.stringify(ok.dropped));
+    let threw = '';
+    try { P.planSuggestionAccept(html, pick, { widgetPath: '/d/x/v/1/widget/', overBy: () => 1, budget: 2 }); } catch (e) { threw = e.message; }
+    assert(threw === P.SUGGEST_PLAN_TOO_MUCH, `threw ${threw}`);
+  });
+  await t('planner: an unsafe pass names its edits by the node each rewrote, with one plan more', async () => {
+    const html = '<!doctype html><html><body><p>Path /d/x/v/1&#x2F;widget/a.html and note</p><p>Good one.</p><p>Good two.</p></body></html>';
+    const pick = [['and note', 'and notes'], ['Good one.', 'Fine one.'], ['Good two.', 'Fine two.']].map(([find, replace], k) => ({ set: { id: `s${k}` }, edit: { id: 'e1', find, replace } }));
+    const out = P.planSuggestionAccept(html, pick, { widgetPath: '/d/x/v/1/widget/', overBy: () => -1, budget: 4 });
+    assert(out.good.length === 2 && out.dropped.length === 1 && out.dropped[0].reason === 'unsafe' && out.dropped[0].edit.find === 'and note', JSON.stringify(out.dropped));
+  });
   // Everything a browser runs or styles or draws as foreign content, from a
   // parse: script/style text in any namespace, every attribute, and the
   // whole of each svg/math subtree. An accepted edit may change none of it.

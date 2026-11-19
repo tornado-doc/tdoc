@@ -23047,9 +23047,11 @@ function suggestPlan(html, edits, opts = {}) {
   const failed = [];
   if (map.truncated || !map.tree) {
     (edits || []).forEach((_, index) => failed.push({ index, reason: 'doc_too_large', matches: 0 }));
-    return { failed, map, next: null };
+    return { failed, map, next: null, at: new Map() };
   }
   const spans = [];
+  // Where each uniquely matched find sits in the map's text (planSuggestionAccept).
+  const at = new Map();
   const perNode = new Map(); // node index -> [{ from, to, text, index }]
   (edits || []).forEach((edit, index) => {
     const find = suggestNorm(edit && edit.find);
@@ -23060,6 +23062,7 @@ function suggestPlan(html, edits, opts = {}) {
     if (matches !== 1) { failed.push({ index, reason: matches ? 'not_unique' : 'not_found', matches }); return; }
     const a = map.text.indexOf(find);
     const b = a + find.length;
+    at.set(index, [a, b]);
     // Already applied (an insertion whose new text contains the old): the
     // new text is there around the match. Never apply it twice.
     const replaceNorm = suggestNorm(edit.replace);
@@ -23123,7 +23126,7 @@ function suggestPlan(html, edits, opts = {}) {
     const keep = list.filter((r) => !unsafe.has(r.index));
     if (keep.length) perNode.set(g, keep); else perNode.delete(g);
   }
-  if (!perNode.size) return { failed, map, next: null };
+  if (!perNode.size) return { failed, map, next: null, at };
   // Each edited node's new text, then its source bytes rewritten whole.
   const changed = new Map();
   const writes = [];
@@ -23132,7 +23135,7 @@ function suggestPlan(html, edits, opts = {}) {
     let value = n.value;
     for (const r of [...list].sort((x, y) => y.from - x.from)) value = value.slice(0, r.from) + r.text + value.slice(r.to);
     changed.set(n.node, value);
-    writes.push({ s: n.start, e: n.end, text: suggestEscapeText(value) });
+    writes.push({ s: n.start, e: n.end, text: suggestEscapeText(value), indexes: list.map((r) => r.index) });
   }
   let next = String(html);
   for (const w of writes.sort((x, y) => y.s - x.s)) next = next.slice(0, w.s) + w.text + next.slice(w.e);
@@ -23142,14 +23145,16 @@ function suggestPlan(html, edits, opts = {}) {
   if (!same) {
     const landed = new Set([...perNode.values()].flat().map((r) => r.index));
     for (const index of landed) failed.push({ index, reason: 'unsafe', matches: 1 });
-    return { failed, map, next: null };
+    return { failed, map, next: null, at };
   }
-  return { failed, map, next };
+  return { failed, map, next, at, writes };
 }
 
 const SUGGEST_WIDGET_PATH = /\/d\/[^/\s]*\/v\/\d*\/widget\//i;
 // The edits a model or an agent sent, cleaned to { find, replace, comment_id? }.
-function suggestCleanEdits(list) {
+// `refused` (optional) collects the ones turned away for what they would
+// write, so the proposing agent is told ({ find, reason }).
+function suggestCleanEdits(list, refused = null) {
   const out = [];
   for (const e of Array.isArray(list) ? list.slice(0, SUGGEST_MAX_EDITS * 2) : []) {
     if (!e || typeof e.find !== 'string' || typeof e.replace !== 'string') continue;
@@ -23158,9 +23163,9 @@ function suggestCleanEdits(list) {
     if (suggestNorm(find) === suggestNorm(replace)) continue;
     // A version save rewrites this doc's widget paths (/d/<slug>/v/<n>/widget/)
     // wherever they appear; a replacement must not carry one into the text.
-    if (SUGGEST_WIDGET_PATH.test(replace)) continue;
+    if (SUGGEST_WIDGET_PATH.test(replace)) { if (refused) refused.push({ find: suggestNorm(find).slice(0, 120), reason: 'widget_path' }); continue; }
     // Nor the reader's own markers: a version holding them is refused at Accept.
-    if (SUGGEST_PROVIDER_RE.test(replace)) continue;
+    if (SUGGEST_PROVIDER_RE.test(replace)) { if (refused) refused.push({ find: suggestNorm(find).slice(0, 120), reason: 'reader_markup' }); continue; }
     const comment = e.comment_id != null ? e.comment_id : e.comment;
     out.push({ find, replace, ...(typeof comment === 'string' && comment.length < 120 ? { comment_id: comment } : {}) });
     if (out.length >= SUGGEST_MAX_EDITS) break;
@@ -23809,71 +23814,167 @@ async function handleSuggestionsAcceptMany(env, req, url, slug, ctx = null) {
 // what happens. Nothing one edit does can sink the rest:
 //   - edits that no longer match (not found, not unique, already applied) are
 //     dropped as 'changed';
-//   - edits that overlap one landing in this pass are planned again on the
-//     text that pass made, so the order they came in decides nothing; an
-//     exact copy of a landed edit is accepted with it (`copies`);
+//   - edits that overlap one landing in a pass are planned again on the text
+//     that pass made, but only where they first matched (their words, moved
+//     by what landed around them), so their order decides nothing and no edit
+//     lands on words another one inserted; an exact copy of a landed edit is
+//     accepted with it (`copies`);
 //   - a pass whose result would make a new widget path or provider markup
-//     the base did not have finds the edits that do it, alone, drops them as
-//     'unsafe' and runs again without them;
-//   - a result over the size cap drops the last set whole ('too_large') and
-//     plans again without it.
+//     the base did not have finds the edits that do it by halving the pass,
+//     drops them as 'unsafe' and runs again without them;
+//   - a result over the size cap leaves out the sets that grow the doc most,
+//     until the rest fit ('too_large': never stale, they stay pending).
+// The work is bounded: each pass parses its text once (the map is shared by
+// every plan on it), and at most SUGGEST_PLAN_BUDGET parses of the doc (a
+// pass's map, a plan's check of its result) run in all: about 2 s for a
+// 220 KB doc with 480 edits, where one plan is ~0.2 s. Past
+// that it throws SUGGEST_PLAN_TOO_MUCH and the caller refuses, saving nothing
+// and marking nothing (a Worker's clock does not move while it computes, so
+// the bound is counted, not timed).
 // -> { next, good, copies, dropped: [{ set, edit, reason }] }
 const SUGGEST_PLAN_PASSES = 4;
+const SUGGEST_PLAN_BUDGET = 10;
+const SUGGEST_SIZE_ROUNDS = 3;
+const SUGGEST_PLAN_TOO_MUCH = 'suggest_plan_too_much';
 const SUGGEST_PROVIDER_RE = /data-tdoc-provider|id=["']tdoc-frame-probe["']/i;
-function planSuggestionAccept(html, pick, { widgetPath, tooLarge }) {
+function planSuggestionAccept(html, pick, { widgetPath, overBy, budget = SUGGEST_PLAN_BUDGET, byteLength = (x) => x.length }) {
   const same = (a, b) => suggestNorm(a.find) === suggestNorm(b.find) && suggestNorm(a.replace) === suggestNorm(b.replace);
   const widgets = (h) => h.split(widgetPath).length;
   const baseProvider = SUGGEST_PROVIDER_RE.test(html);
   const unsafe = (from, next) => widgets(next) > widgets(from) || (!baseProvider && SUGGEST_PROVIDER_RE.test(next));
-  const tooBig = [];
-  for (;;) {
+  let plans = 0;
+  const plan = (text, list, map) => {
+    if (++plans > budget) throw new Error(SUGGEST_PLAN_TOO_MUCH);
+    return suggestPlan(text, list.map((p) => p.edit), map ? { map } : {});
+  };
+  // A position in the text before a pass, in the text after it (`spans`: what
+  // landed, [a, b) and the new length r). Inside a replaced span: its start,
+  // or its end for the end of a region.
+  const moved = (x, spans, end) => {
+    let d = 0;
+    for (const sp of spans) {
+      if (x >= sp.b) d += sp.r - (sp.b - sp.a);
+      else if (x > sp.a || (end && x === sp.a && sp.b === sp.a)) return sp.a + d + (end ? sp.r : 0);
+      else break;
+    }
+    return x + d;
+  };
+  const SLACK = 2; // whitespace runs fold differently at a span's edges
+  const once = (left) => {
     let cur = html;
-    let rest = pick.filter((p) => !tooBig.includes(p));
+    let map = null;
+    let rest = pick.filter((p) => !left.has(p.set.id));
     const good = [];
     const copies = [];
-    const dropped = tooBig.map((p) => ({ ...p, reason: 'too_large' }));
-    let next = html;
-    for (let pass = 0, redo = 0; rest.length && pass < SUGGEST_PLAN_PASSES && redo <= pick.length;) {
-      const plan = suggestPlan(cur, rest.map((p) => p.edit));
-      const failedAt = new Map(plan.failed.map((f) => [f.index, f.reason]));
-      const landing = rest.filter((_, i) => !failedAt.has(i));
-      if (!landing.length || !plan.next) {
+    const dropped = pick.filter((p) => left.has(p.set.id)).map((p) => ({ ...p, reason: 'too_large' }));
+    const region = new Map(); // p -> [a, b] where it may land, in cur's text
+    for (let pass = 0; rest.length && pass < SUGGEST_PLAN_PASSES;) {
+      if (!map) { if (++plans > budget) throw new Error(SUGGEST_PLAN_TOO_MUCH); map = suggestTextMap(cur); }
+      const result = plan(cur, rest, map);
+      const failedAt = new Map(result.failed.map((f) => [f.index, f.reason]));
+      // A re-planned edit lands only where it first matched.
+      rest.forEach((p, i) => {
+        const r = region.get(p);
+        const hit = result.at.get(i);
+        if (!r || failedAt.has(i) || !hit) return;
+        const inside = hit[0] >= r.hull[0] - SLACK && hit[1] <= r.hull[1] + SLACK;
+        // And on some of its own words, not only on ones another edit wrote.
+        const own = r.keep.some(([x, y]) => hit[0] < y && x < hit[1]);
+        if (!inside || !own) failedAt.set(i, 'moved');
+      });
+      let landing = rest.filter((_, i) => !failedAt.has(i));
+      if (landing.length < rest.filter((_, i) => !result.failed.some((f) => f.index === i)).length) {
+        // Some were refused for where they matched: plan the rest without them.
+        const keep = rest.filter((_, i) => failedAt.get(i) !== 'moved');
+        rest.forEach((p, i) => { if (failedAt.get(i) === 'moved') dropped.push({ ...p, reason: 'changed' }); });
+        rest = keep;
+        continue;
+      }
+      if (!landing.length || !result.next) {
         rest.forEach((p) => dropped.push({ ...p, reason: 'changed' }));
         rest = [];
         break;
       }
-      if (unsafe(cur, plan.next)) {
-        // Which ones: each alone on this text; if none alone, all of this pass.
-        let bad = landing.filter((p) => {
-          const one = suggestPlan(cur, [p.edit]);
-          return !one.next || unsafe(cur, one.next);
-        });
-        if (!bad.length) bad = landing;
-        bad.forEach((p) => dropped.push({ ...p, reason: 'unsafe' }));
-        rest = rest.filter((p) => !bad.includes(p));
-        redo++;
+      if (unsafe(cur, result.next)) {
+        // Which ones: first by the text node each rewrote (what it wrote
+        // against the bytes it replaced), with no plan at all.
+        const named = new Set();
+        for (const w of result.writes || []) {
+          const was = cur.slice(w.s, w.e);
+          if (w.text.split(widgetPath).length > was.split(widgetPath).length || (!baseProvider && SUGGEST_PROVIDER_RE.test(w.text))) w.indexes.forEach((i) => named.add(rest[i]));
+        }
+        if (named.size) {
+          [...named].forEach((p) => dropped.push({ ...p, reason: 'unsafe' }));
+          rest = rest.filter((p) => !named.has(p));
+          continue;
+        }
+        // Else (a path made across nodes): halve until each one stands alone, on the same map.
+        const find = (list) => {
+          if (list.length === 1) return list;
+          const half = Math.ceil(list.length / 2);
+          const out = [];
+          for (const part of [list.slice(0, half), list.slice(half)]) {
+            const r = plan(cur, part, map);
+            if (r.next && unsafe(cur, r.next)) out.push(...find(part));
+          }
+          return out.length ? out : list;
+        };
+        const bad = new Set(find(landing));
+        landing.filter((p) => bad.has(p)).forEach((p) => dropped.push({ ...p, reason: 'unsafe' }));
+        rest = rest.filter((p) => !bad.has(p));
         continue;
       }
       good.push(...landing);
-      cur = plan.next;
-      next = plan.next;
+      // What landed, in this pass's text, for the regions of the ones planned again.
+      const spans = rest.map((p, i) => (failedAt.has(i) ? null : result.at.get(i))).map((x, k) => (x ? { a: x[0], b: x[1], r: suggestNorm(rest[k].edit.replace).length } : null))
+        .filter(Boolean).sort((x, y) => x.a - y.a);
       const over = [];
       rest.forEach((p, i) => {
         const why = failedAt.get(i);
         if (!why) return;
         if (why === 'overlaps') {
-          if (good.some((g) => same(g.edit, p.edit))) copies.push(p);
-          else over.push(p);
+          if (good.some((g) => same(g.edit, p.edit))) { copies.push(p); return; }
+          const hit = result.at.get(i);
+          if (!hit) { dropped.push({ ...p, reason: 'changed' }); return; }
+          // Its words that no landed edit replaced, where they are now.
+          const keep = [];
+          let from = hit[0];
+          for (const sp of spans) {
+            if (sp.b <= from || sp.a >= hit[1]) continue;
+            if (sp.a > from) keep.push([moved(from, spans, false), moved(sp.a, spans, false)]);
+            from = Math.max(from, sp.b);
+          }
+          if (from < hit[1]) keep.push([moved(from, spans, false), moved(hit[1], spans, true)]);
+          region.set(p, { hull: [moved(hit[0], spans, false), moved(hit[1], spans, true)], keep });
+          over.push(p);
         } else dropped.push({ ...p, reason: 'changed' });
       });
+      cur = result.next;
+      map = null;
       rest = over;
       pass++;
     }
     rest.forEach((p) => dropped.push({ ...p, reason: 'changed' }));
-    if (!good.length || !tooLarge(next)) return { next: good.length ? next : null, good, copies, dropped };
-    // Too large: the last set with an edit landing goes whole, then plan again.
-    const lastSetId = [...new Set(pick.filter((p) => !tooBig.includes(p)).map((p) => p.set.id))].pop();
-    pick.filter((p) => p.set.id === lastSetId && !tooBig.includes(p)).forEach((p) => tooBig.push(p));
+    return { next: good.length ? cur : null, good, copies, dropped };
+  };
+  const left = new Set();
+  for (let round = 0; ; round++) {
+    const out = once(left);
+    const over = out.good.length ? overBy(out.next) : 0;
+    if (over <= 0) return out;
+    if (round >= SUGGEST_SIZE_ROUNDS) throw new Error(SUGGEST_PLAN_TOO_MUCH);
+    // Leave out the sets that grow the doc most until the growth they take
+    // away covers what is over (the next round checks it).
+    const growth = new Map();
+    for (const g of out.good) growth.set(g.set.id, (growth.get(g.set.id) || 0) + byteLength(g.edit.replace) - byteLength(g.edit.find));
+    const order = [...growth.entries()].filter(([, n]) => n > 0).sort((x, y) => y[1] - x[1]);
+    if (!order.length) throw new Error(SUGGEST_PLAN_TOO_MUCH);
+    let took = 0;
+    for (const [id, n] of order) {
+      if (took >= over) break;
+      left.add(id);
+      took += n;
+    }
   }
 }
 function setsOfDropped(dropped) {
@@ -23931,10 +24032,18 @@ async function acceptSuggestionSets(env, slug, gate, wanted, ctx) {
     const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
     if (!obj) return { error: json({ error: 'not_found' }, { status: 404 }) };
     const html = await obj.text();
-    const plan = planSuggestionAccept(html, pick, {
-      widgetPath: `/d/${slug}/v/${latest}/widget/`,
-      tooLarge: (next) => utf8ByteLength(next) > hostedMaxUploadBytes(env, next),
-    });
+    let plan;
+    try {
+      plan = planSuggestionAccept(html, pick, {
+        widgetPath: `/d/${slug}/v/${latest}/widget/`,
+        overBy: (next) => utf8ByteLength(next) - hostedMaxUploadBytes(env, next),
+        byteLength: utf8ByteLength,
+      });
+    } catch (e) {
+      if (!e || e.message !== SUGGEST_PLAN_TOO_MUCH) throw e;
+      // Nothing saved, nothing marked: every suggestion is still there.
+      return { error: json({ error: 'too_many_to_apply', message: 'These suggestions are too much to apply in one step. Accept them a few at a time.' }, { status: 422 }) };
+    }
     ({ good, copies, dropped } = plan);
     if (!good.length) {
       // Nothing can land: what was dropped is marked so, in one step, and said.
@@ -23978,7 +24087,9 @@ async function acceptSuggestionSets(env, slug, gate, wanted, ctx) {
   const version = saved.body.version;
   // Every set settled in one step: what landed (and its copies) is accepted,
   // even if a racing accept had marked it stale; what was dropped is stale.
-  const bySetDropped = setsOfDropped(dropped);
+  // Left out for size, an edit stays pending: it is still good once the doc is smaller.
+  const bySetDropped = setsOfDropped(dropped.filter((d) => d.reason !== 'too_large'));
+  const bySetReported = setsOfDropped(dropped);
   const items = sets.map(({ set }) => ({
     id: set.id,
     accepted: [...good, ...copies].filter((g) => g.set.id === set.id).map((g) => g.edit.id),
@@ -23996,7 +24107,7 @@ async function acceptSuggestionSets(env, slug, gate, wanted, ctx) {
     const settled = settledBy.get(item.id);
     const cur = settled ? settled.set : set;
     const fixed = settled ? settled.fixed || [] : [];
-    results.push({ id: set.id, accepted: item.accepted, stale: item.stale, dropped: (bySetDropped.get(set.id) || { dropped: [] }).dropped, suggestion: view(cur) });
+    results.push({ id: set.id, accepted: item.accepted, stale: item.stale, dropped: (bySetReported.get(set.id) || { dropped: [] }).dropped, suggestion: view(cur) });
     if (!fixed.length) continue;
     if (!comments) { comments = await readComments(env, slug); ensureMigrated(comments); }
     for (const cid of fixed) {
@@ -24024,6 +24135,9 @@ async function acceptSuggestionSets(env, slug, gate, wanted, ctx) {
         noted.push({ thread, at: now, author: agent, replyId, text });
       }
     }
+  }
+  for (const [id, x] of bySetReported) {
+    if (!results.some((r) => r.id === id)) results.push({ id, accepted: [], stale: [], dropped: x.dropped, suggestion: view(x.set) });
   }
   // Whoever accepted has just seen them; anybody else waiting on these
   // threads sees them in My docs and, in one bell write each, the bell.
@@ -24086,8 +24200,14 @@ async function handleProposeEdits(env, req, url, slug) {
   const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
   if (!obj) return json({ error: 'not_found' }, { status: 404 });
   const html = await obj.text();
-  const edits = suggestCleanEdits(raw).map((e) => (commentIds.length === 1 && !e.comment_id ? { ...e, comment_id: commentIds[0] } : e));
-  const { kept, dropped } = suggestValidate(html, edits, '');
+  const refused = [];
+  const edits = suggestCleanEdits(raw, refused).map((e) => (commentIds.length === 1 && !e.comment_id ? { ...e, comment_id: commentIds[0] } : e));
+  const validated = edits.length ? suggestValidate(html, edits, '') : { kept: [], dropped: [] };
+  const { kept } = validated;
+  const dropped = [...refused, ...validated.dropped];
+  if (!kept.length && refused.length && !validated.dropped.length) {
+    return json({ error: 'edit_refused', message: 'Nothing suggested. A replacement is plain text: it may not carry a widget path (/d/<slug>/v/<n>/widget/) or tdoc\'s reader markup (data-tdoc-provider, tdoc-frame-probe).', dropped, version: latest }, { status: 400 });
+  }
   if (!kept.length) {
     return json({ error: 'edit_not_unique', message: `Nothing suggested. Each find must be the doc's visible text (no markup), inside one paragraph, and match exactly once in v${latest}.`, dropped, version: latest }, { status: 400 });
   }
@@ -27086,7 +27206,7 @@ const MCP_TOOLS = {
         ...mcpAgentIdentity(call),
       }, { raftAgent: args.raft_agent });
       if (!r.ok || !r.data || !r.data.ok) {
-        if (r.data && r.data.error === 'edit_not_unique') return mcpToolError('edit_not_unique', r.data.message, { dropped: r.data.dropped || [], version: r.data.version });
+        if (r.data && (r.data.error === 'edit_not_unique' || r.data.error === 'edit_refused')) return mcpToolError(r.data.error, r.data.message, { dropped: r.data.dropped || [], version: r.data.version });
         return mcpApiError(r);
       }
       const n = r.data.suggestion.edits.length;
