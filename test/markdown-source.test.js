@@ -217,8 +217,8 @@ const assert = require('assert/strict');
     const r = toMarkdown('<p>A</p>');
     for (const [text, why] of [
       ['> '.repeat(5000) + 'x', /nested too deeply/],
-      ['*a '.repeat(8000), /too much \* or _/],
-      ['_a '.repeat(8000), /too much \* or _/],
+      ['*a '.repeat(8000), /unclosed \* or _/],
+      ['_a '.repeat(8000), /unclosed \* or _/],
       [Array.from({ length: 60 }, (_, i) => `${' '.repeat(i * 2)}- x`).join('\n'), /nested too deeply/],
       ['- '.repeat(400) + 'x', /nested too deeply/],
     ]) {
@@ -238,6 +238,57 @@ const assert = require('assert/strict');
     const t0 = Date.now();
     parseFragment(html);
     assert.ok(Date.now() - t0 < 1500, `${Date.now() - t0} ms`);
+  });
+
+  // Delta re-review of #1089 ------------------------------------------------
+  t('no false refusals: code fences, indented code, spaced rules, snake_case prose, text already in the doc', () => {
+    const r = toMarkdown('<p>A</p>\n<p>B</p>');
+    const py = '```python\n' + Array.from({ length: 160 }, (_, i) => `def fn_${i}(self, *args, **kwargs): return self.__dict__`).join('\n') + '\n```';
+    const sql = '```sql\n' + Array.from({ length: 250 }, (_, i) => `SELECT user_id, created_at, total_amount FROM order_items_${i} WHERE is_deleted = 0;`).join('\n') + '\n```';
+    const indented = 'Text\n\n' + Array.from({ length: 30 }, (_, i) => `${' '.repeat(34 + (i % 7))}- item_${i}`).join('\n');
+    const rule = Array(20).fill('*').join(' ');
+    const snake = Array.from({ length: 320 }, (_, i) => `field_name_${i}`).join(' ');
+    for (const text of [py, sql, indented, rule, snake, '~~~\n' + '*a '.repeat(3000) + '\n~~~', '    ' + '*a '.repeat(3000)]) {
+      const out = fromMarkdown(`A edited\n\n${text}\n\nB\n`, r.snapshot).bodyHtml;
+      assert.ok(out.includes('<p>A edited</p>'), text.slice(0, 40));
+    }
+    // A paragraph that was already in the doc, however much emphasis it
+    // holds, never stops an edit elsewhere.
+    const heavy = '<p>' + Array.from({ length: 450 }, (_, i) => `<em>w${i}</em>`).join(' ') + '</p>\n<p>Other</p>';
+    const r2 = toMarkdown(heavy);
+    assert.equal(r2.ok, true);
+    const out2 = fromMarkdown(r2.markdown.replace('Other', 'Other, edited'), r2.snapshot).bodyHtml;
+    assert.ok(out2.includes('<p>Other, edited</p>'));
+  });
+
+  t('2,000 blocks rewritten at once and 2,100 lists in a row stay fast', () => {
+    let html = '';
+    for (let i = 0; i < 2000; i++) html += `<p id="p${i}">alpha beta gamma ${i}</p>\n`;
+    const r = toMarkdown(html);
+    const rewritten = Array.from({ length: 2000 }, (_, i) => `delta epsilon ${i} gamma beta`).join('\n\n') + '\n';
+    let t0 = Date.now();
+    fromMarkdown(rewritten, r.snapshot);
+    assert.ok(Date.now() - t0 < 2500, `rewrite: ${Date.now() - t0} ms`);
+    let lists = '';
+    for (let i = 0; i < 2100; i++) lists += `<ul id="l${i}"><li>item ${i}</li></ul>\n`;
+    t0 = Date.now();
+    const r2 = toMarkdown(lists + '<p>end</p>\n');
+    assert.ok(Date.now() - t0 < 3000, `lists: ${Date.now() - t0} ms`);
+    assert.equal(r2.ok, true);
+    const out = fromMarkdown(r2.markdown.replace('end', 'end edited'), r2.snapshot).bodyHtml;
+    assert.ok(out.includes('<ul id="l2099"><li>item 2099</li></ul>') && out.includes('<ul id="l1"><li>item 1</li></ul>'));
+  });
+
+  t('a copy\'s ids come off as attributes (not by pattern); SVG ids stay; a copied sheet gets its own name', () => {
+    const fig = '<figure id="f1" title=\'x id="y"\'><svg viewBox="0 0 10 10"><defs><marker id="arr"></marker></defs><path marker-end="url(#arr)"></path></svg></figure>';
+    const sheet = '<table data-tdoc-sheet="s1" data-name="Budget"><tbody><tr><td>1</td></tr></tbody></table>';
+    const r = toMarkdown(`<p>A</p>\n${fig}\n<p>B</p>\n${sheet}\n<p>C</p>`);
+    const [k1, k2] = r.markdown.match(/<!--[^\n]*-->/g);
+    const out = fromMarkdown(`${r.markdown}\n${k1}\n\n${k2}\n`, r.snapshot).bodyHtml;
+    assert.ok(out.includes('<figure title="x id=&quot;y&quot;"><svg viewBox="0 0 10 10"><defs><marker id="arr"></marker>'), out);
+    assert.ok(out.includes('<table data-tdoc-sheet="s1-copy1" data-name="Budget (copy)">'), out);
+    assert.equal(out.split(fig).length - 1, 1);
+    assert.equal(out.split(sheet).length - 1, 1);
   });
 
   if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

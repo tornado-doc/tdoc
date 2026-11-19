@@ -2627,7 +2627,8 @@
         var restoredHtml = draftBodyHtml();
         var restoredDirty = restoredHtml !== editBaselineHtml;
         setDirty(restoredDirty, false);
-        post({ type: 'tdoc:editSnapshot', bodyHtml: restoredHtml, dirty: restoredDirty });
+        // requestId: the shell's Markdown view knows its own body by it.
+        post({ type: 'tdoc:editSnapshot', bodyHtml: restoredHtml, dirty: restoredDirty, requestId: typeof d.requestId === 'string' ? d.requestId : undefined });
         refreshTableLayout();
         rereportPins();
       }

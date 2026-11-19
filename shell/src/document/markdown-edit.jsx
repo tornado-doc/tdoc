@@ -49,7 +49,9 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
   const timer = useRef(0);
   const dirtyText = useRef(false);
   const lastSent = useRef(null);
-  const echoes = useRef(0);
+  // Bodies sent and not yet answered, by request id: the page's answer to
+  // one of them is this view's own; anything else is from elsewhere.
+  const inFlight = useRef(new Set());
   // Bodies the page holds because of this view (what it was opened on, and
   // the page's own copy of each body sent): a snapshot of one of them (an
   // autosave publishing it, editCommitted) is not a change from elsewhere.
@@ -90,8 +92,9 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
     const previous = lastSent.current == null ? current.snapshot.bodyHtml : lastSent.current;
     if (bodyHtml === previous) return;
     lastSent.current = bodyHtml;
-    echoes.current += 1;
-    send({ type: 'tdoc:editRestore', bodyHtml, keepFocus: true });
+    const requestId = `md-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    inFlight.current.add(requestId);
+    send({ type: 'tdoc:editRestore', bodyHtml, keepFocus: true, requestId });
   }, [send, showToast]);
   const flushQuietly = useCallback(() => { try { flush(); return true; } catch { return false; } }, [flush]);
 
@@ -100,7 +103,7 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
     window.clearTimeout(timer.current);
     dirtyText.current = false;
     lastSent.current = null;
-    echoes.current = 0;
+    inFlight.current = new Set();
     problem.current = '';
   }, []);
 
@@ -123,7 +126,7 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
       setBlocked('');
       lastSent.current = null;
       dirtyText.current = false;
-      echoes.current = 0;
+      inFlight.current = new Set();
       warnedRemoved.current = 0;
       problem.current = '';
       ours.current = new Set([bodyHtml]);
@@ -159,7 +162,10 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
   // was the person's choice, otherwise only learn whether it could open.
   useEffect(() => {
     if (!available) {
-      if (viewRef.current && !close()) { cancel(); viewRef.current = null; setView(null); }
+      // Leaving Edit: what was typed goes to the page first. Markdown that
+      // can't be converted is kept (not shown) and comes back with Edit;
+      // flush has said why, and leaving the page asks first (below).
+      if (viewRef.current) close();
       return undefined;
     }
     // A new page in the frame (first load, Discard, a reload): typing still
@@ -172,6 +178,8 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
     let cancelled = false;
     const id = window.setTimeout(async () => {
       if (cancelled) return;
+      // Back in Edit with Markdown still waiting to be fixed: that text.
+      if (viewRef.current && dirtyText.current) { setView(viewRef.current); return; }
       if (wanted) { await open({ quiet: true }); return; }
       try {
         const [mod, bodyHtml] = await Promise.all([loadConverter(), editor.requestBody()]);
@@ -192,8 +200,8 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
       beforeSerialize: () => flush(),
       onSnapshot: (message) => {
         if (!viewRef.current) return;
-        if (echoes.current > 0) {
-          echoes.current -= 1;
+        if (message.requestId && inFlight.current.has(message.requestId)) {
+          inFlight.current.delete(message.requestId);
           ours.current.add(message.bodyHtml);
           if (ours.current.size > 8) ours.current = new Set([...ours.current].slice(-8));
           return;
@@ -209,6 +217,20 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
   }, [editor, flush, open]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  // Leaving the page with Markdown the page does not have yet (it could not
+  // be converted, or the last keystrokes): try once more, then ask. Neither
+  // a draft nor autosave can hold text the page never got.
+  useEffect(() => {
+    const warn = (event) => {
+      if (!viewRef.current || !dirtyText.current) return;
+      if (flushQuietly()) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [flushQuietly]);
 
   const onChange = (event) => {
     const text = event.target.value;

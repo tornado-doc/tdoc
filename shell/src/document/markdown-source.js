@@ -434,6 +434,23 @@ export function toMarkdown(bodyHtml) {
   for (const seg of segments) {
     if (seg.kind === 'keep') { seg.id = ++id; seg.md = keepLine(seg.id, seg.labels); seg.html = html.slice(seg.start, seg.end); }
   }
+  // First, neighbour by neighbour (linear): a block that its predecessor
+  // would swallow as Markdown (two lists in a row) stays HTML.
+  for (let k = 1; k < segments.length; k++) {
+    const a = segments[k - 1], b = segments[k];
+    if (b.kind !== 'md') continue;
+    const toks = blockTokens(`${a.md}\n\n${b.md}`);
+    if (toks.length === 2 && toks[0].text === a.md && toks[1].text === b.md) continue;
+    b.kind = 'keep';
+    b.labels = [label(nodes.find((n) => n.start === b.start), html)];
+    b.md = keepLine(0, b.labels);
+  }
+  for (let m = segments.length - 1; m > 0; m--) {
+    const a = segments[m - 1], b = segments[m];
+    if (a.kind === 'keep' && b.kind === 'keep') { a.end = b.end; a.labels = a.labels.concat(b.labels); segments.splice(m, 1); }
+  }
+  id = 0;
+  for (const seg of segments) if (seg.kind === 'keep') { seg.id = ++id; seg.md = keepLine(seg.id, seg.labels); seg.html = html.slice(seg.start, seg.end); }
   // Two blocks that Markdown would read as one (two lists in a row): the
   // second stays HTML. Checked on the text as it will be read back, from
   // the block before the last mismatch on, until every block reads back as
@@ -546,13 +563,13 @@ function alignBlocks(a, b) {
   return pairs.concat(tailPairs);
 }
 
+const MAX_LIKENESS_PAIRS = 250_000;
 // How alike two blocks' words are (0..1): an edited block keeps the
 // attributes of the block it replaced only when it is that block.
 function words(text) {
   return new Set(String(text).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
 }
-function likeness(a, b) {
-  const x = words(a), y = words(b);
+function likeness(x, y) {
   if (!x.size && !y.size) return 1;
   let same = 0;
   for (const w of x) if (y.has(w)) same++;
@@ -567,11 +584,22 @@ function withoutIds(blockHtml, copy) {
   const edits = [];
   const walk = (list) => list.forEach((node) => {
     if (node.type !== 'el') return;
-    const open = blockHtml.slice(node.start, node.openEnd);
-    const next = open
-      .replace(/\s(?:id|data-tdoc-aid)\s*=\s*("[^"]*"|'[^']*'|[^\s"'>]+)/gi, '')
-      .replace(/(\sdata-tdoc-sheet\s*=\s*")([^"]+)"/i, (_, pre, v) => `${pre}${v}-copy${copy}"`);
-    if (next !== open) edits.push([node.start, node.openEnd, next]);
+    // An SVG's ids are its own references (url(#arrow), <use href>): left
+    // as they are, so the copy draws the same.
+    if (node.tag === 'svg' || node.tag === 'math') return;
+    const sheet = node.attrs.some(([k]) => k === 'data-tdoc-sheet');
+    let changed = false;
+    const attrs = [];
+    for (const [k, v] of node.attrs) {
+      if (k === 'id' || k === 'data-tdoc-aid') { changed = true; continue; }
+      if (k === 'data-tdoc-sheet' && v) { attrs.push([k, `${v}-copy${copy}`]); changed = true; continue; }
+      if (k === 'data-name' && sheet) { attrs.push([k, `${v || 'Sheet'} (copy${copy > 1 ? ` ${copy}` : ''})`]); changed = true; continue; }
+      attrs.push([k, v]);
+    }
+    if (changed) {
+      const self = /\/>$/.test(blockHtml.slice(node.start, node.openEnd)) ? ' /' : '';
+      edits.push([node.start, node.openEnd, `<${node.tag}${attrs.map(([k, v]) => ` ${k}="${escAttr(v)}"`).join('')}${self}>`]);
+    }
     walk(node.children);
   });
   walk(nodes);
@@ -599,7 +627,8 @@ function withAttrs(blockHtml, tag, attrs) {
 export function fromMarkdown(markdown, snapshot) {
   const md = String(markdown == null ? '' : markdown).replace(/\r\n?/g, '\n');
   if (md === snapshot.markdown) return { bodyHtml: snapshot.bodyHtml, removedKept: 0 };
-  guardMarkdown(md);
+  if (!snapshot.lines) snapshot.lines = new Set(snapshot.markdown.split('\n'));
+  guardMarkdown(md, snapshot.lines);
   const segs = snapshot.segments;
   const byId = new Map(segs.filter((s) => s.kind === 'keep').map((s) => [s.id, s]));
   const blocks = blockTokens(md);
@@ -618,6 +647,7 @@ export function fromMarkdown(markdown, snapshot) {
   // when the gap is one block on each side; otherwise only an original whose
   // words it mostly shares (a deleted neighbour never lends its id).
   const replaces = new Map();
+  let compared = 0;
   const pairGap = (gapNew, gapOld) => {
     const olds = gapOld.filter((o) => segs[o].kind === 'md');
     const news = gapNew.filter((nn) => !newKeys[nn].startsWith('\u0000keep:') && !blocks[nn].def);
@@ -625,12 +655,19 @@ export function fromMarkdown(markdown, snapshot) {
       replaces.set(news[0], olds[0]);
       return;
     }
+    // A rewrite of thousands of blocks at once: past the budget, edited
+    // blocks start without the originals' attributes rather than freeze
+    // the page (never with a wrong block's).
+    compared += olds.length * news.length;
+    if (compared > MAX_LIKENESS_PAIRS) return;
+    const oldWords = new Map(olds.map((o) => [o, words(segs[o].md)]));
     const taken = new Set();
     for (const nn of news) {
+      const mine = words(blocks[nn].text);
       let best = -1, score = 0.5;
       for (const o of olds) {
         if (taken.has(o)) continue;
-        const sc = likeness(blocks[nn].text, segs[o].md);
+        const sc = likeness(mine, oldWords.get(o));
         if (sc >= score) { best = o; score = sc; }
       }
       if (best !== -1) { taken.add(best); replaces.set(nn, best); }
@@ -693,36 +730,77 @@ export class MarkdownTooComplex extends Error {}
 const MAX_MD_CHARS = 4_000_000;
 const MAX_QUOTE_DEPTH = 16;
 const MAX_LIST_DEPTH = 16;
-// Emphasis delimiters (* and _) in one run of inline text: marked's
-// delimiter matching is quadratic there (8,000 of them: 14 s). A list item
-// and a table row are runs of their own; brackets, backticks and links are
-// linear (measured), so they are not counted.
-const MAX_EMPHASIS_PER_RUN = 600;
-export function guardMarkdown(md) {
+// Emphasis that marked takes seconds on: OPENERS (a * or _ run before a
+// word, after a space) that wait for closers, in one run of inline text
+// (measured: 1,000 such openers 0.3 s, 2,000 1-2 s; paired emphasis,
+// snake_case, `**kwargs` closed later in the run's shape, links, brackets,
+// tables and long lists stay linear). A paragraph, a heading, a list item
+// and a table row are runs of their own; code (fenced or indented) is not
+// inline text and is never counted; and only runs with a line that is not
+// in the doc as it opened are checked, so text that was already there is
+// never refused.
+const MAX_OPENERS_PER_RUN = 400;
+const OPENER = /(?:^|[\s([{"'>~-])(?:\*+|_+)(?=[^\s*_])/g;
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const MARKER = /^([ \t]*)((?:>[ \t]?)*)[ \t]*((?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$))/;
+const indentOf = (line) => /^[ \t]*/.exec(line)[0].replace(/\t/g, '    ').length;
+export function guardMarkdown(md, known = null) {
   if (md.length > MAX_MD_CHARS) throw new MarkdownTooComplex('This Markdown is too long to convert');
   let run = 0;
+  let runNew = false;
+  let fence = null;
+  let prevBlank = true;
+  let inCode = false;
+  let stack = [];
+  const endRun = () => {
+    if (runNew && run > MAX_OPENERS_PER_RUN) throw new MarkdownTooComplex('A paragraph has too much unclosed * or _ formatting to convert');
+    run = 0; runNew = false;
+  };
   let start = 0;
   while (start <= md.length) {
     let end = md.indexOf('\n', start);
     if (end === -1) end = md.length;
     const line = md.slice(start, end);
-    if (!line.trim()) run = 0;
-    else {
-      const quotes = /^(?:[ \t]{0,3}>)+/.exec(line);
-      if (quotes && quotes[0].split('>').length - 1 > MAX_QUOTE_DEPTH) throw new MarkdownTooComplex('Quotes are nested too deeply to convert');
-      const lead = /^[ \t]*/.exec(line)[0].replace(/\t/g, '    ').length;
-      const markers = /^(?:[ \t]*(?:>[ \t]*)*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$))+/.exec(line);
-      if (markers) {
-        const depth = Math.floor(lead / 2) + (markers[0].match(/(?:^|[ \t>])(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$)/g) || []).length;
-        if (depth > MAX_LIST_DEPTH) throw new MarkdownTooComplex('Lists are nested too deeply to convert');
-      }
-      if (markers || /^[ \t]*\|/.test(line)) run = 0;
-      for (let i = 0; i < line.length; i++) {
-        const c = line.charCodeAt(i);
-        if (c === 42 || c === 95) run++;
-      }
-      if (run > MAX_EMPHASIS_PER_RUN) throw new MarkdownTooComplex('A paragraph has too much * or _ formatting to convert');
-    }
     start = end + 1;
+    if (fence) {
+      const close = FENCE.exec(line);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length && !line.slice(close[0].length).trim()) fence = null;
+      continue;
+    }
+    const open = FENCE.exec(line);
+    if (open && !(open[1][0] === '`' && line.slice(open[0].length).includes('`'))) { endRun(); fence = open[1]; prevBlank = false; continue; }
+    if (!line.trim()) { endRun(); prevBlank = true; inCode = false; continue; }
+    const lead = indentOf(line);
+    // Indented code: 4+ spaces opening a block outside a list.
+    if (!stack.length && lead >= 4 && (prevBlank || inCode)) { inCode = true; prevBlank = false; continue; }
+    inCode = false;
+    const quotes = /^(?:[ \t]{0,3}>)+/.exec(line);
+    if (quotes && quotes[0].split('>').length - 1 > MAX_QUOTE_DEPTH) throw new MarkdownTooComplex('Quotes are nested too deeply to convert');
+    const isNew = !known || !known.has(line);
+    if (RULE.test(line)) { endRun(); prevBlank = false; continue; }
+    const marker = MARKER.exec(line);
+    if (marker) {
+      endRun();
+      // Nesting: an item deeper than the open ones nests under them.
+      const at = lead + (marker[2] ? marker[2].length : 0);
+      while (stack.length && stack[stack.length - 1] >= at) stack.pop();
+      stack.push(at);
+      // `- - - x` nests on one line.
+      const rest = line.slice(marker[0].length);
+      const same = /^(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*/.exec(rest)[0];
+      const extra = (same.match(/(?:[-*+]|\d{1,9}[.)])[ \t]+/g) || []).length;
+      if (stack.length + extra > MAX_LIST_DEPTH) throw new MarkdownTooComplex('Lists are nested too deeply to convert');
+    } else if (prevBlank && lead === 0) {
+      stack = [];
+    }
+    if (/^[ \t]*(?:#{1,6}[ \t]|\|)/.test(line)) endRun();
+    OPENER.lastIndex = 0;
+    let m;
+    while ((m = OPENER.exec(line))) { run++; OPENER.lastIndex = m.index + m[0].length; }
+    if (isNew) runNew = true;
+    if (/^[ \t]*#{1,6}[ \t]/.test(line)) endRun();
+    prevBlank = false;
   }
+  endRun();
 }

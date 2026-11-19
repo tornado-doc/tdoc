@@ -245,6 +245,28 @@ const SHEET = `<!doctype html>
       await context.close();
     });
 
+    await test('unconverted Markdown survives leaving Edit and coming back, and leaving the page asks first', async () => {
+      reset('notes');
+      const context = await newContext({ storage: { 'tdoc-edit-view:owner': 'markdown' } });
+      const { page } = await openDoc(context, 'notes', '?edit=1');
+      await source(page).waitFor();
+      const md = await source(page).inputValue();
+      const bad = md.replace('The end.', `The end.\n\n${'> '.repeat(40)}deep`);
+      await source(page).fill(bad);
+      await page.locator('.tdoc-shell-toast', { hasText: 'nested too deeply' }).first().waitFor({ timeout: 3000 });
+      await chooseMode(page, 'Read');
+      await page.waitForTimeout(400);
+      await chooseMode(page, 'Edit');
+      await source(page).waitFor({ timeout: 4000 });
+      assert(await source(page).inputValue() === bad, 'the Markdown typed was dropped on leaving Edit');
+      let asked = false;
+      page.on('dialog', async (dialog) => { if (dialog.type() === 'beforeunload') asked = true; await dialog.accept().catch(() => {}); });
+      await page.close({ runBeforeUnload: true });
+      await until(() => asked, 3000);
+      assert(asked, 'leaving with unconverted Markdown did not ask');
+      await context.close();
+    });
+
     await test('Discard right after typing: the typing does not reach the discarded page', async () => {
       reset('notes');
       const context = await newContext({ storage: { 'tdoc-edit-view:owner': 'markdown' } });
