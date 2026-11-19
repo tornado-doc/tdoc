@@ -61,27 +61,30 @@ export function useCopyForAgent({
     tell?.(ok ? done : 'Could not copy', !ok);
     return ok;
   }, []);
-  const copyThread = useCallback((comment) => (fresh(`thread:${comment?.id}`) ? write(comment ? [comment] : [], '', 'Copied for agent') : false), [write]);
-  const copyOpen = useCallback(() => {
-    if (!fresh('open')) return false;
+  // The keys act on every press; only a menu row's press is deduped.
+  const copyThreadNow = useCallback((comment) => write(comment ? [comment] : [], '', 'Copied for agent'), [write]);
+  const copyOpenNow = useCallback(() => {
     const threads = openThreads(live.current.area);
     return write(threads, 'open', `Copied ${threads.length} open ${threads.length === 1 ? 'comment' : 'comments'} for agent`);
   }, [write]);
-  const copySelectedOrOpen = useCallback(() => {
-    const { area: a, selectedId: id } = live.current;
-    const picked = id && a?.byId?.get(id);
-    return picked && !picked.deleted ? copyThread(picked) : copyOpen();
-  }, [copyThread, copyOpen]);
-  const toggleMarkers = useCallback(() => {
+  const toggleMarkersNow = useCallback(() => {
     const m = live.current.markers;
-    if (!m || !fresh('markers')) return;
+    if (!m) return;
     m.toggle();
     live.current.say?.(m.hidden ? 'Comment markers shown' : 'Comment markers hidden');
   }, []);
+  const copySelectedOrOpen = useCallback(() => {
+    const { area: a, selectedId: id } = live.current;
+    const picked = id && a?.byId?.get(id);
+    return picked && !picked.deleted ? copyThreadNow(picked) : copyOpenNow();
+  }, [copyThreadNow, copyOpenNow]);
+  const copyThread = useCallback((comment) => (fresh(`thread:${comment?.id}`) ? copyThreadNow(comment) : false), [copyThreadNow]);
+  const copyOpen = useCallback(() => (fresh('open') ? copyOpenNow() : false), [copyOpenNow]);
+  const toggleMarkers = useCallback(() => { if (fresh('markers')) toggleMarkersNow(); }, [toggleMarkersNow]);
 
   useCommentShortcuts({
     copy: copySelectedOrOpen,
-    markers: markers ? toggleMarkers : null,
+    markers: markers ? toggleMarkersNow : null,
   }, { enabled: enabled && keysEnabled });
 
   const hasMarkers = Boolean(markers);
