@@ -126,6 +126,16 @@ export const FLAGS = Object.freeze({
   // undone by Restore in the version history. The flag is the off switch
   // until it settles; remove it by graduate_by.
   convertToSheet: Object.freeze({ label: 'Convert a doc to a sheet (⋯ menu)', owner: 'julie', added: '2026-11-17', default: true, graduate_by: '2026-11-24' }),
+  // Copy for agent (agentation-style, zero setup): a thread's ⋯ › Copy for
+  // agent and the comment list's ⋯ › Copy N open for agent put the threads
+  // on the clipboard as Markdown an agent can act on (page, element,
+  // selector, dialog / tab state, area, replies, id, tdoc link:
+  // comments/core/agent-markdown.js). While the list or a thread is open,
+  // and nobody is typing: C copies (the selected thread, else all open), H
+  // hides / shows the markers, Esc closes. Every comment surface (doc page,
+  // slides, sheets, feedback widget, feedback space page). The widget reads
+  // it like feedbackAreaSelect (the session's dev flags).
+  copyForAgent: Object.freeze({ label: 'Copy comments for an agent (C, H keys)', owner: 'julie', added: '2026-11-19', default: false, preview: true, graduate_by: '2026-11-26' }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

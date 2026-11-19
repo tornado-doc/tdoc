@@ -12,6 +12,8 @@ import { composerDefault, maySendToAgent, sendToAgentSetup, sendToAgentState } f
 import { askOwnAgent, threadAskPick, useMyAgent } from './document/my-agent.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { CommentPanel } from './comments/panel/comment-panel.jsx';
+import { CopyForAgentContext, useCopyForAgent } from './comments/panel/copy-for-agent.jsx';
+import { isFeatureOn } from './feature-flags.js';
 import { useCommentArea, useCommentListPrefs } from './comments/core/comment-area.js';
 import { groupBy } from './comments/core/comment-query.js';
 import { useCommentFeed } from './comments/core/use-comment-feed.js';
@@ -40,7 +42,8 @@ export function FeedbackSpace({ boot }) {
   // Open by default; the choice remembered per space, as in the widget.
   const listPrefs = useCommentListPrefs(slug);
   const { filter, setFilter } = listPrefs;
-  const [openId, setOpenId] = useState(null);
+  // ?comment=<id> (Copy for agent's tdoc link, a notification) selects it.
+  const [openId, setOpenId] = useState(() => new URLSearchParams(location.search).get('comment') || null);
   const [notice, setNotice] = useState('');
   const [notifyIds, setNotifyIds] = useState(null);
   const [joinBusy, setJoinBusy] = useState(false);
@@ -109,6 +112,21 @@ export function FeedbackSpace({ boot }) {
   const area = useCommentArea({
     comments: comments || [], slug, selectedId: openId, filter, sort: listPrefs.sort, search: listPrefs.search,
     handoffViewer: viewerKeys, isOwner: Boolean(isOwner), syncSeen: Boolean(identity),
+  });
+
+  // Copy for agent (flag copyForAgent): the list's ⋯ and each thread's ⋯;
+  // C copies the selected thread or every open one. The list is this page,
+  // so the key is live whenever nobody is typing. No markers here: H is the
+  // widget's and the doc page's.
+  const copyForAgent = useCopyForAgent({
+    enabled: isFeatureOn('copyForAgent'),
+    area,
+    selectedId: openId,
+    title: `${title} (feedback on ${host})`,
+    pageUrl: origin,
+    linkFor: (c) => `${location.origin}/d/${encodeURIComponent(slug)}?comment=${encodeURIComponent(c.id)}`,
+    say: (text) => { setNotice(text); setTimeout(() => setNotice((n) => (n === text ? '' : n)), 3200); },
+    keysEnabled: comments !== null,
   });
 
   const refresh = useCallback(async () => {
@@ -181,6 +199,7 @@ export function FeedbackSpace({ boot }) {
   const ready = area.handoffBuckets.ready;
 
   return (
+    <CopyForAgentContext.Provider value={copyForAgent}>
     <AgentMentionContext.Provider value={agentMentions}>
     <div className="tdoc-app docs-hub tdoc-fbspace">
       {/* The space's workspace, as on a doc page: a team's space shows the
@@ -340,5 +359,6 @@ export function FeedbackSpace({ boot }) {
       ) : null}
     </div>
     </AgentMentionContext.Provider>
+    </CopyForAgentContext.Provider>
   );
 }

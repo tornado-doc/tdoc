@@ -62,6 +62,7 @@ import { readStored, writeStored } from './safe-storage.js';
 import { SideResizeHandle, useSideWidth } from './ui/side-resize.jsx';
 import { COMMENT_SIDE_WIDTH, CommentPanel } from './comments/panel/comment-panel.jsx';
 import { useDoubleTapOption, useEscapeLadder } from './comments/panel/keyboard.js';
+import { CopyForAgentContext, useCopyForAgent } from './comments/panel/copy-for-agent.jsx';
 import { CommentIcon } from './ui/comment-icon.jsx';
 import { AppButton } from './ui/button.jsx';
 import { isFeatureOn } from './feature-flags.js';
@@ -688,6 +689,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       if (message.supportsTheme === true) bridge.send({ type: 'tdoc:theme', theme: nextTheme });
       bridge.send(editorRef.current?.modeMessage?.() || { type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding, areaSelect: !config.isLanding && isFeatureOn('feedbackAreaSelect') });
       sendFooterInsetRef.current();
+      if (marksHiddenRef.current) bridge.send({ type: 'tdoc:marksHidden', hidden: true });
       comments.refresh();
       suggestRef.current?.frameHandlers['tdoc:ready']();
     },
@@ -703,9 +705,9 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       s.pick(String(message.id));
     },
     'tdoc:suggestKey': () => openAskRef.current?.(),
-    // Option and Esc pressed in the doc: the shell's own keys (keyboard.js).
+    // Option, Esc, C and H pressed in the doc: the shell's own keys (keyboard.js).
     'tdoc:key': (message) => {
-      if (message.key !== 'Alt' && message.key !== 'Escape') return;
+      if (!['Alt', 'Escape', 'c', 'h'].includes(message.key)) return;
       document.dispatchEvent(new KeyboardEvent('keydown', { key: message.key, bubbles: true, cancelable: true }));
     },
     // A change only an editor keeps for everyone (a sheet's column width or
@@ -2226,6 +2228,27 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   useDoubleTapOption(() => startPick(), {
     enabled: !config.isLanding && Boolean(config.canComment || config.signInToComment),
   });
+  // Copy for agent (flag copyForAgent), as on every comment surface: ⋯ on a
+  // thread and on the list; C (the open thread, else all open) and H (hide
+  // the pins and the words' highlight) while the list, the phone drawer or
+  // a thread is open (comments/panel/copy-for-agent.jsx). Doc, slides and
+  // sheets alike: they share this shell.
+  const [markersHidden, setMarkersHidden] = useState(false);
+  const copyForAgent = useCopyForAgent({
+    enabled: !config.isLanding && isFeatureOn('copyForAgent'),
+    area: commentArea,
+    selectedId: openCommentId,
+    title: title || config.title || config.slug,
+    pageUrl: `${location.origin}/d/${encodeURIComponent(config.slug)}`,
+    linkFor: (c) => `${location.origin}/d/${encodeURIComponent(config.slug)}?comment=${encodeURIComponent(c.id)}`,
+    say: showToast,
+    markers: { hidden: markersHidden, toggle: () => setMarkersHidden((h) => !h) },
+    keysEnabled: Boolean(sidePanelOpen || openCommentId || openClusterKey || (narrow && drawerOpen)) && !composer && !reanchorId,
+  });
+  const marksHidden = Boolean(copyForAgent && markersHidden);
+  const marksHiddenRef = useRef(marksHidden);
+  marksHiddenRef.current = marksHidden;
+  useEffect(() => { bridge.send({ type: 'tdoc:marksHidden', hidden: marksHidden }); }, [bridge.send, marksHidden]);
   // What the document and its pins have to themselves.
   const sideInset = sidePanelOpen ? sidePanelSize.width : 0;
   const viewRight = window.innerWidth - sideInset;
@@ -2458,9 +2481,11 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     />
   ) : null;
   return (
+    <CopyForAgentContext.Provider value={copyForAgent}>
     <div
       className="tdoc-document-app"
       data-mode={editor.mode}
+      data-markers-hidden={marksHidden || undefined}
       data-visual-open={visualOpen || undefined}
       data-presenting={(visualOpen && presenting) || undefined}
       onPointerDown={() => {
@@ -3004,5 +3029,6 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       </AgentMentionContext.Provider>
       </HandoffSendTransport.Provider>
     </div>
+    </CopyForAgentContext.Provider>
   );
 }

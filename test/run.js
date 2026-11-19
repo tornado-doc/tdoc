@@ -21,6 +21,7 @@ const OFFLINE = [
   'frame-part.test.js', // what the doc frame says it picked is rebuilt: known keys, one line, finite numbers, under the anchor size cap
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
   'selection-bundle.test.js',  // the shared selection modules bundle into the doc frame without a bundler; container keys, adapters, the pick gesture
+  'copy-for-agent.test.js',    // Copy for agent: thread Markdown (context, missing pieces, escaping, http(s) links) and the C / H key guard (never in fields, menus, with modifiers)
   'comment-query.test.js',     // one comment query on every surface: Open by default, counts, deleted rule, waiting on you, search, sort, groupBy
   'thread-seen-api.test.js',   // server read state: authorized like reading the comments, no cross-doc reads, no thread-id leaks
   'feedback-team-agents.test.js', // the widget's @ lists team agents (answer only) only through tdoc's own-origin token door
@@ -296,6 +297,7 @@ const BROWSER = [
   'ask-send-switch-ui.test.js', // Ask AI: quiet Ask ▾ / Edit ▾ mode picker in the input row (instruction input, N comments included · Choose, Send to <agent>, instruction-only becomes a whole-document comment handed off, mode remembered), long agent name on a 320/390 phone stays one row, one row per team agent, team agent answers in public; no phone paper-plane
   'comment-selection-ui.test.js', // one selection engine: old cssPath anchors resolve, slide comments follow reordered slides across versions, area boxes on charts, + Comment picks (whole doc on nothing), widget quotes and page comments; desktop + phone
   'comment-parity-ui.test.js', // doc page and widget run the same cases: Open by default with counts (remembered), a polled agent reply appears, read state is the server's (widget ↔ space page, fresh browser), autoReadComments in the widget, the seen endpoint refuses non-readers; desktop + phone
+  'copy-for-agent-ui.test.js', // Copy for agent on the doc page, the widget and the space page: thread ⋯ and list ⋯ copy Markdown, toast, C / H keys (never while typing), Esc still closes, flag off shows nothing; desktop + phone
   'feedback-panel-parity-ui.test.js', // the widget's comment list = the doc page's: same side width, same filter row (one line, options inside the pill, same geometry), on a plain and a hostile host page; desktop + phone
   'comment-one-behaviour-ui.test.js', // doc page, feedback space and widget draw one card: reply prefill rule, one agent-list height, a reply draft per thread, floating card fits the screen, panel drag width
   'ask-edit-feedback-ui.test.js', // Ask/Edit v2 feedback: @agent in a comment or reply asks for suggestions (phone drawer, ⌘⇧Enter), nothing changes outside dev mode, a reply box is not held by delivery, rewrites read as blocks, edits stay text
