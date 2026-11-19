@@ -157,7 +157,6 @@ const OFFLINE = [
   'create-from-scratch.test.js', // #356 blank doc: slug derivation, both create routes, edit-on-arrival
   'draft-store.test.js',       // #369 per-doc draft cache + fingerprint restore
   'edit-markdown.test.js',     // #374 markdown input rules (no schema parser)
-  'markdown-source.test.js',   // Edit as Markdown (flag markdownEditMode): plain docs round-trip, untouched blocks byte for byte, unshowable blocks kept behind placeholders, nothing typed becomes markup outside the allow-list
   'title-and-save-flow.test.js', // #367 hosted title plumbing, save's leave-site prompt, save notice
   'first-save-replaces-scaffold.test.js', // #380 the first save becomes v1 instead of appending v2
   'document-owner.test.js',   // #395 the bar and the lists name the document's owner
@@ -360,6 +359,7 @@ const PERF = [
 const RUNTIME = [
   'preview-workerd.test.js', // needs npm ci; real workerd WASM and font modules
   'doc-download-deps.test.js', // needs npm ci; download output read back with marked and SheetJS (CI: shell runtime job)
+  'markdown-source.test.js', // needs npm ci (marked); Edit as Markdown (flag markdownEditMode): plain docs round-trip, untouched blocks byte for byte, unshowable blocks kept behind placeholders, nothing typed becomes markup outside the allow-list (CI: shell runtime job)
 ];
 const runAll = process.argv.includes('--all');
 const runPerf = process.argv.includes('--perf');
