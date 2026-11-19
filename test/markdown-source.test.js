@@ -9,7 +9,7 @@ const assert = require('assert/strict');
 
 (async () => {
   console.log('markdown source (Edit as Markdown)');
-  const { toMarkdown, fromMarkdown, markdownToHtml, sanitizeHtml, parseFragment } = await import('../shell/src/document/markdown-source.js');
+  const { toMarkdown, fromMarkdown, markdownToHtml, sanitizeHtml, parseFragment, MarkdownTooComplex } = await import('../shell/src/document/markdown-source.js');
   let failed = 0;
   const t = (name, fn) => {
     try { fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.stack || error.message}`); }
@@ -157,6 +157,87 @@ const assert = require('assert/strict');
     assert.ok(out.includes('<p>Paragraph seven with <strong>bold</strong> text.</p>'));
     assert.equal(out.length, html.length + 4);
     assert.ok(ms < 8000, `${ms} ms`);
+  });
+
+  // Review of #1089 (regressions) -------------------------------------------
+  t('24 lists in a row: every one keeps its bytes, id and aid (the split settles, no cap)', () => {
+    let html = '';
+    for (let i = 0; i < 24; i++) html += `<ul id="l${i}" data-tdoc-aid="a${i}"><li>item ${i}</li></ul>\n`;
+    html += '<p>end</p>\n';
+    const r = toMarkdown(html);
+    assert.equal(r.ok, true);
+    const out = fromMarkdown(r.markdown.replace('end', 'end edited'), r.snapshot).bodyHtml;
+    for (let i = 0; i < 24; i++) assert.ok(out.includes(`<ul id="l${i}" data-tdoc-aid="a${i}"><li>item ${i}</li></ul>`), `list ${i} changed:\n${out}`);
+    assert.ok(out.includes('<p>end edited</p>'));
+  });
+
+  t('a deleted block never lends its id to its edited neighbour; a one-for-one edit keeps it', () => {
+    const r = toMarkdown('<p id="intro" data-tdoc-aid="x">Alpha</p>\n<p>Beta</p>\n');
+    const del = fromMarkdown('Beta edited\n', r.snapshot).bodyHtml;
+    assert.ok(!/id="intro"|data-tdoc-aid="x"/.test(del), del);
+    assert.ok(del.includes('<p>Beta edited</p>'), del);
+    const one = fromMarkdown('Alpha, edited\n\nBeta\n', r.snapshot).bodyHtml;
+    assert.match(one, /<p id="intro" data-tdoc-aid="x">Alpha, edited<\/p>/);
+    // Unequal gap: the edit that shares its words keeps the attributes.
+    const r2 = toMarkdown('<p id="one">The reader ships Monday</p>\n<p id="two">Editor later</p>\n<p>tail</p>\n');
+    const out = fromMarkdown('A brand new line\n\nThe reader ships Tuesday\n\ntail\n', r2.snapshot).bodyHtml;
+    assert.match(out, /<p id="one">The reader ships Tuesday<\/p>/);
+    assert.ok(!out.includes('id="two"') && /<p>A brand new line<\/p>/.test(out), out);
+  });
+
+  t('past the LCS size: untouched blocks keep their bytes, nothing shifts by one', () => {
+    let html = '';
+    for (let i = 0; i < 2100; i++) html += `<p data-tdoc-aid="a${i}">para ${i} <b>x</b></p>\n`;
+    const r = toMarkdown(html);
+    const out = fromMarkdown(r.markdown.replace('para 0 ', 'NEW first\n\npara 0 ').replace('para 2099 ', 'para 2099 edited '), r.snapshot).bodyHtml;
+    assert.ok(out.includes('<p data-tdoc-aid="a1000">para 1000 <b>x</b></p>'), 'a1000 moved or was rewritten');
+    assert.ok(out.includes('<p>NEW first</p>'), 'the new block took a neighbour\'s aid');
+    assert.match(out, /<p data-tdoc-aid="a2099">para 2099 edited <strong>x<\/strong><\/p>/);
+    assert.equal((out.match(/<b>x<\/b>/g) || []).length, 2099);
+  });
+
+  t('a copied placeholder: the copy carries no id, aid or the same sheet id', () => {
+    const sheet = '<table data-tdoc-sheet="s1" id="t1" data-tdoc-aid="q"><tbody><tr><td data-tdoc-aid="c1">1</td></tr></tbody></table>';
+    const r = toMarkdown(`<p>A</p>\n${sheet}\n<p>B</p>`);
+    const keep = r.markdown.match(/<!--[^\n]*-->/)[0];
+    const out = fromMarkdown(`A\n\n${keep}\n\nB\n\n${keep}\n`, r.snapshot).bodyHtml;
+    assert.equal(out.split(sheet).length - 1, 1, 'the original is not in place, byte for byte');
+    assert.ok(out.includes('<table data-tdoc-sheet="s1-copy1"><tbody><tr><td>1</td></tr></tbody></table>'), out);
+  });
+
+  t('a placeholder with text after it on its line is text, never the block', () => {
+    const r = toMarkdown(`<p>A</p>\n${CARDS}\n<p>B</p>`);
+    const keep = r.markdown.match(/<!--[^\n]*-->/)[0];
+    const out = fromMarkdown(r.markdown.replace(keep, `${keep} <b>x</b> -->`), r.snapshot);
+    assert.ok(!out.bodyHtml.includes('tdoc-cards') && out.removedKept === 1, out.bodyHtml);
+    assert.ok(out.bodyHtml.includes('&lt;!-- tdoc:keep 1'), out.bodyHtml);
+  });
+
+  t('Markdown marked would take seconds (or the stack) on is refused at once, with a reason', () => {
+    const r = toMarkdown('<p>A</p>');
+    for (const [text, why] of [
+      ['> '.repeat(5000) + 'x', /nested too deeply/],
+      ['*a '.repeat(8000), /too much \* or _/],
+      ['_a '.repeat(8000), /too much \* or _/],
+      [Array.from({ length: 60 }, (_, i) => `${' '.repeat(i * 2)}- x`).join('\n'), /nested too deeply/],
+      ['- '.repeat(400) + 'x', /nested too deeply/],
+    ]) {
+      const t0 = Date.now();
+      assert.throws(() => fromMarkdown(`A\n\n${text}\n`, r.snapshot), (e) => e instanceof MarkdownTooComplex && why.test(e.message));
+      assert.ok(Date.now() - t0 < 500, `slow refusal: ${Date.now() - t0} ms`);
+    }
+    // Real shapes stay fine: a long list of links, a long table with bold.
+    const list = Array.from({ length: 2000 }, (_, i) => `- [link ${i}](https://x.dev/${i}) **b** *c*`).join('\n');
+    const table = '| a | b |\n| --- | --- |\n' + Array.from({ length: 1000 }, () => '| [x](https://y.dev) **b** | *c* |').join('\n');
+    const out = fromMarkdown(`A\n\n${list}\n\n${table}\n`, r.snapshot).bodyHtml;
+    assert.ok(out.includes('<li><a href="https://x.dev/1999">link 1999</a> <strong>b</strong> <em>c</em></li>'));
+  });
+
+  t('reading many script / style blocks stays linear', () => {
+    const html = '<p>A</p>' + '<script>x()</script><style>p{}</style>'.repeat(20000);
+    const t0 = Date.now();
+    parseFragment(html);
+    assert.ok(Date.now() - t0 < 1500, `${Date.now() - t0} ms`);
   });
 
   if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

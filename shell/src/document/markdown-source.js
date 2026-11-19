@@ -41,6 +41,7 @@ export function parseFragment(html) {
   let count = 0;
   const n = html.length;
   const top = () => stack[stack.length - 1];
+  let lower = null;
   const add = (node) => {
     if (++count > MAX_NODES) throw new Error('too large');
     top().children.push(node);
@@ -120,7 +121,7 @@ export function parseFragment(html) {
     i = j;
     if (VOID.has(tag) || selfClose) continue;
     if (RAW.has(tag)) {
-      const lower = html.toLowerCase();
+      if (lower == null) lower = html.toLowerCase();
       const end = lower.indexOf(`</${tag}`, j);
       if (end === -1) throw new Error(`open <${tag}>`);
       const gt = html.indexOf('>', end);
@@ -230,7 +231,9 @@ const marked = new Marked({
 function renderTokens(tokens, links) {
   const list = tokens.slice();
   list.links = links || {};
-  return sanitizeHtml(marked.parser(list));
+  try { return sanitizeHtml(marked.parser(list)); } catch (error) {
+    throw new MarkdownTooComplex('This Markdown is too large to convert');
+  }
 }
 export function markdownToHtml(md) {
   const tokens = marked.lexer(String(md || ''));
@@ -298,9 +301,11 @@ function canonical(nodes, top) {
 const SIMPLE = /^(p|h[1-6]|ul|ol|blockquote|pre|hr|table)$/;
 // A top-level attribute that makes a block the page's, not prose: kept as is.
 const OWNED_ATTR = /^(data-tdoc-(?!aid$)|contenteditable$|hidden$)/;
+const MAX_SPLIT_PASSES = 2000;
 const HIDDEN = /^(script|style|link|meta|template|noscript)$/;
 const HOUSE = /\b(tdoc-tiles|tdoc-tile|tdoc-cards|tdoc-card|note|diagram-box|slide|tdoc-artifact|tdoc-table-scroll)\b/;
-const KEEP_LINE = /^<!--\s*tdoc:keep\s+(\d+)\b[^\n]*?-->$/;
+// One placeholder, alone on its line: nothing after its `-->`.
+const KEEP_LINE = /^<!--\s*tdoc:keep\s+(\d+)(?:\s(?:(?!-->)[^\n])*)?-->$/;
 
 const SIMPLE_NAMES = { p: 'paragraph', ul: 'list', ol: 'list', blockquote: 'quote', pre: 'code', table: 'table', hr: 'divider' };
 function label(node, html) {
@@ -430,15 +435,22 @@ export function toMarkdown(bodyHtml) {
     if (seg.kind === 'keep') { seg.id = ++id; seg.md = keepLine(seg.id, seg.labels); seg.html = html.slice(seg.start, seg.end); }
   }
   // Two blocks that Markdown would read as one (two lists in a row): the
-  // second stays HTML. Checked on the whole text, as it will be read back.
-  for (let pass = 0; pass < 8; pass++) {
-    const tokens = blockTokens(segments.map((s) => s.md).join('\n\n'));
+  // second stays HTML. Checked on the text as it will be read back, from
+  // the block before the last mismatch on, until every block reads back as
+  // itself; a doc where that does not settle keeps its rich editor.
+  let from0 = 0;
+  let settled = false;
+  for (let pass = 0; pass <= MAX_SPLIT_PASSES; pass++) {
+    const tokens = blockTokens(segments.slice(from0).map((s) => s.md).join('\n\n'));
     let bad = -1;
-    for (let k = 0; k < segments.length; k++) {
-      if (!tokens[k] || tokens[k].text !== segments[k].md) { bad = k; break; }
+    for (let k = from0; k < segments.length; k++) {
+      const tok = tokens[k - from0];
+      if (!tok || tok.text !== segments[k].md) { bad = k; break; }
     }
-    if (bad === -1 && tokens.length === segments.length) break;
+    if (bad === -1 && tokens.length === segments.length - from0) { settled = true; break; }
+    if (pass === MAX_SPLIT_PASSES) break;
     if (bad === -1) bad = segments.length - 1;
+    from0 = Math.max(0, bad - 1);
     // Usually block `bad` swallowed the next one: the next one stays HTML.
     const target = bad + 1 < segments.length && segments[bad + 1].kind === 'md' ? bad + 1 : bad;
     const seg = segments[target];
@@ -456,7 +468,9 @@ export function toMarkdown(bodyHtml) {
     }
     id = 0;
     for (const s of segments) if (s.kind === 'keep') { s.id = ++id; s.md = keepLine(s.id, s.labels); s.html = html.slice(s.start, s.end); }
+    from0 = Math.min(from0, Math.max(0, segments.length - 1));
   }
+  if (!settled) return { ok: false, reason: 'This doc\'s layout can\'t be shown as Markdown' };
   const mdCount = segments.filter((s) => s.kind === 'md').length;
   const keptCount = segments.length - mdCount;
   if (!mdCount && keptCount) {
@@ -484,7 +498,11 @@ function blockTokens(md) {
   return out;
 }
 
-// Longest common subsequence of block texts: which blocks are untouched.
+// Which blocks are untouched: the longest common subsequence of block
+// texts. Past LCS_CELLS (a very long doc edited in many places) the middle
+// is matched greedily on equal texts, in order: still only ever equal
+// blocks paired, so untouched blocks keep their bytes.
+const LCS_CELLS = 4_000_000;
 function alignBlocks(a, b) {
   const n = a.length, m = b.length;
   const pairs = [];
@@ -494,7 +512,7 @@ function alignBlocks(a, b) {
   const tailPairs = [];
   while (ea > lo && eb > lo && a[ea - 1] === b[eb - 1]) { ea--; eb--; tailPairs.unshift([ea, eb]); }
   const na = ea - lo, nb = eb - lo;
-  if (na && nb && na * nb <= 4_000_000) {
+  if (na && nb && na * nb <= LCS_CELLS) {
     const w = nb + 1;
     const dp = new Uint32Array((na + 1) * w);
     for (let x = na - 1; x >= 0; x--) {
@@ -508,8 +526,58 @@ function alignBlocks(a, b) {
       else if (dp[(x + 1) * w + y] >= dp[x * w + y + 1]) x++;
       else y++;
     }
+  } else if (na && nb) {
+    const where = new Map();
+    for (let x = lo; x < ea; x++) {
+      const list = where.get(a[x]);
+      if (list) list.push(x); else where.set(a[x], [x]);
+    }
+    const next = new Map();
+    let last = lo - 1;
+    for (let y = lo; y < eb; y++) {
+      const list = where.get(b[y]);
+      if (!list) continue;
+      let i = next.get(b[y]) || 0;
+      while (i < list.length && list[i] <= last) i++;
+      next.set(b[y], i);
+      if (i < list.length) { pairs.push([list[i], y]); last = list[i]; next.set(b[y], i + 1); }
+    }
   }
   return pairs.concat(tailPairs);
+}
+
+// How alike two blocks' words are (0..1): an edited block keeps the
+// attributes of the block it replaced only when it is that block.
+function words(text) {
+  return new Set(String(text).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+}
+function likeness(a, b) {
+  const x = words(a), y = words(b);
+  if (!x.size && !y.size) return 1;
+  let same = 0;
+  for (const w of x) if (y.has(w)) same++;
+  return (2 * same) / (x.size + y.size);
+}
+
+// A copy of a kept block must not carry the original's ids: an id names
+// one place (comment anchors, links), a sheet's id one sheet.
+function withoutIds(blockHtml, copy) {
+  let nodes;
+  try { nodes = parseFragment(blockHtml); } catch { return blockHtml; }
+  const edits = [];
+  const walk = (list) => list.forEach((node) => {
+    if (node.type !== 'el') return;
+    const open = blockHtml.slice(node.start, node.openEnd);
+    const next = open
+      .replace(/\s(?:id|data-tdoc-aid)\s*=\s*("[^"]*"|'[^']*'|[^\s"'>]+)/gi, '')
+      .replace(/(\sdata-tdoc-sheet\s*=\s*")([^"]+)"/i, (_, pre, v) => `${pre}${v}-copy${copy}"`);
+    if (next !== open) edits.push([node.start, node.openEnd, next]);
+    walk(node.children);
+  });
+  walk(nodes);
+  let out = blockHtml;
+  for (let i = edits.length - 1; i >= 0; i--) out = out.slice(0, edits[i][0]) + edits[i][2] + out.slice(edits[i][1]);
+  return out;
 }
 
 // An edited block that is still the same kind keeps the block's own
@@ -531,6 +599,7 @@ function withAttrs(blockHtml, tag, attrs) {
 export function fromMarkdown(markdown, snapshot) {
   const md = String(markdown == null ? '' : markdown).replace(/\r\n?/g, '\n');
   if (md === snapshot.markdown) return { bodyHtml: snapshot.bodyHtml, removedKept: 0 };
+  guardMarkdown(md);
   const segs = snapshot.segments;
   const byId = new Map(segs.filter((s) => s.kind === 'keep').map((s) => [s.id, s]));
   const blocks = blockTokens(md);
@@ -544,9 +613,29 @@ export function fromMarkdown(markdown, snapshot) {
   const pairs = alignBlocks(oldKeys, newKeys);
   const matchedNew = new Map(pairs.map(([o, nn]) => [nn, o]));
   const matchedOld = new Set(pairs.map(([o]) => o));
-  // For an edited block: the original block it replaced, if any (the
-  // unmatched originals between the same two matched blocks, in order).
+  // For an edited block: the original block it replaced, from the
+  // unmatched originals between the same two matched blocks. One for one
+  // when the gap is one block on each side; otherwise only an original whose
+  // words it mostly shares (a deleted neighbour never lends its id).
   const replaces = new Map();
+  const pairGap = (gapNew, gapOld) => {
+    const olds = gapOld.filter((o) => segs[o].kind === 'md');
+    const news = gapNew.filter((nn) => !newKeys[nn].startsWith('\u0000keep:') && !blocks[nn].def);
+    if (gapOld.length === 1 && gapNew.length === 1 && olds.length === 1 && news.length === 1) {
+      replaces.set(news[0], olds[0]);
+      return;
+    }
+    const taken = new Set();
+    for (const nn of news) {
+      let best = -1, score = 0.5;
+      for (const o of olds) {
+        if (taken.has(o)) continue;
+        const sc = likeness(blocks[nn].text, segs[o].md);
+        if (sc >= score) { best = o; score = sc; }
+      }
+      if (best !== -1) { taken.add(best); replaces.set(nn, best); }
+    }
+  };
   let prevOld = -1;
   let pending = [];
   const sorted = pairs.slice().sort((p, q) => p[1] - q[1]);
@@ -556,7 +645,7 @@ export function fromMarkdown(markdown, snapshot) {
     if (nextOld != null) {
       const gapOld = [];
       for (let o = prevOld + 1; o < nextOld; o++) if (!matchedOld.has(o)) gapOld.push(o);
-      pending.forEach((newIndex, k) => { if (k < gapOld.length) replaces.set(newIndex, gapOld[k]); });
+      if (pending.length && gapOld.length) pairGap(pending, gapOld);
       pending = [];
       if (nn < blocks.length) { prevOld = nextOld; pi++; }
       continue;
@@ -564,22 +653,27 @@ export function fromMarkdown(markdown, snapshot) {
     pending.push(nn);
   }
   let out = snapshot.prefix || '';
-  const used = new Set();
+  const uses = new Map();
+  const keepHtml = (seg) => {
+    const n = (uses.get(seg.id) || 0) + 1;
+    uses.set(seg.id, n);
+    return n === 1 ? seg.html : withoutIds(seg.html, n - 1);
+  };
+  // Matched placeholders first: a moved or copied one is the copy, never
+  // the one still in its place.
+  for (const [o] of pairs) if (segs[o].kind === 'keep') uses.set(segs[o].id, 1);
   blocks.forEach((b, nn) => {
     if (b.def) return;
     const o = matchedNew.get(nn);
     if (o != null) {
       const seg = segs[o];
       out += seg.sep + (seg.kind === 'keep' ? seg.html : snapshot.bodyHtml.slice(seg.start, seg.end));
-      if (seg.kind === 'keep') used.add(seg.id);
       return;
     }
     const key = newKeys[nn];
     if (key.startsWith('\u0000keep:')) {
       // A placeholder moved or copied: the same HTML, from this document.
-      const seg = byId.get(Number(key.slice(6)));
-      out += '\n' + seg.html;
-      used.add(seg.id);
+      out += '\n' + keepHtml(byId.get(Number(key.slice(6))));
       return;
     }
     let blockHtml = renderTokens([b.token], blocks.links).replace(/\s+$/, '');
@@ -589,6 +683,46 @@ export function fromMarkdown(markdown, snapshot) {
   });
   out += snapshot.tail;
   let removedKept = 0;
-  for (const id of byId.keys()) if (!used.has(id)) removedKept++;
+  for (const id of byId.keys()) if (!uses.has(id)) removedKept++;
   return { bodyHtml: out, removedKept };
+}
+
+// Markdown a person could type but marked takes seconds (or the stack) to
+// read: refused with a reason, before it is read. A real doc is far inside.
+export class MarkdownTooComplex extends Error {}
+const MAX_MD_CHARS = 4_000_000;
+const MAX_QUOTE_DEPTH = 16;
+const MAX_LIST_DEPTH = 16;
+// Emphasis delimiters (* and _) in one run of inline text: marked's
+// delimiter matching is quadratic there (8,000 of them: 14 s). A list item
+// and a table row are runs of their own; brackets, backticks and links are
+// linear (measured), so they are not counted.
+const MAX_EMPHASIS_PER_RUN = 600;
+export function guardMarkdown(md) {
+  if (md.length > MAX_MD_CHARS) throw new MarkdownTooComplex('This Markdown is too long to convert');
+  let run = 0;
+  let start = 0;
+  while (start <= md.length) {
+    let end = md.indexOf('\n', start);
+    if (end === -1) end = md.length;
+    const line = md.slice(start, end);
+    if (!line.trim()) run = 0;
+    else {
+      const quotes = /^(?:[ \t]{0,3}>)+/.exec(line);
+      if (quotes && quotes[0].split('>').length - 1 > MAX_QUOTE_DEPTH) throw new MarkdownTooComplex('Quotes are nested too deeply to convert');
+      const lead = /^[ \t]*/.exec(line)[0].replace(/\t/g, '    ').length;
+      const markers = /^(?:[ \t]*(?:>[ \t]*)*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$))+/.exec(line);
+      if (markers) {
+        const depth = Math.floor(lead / 2) + (markers[0].match(/(?:^|[ \t>])(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$)/g) || []).length;
+        if (depth > MAX_LIST_DEPTH) throw new MarkdownTooComplex('Lists are nested too deeply to convert');
+      }
+      if (markers || /^[ \t]*\|/.test(line)) run = 0;
+      for (let i = 0; i < line.length; i++) {
+        const c = line.charCodeAt(i);
+        if (c === 42 || c === 95) run++;
+      }
+      if (run > MAX_EMPHASIS_PER_RUN) throw new MarkdownTooComplex('A paragraph has too much * or _ formatting to convert');
+    }
+    start = end + 1;
+  }
 }

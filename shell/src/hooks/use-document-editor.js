@@ -148,6 +148,9 @@ export function useDocumentEditor({
   }, [config, dirty, modeless, onDisableCommentSelection, showToast, storeKey]);
 
   const requestDocumentMessage = useCallback(() => new Promise((resolve, reject) => {
+    // The Markdown view hands the page what was typed first; Markdown it
+    // can't convert stops the read (and so the save), with its reason.
+    try { markdownHooks.current.beforeSerialize?.(); } catch (error) { reject(error); return; }
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const timer = window.setTimeout(() => {
       requests.current.delete(requestId);
@@ -156,7 +159,6 @@ export function useDocumentEditor({
     requests.current.set(requestId, {
       resolve: (message) => { window.clearTimeout(timer); resolve(message); },
     });
-    try { markdownHooks.current.beforeSerialize?.(); } catch {}
     send({ type: 'tdoc:editSerialize', requestId });
   }), [send]);
   const requestDocument = useCallback(() => requestDocumentMessage().then((message) => message.html), [requestDocumentMessage]);

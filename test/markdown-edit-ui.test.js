@@ -56,6 +56,8 @@ ${CARDS}
 <p>Read more at <a href="https://tdoc.dev">tdoc.dev</a>.</p>
 <p id="last">The end.</p>
 </main></body></html>`;
+const NOTE = '<aside class="note"><p>Careful with the rollout.</p></aside>';
+const NOTES2 = PROSE.replace('<h2>Plan</h2>', `<h2>Plan</h2>\n${NOTE}`);
 const HOUSE_ONLY = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Dashboard</title></head>
 <body><main>
@@ -72,7 +74,7 @@ const SHEET = `<!doctype html>
 (async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-md-edit-'));
   const shots = process.env.TDOC_SHOTS || '';
-  const docs = { notes: PROSE, dash: HOUSE_ONLY, budget: SHEET };
+  const docs = { notes: PROSE, notes2: NOTES2, dash: HOUSE_ONLY, budget: SHEET };
   const reset = (slug) => {
     const docRoot = path.join(root, slug);
     fs.rmSync(docRoot, { recursive: true, force: true });
@@ -98,12 +100,15 @@ const SHEET = `<!doctype html>
     await context.addInitScript(([flagOn, modelessOn, idle, stored]) => {
       window.__TDOC_FLAGS__ = { markdownEditMode: flagOn, modelessEdit: modelessOn };
       window.__TDOC_MODELESS_IDLE_MS = idle;
-      if (stored && !sessionStorage.getItem('seeded')) {
-        sessionStorage.setItem('seeded', '1');
-        for (const [k, v] of Object.entries(stored)) localStorage.setItem(k, v);
-      }
+      // Not in the sandboxed doc frame, which has no storage.
+      try {
+        if (stored && !sessionStorage.getItem('seeded')) {
+          sessionStorage.setItem('seeded', '1');
+          for (const [k, v] of Object.entries(stored)) localStorage.setItem(k, v);
+        }
+      } catch {}
     }, [flag, modeless, idleMs, storage]);
-    await context.route(/\/d\/[a-z]+\/v\/\d+(\?.*)?$/, async (route) => {
+    await context.route(/\/d\/[a-z0-9]+\/v\/\d+(\?.*)?$/, async (route) => {
       const response = await route.fetch();
       const body = (await response.text()).replace(/window\.__TDOC_SHELL__ = (.*?);<\/script>/,
         (_, json) => `window.__TDOC_SHELL__ = ${JSON.stringify({ ...JSON.parse(json), mode: 'published' })};</script>`);
@@ -193,17 +198,92 @@ const SHEET = `<!doctype html>
       await context.close();
     });
 
-    await test('a placeholder deleted in Markdown removes that block, and says so', async () => {
+    await test('a placeholder deleted in Markdown removes that block, and says so as it happens (before any save)', async () => {
       reset('notes');
       const context = await newContext({ storage: { 'tdoc-edit-view:owner': 'markdown' } });
       const { page, frame } = await openDoc(context, 'notes', '?edit=1');
       await source(page).waitFor();
       const md = await source(page).inputValue();
       await source(page).fill(md.replace(/<!-- tdoc:keep 1[^\n]*-->\n\n/, ''));
-      await page.waitForTimeout(600);
+      // Said while still in Markdown: no switch back needed.
+      await page.locator('.tdoc-shell-toast, .tdoc-toast, [role="status"]', { hasText: 'kept as HTML was deleted' }).first().waitFor({ timeout: 3000 });
+      assert(await source(page).count() === 1, 'the view closed');
       await mdSwitch(page).click();
-      await page.locator('.tdoc-toast, [role="status"]', { hasText: 'kept as HTML was deleted' }).first().waitFor({ timeout: 3000 });
+      await page.locator('.tdoc-md-source').waitFor({ state: 'detached' });
       assert(await frame.evaluate(() => !document.querySelector('.tdoc-cards')), 'the deleted block is still on the page');
+      await context.close();
+    });
+
+    await test('Markdown that can\'t be converted blocks Save with the reason, keeps the view, and saves once fixed', async () => {
+      reset('notes');
+      const context = await newContext({ storage: { 'tdoc-edit-view:owner': 'markdown' } });
+      const { page } = await openDoc(context, 'notes', '?edit=1');
+      await source(page).waitFor();
+      const md = await source(page).inputValue();
+      await source(page).fill(md.replace('The end.', 'The end. Fine edit.'));
+      await page.waitForFunction(() => !document.querySelector('.tdoc-editor-commit button.primary')?.disabled, null, { timeout: 4000 });
+      await source(page).fill(md.replace('The end.', `The end. Fine edit.\n\n${'> '.repeat(40)}deep`));
+      // Said as soon as the view tries to hand it to the page.
+      await page.locator('.tdoc-shell-toast', { hasText: 'nested too deeply' }).first().waitFor({ timeout: 3000 });
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      const confirm = page.getByRole('button', { name: 'Save and publish' });
+      await confirm.waitFor({ timeout: 1500 }).catch(() => {});
+      if (await confirm.isVisible().catch(() => false)) await confirm.click();
+      await page.locator('.tdoc-shell-toast', { hasText: 'Nothing is saved until it is fixed' }).first().waitFor({ timeout: 3000 });
+      await page.waitForTimeout(1200);
+      assert(latest('notes') === 1, 'the stale page was saved under Markdown that could not be converted');
+      await mdSwitch(page).click();
+      await page.waitForTimeout(300);
+      assert(await source(page).count() === 1, 'switching back dropped the unconverted Markdown');
+      await source(page).fill(md.replace('The end.', 'The end. Fixed.'));
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      const firstPublish = page.getByRole('button', { name: 'Save and publish' });
+      await firstPublish.waitFor({ timeout: 1500 }).catch(() => {});
+      if (await firstPublish.isVisible().catch(() => false)) await firstPublish.click();
+      await until(() => latest('notes') === 2, 8000);
+      assert(latest('notes') === 2 && versionHtml('notes', 2).includes('The end. Fixed.'), 'the fixed Markdown did not save');
+      await context.close();
+    });
+
+    await test('Discard right after typing: the typing does not reach the discarded page', async () => {
+      reset('notes');
+      const context = await newContext({ storage: { 'tdoc-edit-view:owner': 'markdown' } });
+      const { page } = await openDoc(context, 'notes', '?edit=1');
+      await source(page).waitFor();
+      const md = await source(page).inputValue();
+      await source(page).fill(md.replace('The end.', 'The end. First.'));
+      await page.waitForFunction(() => !document.querySelector('.tdoc-editor-commit button.primary')?.disabled, null, { timeout: 4000 });
+      await source(page).fill(md.replace('The end.', 'The end. Second.'));
+      await page.getByRole('button', { name: 'Discard draft' }).click();
+      await page.waitForTimeout(1500);
+      const handle = await page.locator('iframe.tdoc-doc-frame').elementHandle();
+      const frame = await handle.contentFrame();
+      const text = await frame.evaluate(() => document.querySelector('main').textContent);
+      assert(!text.includes('First.') && !text.includes('Second.'), `discarded typing reached the page: ${text}`);
+      await source(page).waitFor();
+      assert(!(await source(page).inputValue()).includes('Second.'), 'the view kept the discarded text');
+      assert(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'a draft is left after Discard');
+      await context.close();
+    });
+
+    await test('modeless: an autosave publishing the view\'s own body does not rebuild the view (placeholders keep their numbers, a cut placeholder pastes back)', async () => {
+      reset('notes2');
+      const context = await newContext({ modeless: true, idleMs: 1200, storage: { 'tdoc-edit-view:owner': 'markdown' } });
+      const { page } = await openDoc(context, 'notes2');
+      await source(page).waitFor();
+      const md = await source(page).inputValue();
+      const keep2 = md.match(/<!-- tdoc:keep 2[^\n]*-->/)[0];
+      const cut = md.replace(`${keep2}\n\n`, '');
+      await source(page).fill(cut);
+      await until(() => latest('notes2') === 2, 8000);
+      assert(latest('notes2') === 2 && !versionHtml('notes2', 2).includes('class="note"'), 'the cut did not publish');
+      await page.waitForTimeout(800);
+      assert(await source(page).inputValue() === cut, 'the view was rebuilt after the autosave');
+      await source(page).fill(`${cut}\n${keep2}\n`);
+      await until(() => latest('notes2') === 3, 8000);
+      assert(latest('notes2') === 3 && versionHtml('notes2', 3).includes(NOTE), 'pasting the placeholder back did not bring its block back');
+      assert(versionHtml('notes2', 3).includes(CARDS), 'the other placeholder changed');
+      assert(!page.errors.length, page.errors.join('\n'));
       await context.close();
     });
 

@@ -2703,7 +2703,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
             isNew: true,
             scene: { type: 'excalidraw', version: 2, elements: [], appState: { viewBackgroundColor: '#ffffff' }, files: {} },
           })}
-          onDiscard={editor.discard}
+          onDiscard={() => { markdown.cancel(); return editor.discard(); }}
           onSave={requestSave}
         />
       ) : null}
