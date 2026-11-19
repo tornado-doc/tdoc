@@ -23836,12 +23836,25 @@ const SUGGEST_PLAN_PASSES = 4;
 const SUGGEST_PLAN_BUDGET = 10;
 const SUGGEST_SIZE_ROUNDS = 3;
 const SUGGEST_PLAN_TOO_MUCH = 'suggest_plan_too_much';
+const SUGGEST_PLAN_DOC_TOO_LARGE = 'suggest_plan_doc_too_large';
 const SUGGEST_PROVIDER_RE = /data-tdoc-provider|id=["']tdoc-frame-probe["']/i;
 function planSuggestionAccept(html, pick, { widgetPath, overBy, budget = SUGGEST_PLAN_BUDGET, byteLength = (x) => x.length }) {
   const same = (a, b) => suggestNorm(a.find) === suggestNorm(b.find) && suggestNorm(a.replace) === suggestNorm(b.replace);
-  const widgets = (h) => h.split(widgetPath).length;
+  // A widget path counts by where it leads (the path and the file after it),
+  // so dropping one and making another can never pass as no change.
+  const widgetRe = new RegExp(`${widgetPath.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}[^\\s"'<>]{0,120}`, 'gi');
+  const widgetsAdded = (from, to) => {
+    const have = new Map();
+    for (const m of from.match(widgetRe) || []) have.set(m, (have.get(m) || 0) + 1);
+    for (const m of to.match(widgetRe) || []) {
+      const n = have.get(m) || 0;
+      if (!n) return true;
+      have.set(m, n - 1);
+    }
+    return false;
+  };
   const baseProvider = SUGGEST_PROVIDER_RE.test(html);
-  const unsafe = (from, next) => widgets(next) > widgets(from) || (!baseProvider && SUGGEST_PROVIDER_RE.test(next));
+  const unsafe = (from, next) => widgetsAdded(from, next) || (!baseProvider && SUGGEST_PROVIDER_RE.test(next));
   let plans = 0;
   const plan = (text, list, map) => {
     if (++plans > budget) throw new Error(SUGGEST_PLAN_TOO_MUCH);
@@ -23901,7 +23914,7 @@ function planSuggestionAccept(html, pick, { widgetPath, overBy, budget = SUGGEST
         const named = new Set();
         for (const w of result.writes || []) {
           const was = cur.slice(w.s, w.e);
-          if (w.text.split(widgetPath).length > was.split(widgetPath).length || (!baseProvider && SUGGEST_PROVIDER_RE.test(w.text))) w.indexes.forEach((i) => named.add(rest[i]));
+          if (widgetsAdded(was, w.text) || (!baseProvider && SUGGEST_PROVIDER_RE.test(w.text))) w.indexes.forEach((i) => named.add(rest[i]));
         }
         if (named.size) {
           [...named].forEach((p) => dropped.push({ ...p, reason: 'unsafe' }));
@@ -23968,7 +23981,8 @@ function planSuggestionAccept(html, pick, { widgetPath, overBy, budget = SUGGEST
     const growth = new Map();
     for (const g of out.good) growth.set(g.set.id, (growth.get(g.set.id) || 0) + byteLength(g.edit.replace) - byteLength(g.edit.find));
     const order = [...growth.entries()].filter(([, n]) => n > 0).sort((x, y) => y[1] - x[1]);
-    if (!order.length) throw new Error(SUGGEST_PLAN_TOO_MUCH);
+    // Over the cap with no set growing it: the doc itself is too large.
+    if (!order.length) throw new Error(SUGGEST_PLAN_DOC_TOO_LARGE);
     let took = 0;
     for (const [id, n] of order) {
       if (took >= over) break;
@@ -24040,6 +24054,9 @@ async function acceptSuggestionSets(env, slug, gate, wanted, ctx) {
         byteLength: utf8ByteLength,
       });
     } catch (e) {
+      if (e && e.message === SUGGEST_PLAN_DOC_TOO_LARGE) {
+        return { error: json({ error: 'payload_too_large', message: 'This document is already over the size limit, so no suggestion can be applied. Make it smaller first.' }, { status: 413 }) };
+      }
       if (!e || e.message !== SUGGEST_PLAN_TOO_MUCH) throw e;
       // Nothing saved, nothing marked: every suggestion is still there.
       return { error: json({ error: 'too_many_to_apply', message: 'These suggestions are too much to apply in one step. Accept them a few at a time.' }, { status: 422 }) };

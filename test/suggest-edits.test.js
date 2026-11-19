@@ -616,6 +616,23 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(odd.ok === false, JSON.stringify(odd));
   });
 
+  await t('accept on a doc already over the size cap: 413 "doc is too large", single and Accept all; nothing marked', async () => {
+    await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'fat', version: 1, html: '<h1>F</h1><p>One here.</p><p>Two here.</p>' } });
+    const p1 = (await call('/api/docs/fat/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'One here.', replace: 'One hare.' }] } })).body.suggestion.id;
+    const p2 = (await call('/api/docs/fat/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Two here.', replace: 'Two.' }] } })).body.suggestion.id;
+    const before = env.TDOC_HOSTED_MAX_UPLOAD_BYTES;
+    env.TDOC_HOSTED_MAX_UPLOAD_BYTES = '40';
+    try {
+      const one = await call(`/api/docs/fat/suggestions/${p1}/accept`, { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: {} });
+      assert(one.status === 413 && one.body.error === 'payload_too_large' && /too large|size limit/i.test(one.body.message), one.text);
+      const all = await call('/api/docs/fat/suggestions/accept', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { sets: [{ id: p1 }, { id: p2 }] } });
+      assert(all.status === 413 && all.body.error === 'payload_too_large', all.text);
+    } finally { if (before === undefined) delete env.TDOC_HOSTED_MAX_UPLOAD_BYTES; else env.TDOC_HOSTED_MAX_UPLOAD_BYTES = before; }
+    const stored = env.COMMENTS.stateFor('fat').storage.map.get('suggestions');
+    assert(stored.every((x) => x.edits.every((e) => e.state === 'pending')), JSON.stringify(stored.map((x) => x.edits[0].state)));
+    assert(JSON.parse(env.META.map.get('meta:fat')).versions.length === 1);
+  });
+
   await t('Accept all: an overlapping edit planned again never lands on words another edit inserted', async () => {
     // A rewrites "one two" into text holding "two three"; B ("two three")
     // overlapped A. After A, "two three" is unique again, but only inside A's
@@ -785,7 +802,7 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
   const workerSrc = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8').replace('/* __TDOC_HTML_PARSER__ */', () => parserSrc);
   const S = new Function(`${workerSrc.slice(workerSrc.indexOf('const SUGGEST_MAX_EDITS'), workerSrc.indexOf('// The edits a model or an agent sent'))}\nreturn { suggestPlan, suggestTextMap, suggestParse, SUGGEST_MAX_HTML, SUGGEST_MAX_RAW };`)();
   // The Accept planner itself (planSuggestionAccept), on the same parser.
-  const P = new Function(`${workerSrc.slice(workerSrc.indexOf('const SUGGEST_MAX_EDITS'), workerSrc.indexOf('// The edits a model or an agent sent'))}\n${workerSrc.slice(workerSrc.indexOf('const SUGGEST_PLAN_PASSES'), workerSrc.indexOf('function setsOfDropped'))}\nreturn { planSuggestionAccept, SUGGEST_PLAN_TOO_MUCH };`)();
+  const P = new Function(`${workerSrc.slice(workerSrc.indexOf('const SUGGEST_MAX_EDITS'), workerSrc.indexOf('// The edits a model or an agent sent'))}\n${workerSrc.slice(workerSrc.indexOf('const SUGGEST_PLAN_PASSES'), workerSrc.indexOf('function setsOfDropped'))}\nreturn { planSuggestionAccept, SUGGEST_PLAN_TOO_MUCH, SUGGEST_PLAN_DOC_TOO_LARGE };`)();
   await t('planner: a work budget it cannot keep refuses (throws), never runs on', async () => {
     const html = '<!doctype html><html><body><p>One here.</p><p>Two here.</p></body></html>';
     const pick = ['One here.', 'Two here.'].map((find, k) => ({ set: { id: `s${k}` }, edit: { id: 'e1', find, replace: find.replace('here', 'there') } }));
@@ -800,6 +817,21 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     const pick = [['and note', 'and notes'], ['Good one.', 'Fine one.'], ['Good two.', 'Fine two.']].map(([find, replace], k) => ({ set: { id: `s${k}` }, edit: { id: 'e1', find, replace } }));
     const out = P.planSuggestionAccept(html, pick, { widgetPath: '/d/x/v/1/widget/', overBy: () => -1, budget: 4 });
     assert(out.good.length === 2 && out.dropped.length === 1 && out.dropped[0].reason === 'unsafe' && out.dropped[0].edit.find === 'and note', JSON.stringify(out.dropped));
+  });
+  await t('planner: dropping one widget path and making another is not "no change"', async () => {
+    const html = '<!doctype html><html><body><p>Go /d/x/v/1/widget/a.html or /d/x/v/1&#x2F;widget/b.html now</p><p>Good one.</p></body></html>';
+    const pick = [['Go /d/x/v/1/widget/a.html or', 'Go'], ['Good one.', 'Fine one.']].map(([find, replace], k) => ({ set: { id: `s${k}` }, edit: { id: 'e1', find, replace } }));
+    const out = P.planSuggestionAccept(html, pick, { widgetPath: '/d/x/v/1/widget/', overBy: () => -1 });
+    assert(out.good.length === 1 && out.good[0].edit.find === 'Good one.', JSON.stringify(out.good.map((g) => g.edit.find)));
+    assert(out.dropped.length === 1 && out.dropped[0].reason === 'unsafe', JSON.stringify(out.dropped));
+    assert(!/widget\/b\.html/.test(out.next.replace('&#x2F;widget/b.html', '')), out.next);
+  });
+  await t('planner: a doc already over the cap with no set growing it says so (not "too much")', async () => {
+    const html = '<!doctype html><html><body><p>One here.</p></body></html>';
+    const pick = [{ set: { id: 's0' }, edit: { id: 'e1', find: 'One here.', replace: 'One hare.' } }];
+    let threw = '';
+    try { P.planSuggestionAccept(html, pick, { widgetPath: '/d/x/v/1/widget/', overBy: () => 10 }); } catch (e) { threw = e.message; }
+    assert(threw === P.SUGGEST_PLAN_DOC_TOO_LARGE, `threw ${threw}`);
   });
   // Everything a browser runs or styles or draws as foreign content, from a
   // parse: script/style text in any namespace, every attribute, and the
