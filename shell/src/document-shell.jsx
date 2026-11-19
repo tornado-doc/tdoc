@@ -53,6 +53,7 @@ import {
   EditorSaveStatus,
 } from './document/editor-toolbar.jsx';
 import { flashEdited, useModelessEdit } from './document/modeless-edit.jsx';
+import { MarkdownSwitch, markdownEligible, useMarkdownEdit } from './document/markdown-edit.jsx';
 import {
   DeleteDocumentDialog,
   OwnerAccessDialog,
@@ -609,6 +610,9 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // frame's ready message.
   const exportHtml = useMemo(() => createExportHtmlRequest(sendToFrame), [sendToFrame]);
   const [docShape, setDocShape] = useState({ sheets: 0, sheetDoc: false });
+  // Each page the frame loads (first load, Discard, a save): the Markdown
+  // view reopens on it.
+  const [frameEpoch, setFrameEpoch] = useState(0);
   // The signed-out homepage remembers nothing about a visitor's view.
   const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity), canEdit: Boolean(config.canEdit) });
   const [embedsHeld, setEmbedsHeld] = useState(false);
@@ -681,6 +685,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     'tdoc:ready': (message) => {
       setVisualOpen(false);
       setDocShape({ sheets: Number(message.sheets) || 0, sheetDoc: message.sheetDoc === true, slides: Number(message.slides) || 0 });
+      setFrameEpoch((n) => n + 1);
       setSupportsTheme(message.supportsTheme === true);
       const storedTheme = readStored('tdoc-theme');
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
@@ -947,6 +952,16 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     onPublished: (result) => { adoptVersion(Number(result?.version) || 0); flashEdited(); },
   });
   editorRef.current = editor;
+  // Edit as Markdown (flag markdownEditMode): a prose doc being edited.
+  const markdown = useMarkdownEdit({
+    available: isFeatureOn('markdownEditMode') && Boolean(config.canEdit) && !config.isLanding && !boot.oldVersion
+      && editor.mode === 'edit' && frameEpoch > 0 && markdownEligible(docShape),
+    editor,
+    send: bridge.send,
+    login: config.identity?.login,
+    frameEpoch,
+    showToast,
+  });
 
   // The frame decides whether a click dismisses or acts, so it has to know when
   // the shell has something open. While it does, the next click anywhere in the
@@ -2075,7 +2090,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     send: bridge.send,
     frameRef: bridge.frameRef,
     narrow,
-    busy: Boolean(composer || dialog || comparing || historyOpen || (narrow && drawerOpen) || editor.conflict || editor.staleDraft),
+    busy: Boolean(composer || dialog || comparing || historyOpen || (narrow && drawerOpen) || editor.conflict || editor.staleDraft || markdown.on),
     latest: liveLatest,
     onAdoptVersion: adoptVersion,
     // A version that cannot be swapped in: the owner waiting on their agent
@@ -2500,6 +2515,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
               disabled={editor.mode === 'edit' && editor.dirty && !editor.modeless}
             />
             {editor.modeless ? <EditorSaveStatus status={editor.saveStatus} /> : null}
+            {editor.modeless ? <MarkdownSwitch markdown={markdown} /> : null}
             {askAiAction}
             {!narrow && sidePanelAvailable ? (
               // One Comment button, its open count on it: it opens and closes
@@ -2633,7 +2649,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           setDiagram(null);
           showToast(`${diagram.isNew ? 'Diagram inserted' : 'Diagram applied'}. Save the document to publish a new version.`);
         }} />
-      <div className="tdoc-reader-surface" hidden={comparing || historyOpen} style={sideInset ? { marginRight: sideInset } : undefined}>
+      <div className="tdoc-reader-surface" hidden={comparing || historyOpen} data-markdown={markdown.on ? '' : undefined} style={sideInset ? { marginRight: sideInset } : undefined}>
       <OldVersionNotice value={boot.oldVersion || (modelessEdit.strip !== 'hidden' && modelessEdit.newest > Number(config.version) ? {
         current: Number(config.version),
         latest: modelessEdit.newest,
@@ -2673,6 +2689,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       {editor.mode === 'edit' && !editor.modeless ? (
         <EditorToolbar
           proseTools={!docShape.sheetDoc}
+          markdown={markdown}
           dirty={editor.dirty}
           checking={editor.checking}
           saving={editor.saving}
@@ -2708,11 +2725,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         sandbox="allow-scripts"
         src={frameSrc}
       />
+      {markdown.pane}
 
       <DocumentFooter footerRef={footerRef} visible={bridge.layout.footerVisible && !bridge.layout.fullBleed} />
 
       {narrow ? (<>
-        {editor.mode !== 'read' ? <DesktopCommentLayer
+        {editor.mode !== 'read' && !markdown.on ? <DesktopCommentLayer
           clusters={clusters.filter((cluster) => cluster.items.every(({ comment }) => comment.document))}
           commentsById={commentsById}
           seenMap={seenMap}
@@ -2777,7 +2795,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         />
       </>) : (
         <DesktopCommentLayer
-          clusters={editor.mode === 'read' ? [] : clusters}
+          clusters={editor.mode === 'read' || markdown.on ? [] : clusters}
           commentsById={commentsById}
           seenMap={seenMap}
           hoveredAnchorId={hoveredAnchorId}

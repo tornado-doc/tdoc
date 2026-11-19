@@ -212,6 +212,44 @@ html:has(.tdoc-document-app[data-visual-open]) { filter: none !important; }
 .tdoc-live-swap-frame { position: fixed; left: -10000px; top: 0; width: 1024px; height: 600px; border: 0; visibility: hidden; pointer-events: none; }
 .tdoc-editor-status.tdoc-editor-autosave { min-width: 0; margin: 0 2px; }
 
+/* Edit as Markdown (flag markdownEditMode; document/markdown-edit.jsx): the
+   switch in the editor bar or beside the autosave status, and the source
+   view in the page's place: the reading column's width and padding
+   (reader.css), the page's colours, monospace. */
+.tdoc-md-switch { display: inline-flex; flex: none; }
+.tdoc-md-switch .tdoc-switch[data-disabled] { cursor: not-allowed; opacity: .5; }
+.tdoc-md-switch .tdoc-switch[data-disabled]:hover { border-color: transparent; background: none; }
+.tdoc-editor-toolbar .tdoc-switch-track:hover:not(:disabled) { border: none; background: #d4d4d9; }
+.tdoc-editor-toolbar .tdoc-switch-track[data-checked]:hover:not(:disabled) { background: #1a7340; }
+.tdoc-reader-surface[data-markdown] > .tdoc-doc-frame { display: none; }
+.tdoc-md-source {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  background: var(--td-ground);
+}
+.tdoc-md-source .tdoc-md-source-text {
+  display: block;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 56px 24px 80px;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  background: transparent;
+  color: var(--td-ink);
+  caret-color: var(--td-accent);
+  font: 14px/1.7 ui-monospace, "SF Mono", Menlo, monospace;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.tdoc-md-source .tdoc-md-source-text::selection { background: var(--td-selection); }
+
 .tdoc-editor-link-field {
   display: grid;
   gap: 6px;
@@ -243,6 +281,7 @@ html:has(.tdoc-document-app[data-visual-open]) { filter: none !important; }
   .tdoc-editor-status.tdoc-editor-autosave { display: inline; }
   .tdoc-editor-toolbar button.primary { min-width: 32px; }
   .tdoc-editor-toolbar button.primary span { display: none; }
+  .tdoc-md-source .tdoc-md-source-text { padding: 24px 16px 64px; font-size: 13px; }
 }
 
 .tdoc-footer {

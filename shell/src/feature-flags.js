@@ -126,6 +126,16 @@ export const FLAGS = Object.freeze({
   // undone by Restore in the version history. The flag is the off switch
   // until it settles; remove it by graduate_by.
   convertToSheet: Object.freeze({ label: 'Convert a doc to a sheet (⋯ menu)', owner: 'julie', added: '2026-11-17', default: true, graduate_by: '2026-11-24' }),
+  // Edit as Markdown: while a prose doc is being edited (Edit mode, or the
+  // modeless page), a "Markdown" switch shows the doc as Markdown source in
+  // place of the page and back; the page follows what is typed, so Save,
+  // drafts and autosave are unchanged. Blocks Markdown can't show (house
+  // blocks, sheets, figures, embeds, styled markup) stay HTML behind a
+  // placeholder line and come back byte for byte; a doc made only of them
+  // has the switch disabled with the reason. Sheets and slides: no switch.
+  // The choice is remembered in this browser (document/markdown-edit.jsx,
+  // markdown-source.js).
+  markdownEditMode: Object.freeze({ label: 'Edit as Markdown (switch while editing)', owner: 'julie', added: '2026-11-19', default: false, preview: true, graduate_by: '2026-11-26' }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

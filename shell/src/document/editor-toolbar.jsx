@@ -26,6 +26,7 @@ import { AppButton } from '../ui/button.jsx';
 import { CommentIcon } from '../ui/comment-icon.jsx';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { formatDraftAge } from './draft-store.js';
+import { MarkdownSwitch } from './markdown-edit.jsx';
 
 export const MODES = [
   { value: 'read', label: 'Read', Icon: Eye },
@@ -104,10 +105,15 @@ function ToolButton({ label, icon, command, value, onFormat, pressed, keepFocus 
 // proseTools false (a doc that is only its sheet): the bar keeps Undo, Redo,
 // the status and Save / Discard, and the sheet's own format row is the only
 // formatting row. A prose doc keeps the prose tools.
-export function EditorToolbar({ dirty, checking, saving, onFormat, onInsertDiagram, onDiscard, onSave, proseTools = true }) {
+// `markdown` (flag markdownEditMode): the Markdown switch, before the status;
+// while the Markdown view shows, the formatting tools (which act on the
+// page) give way to it.
+export function EditorToolbar({ dirty, checking, saving, onFormat, onInsertDiagram, onDiscard, onSave, proseTools = true, markdown = null }) {
+  const source = Boolean(markdown?.on);
   return (
     <div className="tdoc-editor-toolbar" role="toolbar" aria-label="Document editing">
       <div className="tdoc-editor-tools">
+        {source ? null : (<>
         {proseTools ? (<>
         <ToolButton label="Bold" icon={<Bold size={16} />} command="bold" onFormat={onFormat} />
         <ToolButton label="Italic" icon={<Italic size={16} />} command="italic" onFormat={onFormat} />
@@ -127,8 +133,10 @@ export function EditorToolbar({ dirty, checking, saving, onFormat, onInsertDiagr
         </>) : null}
         <ToolButton label="Undo" icon={<Undo2 size={16} />} command="undo" onFormat={onFormat} />
         <ToolButton label="Redo" icon={<Redo2 size={16} />} command="redo" onFormat={onFormat} />
+        </>)}
       </div>
       <div className="tdoc-editor-commit">
+        <MarkdownSwitch markdown={markdown} />
         <span className="tdoc-editor-status">{checking ? 'Checking changes...' : (dirty ? 'Unsaved draft' : 'No changes')}</span>
         <button type="button" title="Discard draft" aria-label="Discard draft" disabled={!dirty || saving} onClick={onDiscard}>
           <RotateCcw size={15} />
