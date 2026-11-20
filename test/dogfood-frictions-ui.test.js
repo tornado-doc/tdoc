@@ -12,6 +12,11 @@
 //     is "Post" (the dock's button is "Comment")
 //   - widget: Esc closes the composer (not back to picking), the words come
 //     back on the same element, the next Esc closes what is behind it
+//   - widget, comment first (2026-11-20 follow-up): the bookmark opens no
+//     window, it goes straight to picking; Post opens the tdoc window; no
+//     separate "Finish signing in" notice (the composer says it), and its
+//     Post button brings the window back; × / Esc mid sign-in close the
+//     window and drop the held post, the words stay for the same element
 // TDOC_UI_SHOTS=<dir> saves screenshots.
 // Run with: node test/dogfood-frictions-ui.test.js
 const assert = require('assert/strict');
@@ -209,14 +214,17 @@ const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p
         await page.goto(`${base}/__page`);
         const root = page.locator('#tdoc-feedback-root');
         await root.locator('.tdoc-feedback-dock').waitFor({ timeout: 15000 });
+        // The bookmark (data-tdoc-open) goes straight to picking, and opens
+        // no window: signing in waits for Post.
+        await root.locator('.tdoc-fb-banner').waitFor({ timeout: 5000 });
+        await page.waitForTimeout(800);
+        assert.equal(ctx.pages().length, 1, 'the bookmark opened a sign-in window');
+        assert.equal(await root.locator('.tdoc-feedback-notice').count(), 0, 'a notice on opening, before any comment');
         const pick = async () => {
           if (!(await root.locator('.tdoc-fb-banner').count())) await root.locator('.tdoc-feedback-dock button', { hasText: 'Comment' }).first().click();
           await root.locator('.tdoc-fb-banner').waitFor({ timeout: 5000 });
-          // The connect window the first click opens: closed, and the
-          // widget's word about it settled, before picking.
-          await page.waitForTimeout(400);
-          for (const p of ctx.pages()) if (p !== page) await p.close().catch(() => {});
-          await page.waitForTimeout(700);
+          await page.waitForTimeout(300);
+          assert.equal(ctx.pages().length, 1, 'picking opened a sign-in window');
           const b = await page.locator('#trial').boundingBox();
           await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
           await page.waitForTimeout(100);
@@ -246,22 +254,22 @@ const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p
         assert.match(await composer.locator('.tdoc-sign-in-to-post').innerText(), /Finish signing in/);
         assert.equal(await root.locator('.tdoc-feedback-notice', { hasText: 'Not connected' }).count(), 0, 'a stale Not connected notice beside the window');
         await shot(page, `widget-${tag}-signing-in`);
-        // Pressing Post again while the window is still open: no second window.
+        // Pressing Post again while the window is still open (it reads
+        // "Open sign-in"): the same window comes forward, no second one.
         const now = ctx.pages().length;
-        await composer.locator('button.submit').click({ force: true }).catch(() => {});
+        assert.equal((await composer.locator('button.submit').innerText()).trim(), 'Open sign-in');
+        await composer.locator('button.submit').click();
         await page.waitForTimeout(400);
         assert.equal(ctx.pages().length, now, 'a second tdoc window');
-        // The window closed before connecting: nothing posted, the composer
-        // stays; closing it now (×) keeps the words for next time.
+        // No separate "Finish signing in" notice (it could not be closed):
+        // the composer is the one place that says so.
+        assert.equal(await root.locator('.tdoc-feedback-waiting').count(), 0, 'the sticky Finish signing in notice');
+        // The window closed: nothing posted, the composer stays; closing it
+        // now (×) keeps the words for next time.
         const heldDraft = () => page.evaluate(() => Object.keys(sessionStorage).filter((k) => k.endsWith(':draft')).length);
         assert.equal(await heldDraft(), 1, 'the signed-out post was not held');
         for (const p of ctx.pages()) if (p !== page) await p.close().catch(() => {});
-        await page.waitForFunction(() => {
-          const root = document.querySelector('#tdoc-feedback-root')?.shadowRoot;
-          const b = root && root.querySelector('.tdoc-popup button.submit');
-          return b && !b.disabled;
-        }, null, { timeout: 5000 });
-        await page.waitForTimeout(150);
+        await page.waitForTimeout(800);
         await composer.locator('button.x[aria-label="Close"]').click();
         await composer.waitFor({ state: 'detached' });
         await pick();
@@ -269,12 +277,15 @@ const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p
         assert.equal(await composer.locator('textarea').inputValue(), 'CTA label is vague', 'a failed Post lost the words on close');
         // Esc abandons the held signed-out post too (as × does): connecting
         // later must not post words the person walked away from.
-        await composer.locator('button.submit').click();
+        const [win] = await Promise.all([ctx.waitForEvent('page'), composer.locator('button.submit').click()]);
         await page.waitForTimeout(400);
         assert.equal(await heldDraft(), 1, 'Post did not hold the words');
         await page.keyboard.press('Escape');
         await composer.waitFor({ state: 'detached' });
         assert.equal(await heldDraft(), 0, 'Esc left the signed-out post held, to post on the next connect');
+        await page.waitForTimeout(300);
+        assert.ok(win.isClosed(), 'Esc left the sign-in window open');
+        assert.equal(await root.locator('.tdoc-feedback-notice').count(), 0, 'a notice after Esc called off the sign-in');
         assert.deepEqual(page.errors, []);
         await ctx.close();
       });
@@ -289,7 +300,7 @@ const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p
       await page.goto(`${base}/__page`);
       const root = page.locator('#tdoc-feedback-root');
       await root.locator('.tdoc-feedback-dock').waitFor({ timeout: 15000 });
-      await root.locator('.tdoc-feedback-dock button', { hasText: 'Comment' }).first().click();
+      // The bookmark goes straight to picking (nothing tried to open).
       await root.locator('.tdoc-fb-banner').waitFor({ timeout: 5000 });
       await page.waitForTimeout(500);
       const b = await page.locator('#trial').boundingBox();

@@ -248,15 +248,17 @@ async function startSite(state) {
             await page.waitForURL(`${w.site}/`);
             assert.equal(await page.evaluate(() => location.search), '', 'the site got the invite');
             assert((await allowed(w)).includes('bob'), 'bob not let in');
-            // The bookmark: its first connect goes to the space joined.
-            const popupP = context.waitForEvent('page', { timeout: 4000 }).catch(() => null);
+            // The bookmark opens no window (comment first, sign in later):
+            // it goes to picking, and the first Post connects, to the space
+            // joined.
+            const popupP = context.waitForEvent('page', { timeout: 2500 }).catch(() => null);
             await clickBookmark(page, w.tdoc);
-            let popup = await popupP;
-            if (!popup) {
-              const connectBtn = page.locator('#tdoc-feedback-root .tdoc-feedback-notice button.submit');
-              await connectBtn.waitFor();
-              [popup] = await Promise.all([context.waitForEvent('page'), connectBtn.click()]);
-            }
+            assert.equal(await popupP, null, 'the bookmark opened a window');
+            const root = page.locator('#tdoc-feedback-root');
+            await root.locator('.tdoc-fb-banner').waitFor();
+            await root.locator('.tdoc-fb-banner button', { hasText: 'Comment on this page' }).click();
+            await root.locator('.tdoc-popup textarea').fill('Joined, first comment');
+            const [popup] = await Promise.all([context.waitForEvent('page'), root.locator('.tdoc-popup button.submit').click()]);
             await popup.waitForLoadState();
             await popup.locator('#connect').click();
             await page.waitForFunction((key) => { try { return Boolean(JSON.parse(localStorage.getItem(key)).token); } catch (_) { return false; } }, storageKey(w));

@@ -15,7 +15,12 @@
 //   - the comment written before connecting posts once the person clicks
 //     Connect, collected through the claim (no postMessage possible);
 //   - a blocked popup keeps the comment and posts it after Connect tdoc;
-//   - cancelling keeps it too; retrying posts it.
+//   - the window lost mid sign-in: the composer's Post ("Open sign-in")
+//     opens it again, and the comment posts once;
+//   - the held draft posts only on an explicit Post / Connect: a reload
+//     with a valid token posts nothing, one older than 15 minutes is dropped;
+//   - the bookmark itself opens no window (comment first, sign in later);
+//     the composer, not a separate notice, says signing in is under way.
 // TDOC_UI_SHOTS=<dir> saves screenshots (1440 and 390).
 const assert = require('assert/strict');
 const http = require('http');
@@ -155,18 +160,25 @@ function listen(handler, port) {
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(`${appBase}/dashboard`);
-    await page.evaluate(() => { window.__realOpen = window.open; window.open = () => null; });
+    await page.evaluate(() => {
+      window.__realOpen = window.open;
+      window.__opened = 0;
+      window.open = (...args) => { window.__opened++; return window.__realOpen(...args); };
+    });
     await page.addScriptTag({ url: `${tdocBase}/feedback.js` });
     await page.waitForFunction(() => window.tdocFeedback && window.tdocFeedback.base);
-    // The bookmark: shows the overlay; connecting is blocked this once.
+    // The bookmark: shows the overlay and goes to picking. Signed out, it
+    // opens no window: signing in waits for Post.
     await page.evaluate(() => window.tdocFeedback.open());
-    await fb(page, '.tdoc-feedback-notice').waitFor();
-    await page.evaluate(() => { window.open = window.__realOpen; });
-    await fb(page, '.tdoc-feedback-notice button.x').click();
+    await fb(page, '.tdoc-fb-banner').waitFor();
+    await page.waitForTimeout(500);
+    assert.equal(await page.evaluate(() => window.__opened), 0, 'the bookmark opened a window');
+    assert.equal(await fb(page, '.tdoc-feedback-notice').count(), 0, 'a notice before any comment');
     return { context, page, errors };
   };
   const compose = async (page, text) => {
-    await fb(page, '.tdoc-feedback-dock button.primary').click();
+    if (!(await fb(page, '.tdoc-fb-banner').count())) await fb(page, '.tdoc-feedback-dock button.primary').click();
+    await fb(page, '.tdoc-fb-banner').waitFor();
     await page.locator('#invite').click({ force: true });
     const field = fb(page, '.tdoc-popup textarea');
     await field.waitFor();
@@ -186,10 +198,11 @@ function listen(handler, port) {
           await popup.getByRole('link', { name: 'Sign in with GitHub' }).click();
           await popup.waitForURL(`${idpBase}/**`);
           // The hypothesis: the popup is still open, yet the app reads it as
-          // closed (the waiting line shows only once popup.closed is true).
-          const waiting = fb(page, '.tdoc-feedback-waiting');
-          await waiting.waitFor({ timeout: 5000 });
-          assert.match(await waiting.innerText(), /Finish signing in in the tdoc window/);
+          // closed. The composer stays, saying signing in is under way; no
+          // separate notice (it could not be closed with Esc).
+          await page.waitForTimeout(1200);
+          assert.match(await fb(page, '.tdoc-popup .tdoc-sign-in-to-post').innerText(), /Finish signing in/);
+          assert.equal(await fb(page, '.tdoc-feedback-waiting').count(), 0, 'the sticky waiting notice');
           assert.equal(await fb(page, '.tdoc-popup textarea').inputValue(), 'The invite button does nothing', 'composer lost the text while connecting');
           await shot(page, `coop-${width}-waiting`);
           await popup.locator('#continue').click();
@@ -237,29 +250,92 @@ function listen(handler, port) {
       } finally { await context.close(); }
     });
 
-    await t('cancelling the wait keeps the comment; retrying posts it once', async () => {
+    // The held draft (sessionStorage) posts only on the person's own Post
+    // or Connect, and only while fresh: a later load that happens to have a
+    // session never sends it.
+    const holdBlocked = async (page, text) => {
+      await compose(page, text);
+      await page.evaluate(() => { window.open = () => null; });
+      await fb(page, '.tdoc-popup button.submit').click();
+      await fb(page, '.tdoc-feedback-notice').waitFor();
+      const held = await page.evaluate((key) => JSON.parse(sessionStorage.getItem(`${key}:draft`) || 'null'), storageKey);
+      assert.equal(held && held.text, text, 'the signed-out post was not held');
+      assert(Number.isFinite(held.at), 'the held draft has no time');
+    };
+
+    await t('held draft: a reload with a valid token posts nothing; an explicit Post posts', async () => {
       const { context, page } = await start(1440);
       try {
-        await compose(page, 'Cancelled, then posted');
+        await holdBlocked(page, 'Held, never sent by a load');
+        // A valid token for this app, as a connect would leave it.
+        const r = await worker.fetch(new Request('https://tdoc.dev/api/feedback/connect', {
+          method: 'POST',
+          headers: { cookie: await putSession(env, 'julie'), origin: appBase, 'content-type': 'application/json' },
+          body: JSON.stringify({ origin: appBase }),
+        }), env, { waitUntil() {} });
+        const session = await r.json();
+        assert(session.token, `no token: ${JSON.stringify(session)}`);
+        await page.evaluate(([key, value]) => localStorage.setItem(key, JSON.stringify(value)), [storageKey, session]);
+        await page.reload();
+        await page.addScriptTag({ url: `${tdocBase}/feedback.js` });
+        await page.waitForFunction(() => window.tdocFeedback && window.tdocFeedback.base);
+        await page.evaluate(() => window.tdocFeedback.open());
+        await fb(page, '.tdoc-feedback-dock').waitFor();
+        await page.waitForTimeout(2500);
+        assert.equal((await comments()).length, 0, 'a load with a session posted the held draft');
+        // The person's own Post sends their comment.
+        await compose(page, 'Sent by Post');
+        await fb(page, '.tdoc-popup button.submit').click();
+        await fb(page, '.tdoc-pin').first().waitFor({ timeout: 8000 });
+        const posted = await comments();
+        assert.deepEqual(posted.map((c) => c.text), ['Sent by Post']);
+      } finally { await context.close(); }
+    });
+
+    await t('held draft: older than 15 minutes, Connect posts nothing and drops it', async () => {
+      const { context, page } = await start(1440, { signedIn: true });
+      try {
+        await holdBlocked(page, 'Too old to send');
+        await page.evaluate((key) => {
+          const draft = JSON.parse(sessionStorage.getItem(`${key}:draft`));
+          sessionStorage.setItem(`${key}:draft`, JSON.stringify({ ...draft, at: Date.now() - 16 * 60 * 1000 }));
+          window.open = window.__realOpen;
+        }, storageKey);
+        const notice = fb(page, '.tdoc-feedback-notice');
+        const [popup] = await Promise.all([context.waitForEvent('page'), notice.locator('button.submit').click()]);
+        await popup.locator('#connect').click();
+        await page.waitForFunction((key) => { try { return Boolean(JSON.parse(localStorage.getItem(key)).token); } catch (_) { return false; } }, storageKey);
+        await page.waitForTimeout(2000);
+        assert.equal((await comments()).length, 0, 'an expired held draft posted');
+        assert.equal(await page.evaluate((key) => sessionStorage.getItem(`${key}:draft`), storageKey), null, 'the expired draft was kept');
+      } finally { await context.close(); }
+    });
+
+    await t('the window lost mid sign-in: Open sign-in opens it again, the comment posts once', async () => {
+      const { context, page } = await start(1440);
+      try {
+        await compose(page, 'Lost window, then posted');
         const [popup] = await Promise.all([context.waitForEvent('page'), fb(page, '.tdoc-popup button.submit').click()]);
         await popup.getByRole('link', { name: 'Sign in with GitHub' }).click();
         await popup.waitForURL(`${idpBase}/**`);
-        await fb(page, '.tdoc-feedback-waiting').waitFor({ timeout: 5000 });
-        await fb(page, '.tdoc-feedback-waiting').getByRole('button', { name: 'Cancel' }).click();
-        const notice = fb(page, '.tdoc-feedback-notice');
-        await notice.waitFor();
-        assert.match(await notice.innerText(), /Not connected\. Your comment is kept/);
-        assert.equal(await fb(page, '.tdoc-popup textarea').inputValue(), 'Cancelled, then posted');
-        // Finish signing in in that window anyway, then retry from the app.
-        await popup.locator('#continue').click();
-        await popup.waitForURL(`${tdocBase}/feedback/connect?**`);
+        await page.waitForTimeout(1200);
+        // Closed for real now; the composer's Post brings a new one.
         await popup.close();
-        const [again] = await Promise.all([context.waitForEvent('page'), notice.locator('button.submit').click()]);
+        const reopen = fb(page, '.tdoc-popup button.submit');
+        assert.equal((await reopen.innerText()).trim(), 'Open sign-in');
+        const [again] = await Promise.all([context.waitForEvent('page'), reopen.click()]);
+        await again.waitForLoadState();
+        assert(again.url().startsWith(`${tdocBase}/feedback/connect?`), again.url());
+        await again.getByRole('link', { name: 'Sign in with GitHub' }).click();
+        await again.waitForURL(`${idpBase}/**`);
+        await again.locator('#continue').click();
+        await again.waitForURL(`${tdocBase}/feedback/connect?**`);
         await again.locator('#connect').click();
-        await fb(page, '.tdoc-pin').first().waitFor({ timeout: 8000 });
+        await fb(page, '.tdoc-pin').first().waitFor({ timeout: 10000 });
+        assert.equal(await fb(page, '.tdoc-popup textarea').count(), 0, 'composer still open');
         const posted = await comments();
         assert.equal(posted.length, 1, `comments: ${posted.length}`);
-        assert.equal(posted[0].text, 'Cancelled, then posted');
+        assert.equal(posted[0].text, 'Lost window, then posted');
       } finally { await context.close(); }
     });
   } finally {

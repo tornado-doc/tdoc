@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
 import { useViewerIdentity } from './hooks/use-viewer-identity.js';
+import { announceSignedIn } from './sign-in-popup.js';
 
 // The one edge-page frame: sign-in status, access denials, email opt-out.
 // The boot JSON is the whole contract — title, message, optional link-shaped
@@ -11,6 +12,14 @@ import { useViewerIdentity } from './hooks/use-viewer-identity.js';
 export function StatusPage({ boot }) {
   const [requested, setRequested] = useState('');
   const viewer = useViewerIdentity(boot.identity);
+  // The sign-in window's last page (/auth/signed-in, sign-in-popup.js): the
+  // page that opened it checks with tdoc now and carries on; this closes.
+  useEffect(() => {
+    if (!boot.signedInWindow) return undefined;
+    announceSignedIn();
+    const timer = window.setTimeout(() => { try { window.close(); } catch { /* ignore */ } }, 600);
+    return () => window.clearTimeout(timer);
+  }, [boot.signedInWindow]);
 
   const requestAccess = async () => {
     setRequested('sending');

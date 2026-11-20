@@ -19,7 +19,7 @@ import {
   acceptTeamInvite,
   requestTeamJoin,
 } from './document/api.js';
-import { CommentComposer } from './document/comment-composer.jsx';
+import { CommentComposer, composerDraftKey, rememberClosedDraft } from './document/comment-composer.jsx';
 import {
   CommentFilterMenu,
   DesktopCommentLayer,
@@ -78,6 +78,7 @@ import { createSheetEmbedHandler, embedFrameSrc } from './document/sheet-embed.j
 import { AllowSheetEmbedsDialog } from './document/sheet-embed-dialog.jsx';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
+import { signedInIdentity, signInHref, startSignInPopup } from './sign-in-popup.js';
 import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
 import { ConnectAiAppsStrip } from './connect-ai-apps.jsx';
@@ -280,9 +281,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   const startDocumentCommentRef = useRef(null);
   const [composer, setComposer] = useState(null);
   // A visitor writes before signing in. Bring that draft and its quote back
-  // after the auth redirect, so sending never discards the work they just did.
+  // after the auth redirect (the sign-in window was blocked), so sending
+  // never discards the work they just did: signed in, the foot says it is
+  // saved and one Post sends it; back without signing in (the browser's
+  // Back), it says Post signs in. Never posted by itself.
   useEffect(() => {
-    if (!config.identity || !config.canComment) return;
+    if (!(config.identity ? config.canComment : config.signInToComment)) return;
     let saved;
     try {
       const key = commentSignInDraftKey(config);
@@ -292,8 +296,34 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     if (!saved || !Number.isFinite(saved.at) || Date.now() - saved.at > COMMENT_SIGNIN_DRAFT_MAX_AGE_MS
       || !saved.selection || (saved.selection.kind && !['text', 'element', 'document'].includes(saved.selection.kind))
       || typeof saved.text !== 'string') return;
-    setComposer({ ...saved.selection, draftText: saved.text });
-  }, [config.identity, config.canComment, config.slug, config.version]);
+    setComposer({ ...saved.selection, draftText: saved.text, restored: true });
+  }, [config.identity, config.canComment, config.signInToComment, config.slug, config.version]);
+  // A sign-in running in its own window for the comment in the composer
+  // (sign-in-popup.js): { reopen, cancel, held }, `held` being the composer
+  // it was started from.
+  const signInWaitRef = useRef(null);
+  const composerRef = useRef(composer);
+  composerRef.current = composer;
+  // The composer replaced or gone by any road (a click in the doc, a new
+  // selection, + Comment, a mode change, × / Esc): the held post is
+  // abandoned. Its sign-in is called off and nothing posts after it; the
+  // words stay for their passage, as any closed draft.
+  useEffect(() => {
+    const wait = signInWaitRef.current;
+    if (!wait || wait.held === composer) return;
+    abandonHeldSignIn(wait);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composer]);
+  const abandonHeldSignIn = (wait) => {
+    let stored = null;
+    try {
+      stored = JSON.parse(sessionStorage.getItem(commentSignInDraftKey(config)) || 'null');
+      sessionStorage.removeItem(commentSignInDraftKey(config));
+    } catch {}
+    if (stored && typeof stored.text === 'string' && wait.held) rememberClosedDraft(composerDraftKey(wait.held), stored.text);
+    if (signInWaitRef.current === wait) signInWaitRef.current = null;
+    wait.cancel();
+  };
   const [openCommentId, setOpenCommentId] = useState(null);
   const [openClusterKey, setOpenClusterKey] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -1141,6 +1171,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   };
 
   const closeComposer = () => {
+    // Closed without posting (× or Esc): the held signed-out post is
+    // dropped and its sign-in window called off, so signing in later never
+    // posts words the person walked away from. (Any other way the composer
+    // goes or is replaced is caught by the effect on `composer` above.)
+    if (signInWaitRef.current) abandonHeldSignIn(signInWaitRef.current);
+    else { try { sessionStorage.removeItem(commentSignInDraftKey(config)); } catch {} }
     setComposer(null);
     setPrivateAsk(null);
     bridge.send({ type: 'tdoc:clearPending' });
@@ -1196,8 +1232,71 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     // A signed-out reader can select, copy, and write first. Asking to sign
     // in happens on the action that would actually send their words.
     if (!config.identity && config.signInToComment) {
-      try { sessionStorage.setItem(commentSignInDraftKey(config), JSON.stringify({ text, selection: composer, at: Date.now() })); } catch {}
-      signIn();
+      const held = composer;
+      // One held post at a time: an earlier wait (another passage) ends.
+      if (signInWaitRef.current) abandonHeldSignIn(signInWaitRef.current);
+      // Kept for the page's own sign-in (a redirect, when the window is
+      // blocked) and for a post that fails after signing in.
+      try { sessionStorage.setItem(commentSignInDraftKey(config), JSON.stringify({ text, selection: held, at: Date.now() })); } catch {}
+      // Signed in already (another tab, since this page loaded)? Asked
+      // alongside opening the window, so the window still comes from this
+      // click. Then nothing posts by itself as whichever account that is:
+      // the page reloads as them and the words wait in the composer.
+      const already = signedInIdentity().catch(() => null);
+      // Sign in in a window of its own, the composer staying as it is
+      // (the widget does the same with its tdoc window). Blocked, or no
+      // provider door here: the page's own sign-in, as before.
+      const href = signInHref(config);
+      const wait = href ? startSignInPopup(href) : null;
+      if (!wait) { if (await already) { location.reload(); return; } signIn(); return; }
+      wait.held = held;
+      signInWaitRef.current = wait;
+      if (await already) { signInWaitRef.current = null; wait.cancel(); location.reload(); return; }
+      try {
+        await wait.done;
+      } catch {
+        // Called off (× / Esc, the composer replaced) or timed out.
+        return;
+      } finally {
+        if (signInWaitRef.current === wait) signInWaitRef.current = null;
+      }
+      // Still the comment the person is waiting on: the same composer, and
+      // the same words held. Anything else was abandoned on the way.
+      let stored = null;
+      try { stored = JSON.parse(sessionStorage.getItem(commentSignInDraftKey(config)) || 'null'); } catch {}
+      if (composerRef.current !== held || !stored || stored.text !== text) return;
+      // Signed in: tdoc says so for this browser's cookie (never the
+      // window's word). Post the held words as that person, then show the
+      // page as them, with the new comment open.
+      try {
+        const value = await comments.addComment(held, text);
+        if (!value?.id) return;
+        try { sessionStorage.removeItem(commentSignInDraftKey(config)); } catch {}
+        markCommented();
+        const outcome = value.mention_outcome;
+        if (outcome && (outcome.newcomers?.length || outcome.blocked?.length)) {
+          // What became of an @mention has to be said here (a reload would
+          // drop it): the comment shows from the POST's answer, open.
+          closeComposer();
+          reportMentions(value);
+          setOpenCommentId(value.id);
+          return;
+        }
+        const next = new URL(location.href);
+        next.searchParams.set('comment', value.id);
+        location.replace(next.href);
+      } catch (error) {
+        showToast(error?.message || 'Could not post the comment', true);
+        if (error?.status === 403) {
+          // Refused for this account: nothing to post later. The words stay
+          // in the open composer, not held.
+          try { sessionStorage.removeItem(commentSignInDraftKey(config)); } catch {}
+          return;
+        }
+        // A passing failure: the words stay saved and come back in the
+        // composer after the page reloads as the signed-in person.
+        window.setTimeout(() => location.reload(), 2000);
+      }
       return;
     }
     const selection = composer;
@@ -2503,6 +2602,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       onClose={closeComposer}
       onCopyToast={showToast}
       signInToPost={!config.identity && Boolean(config.signInToComment)}
+      onReopenSignIn={() => { if (signInWaitRef.current && !signInWaitRef.current.reopen()) showToast('Your browser blocked the sign-in window. Allow pop-ups for tdoc and try again.', true); }}
+      restored={Boolean(composer.restored)}
     />
   ) : null;
   return (

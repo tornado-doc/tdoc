@@ -24,7 +24,7 @@ import { AppSelect } from '../../shell/src/ui/select.jsx';
 import { withPostedComment } from '../../shell/src/comments/core/posted-comment.js';
 import { productPageUrl } from '../../shell/src/document/product-url.js';
 import { AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
-import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
+import { CommentComposer, COMPOSER_WIDTH, composerDraftKey, rememberClosedDraft } from '../../shell/src/document/comment-composer.jsx';
 import { composerAgents } from '../../shell/src/document/ai-answerer.js';
 import { composerDefault, maySendToAgent, sendToAgentSetup, sendToAgentState } from '../../shell/src/document/agent-choices.js';
 import { askOwnAgent, threadAskPick, useMyAgent } from '../../shell/src/document/my-agent.js';
@@ -553,8 +553,10 @@ ${uiCss}
   const CLAIM_RE = /^[a-f0-9]{64}$/;
   const CLAIM_WAIT_MS = 180_000;
   const CLAIM_POLL_MS = 1500;
-  // The overlay's "Finish signing in in the tdoc window…" line; set by the app.
-  let connectWaiting = () => {};
+  // The attempt in flight: { reopen, cancel }. The composer is its only
+  // status ("Finish signing in — your comment posts after"); its Post button
+  // brings the tdoc window back, its × and Esc cancel. No separate notice.
+  let connectControls = null;
   let connecting = null;
   // The tdoc window this page last opened. A new attempt (a Post while
   // signed out after an earlier Cancel) reuses it while it is still open
@@ -577,7 +579,7 @@ ${uiCss}
         window.removeEventListener('message', onMessage);
         clearInterval(watch);
         clearTimeout(poll);
-        connectWaiting(null);
+        if (connectControls === controls) connectControls = null;
         fn(value);
       };
       const finish = done((session) => { writeSession(session); resolve(session); });
@@ -621,8 +623,11 @@ ${uiCss}
         return connectWindow;
       };
       const controls = {
-        // A new window makes a new claim; the old ones are still collected.
+        // The window still there: bring it to the front. Gone (closed, or
+        // cut off from us by signing in): a new one, which makes a new
+        // claim; the old ones are still collected.
         reopen: () => {
+          if (popup && !popup.closed) { try { popup.focus(); } catch (_) {} return true; }
           const next = openPopup();
           if (next) { popup = next; deadline = Date.now() + CLAIM_WAIT_MS; }
           return Boolean(next);
@@ -642,7 +647,6 @@ ${uiCss}
           if (!claims.size) { failWith('The tdoc window was closed before connecting.'); return; }
           // Maybe closed, maybe only cut off by signing in: keep collecting.
           deadline = Date.now() + CLAIM_WAIT_MS;
-          connectWaiting(controls);
           collect();
         }, 500);
       };
@@ -659,6 +663,7 @@ ${uiCss}
         reject(error);
         return;
       }
+      connectControls = controls;
       watchPopup();
     });
     // Every attempt, including a browser-blocked popup, must release the
@@ -675,10 +680,34 @@ ${uiCss}
   // connecting can be blocked, cancelled or fail, and the person retries
   // (the tab can even reload). It is posted by the first call that has a
   // session, then dropped.
+  // Held a short while only (a sign-in takes minutes, not hours), and
+  // posted only by the person's own Post or Connect, never by a later
+  // load that happens to have a session.
   const draftKey = `${storageKey}:draft`;
-  const readDraft = () => { try { return JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch (_) { return null; } };
+  const DRAFT_MAX_AGE_MS = 15 * 60 * 1000;
   const writeDraft = (draft) => {
-    try { if (draft) sessionStorage.setItem(draftKey, JSON.stringify(draft)); else sessionStorage.removeItem(draftKey); } catch (_) {}
+    try { if (draft) sessionStorage.setItem(draftKey, JSON.stringify({ ...draft, at: Date.now() })); else sessionStorage.removeItem(draftKey); } catch (_) {}
+  };
+  const readDraft = () => {
+    let draft = null;
+    try { draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch (_) { return null; }
+    if (draft && !(Number.isFinite(draft.at) && Date.now() - draft.at < DRAFT_MAX_AGE_MS)) { writeDraft(null); return null; }
+    return draft;
+  };
+  // The composer closed (×, Esc) without posting: the held post is dropped,
+  // and a sign-in still in progress for it is called off (its window
+  // closes), so connecting later never posts words the person walked away
+  // from. The words themselves come back in the composer on the same target
+  // (comment-composer.jsx closedDrafts).
+  const abandonHeldPost = (composerKey) => {
+    const held = readDraft();
+    writeDraft(null);
+    if (connectControls) {
+      // Closed mid sign-in: the composer counts its words as sent, so
+      // keep them here, for the same target, as any closed draft.
+      if (held && held.text && composerKey) rememberClosedDraft(composerDraftKey({ draftKey: composerKey }), held.text);
+      connectControls.cancel();
+    }
   };
 
   // A stored token that the worker no longer honours is dropped, not retried.
@@ -698,6 +727,9 @@ ${uiCss}
         // the token was minted — reconnect so it names the one they joined.
         if (![401, 403, 404, 409].includes(error.status)) throw error;
         writeSession(null);
+        // Quietly: a token tdoc no longer honours is simply signed out. A
+        // space that moved is said (with Reconnect).
+        if (!interactive && error.status !== 409) return null;
         if (!interactive) {
           const quiet = new Error(error.message);
           quiet.status = error.status;
@@ -1113,7 +1145,12 @@ ${uiCss}
     // Connect again: drop the token first, then the one connect below.
     if (message.type === 'tdoc-feedback-signin') writeSession(null);
     try {
-      const session = await ensureSession();
+      // Comment first, sign in later: loading (the bookmark, the pill, a
+      // new page of the app) never opens the tdoc window. Signed out, there
+      // is nothing to read yet; the person picks and writes, and Post (a
+      // click, so the browser lets the window open) connects.
+      const session = await ensureSession({ interactive: message.type !== 'tdoc-feedback-load' });
+      if (!session) return { ok: true, signedOut: true };
       const { slug, version } = session;
       const body = (fields) => ({ slug, version, ...fields });
       let postedDraft = false;
@@ -1121,7 +1158,9 @@ ${uiCss}
       // UI is answered as soon as the POST is (see `followUp` below).
       let posted = null;
       let handOff = null;
-      const draft = readDraft();
+      // Only the person's own Post (submit) or Connect (signin, from the
+      // "Your comment is kept: connect to post it" notice) sends it.
+      const draft = message.type === 'tdoc-feedback-submit' || message.type === 'tdoc-feedback-signin' ? readDraft() : null;
       if (draft && draft.text && draft.anchor) {
         // Taken before posting, so two calls at once cannot post it twice.
         writeDraft(null);
@@ -1203,6 +1242,8 @@ ${uiCss}
       }
       return await loadSurface(session);
     } catch (error) {
+      // Called off by closing the composer: nothing to say.
+      if (error && error.cancelled) return { ok: false, cancelled: true };
       const kept = Boolean(readDraft());
       const why = String(error && error.message || error);
       return {
@@ -1421,9 +1462,8 @@ ${uiCss}
     // nothing on the page moves. Go to comment opens it on the page (openId).
     const [listId, setListId] = useState(null);
     const [notice, setNotice] = useState(null);
-    // Connecting, with the tdoc window cut off from us by signing in.
-    const [waiting, setWaiting] = useState(null);
-    useEffect(() => { connectWaiting = setWaiting; return () => { connectWaiting = () => {}; }; }, []);
+    // The open composer's draft key (set while rendering), for Esc and ×.
+    const composerKeyRef = useRef(null);
     const [toast, setToast] = useState(null);
     const [reanchorId, setReanchorId] = useState(null);
     const [notifyIds, setNotifyIds] = useState(null);
@@ -1442,6 +1482,8 @@ ${uiCss}
     }, []);
 
     const apply = useCallback((result) => {
+      // Signed out: nothing to show yet, and nothing wrong. Post connects.
+      if (result?.signedOut) { setSession(null); return true; }
       // Posted: the comment shows from the POST's answer now; the re-read
       // (and an agent hand-off's word) lands when `followUp` does.
       if (result?.ok && result.posted) {
@@ -1465,7 +1507,7 @@ ${uiCss}
         if (result.postedDraft) { setSelected(null); setAreaSel(null); setPicking(false); if (!result.handoff) say('Comment posted'); }
         return true;
       }
-      setNotice(result || { error: 'Could not load tdoc comments' });
+      if (!result?.cancelled) setNotice(result || { error: 'Could not load tdoc comments' });
       return false;
     }, [say]);
 
@@ -2032,7 +2074,7 @@ ${uiCss}
         gestureRef.current.cancel();
         setDrag(null); setHovered(null);
       } },
-      { active: Boolean(selected), close: () => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); setHovered(null); } },
+      { active: Boolean(selected), close: () => { abandonHeldPost(composerKeyRef.current); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); setHovered(null); } },
       { active: Boolean(picking || reanchorId), close: () => { setPicking(false); setReanchorId(null); setHovered(null); } },
       { active: Boolean(openId), close: () => setOpenId(null) },
       { active: panelOpen, close: () => setPanelOpen(false) },
@@ -2266,6 +2308,9 @@ ${uiCss}
       setOpenId(c.id);
     };
 
+    // What the composer is about (its words are kept per target).
+    const composerKey = selected ? `${canonical()}|${pageSel ? 'page' : frameSel ? `frame:${JSON.stringify(frameSel.anchor || {}).slice(0, 300)}` : quoteSel ? `quote:${String(quoteSel.quote?.text || '').slice(0, 200)}` : areaBox ? `area:${Math.round(areaBox.left)},${Math.round(areaBox.top)},${Math.round(areaBox.width)},${Math.round(areaBox.height)}` : `el:${contextFor(selected).selector || ''}`}` : null;
+    composerKeyRef.current = composerKey;
     return (
       <CopyForAgentContext.Provider value={copyForAgent}>
       <AgentMentionContext.Provider value={agentMentions}>
@@ -2307,7 +2352,7 @@ ${uiCss}
              already has viewport coordinates, so cancel that offset here. */
           <CommentComposer
             selection={{ kind: 'element', label: pageSel ? 'This page' : frameSel ? frameLabel(frameSel.anchor) : quoteSel ? quoteLabel(quoteSel.quote) : areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)),
-              draftKey: `${canonical()}|${pageSel ? 'page' : frameSel ? `frame:${JSON.stringify(frameSel.anchor || {}).slice(0, 300)}` : quoteSel ? `quote:${String(quoteSel.quote?.text || '').slice(0, 200)}` : areaBox ? `area:${Math.round(areaBox.left)},${Math.round(areaBox.top)},${Math.round(areaBox.width)},${Math.round(areaBox.height)}` : `el:${contextFor(selected).selector || ''}`}`,
+              draftKey: composerKey,
               rect: {
               top: composerRect.top - TOP_BAR_HEIGHT,
               bottom: composerRect.bottom - TOP_BAR_HEIGHT,
@@ -2319,7 +2364,8 @@ ${uiCss}
             agentSetupHref={sendToAgentSetupHref}
             sendToAgentDisabledReason={sendToAgentDisabledReason}
             signInToPost={signInToPost}
-            onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); }}
+            onReopenSignIn={() => { if (connectControls && !connectControls.reopen()) say('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.', true); }}
+            onClose={() => { abandonHeldPost(composerKeyRef.current); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); }}
             onSubmit={async (text, opts = {}) => {
               // Signed out: the composer's foot already says Post signs in
               // and keeps the words; an older "Not connected" notice would be
@@ -2380,17 +2426,6 @@ ${uiCss}
               // put the person back where they were headed: picking an element.
               if (apply(result) && !result.postedDraft) setPicking(true);
             }}>{notice.reconnect ? 'Reconnect' : 'Connect tdoc'}</button></div>
-          </section>
-        ) : null}
-
-        {waiting && !notice ? (
-          <section className="tdoc-popup tdoc-feedback-notice tdoc-feedback-waiting" role="status" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
-            <div className="head"><span className="h">Connecting to tdoc</span></div>
-            <p>Finish signing in in the tdoc window… {readDraft() ? 'Your comment posts as soon as you are connected.' : ''}</p>
-            <div className="foot">
-              <button className="ui-btn ui-btn-secondary ui-btn-m" type="button" onClick={() => waiting.cancel()}>Cancel</button>
-              <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => { if (!waiting.reopen()) say('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.', true); }}>Open the tdoc window again</button>
-            </div>
           </section>
         ) : null}
 
