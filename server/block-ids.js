@@ -200,6 +200,21 @@
     return pairs;
   }
 
+  // The longest subsequence of [i, j] pairs (ascending i) whose j also
+  // ascends: patience sorting with back links.
+  function lisPairs(pairs) {
+    var tails = [], links = new Array(pairs.length);
+    for (var k = 0; k < pairs.length; k++) {
+      var lo = 0, hi = tails.length;
+      while (lo < hi) { var mid = (lo + hi) >> 1; if (pairs[tails[mid]][1] < pairs[k][1]) lo = mid + 1; else hi = mid; }
+      links[k] = lo ? tails[lo - 1] : -1;
+      tails[lo] = k;
+    }
+    var out = [];
+    for (var x = tails.length ? tails[tails.length - 1] : -1; x >= 0; x = links[x]) out.push(pairs[x]);
+    return out.reverse();
+  }
+
   // The matcher's one budget, shared by every step: a cell costs 1, a token
   // comparison costs the smaller token count. Spent, the fuzzy steps stop
   // and whatever is left is new. Exact matching is linear past EXACT_CELLS.
@@ -244,15 +259,15 @@
       for (var i0 = 0; i0 < n; i0++) for (var j0 = 0; j0 < m; j0++) if (O[i0].h === N[j0].h) w[i0 * m + j0] = 1;
       lcs(n, m, w).forEach(function (p) { pair(p[0], p[1], 'exact'); });
     } else {
-      // Linear: hashes unique on both sides, taken while they ascend.
-      var countO = new Map(), countN = new Map(), at = new Map(), last = -1;
+      // Large: hashes unique on both sides, and of those pairs the longest
+      // run in order on both sides (LIS, O(n log n)), so one moved block
+      // does not drop every anchor after it. The moved one is found by step 3.
+      var countO = new Map(), countN = new Map(), at = new Map();
       O.forEach(function (b) { countO.set(b.h, (countO.get(b.h) || 0) + 1); });
       N.forEach(function (b, j) { countN.set(b.h, (countN.get(b.h) || 0) + 1); at.set(b.h, j); });
-      O.forEach(function (b, i) {
-        if (countO.get(b.h) !== 1 || countN.get(b.h) !== 1) return;
-        var j = at.get(b.h);
-        if (j > last) { pair(i, j, 'exact'); last = j; }
-      });
+      var uniq = [];
+      O.forEach(function (b, i) { if (countO.get(b.h) === 1 && countN.get(b.h) === 1) uniq.push([i, at.get(b.h)]); });
+      lisPairs(uniq).forEach(function (p) { pair(p[0], p[1], 'exact'); });
     }
     // 2. Similar text, in order, inside each gap between equal blocks.
     var anchors = [[-1, -1]];

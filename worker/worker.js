@@ -15630,7 +15630,10 @@ async function hostedOwnerOp(env, slug, op) {
 async function docBytesExist(env, slug) {
   try {
     const r = await env.DOCS.list({ prefix: `docs/${slug}/` });
-    return { ok: true, exists: Array.isArray(r.objects) && r.objects.length > 0 };
+    // A block-id sidecar (blocks.json) is bookkeeping beside a version, not
+    // a doc: one left behind never makes a slug taken.
+    const objects = Array.isArray(r.objects) ? r.objects.filter((o) => !String(o && o.key).endsWith('/blocks.json')) : [];
+    return { ok: true, exists: objects.length > 0 };
   } catch (e) {
     return { ok: false, response: json({ error: 'doc_bytes_check_failed', message: e.message || String(e) }, { status: 503 }) };
   }
@@ -21120,7 +21123,7 @@ export class CommentsStore {
       });
       versions.sort((a, b) => Number(a.n) - Number(b.n));
       let pendingPreviewTask = null;
-      await putDocMetaJson(this.env, slug, JSON.stringify({
+      const committedRecord = {
         ...meta,
         ...(nextTitle ? { title: nextTitle } : {}),
         versions,
@@ -21131,7 +21134,8 @@ export class CommentsStore {
           existingPreview: meta.preview,
           onRenderTask: (task) => { pendingPreviewTask = task; },
         }),
-      }));
+      };
+      await putDocMetaJson(this.env, slug, JSON.stringify(committedRecord));
       if (pendingPreviewTask) await pendingPreviewTask();
       committed = true;
       // v1's bytes just changed under the same number: a history summary
@@ -21169,6 +21173,7 @@ export class CommentsStore {
       // bounded (writeVersionBlockIds).
       const blockIds = writeVersionBlockIds(this.env, slug, reservation.next, stamped.html, {
         restoredFrom: Number.isInteger(Number(op.restored_from)) ? Number(op.restored_from) : 0, inStore: true,
+        meta: committedRecord, isPurged: () => this._readIsPurged(committedRecord),
       });
       if (this.state && typeof this.state.waitUntil === 'function') this.state.waitUntil(blockIds);
       else await blockIds;
@@ -22897,7 +22902,8 @@ function blockLintOf(html) {
 // latest) is not read, and is replaced on the next write. Reads never write:
 // a missing sidecar is built in memory (blockSidecarForRead) from the nearest
 // stored one, at most BLOCK_IDS_BACKFILL versions back, the same way a
-// publish would; the build is deterministic.
+// publish would; the build is deterministic. A doc whose sidecars are not
+// kept, or with none stored within reach, gets none.
 //
 // First consumer: comment anchors. A text comment whose words are gone from
 // the version being read is re-anchored to the block it was made on, found
@@ -22962,6 +22968,9 @@ async function blockSidecarForRead(env, slug, version, meta, ctx) {
     if (below) { base = below; break; }
     from--;
   }
+  // Nothing stored within reach, or a doc whose sidecars are not kept: no
+  // ids to continue, so none are made up.
+  if (!base || !ctx.allowed) return remember(version, null);
   let prev = base;
   for (let v = from; v <= version; v++) {
     if (ctx.memo.has(v)) { prev = ctx.memo.get(v); continue; }
@@ -22992,13 +23001,17 @@ async function blockIdsWriteAllowed(env, meta) {
   }
   return false;
 }
-// Store a sidecar, unless the doc changed under this write (purged, or the
-// version gone from its record) or a current one is there already. A stale
-// one (other bytes, another doc) is replaced.
-async function storeBlockSidecar(env, slug, version, sidecar) {
+// Store a sidecar, unless the doc changed under this write or a current one
+// is there already. `record`: the doc record the publish just committed
+// (whether the version is listed is read from it, not from KV, which may
+// lag). Re-checked here: the purge hold (`isPurged`), and KV naming another
+// doc on the slug. A stale sidecar (other bytes, another doc) is replaced.
+async function storeBlockSidecar(env, slug, version, sidecar, record, isPurged) {
+  if (!record || docIdentity(record) !== sidecar.doc) return false;
+  if (!(record.versions || []).some((v) => Number(v && v.n) === Number(version))) return false;
+  if (isPurged && await isPurged()) return false;
   const now = await loadDocMeta(env, slug);
-  if (!now || docIdentity(now) !== sidecar.doc) return false;
-  if (!(now.versions || []).some((v) => Number(v && v.n) === Number(version))) return false;
+  if (now && docIdentity(now) !== sidecar.doc) return false;
   const key = blockSidecarKey(slug, version);
   const body = JSON.stringify(sidecar);
   const httpMetadata = { contentType: 'application/json; charset=utf-8' };
@@ -23012,8 +23025,9 @@ async function storeBlockSidecar(env, slug, version, sidecar) {
 // first if missing: the start of this doc's chain) and, for a restore, the
 // restored version's. Never thrown; skipped for sheets, for documents over
 // the size limit, and (`inStore`) over BLOCK_IDS_DO_MAX_HTML in the
-// CommentsStore. Returns what it did, for logs and tests.
-async function writeVersionBlockIds(env, slug, version, html, { meta = null, restoredFrom = 0, inStore = false } = {}) {
+// CommentsStore. `meta`: the record the publish committed. `isPurged`: asks
+// the purge hold. Returns what it did, for logs and tests.
+async function writeVersionBlockIds(env, slug, version, html, { meta = null, restoredFrom = 0, inStore = false, isPurged = null } = {}) {
   try {
     const engine = blockIdsEngine();
     const v = Number(version);
@@ -23030,13 +23044,13 @@ async function writeVersionBlockIds(env, slug, version, html, { meta = null, res
       const bytes = obj ? await obj.text() : '';
       if (bytes && bytes.length <= (inStore ? BLOCK_IDS_DO_MAX_HTML : engine.MAX_HTML) && docTypeFromHtml(bytes) !== 'sheet') {
         prev = engine.build(bytes, null, v - 1, TdocParse5, { doc, sha: (await sha256Hex(bytes)).slice(0, 16) });
-        if (prev) await storeBlockSidecar(env, slug, v - 1, prev);
+        if (prev) await storeBlockSidecar(env, slug, v - 1, prev, record, isPurged);
       }
     }
     const also = restoredFrom > 0 && restoredFrom < v - 1 ? await readBlockSidecar(env, slug, restoredFrom, record) : null;
     const built = engine.build(html, prev, v, TdocParse5, { also, doc, sha: (await sha256Hex(html)).slice(0, 16) });
     if (!built) return 'too_large';
-    return (await storeBlockSidecar(env, slug, v, built)) ? 'written' : 'not_written';
+    return (await storeBlockSidecar(env, slug, v, built, record, isPurged)) ? 'written' : 'not_written';
   } catch (e) {
     console.error('[block-ids] sidecar not written (ignored):', slug, version, e && e.message ? e.message : String(e));
     return 'error';
@@ -23063,7 +23077,7 @@ async function withBlockAnchors(env, slug, shown, records, target, meta) {
   const engine = blockIdsEngine();
   if (!engine || !Number.isInteger(target) || target < 1) return shown;
   const byId = new Map((records || []).map((c) => [c && c.id, c]));
-  const ctx = { memo: new Map(), builds: BLOCK_IDS_READ_BUILDS };
+  const ctx = { memo: new Map(), builds: BLOCK_IDS_READ_BUILDS, allowed: await blockIdsWriteAllowed(env, meta) };
   let looked = 0;
   const out = [];
   for (const c of shown) {
@@ -35446,6 +35460,7 @@ const tdocHandlers = {
           return json({ error: 'not_found', message: 'This doc was deleted for good. In a minute, this slug can be published as a new doc.' }, { status: 404 });
         }
       }
+      let committedRecord = null;
       if (incoming && writesLatestMeta) {
         let pendingPreviewTask = null;
         try {
@@ -35523,7 +35538,7 @@ const tdocHandlers = {
           const mergedVersions = [...versionByNumber.values()]
             .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)
             .sort((a, b) => Number(a.n) - Number(b.n));
-          await putDocMetaJson(env, slug, JSON.stringify({
+          committedRecord = {
             ...(currentMeta || {}),
             ...incoming,
             // When the doc began is the server's record, not an editor's:
@@ -35541,7 +35556,8 @@ const tdocHandlers = {
                 ? await storePreviewScreenshot(env, slug, verNum, previewShot.bytes) : null,
               onRenderTask: (task) => { pendingPreviewTask = task; },
             }),
-          }));
+          };
+          await putDocMetaJson(env, slug, JSON.stringify(committedRecord));
         } catch (e) {
           try { await finishVersionReservation(false); } catch {}
           console.error('[upload] META put failed:', e.message);
@@ -35668,8 +35684,12 @@ const tdocHandlers = {
       // stableBlockIds), started after every other await so it runs after
       // the response where the runtime allows it. Logged, never fails the
       // upload.
-      if (incoming && writesLatestMeta) {
-        const blockIds = writeVersionBlockIds(env, slug, verNum, stampedHtml);
+      if (incoming && writesLatestMeta && committedRecord) {
+        const identity = docIdentity(committedRecord);
+        const blockIds = writeVersionBlockIds(env, slug, verNum, stampedHtml, {
+          meta: committedRecord,
+          isPurged: env.COMMENTS ? async () => Boolean((await versionReservationOp(env, slug, { kind: 'purged', identity })).purged) : null,
+        });
         if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(blockIds);
         else await blockIds;
       }

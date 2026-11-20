@@ -177,9 +177,20 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     const pending = [];
     const r = await worker.fetch(req('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'block-purge', version: 1, html: V1, meta: { title: 'Plan' } } }), env, { waitUntil(p) { pending.push(p); } });
     assert(r.status === 200);
-    env.META.map.delete('meta:block-purge');
+    // The purge began meanwhile: the hold names this doc.
+    const meta = JSON.parse(env.META.map.get('meta:block-purge'));
+    env.COMMENTS.stateFor('block-purge').storage.map.set('purgeHold', { at: Date.now(), identity: meta.created });
     await Promise.all(pending);
     assert(!sidecar('block-purge', 1), 'sidecar written for a purged doc');
+    // Another doc took the slug meanwhile (KV names it): not written either.
+    const pending2 = [];
+    const r2 = await worker.fetch(req('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'block-taken', version: 1, html: V1, meta: { title: 'Plan' } } }), env, { waitUntil(p) { pending2.push(p); } });
+    assert(r2.status === 200);
+    const m2 = JSON.parse(env.META.map.get('meta:block-taken'));
+    env.META.map.set('meta:block-taken', JSON.stringify({ ...m2, created: '2030-01-01T00:00:00.000Z' }));
+    await Promise.all(pending2);
+    assert(!sidecar('block-taken', 1), 'sidecar written over another doc');
+    env.META.map.set('meta:block-taken', JSON.stringify(m2));
     // A leftover from an earlier doc on the slug names that doc: not read.
     assert((await upload('block-reuse', 1, V1)).status === 200);
     const old = sidecar('block-reuse', 1);
@@ -188,7 +199,7 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     env.DOCS.map.set('docs/block-reuse/v1/blocks.json', JSON.stringify(old));
     const c = await call('/api/comments', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug: 'block-reuse', version: 1, text: 'q', anchor: { kind: 'text', text: 'invoices block two renewals' } } });
     const got = (await call(`/api/comments?slug=block-reuse&version=1&blocks=1`, { cookie: alice.cookie })).body.find((x) => x.id === c.body.id);
-    assert(got.anchor_block && !got.anchor_block.id.startsWith('x'), `read a stale doc's sidecar: ${JSON.stringify(got.anchor_block)}`);
+    assert(!(got.anchor_block && got.anchor_block.id.startsWith('x')), `read a stale doc's sidecar: ${JSON.stringify(got.anchor_block)}`);
   });
 
   await t('a replaced latest version gets a fresh sidecar; the stale one is not read', async () => {
@@ -208,15 +219,40 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(after.blocks.length === 5, `blocks ${after.blocks.length}`);
   });
 
+  await t('KV behind the publish does not drop the sidecar (the committed record is used)', async () => {
+    const get = env.META.get.bind(env.META);
+    let lag = false;
+    env.META.get = async (k) => (lag && k === 'meta:block-lag' ? null : get(k));
+    try {
+      const pending = [];
+      const r = await worker.fetch(req('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'block-lag', version: 1, html: V1, meta: { title: 'Plan' } } }), env, { waitUntil(p) { pending.push(p); } });
+      assert(r.status === 200);
+      lag = true;
+      await Promise.all(pending);
+    } finally { env.META.get = get; }
+    assert(sidecar('block-lag', 1), 'sidecar dropped while KV lagged');
+  });
+
+  await t('an orphan sidecar never makes a slug taken', async () => {
+    env.DOCS.map.set('docs/block-orphan/v1/blocks.json', '{}');
+    const carol = await person('carol');
+    const r = await call('/api/upload', { method: 'POST', token: carol.token, body: { slug: 'block-orphan', version: 1, html: V1, meta: { title: 'Plan' } } });
+    assert(r.status === 200, `orphan sidecar made the slug taken: ${r.status} ${r.text}`);
+  });
+
   await t('a doc that never had sidecars still gets ids (backfill from v1)', async () => {
     const other = 'block-legacy';
     assert((await upload(other, 1, V1)).status === 200);
     const c = await call('/api/comments', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug: other, version: 1, text: 'q', anchor: { kind: 'text', text: 'invoices block two renewals' } } });
     assert((await upload(other, 2, V2)).status === 200);
-    for (const v of [1, 2]) env.DOCS.map.delete(`docs/${other}/v${v}/blocks.json`);
+    env.DOCS.map.delete(`docs/${other}/v2/blocks.json`);
     const r = await call(`/api/comments?slug=${other}&version=2&blocks=1`, { cookie: alice.cookie });
     const got = r.body.find((x) => x.id === c.body.id);
     assert(got.anchor_block && got.anchor_block.path[1] === 3 && got.anchor_block.quote_found === false, JSON.stringify(got.anchor_block));
+    // With nothing stored within reach, a read makes no ids up.
+    env.DOCS.map.delete(`docs/${other}/v1/blocks.json`);
+    const none = (await call(`/api/comments?slug=${other}&version=2&blocks=1`, { cookie: alice.cookie })).body.find((x) => x.id === c.body.id);
+    assert(!none.anchor_block, 'ids made up with no sidecar stored');
   });
 
   await t('a failing sidecar write never fails the publish', async () => {

@@ -195,6 +195,17 @@ test('many small fuzzy gaps share the one budget', () => {
   console.log(`    (1000 fuzzy gaps: ${ms} ms, work ${v2.work})`);
 });
 
+test('large docs: one moved block does not drop the anchors after it (LIS over unique blocks)', () => {
+  const doc = (order) => order.map((i) => `<p>Unique paragraph number ${i} with its own words.</p>`).join('');
+  const base = Array.from({ length: 3000 }, (_, i) => i);
+  const moved = base.slice(); const [x] = moved.splice(10, 1); moved.push(x);
+  const v1 = build(doc(base), null, 1);
+  const v2 = build(doc(moved), v1, 2);
+  const before = new Map(v1.blocks.map((b) => [b.t, b.id]));
+  const lost = v2.blocks.filter((b) => before.get(b.t) !== b.id).length;
+  assert.equal(lost, 0, `${lost} ids lost`);
+});
+
 test('size-ratio prefilter: very different lengths are never compared', () => {
   const res = B.match([{ tag: 'p', t: 'a b c d e f g h i j k l m n o p q r s t' }], [{ tag: 'p', t: 'a b' }]);
   assert.equal(res.mn[0], -1);
