@@ -19,8 +19,10 @@
 // 99.5% of unchanged or lightly edited blocks.
 //
 // Everything is bounded: documents over MAX_HTML bytes or MAX_BLOCKS blocks
-// get no sidecar, and each quadratic step has a cell budget, past which it
-// falls back to a linear pass (or is skipped). Pure and deterministic: the
+// get no sidecar; exact matching is linear past EXACT_CELLS; and one work
+// budget (WORK_BUDGET: cells, plus tokens per comparison, after a free
+// size-ratio prefilter) is shared by every fuzzy step: spent, matching stops
+// and the rest is new. Pure and deterministic: the
 // same HTML and previous sidecar always give the same ids, so a sidecar can
 // be rebuilt and a race between two builders writes the same bytes.
 //
@@ -35,7 +37,7 @@
   var MAX_HTML = 1536 * 1024;
   var MAX_BLOCKS = 4000;
   var MAX_TEXT = 1024 * 1024;
-  var EXACT_CELLS = 4000000;
+  var EXACT_CELLS = 400000;
   var GAP_CELLS = 250000;
   var FUZZ = 0.6;
   var FUZZ_CROSS_TAG = 0.75;
@@ -175,22 +177,22 @@
     return over ? null : out;
   }
 
-  // Longest common subsequence, weights w(i, j) > 0 for a possible pair.
-  // Flat typed arrays: n*m cells, the caller keeps that under its budget.
-  function lcs(n, m, w, weighted) {
+  // Longest common subsequence over a precomputed weight table (w[i*m+j] >
+  // 0 for a possible pair). n*m cells; the caller keeps that under budget.
+  function lcs(n, m, w) {
     var W = m + 1;
-    var dp = weighted ? new Float64Array((n + 1) * W) : new Uint16Array((n + 1) * W);
+    var dp = new Float64Array((n + 1) * W);
     var i, j;
     for (i = n - 1; i >= 0; i--) for (j = m - 1; j >= 0; j--) {
       var best = Math.max(dp[(i + 1) * W + j], dp[i * W + j + 1]);
-      var x = w(i, j);
+      var x = w[i * m + j];
       if (x > 0 && dp[(i + 1) * W + j + 1] + x > best) best = dp[(i + 1) * W + j + 1] + x;
       dp[i * W + j] = best;
     }
     var pairs = [];
     i = 0; j = 0;
     while (i < n && j < m) {
-      var y = w(i, j);
+      var y = w[i * m + j];
       if (y > 0 && dp[i * W + j] === dp[(i + 1) * W + j + 1] + y) { pairs.push([i, j]); i++; j++; }
       else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) i++;
       else j++;
@@ -198,24 +200,49 @@
     return pairs;
   }
 
-  function similar(o, n) {
+  // The matcher's one budget, shared by every step: a cell costs 1, a token
+  // comparison costs the smaller token count. Spent, the fuzzy steps stop
+  // and whatever is left is new. Exact matching is linear past EXACT_CELLS.
+  var WORK_BUDGET = 600000;
+  function meter(budget) {
+    return { left: budget == null ? WORK_BUDGET : budget, spent: 0, out: false };
+  }
+  function charge(m, cost) {
+    if (m.out) return false;
+    if (m.left < cost) { m.out = true; return false; }
+    m.left -= cost; m.spent += cost;
+    return true;
+  }
+  // Similarity of two blocks for the fuzzy steps, or 0. The size ratio is a
+  // free prefilter: Jaccard >= t needs min/max >= t.
+  function similar(o, n, m) {
+    var need = o.tag === n.tag ? FUZZ : FUZZ_CROSS_TAG;
+    var a = o.tok.size, b = n.tok.size;
+    if (!a || !b || Math.min(a, b) / Math.max(a, b) < need) return 0;
+    if (!charge(m, Math.min(a, b))) return 0;
     var s = jaccard(o.tok, n.tok);
-    return s >= (o.tag === n.tag ? FUZZ : FUZZ_CROSS_TAG) ? s : 0;
+    return s >= need ? s : 0;
+  }
+  function prepBlock(b) {
+    if (!b.h) b.h = hash(b.t);
+    if (!b.tok) b.tok = tokens(b.t);
+    return b;
   }
 
   // Which old block each new block continues: mn[j] = i, or -1 (new).
-  // O and N: [{ tag, t }]; h and tok are filled in here.
-  function match(O, N) {
-    [O, N].forEach(function (list) {
-      list.forEach(function (b) { if (!b.h) b.h = hash(b.t); if (!b.tok) b.tok = tokens(b.t); });
-    });
+  // O and N: [{ tag, t }]; h and tok are filled in here. `budget`: work
+  // units (default WORK_BUDGET); `work` in the result says what was spent.
+  function match(O, N, budget) {
+    O.forEach(prepBlock); N.forEach(prepBlock);
+    var m0 = meter(budget);
     var n = O.length, m = N.length;
     var mo = new Array(n).fill(-1), mn = new Array(m).fill(-1), kind = new Array(m).fill('new');
     function pair(i, j, k) { mo[i] = j; mn[j] = i; kind[j] = k; }
     // 1. Equal text, in order.
-    if (n * m <= EXACT_CELLS && Math.min(n, m) < 65535) {
-      lcs(n, m, function (i, j) { return O[i].h === N[j].h ? 1 : 0; }, false)
-        .forEach(function (p) { pair(p[0], p[1], 'exact'); });
+    if (n * m <= EXACT_CELLS && charge(m0, n * m)) {
+      var w = new Uint8Array(n * m);
+      for (var i0 = 0; i0 < n; i0++) for (var j0 = 0; j0 < m; j0++) if (O[i0].h === N[j0].h) w[i0 * m + j0] = 1;
+      lcs(n, m, w).forEach(function (p) { pair(p[0], p[1], 'exact'); });
     } else {
       // Linear: hashes unique on both sides, taken while they ascend.
       var countO = new Map(), countN = new Map(), at = new Map(), last = -1;
@@ -231,15 +258,17 @@
     var anchors = [[-1, -1]];
     mn.forEach(function (i, j) { if (i >= 0) anchors.push([i, j]); });
     anchors.push([n, m]);
-    for (var a = 0; a < anchors.length - 1; a++) {
+    for (var a = 0; a < anchors.length - 1 && !m0.out; a++) {
       var OI = [], NJ = [], x;
       for (x = anchors[a][0] + 1; x < anchors[a + 1][0]; x++) OI.push(x);
       for (x = anchors[a][1] + 1; x < anchors[a + 1][1]; x++) NJ.push(x);
-      if (!OI.length || !NJ.length || OI.length * NJ.length > GAP_CELLS) continue;
-      lcs(OI.length, NJ.length, function (p, q) { return similar(O[OI[p]], N[NJ[q]]); }, true)
-        .forEach(function (pq) { pair(OI[pq[0]], NJ[pq[1]], 'fuzzy'); });
+      if (!OI.length || !NJ.length || OI.length * NJ.length > GAP_CELLS || !charge(m0, OI.length * NJ.length)) continue;
+      var gw = new Float64Array(OI.length * NJ.length);
+      for (var p = 0; p < OI.length; p++) for (var q = 0; q < NJ.length; q++) gw[p * NJ.length + q] = similar(O[OI[p]], N[NJ[q]], m0);
+      if (m0.out) break;
+      lcs(OI.length, NJ.length, gw).forEach(function (pq) { pair(OI[pq[0]], NJ[pq[1]], 'fuzzy'); });
     }
-    // 3. Moved: equal text anywhere, then similar text anywhere.
+    // 3. Moved: equal text anywhere (linear), then similar text anywhere.
     var byHash = new Map();
     O.forEach(function (b, i) {
       if (mo[i] >= 0) return;
@@ -254,45 +283,54 @@
     var leftO = [], leftN = [];
     O.forEach(function (b, i) { if (mo[i] < 0) leftO.push(i); });
     N.forEach(function (b, j) { if (mn[j] < 0) leftN.push(j); });
-    if (leftO.length && leftN.length && leftO.length * leftN.length <= GAP_CELLS) {
+    if (!m0.out && leftO.length && leftN.length && leftO.length * leftN.length <= GAP_CELLS && charge(m0, leftO.length * leftN.length)) {
       var cands = [];
-      leftN.forEach(function (j) {
-        leftO.forEach(function (i) { var s = similar(O[i], N[j]); if (s) cands.push([s, i, j]); });
-      });
-      cands.sort(function (p, q) { return q[0] - p[0] || p[1] - q[1] || p[2] - q[2]; });
-      cands.forEach(function (c) { if (mo[c[1]] < 0 && mn[c[2]] < 0) pair(c[1], c[2], 'moved'); });
+      for (var k = 0; k < leftN.length && !m0.out; k++) {
+        for (var l = 0; l < leftO.length && !m0.out; l++) {
+          var sim = similar(O[leftO[l]], N[leftN[k]], m0);
+          if (sim) cands.push([sim, leftO[l], leftN[k]]);
+        }
+      }
+      if (!m0.out) {
+        cands.sort(function (p1, q1) { return q1[0] - p1[0] || p1[1] - q1[1] || p1[2] - q1[2]; });
+        cands.forEach(function (c) { if (mo[c[1]] < 0 && mn[c[2]] < 0) pair(c[1], c[2], 'moved'); });
+      }
       leftO = leftO.filter(function (i) { return mo[i] < 0; });
       leftN = leftN.filter(function (j) { return mn[j] < 0; });
     }
     // 4. Splits: an old block whose words now sit in several new ones. The
     // largest part keeps the id. Merges: a new block made of several old
     // ones keeps the id of the largest.
-    if (leftO.length && leftN.length && leftO.length * leftN.length <= GAP_CELLS) {
+    function contains(small, big) {
+      if (!charge(m0, small.tok.size)) return 0;
+      return containment(small.tok, big.tok);
+    }
+    if (!m0.out && leftO.length && leftN.length && leftO.length * leftN.length <= GAP_CELLS) {
       leftO.forEach(function (i) {
         var o = O[i];
-        if (o.tok.size < 4) return;
-        var parts = leftN.filter(function (j) { return mn[j] < 0 && N[j].tok.size >= 2 && containment(N[j].tok, o.tok) >= 0.8; });
-        if (!parts.length) return;
+        if (m0.out || o.tok.size < 4) return;
+        var parts = leftN.filter(function (j) { return mn[j] < 0 && N[j].tok.size >= 2 && N[j].tok.size <= o.tok.size && contains(N[j], o) >= 0.8; });
+        if (!parts.length || m0.out) return;
         var union = new Set();
         parts.forEach(function (j) { N[j].tok.forEach(function (t) { union.add(t); }); });
         if (containment(o.tok, union) < 0.5) return;
-        var biggest = parts.reduce(function (p, q) { return N[q].tok.size > N[p].tok.size ? q : p; });
+        var biggest = parts.reduce(function (p1, q1) { return N[q1].tok.size > N[p1].tok.size ? q1 : p1; });
         pair(i, biggest, 'split');
       });
       leftN.forEach(function (j) {
-        if (mn[j] >= 0) return;
+        if (m0.out || mn[j] >= 0) return;
         var nb = N[j];
         if (nb.tok.size < 4) return;
-        var parts = leftO.filter(function (i) { return mo[i] < 0 && O[i].tok.size >= 2 && containment(O[i].tok, nb.tok) >= 0.8; });
-        if (!parts.length) return;
+        var parts = leftO.filter(function (i) { return mo[i] < 0 && O[i].tok.size >= 2 && O[i].tok.size <= nb.tok.size && contains(O[i], nb) >= 0.8; });
+        if (!parts.length || m0.out) return;
         var union = new Set();
         parts.forEach(function (i) { O[i].tok.forEach(function (t) { union.add(t); }); });
         if (containment(nb.tok, union) < 0.5) return;
-        var biggest = parts.reduce(function (p, q) { return O[q].tok.size > O[p].tok.size ? q : p; });
+        var biggest = parts.reduce(function (p1, q1) { return O[q1].tok.size > O[p1].tok.size ? q1 : p1; });
         pair(biggest, j, 'merge');
       });
     }
-    return { mn: mn, mo: mo, kind: kind };
+    return { mn: mn, mo: mo, kind: kind, work: m0.spent, exhausted: m0.out };
   }
 
   // A new block's id: short, from the version, its place and its words, so a
@@ -304,23 +342,35 @@
     }
   }
 
+  function prevBlocks(s) {
+    return s && Array.isArray(s.blocks) ? s.blocks.map(function (b) { return { id: b.id, tag: b.tag, t: String(b.t || ''), h: b.h }; }) : [];
+  }
+
   // The sidecar for `version` from its HTML and the previous version's
-  // sidecar (or null). `keep`: optional { newIndex: oldId } the editor
-  // already knows (a browser edit of one block); used before the matcher.
-  // null when the document is too big.
-  function build(html, prev, version, parse5, keep) {
+  // sidecar (or null). opts: { keep: { newIndex: oldId } the editor already
+  // knows, used before the matcher; also: a second sidecar (a restore's
+  // source version) for blocks the previous one did not match; doc, sha:
+  // the doc's identity and these bytes' hash, recorded for readers to
+  // check; budget: matcher work units }. null when the document is too big.
+  function build(html, prev, version, parse5, opts) {
+    opts = opts || {};
     var blocks = segment(html, parse5);
     if (!blocks) return null;
-    var prevBlocks = prev && Array.isArray(prev.blocks) ? prev.blocks.map(function (b) {
-      return { id: b.id, tag: b.tag, t: String(b.t || ''), h: b.h };
-    }) : [];
     var ids = new Array(blocks.length).fill(null);
     var used = new Set();
-    prevBlocks.forEach(function (b) { used.add(b.id); });
-    if (prevBlocks.length && blocks.length) {
-      var res = match(prevBlocks, blocks);
-      res.mn.forEach(function (i, j) { if (i >= 0) ids[j] = prevBlocks[i].id; });
-    }
+    var work = 0;
+    [prev, opts.also].forEach(function (side) {
+      var old = prevBlocks(side);
+      old.forEach(function (b) { used.add(b.id); });
+      var want = [], at = [];
+      blocks.forEach(function (b, j) { if (!ids[j]) { want.push(b); at.push(j); } });
+      if (!old.length || !want.length) return;
+      var taken = new Set(ids.filter(Boolean));
+      var res = match(old, want, opts.budget);
+      work += res.work;
+      res.mn.forEach(function (i, k) { if (i >= 0 && !taken.has(old[i].id)) ids[at[k]] = old[i].id; });
+    });
+    var keep = opts.keep;
     if (keep && typeof keep === 'object') {
       Object.keys(keep).forEach(function (k) {
         var j = Number(k);
@@ -335,7 +385,11 @@
       seen.add(id);
       return { id: id, tag: b.tag, path: b.path, h: h, t: b.t };
     });
-    return { format: FORMAT, version: version, blocks: out };
+    var sidecar = { format: FORMAT, version: version, blocks: out };
+    if (opts.doc) sidecar.doc = String(opts.doc);
+    if (opts.sha) sidecar.sha = String(opts.sha);
+    Object.defineProperty(sidecar, 'work', { value: work, enumerable: false });
+    return sidecar;
   }
 
   function validSidecar(s) {
@@ -354,16 +408,34 @@
     return k;
   }
 
+  // What locate() reads of a sidecar, computed once per sidecar object.
+  var PREPPED = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function prepped(sidecar) {
+    var hit = PREPPED && PREPPED.get(sidecar);
+    if (hit) return hit;
+    var starts = [], doc = '';
+    sidecar.blocks.forEach(function (b, i) { if (i) doc += ' '; starts.push(doc.length); doc += b.t; });
+    var out = { doc: doc, starts: starts, tok: null };
+    if (PREPPED) PREPPED.set(sidecar, out);
+    return out;
+  }
+  function blockTokens(sidecar) {
+    var pre = prepped(sidecar);
+    if (!pre.tok) pre.tok = sidecar.blocks.map(function (b) { return tokens(b.t); });
+    return pre.tok;
+  }
+
   // The block a text anchor ({ text, context_before, context_after }) sits
   // in, as an index into sidecar.blocks, or -1. Exact words first (the
   // context picks between repeats; a quote across blocks counts for the one
-  // it starts in), then the block holding most of its words.
+  // it starts in). Else, for a quote of 4 words or more, the one block
+  // holding most of its words (with its context's words as a tiebreak); a
+  // tie is no answer.
   function locate(sidecar, anchor) {
     if (!validSidecar(sidecar) || !anchor) return -1;
     var q = norm(anchor.text);
     if (!q) return -1;
-    var starts = [], doc = '';
-    sidecar.blocks.forEach(function (b, i) { if (i) doc += ' '; starts.push(doc.length); doc += b.t; });
+    var pre = prepped(sidecar), doc = pre.doc, starts = pre.starts;
     var before = norm(anchor.context_before).slice(-60), after = norm(anchor.context_after).slice(0, 60);
     var best = -1, bestScore = -1;
     for (var at = doc.indexOf(q), hits = 0; at !== -1 && hits < 200; at = doc.indexOf(q, at + 1), hits++) {
@@ -377,25 +449,32 @@
       return lo;
     }
     var qt = tokens(q);
-    if (qt.size < 2) return -1;
-    var pick = -1, share = 0.6;
-    sidecar.blocks.forEach(function (b, i) {
-      var s = containment(qt, tokens(b.t));
-      if (s > share) { share = s; pick = i; }
+    if (qt.size < 4) return -1;
+    var ct = tokens(before + ' ' + after);
+    var toks = blockTokens(sidecar);
+    var pick = -1, top = -1, second = -1;
+    toks.forEach(function (bt, i) {
+      var s = containment(qt, bt);
+      if (s < 0.6) return;
+      var total = s + 0.2 * containment(ct, bt);
+      if (total > top) { second = top; top = total; pick = i; }
+      else if (total > second) second = total;
     });
-    return pick;
+    return pick >= 0 && top - second > 1e-9 ? pick : -1;
   }
 
   // Where block `id` is in a sidecar, as the frame needs it: the path to
-  // try first, the tag and the opening words to check it (and to find the
-  // block by when the path misses), and whether the quote is still there.
+  // try first, the tag, the opening words and the length of its words (to
+  // check it, and to find the block by when the path misses), and whether
+  // the quote is still there.
   function place(sidecar, id, quote) {
     if (!validSidecar(sidecar) || !id) return null;
     for (var i = 0; i < sidecar.blocks.length; i++) {
       var b = sidecar.blocks[i];
       if (b.id !== id) continue;
       var q = norm(quote);
-      return { id: id, index: i, path: b.path, tag: b.tag, head: squash(b.t).slice(0, 80), quote_found: Boolean(q) && b.t.indexOf(q) !== -1, excerpt: b.t.slice(0, 160) };
+      var words = squash(b.t);
+      return { id: id, index: i, path: b.path, tag: b.tag, head: words.slice(0, 80), len: words.length, quote_found: Boolean(q) && b.t.indexOf(q) !== -1, excerpt: b.t.slice(0, 160) };
     }
     return null;
   }
@@ -403,6 +482,7 @@
   return {
     FORMAT: FORMAT,
     MAX_HTML: MAX_HTML,
+    WORK_BUDGET: WORK_BUDGET,
     segment: segment,
     match: match,
     build: build,

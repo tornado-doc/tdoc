@@ -27,12 +27,25 @@ export function blockWords(el) {
   return String((el && el.textContent) || '').toLowerCase().replace(/[\s ]+/g, '');
 }
 
+// The words' length may differ a little from the server's count (an image's
+// alt text is in the server's, not in textContent).
+function lengthFits(words, block) {
+  var len = Number(block.len);
+  if (!(len > 0)) return true;
+  return Math.abs(words.length - len) <= Math.max(8, len * 0.1);
+}
+
 function blockFits(el, block) {
   if (!el || String(el.tagName || '').toLowerCase() !== String(block.tag || '').toLowerCase()) return false;
   var head = String(block.head || '');
-  return !head || blockWords(el).indexOf(head.slice(0, 40)) === 0;
+  var words = blockWords(el);
+  return (!head || words.indexOf(head.slice(0, 40)) === 0) && lengthFits(words, block);
 }
 
+// The block, or null. By path first; else by tag and words, and only when
+// exactly one element fits once those that hold another fitting one are
+// set aside (a wrapper starting with the same words as its first child):
+// two equal blocks are no answer.
 export function findBlockElement(block, root) {
   if (!block || !block.tag) return null;
   var body = root || (typeof document !== 'undefined' ? document.body : null);
@@ -43,6 +56,11 @@ export function findBlockElement(block, root) {
   if (el && el !== body && blockFits(el, block)) return el;
   if (!block.head) return null;
   var all = body.getElementsByTagName(String(block.tag));
-  for (var k = 0; k < all.length; k++) if (blockFits(all[k], block)) return all[k];
-  return null;
+  var fits = [];
+  for (var k = 0; k < all.length; k++) if (blockFits(all[k], block)) fits.push(all[k]);
+  fits = fits.filter(function (a) {
+    for (var j = 0; j < fits.length; j++) if (fits[j] !== a && a.contains(fits[j])) return false;
+    return true;
+  });
+  return fits.length === 1 ? fits[0] : null;
 }

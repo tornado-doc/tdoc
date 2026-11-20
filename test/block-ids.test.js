@@ -116,17 +116,21 @@ test('ids chain over several versions and rebuild deterministically', () => {
 
 test('editor hint (keep) wins over the matcher', () => {
   const v1 = build('<p>Alpha.</p><p>Beta.</p>', null, 1);
-  const v2 = B.build(page('<p>Entirely rewritten.</p><p>Beta.</p>'), v1, 2, parse5, { 0: v1.blocks[0].id });
+  const v2 = B.build(page("<p>Entirely rewritten.</p><p>Beta.</p>"), v1, 2, parse5, { keep: { 0: v1.blocks[0].id } });
   assert.equal(v2.blocks[0].id, v1.blocks[0].id);
 });
 
 test('locate: a quote, its repeat told apart by context, a quote across blocks, words reworded', () => {
-  const s = build('<p>The cat sat. Then the dog ran.</p><p>Later the dog ran again.</p><p>Final words here.</p>', null, 1);
+  const s = build('<p>The cat sat. Then the dog ran.</p><p>Later the dog ran again.</p><p>Final words here, all four.</p>', null, 1);
   assert.equal(B.locate(s, { text: 'the dog ran' , context_before: 'Later ', context_after: ' again.' }), 1);
   assert.equal(B.locate(s, { text: 'the dog ran', context_before: 'The cat sat. Then ', context_after: '.' }), 0);
   assert.equal(B.locate(s, { text: 'ran again.\nFinal words' }), 1);
   assert.equal(B.locate(s, { text: 'Final   WORDS' }), 2);
-  assert.equal(B.locate(s, { text: 'here final words' }), 2, 'most of its words');
+  assert.equal(B.locate(s, { text: 'here four final words' }), 2, 'most of its words');
+  assert.equal(B.locate(s, { text: 'here final words' }), -1, 'under 4 words: no fuzzy guess');
+  const twins = build('<p>alpha beta gamma delta one</p><p>alpha beta gamma delta two</p>', null, 1);
+  assert.equal(B.locate(twins, { text: 'delta gamma beta alpha' }), -1, 'a tie is no answer');
+  assert.equal(B.locate(twins, { text: 'delta gamma beta alpha', context_after: 'two' }), 1, 'context words break the tie');
   assert.equal(B.locate(s, { text: 'nothing like it' }), -1);
   assert.equal(B.locate(null, { text: 'x' }), -1);
 });
@@ -158,6 +162,51 @@ test('bounds: too big is no sidecar, many blocks stay fast', () => {
   assert.equal(v2.blocks[1].id, v1.blocks[0].id);
   assert(ms < 5000, `2000 blocks took ${ms} ms`);
   console.log(`    (2000-block build + match: ${ms} ms)`);
+});
+
+test('one work budget bounds every fuzzy step: many similar gaps cannot run away', () => {
+  // Crafted: every block near-equal to every other (same long token set,
+  // one word changed), no exact anchors, so each step would compare all
+  // pairs. Work stays within the budget; what is left is new.
+  const words = Array.from({ length: 100 }, (_, i) => `w${i}`).join(' ');
+  const doc = (k) => Array.from({ length: 1500 }, (_, i) => `<p>${words} ${k}${i}</p>`).join('');
+  const t0 = Date.now();
+  const v1 = build(doc('a'), null, 1);
+  const v2 = build(doc('b'), v1, 2);
+  const ms = Date.now() - t0;
+  assert(v2.work <= B.WORK_BUDGET, `work ${v2.work}`);
+  assert(ms < 3000, `took ${ms} ms`);
+  const few = (s) => s.blocks.slice(0, 300).map((b) => ({ tag: b.tag, t: b.t }));
+  const res = B.match(few(v1), few(v2), 5000);
+  assert(res.work <= 5000 && res.exhausted, `small budget: work ${res.work}`);
+  console.log(`    (crafted 1500x1500 near-equal blocks: ${ms} ms, work ${v2.work})`);
+});
+
+test('many small fuzzy gaps share the one budget', () => {
+  const words = Array.from({ length: 100 }, (_, i) => `w${i}`).join(' ');
+  const doc = (k) => Array.from({ length: 1000 }, (_, i) => `<p>anchor ${i}</p><p>${words} ${k}${i}</p><p>${words} ${k}x${i}</p>`).join('');
+  const t0 = Date.now();
+  const v1 = build(doc('a'), null, 1);
+  const v2 = build(doc('b'), v1, 2);
+  const ms = Date.now() - t0;
+  assert(v2.work <= B.WORK_BUDGET, `work ${v2.work}`);
+  assert(ms < 3000, `took ${ms} ms`);
+  assert.equal(v2.blocks[0].id, v1.blocks[0].id, 'exact anchors still match');
+  console.log(`    (1000 fuzzy gaps: ${ms} ms, work ${v2.work})`);
+});
+
+test('size-ratio prefilter: very different lengths are never compared', () => {
+  const res = B.match([{ tag: 'p', t: 'a b c d e f g h i j k l m n o p q r s t' }], [{ tag: 'p', t: 'a b' }]);
+  assert.equal(res.mn[0], -1);
+  assert(res.work <= 5, `cells only, no Jaccard: ${res.work}`);
+});
+
+test('a restore also matches the restored version\'s ids', () => {
+  const v1 = build('<p>Old paragraph that was removed later on.</p><p>Stays.</p>', null, 1);
+  const v2 = build('<p>Stays.</p>', v1, 2);
+  const v3 = B.build(page('<p>Old paragraph that was removed later on.</p><p>Stays.</p>'), v2, 3, parse5, { also: v1 });
+  assert.equal(v3.blocks[0].id, v1.blocks[0].id);
+  assert.equal(v3.blocks[1].id, v2.blocks[0].id);
 });
 
 console.log(`block-ids: ${n} passed`);

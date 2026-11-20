@@ -135,12 +135,77 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(s && idWith(s, 'now block three') === blockId, 'v4 sidecar');
   });
 
-  await t('missing sidecars are built when asked for, from the nearest one below', async () => {
-    for (const v of [2, 3, 4]) env.DOCS.map.delete(`docs/${slug}/v${v}/blocks.json`);
+  await t('missing sidecars are built in memory when read, from the nearest one below, and never written by a read', async () => {
+    const saved = {};
+    for (const v of [2, 3, 4]) { saved[v] = env.DOCS.map.get(`docs/${slug}/v${v}/blocks.json`); env.DOCS.map.delete(`docs/${slug}/v${v}/blocks.json`); }
+    const puts = env.DOCS.putCalls;
     const r = await call(`/api/comments?slug=${slug}&version=4&blocks=1`, { cookie: alice.cookie });
     const c = r.body.find((x) => x.id === commentId);
     assert(c.anchor_block && c.anchor_block.id === blockId, JSON.stringify(c.anchor_block));
-    for (const v of [2, 3, 4]) assert(sidecar(slug, v), `v${v} not stored back`);
+    assert(env.DOCS.putCalls === puts, 'a read wrote to R2');
+    for (const v of [2, 3, 4]) { assert(!sidecar(slug, v), `v${v} stored by a read`); env.DOCS.map.set(`docs/${slug}/v${v}/blocks.json`, saved[v]); }
+  });
+
+  await t('resolved comments are not looked up', async () => {
+    const r0 = await call('/api/comments', { method: 'PATCH', cookie: alice.cookie, headers: ORIGIN, body: { slug, id: commentId, resolved: true, version: 4 } });
+    const r = await call(`/api/comments?slug=${slug}&version=4&blocks=1`, { cookie: alice.cookie });
+    const c = r.body.find((x) => x.id === commentId);
+    assert(r0.status === 200 && c && (c.status === 'applied' || c.resolved), `not resolved: ${r0.status} ${r0.text}`);
+    assert(!c.anchor_block, 'resolved thread looked up');
+    await call('/api/comments', { method: 'PATCH', cookie: alice.cookie, headers: ORIGIN, body: { slug, id: commentId, resolved: false, version: 4 } });
+  });
+
+  await t('a doc whose owner is not in dev mode gets no sidecars', async () => {
+    const bob = await person('bob');
+    const r = await call('/api/upload', { method: 'POST', token: bob.token, body: { slug: 'block-bob', version: 1, html: V1, meta: { title: 'Plan' } } });
+    assert(r.status === 200, `upload ${r.status} ${r.text}`);
+    assert(!sidecar('block-bob', 1), 'sidecar for a doc without the flag');
+    const s = await call('/api/doc/versions', { method: 'POST', cookie: bob.cookie, headers: ORIGIN, body: { slug: 'block-bob', baseVersion: 1, html: V2 } });
+    assert(s.status === 200 && !sidecar('block-bob', 2), 'browser save wrote one');
+  });
+
+  await t('the upload starts the sidecar after everything else, in waitUntil', async () => {
+    const pending = [];
+    const r = await worker.fetch(req('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'block-later', version: 1, html: V1, meta: { title: 'Plan' } } }), env, { waitUntil(p) { pending.push(p); } });
+    assert(r.status === 200);
+    assert(pending.length >= 1, 'nothing handed to waitUntil');
+    await Promise.all(pending);
+    assert(sidecar('block-later', 1), 'not written after waitUntil');
+  });
+
+  await t('a doc purged while the sidecar is built gets no sidecar; one from a purged doc is never read', async () => {
+    const pending = [];
+    const r = await worker.fetch(req('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'block-purge', version: 1, html: V1, meta: { title: 'Plan' } } }), env, { waitUntil(p) { pending.push(p); } });
+    assert(r.status === 200);
+    env.META.map.delete('meta:block-purge');
+    await Promise.all(pending);
+    assert(!sidecar('block-purge', 1), 'sidecar written for a purged doc');
+    // A leftover from an earlier doc on the slug names that doc: not read.
+    assert((await upload('block-reuse', 1, V1)).status === 200);
+    const old = sidecar('block-reuse', 1);
+    old.doc = '1999-01-01T00:00:00.000Z';
+    old.blocks.forEach((b) => { b.id = `x${b.id}`; });
+    env.DOCS.map.set('docs/block-reuse/v1/blocks.json', JSON.stringify(old));
+    const c = await call('/api/comments', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug: 'block-reuse', version: 1, text: 'q', anchor: { kind: 'text', text: 'invoices block two renewals' } } });
+    const got = (await call(`/api/comments?slug=block-reuse&version=1&blocks=1`, { cookie: alice.cookie })).body.find((x) => x.id === c.body.id);
+    assert(got.anchor_block && !got.anchor_block.id.startsWith('x'), `read a stale doc's sidecar: ${JSON.stringify(got.anchor_block)}`);
+  });
+
+  await t('a replaced latest version gets a fresh sidecar; the stale one is not read', async () => {
+    const other = 'block-replace';
+    assert((await upload(other, 1, V1)).status === 200);
+    const before = sidecar(other, 1);
+    assert(before && before.sha, 'no sha recorded');
+    const meta = JSON.parse(env.META.map.get(`meta:${other}`));
+    assert(before.sha === meta.versions[0].sha, 'sha is not the stored bytes');
+    // Admin replace of the latest version with other bytes.
+    env.TDOC_UPLOAD_TOKEN = 'admin-token';
+    const r = await call('/api/upload', { method: 'POST', token: 'admin-token', body: { slug: other, version: 1, replace: true, html: V2, meta: { title: 'Plan', versions: [{ n: 1, created: meta.versions[0].created }] } } });
+    assert(r.status === 200, `replace ${r.status} ${r.text}`);
+    const after = sidecar(other, 1);
+    const metaAfter = JSON.parse(env.META.map.get(`meta:${other}`));
+    assert(after && after.sha === metaAfter.versions[0].sha && after.sha !== before.sha, 'sidecar not rebuilt for the new bytes');
+    assert(after.blocks.length === 5, `blocks ${after.blocks.length}`);
   });
 
   await t('a doc that never had sidecars still gets ids (backfill from v1)', async () => {
@@ -166,6 +231,13 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
       assert(s.status === 200, `save ${s.status} ${s.text}`);
     } finally { env.DOCS.put = put; console.error = errors; }
     assert(!sidecar('block-fail', 1) && !sidecar('block-fail', 2));
+  });
+
+  await t('a sheet doc gets no sidecar', async () => {
+    const sheet = '<!doctype html><html><head><title>S</title></head><body><table data-tdoc-sheet data-name="T"><thead><tr><th data-key="a">A</th></tr></thead><tbody><tr data-row="1"><td>x</td></tr></tbody></table></body></html>';
+    const r = await upload('block-sheet', 1, sheet);
+    assert(r.status === 200, `upload ${r.status} ${r.text}`);
+    assert(!sidecar('block-sheet', 1), 'sheet sidecar');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

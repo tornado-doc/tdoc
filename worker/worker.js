@@ -20504,7 +20504,7 @@ async function readCommentsForReader(env, req, url, slug, gate, agentAuth, V) {
   let blocked = linked;
   if (url.searchParams.get('blocks') === '1' && await stableBlockIdsAllowed(env, gate.session || (agentAuth && agentAuth.ok ? agentAuth.actor : null))) {
     const target = isFiniteVersion(V) ? V : latestVersionNumber(gate.meta);
-    try { blocked = await withBlockAnchors(env, slug, linked, list, target); }
+    try { blocked = await withBlockAnchors(env, slug, linked, list, target, gate.meta); }
     catch (e) { console.error('[block-ids] comments read without blocks:', e && e.message ? e.message : String(e)); }
   }
   return (await redactCommentEmails(blocked, await emailPrivacyFor(env, gate.session, slug, gate.meta)));
@@ -21167,7 +21167,9 @@ export class CommentsStore {
       // Block ids for the new version (flag stableBlockIds): after the
       // answer where the runtime allows it. Logged, never fails the save;
       // bounded (writeVersionBlockIds).
-      const blockIds = writeVersionBlockIds(this.env, slug, reservation.next, stamped.html);
+      const blockIds = writeVersionBlockIds(this.env, slug, reservation.next, stamped.html, {
+        restoredFrom: Number.isInteger(Number(op.restored_from)) ? Number(op.restored_from) : 0, inStore: true,
+      });
       if (this.state && typeof this.state.waitUntil === 'function') this.state.waitUntil(blockIds);
       else await blockIds;
       return {
@@ -22885,21 +22887,32 @@ function blockLintOf(html) {
 // docs/<slug>/v<N>/blocks.json; the stored HTML is never changed.
 //
 // Written after every publish has committed (upload / update_doc / edit_doc /
-// commit_upload, browser save, suggestion accept, restore), matched against
-// the previous version's sidecar. Never fails or holds up a publish: any
-// error is logged and the version simply has no sidecar yet. A missing one is
-// built when asked for (blockSidecar), from the nearest earlier sidecar, at
-// most BLOCK_IDS_BACKFILL versions back; beyond that the chain starts afresh.
-// The build is deterministic, so two builders racing write the same ids, and
-// a sidecar is written create-once all the same.
+// commit_upload, browser save, suggestion accept, restore), only for a doc
+// whose owner (or a team admin) has the flag (blockIdsWriteAllowed), matched
+// against the previous version's sidecar. Never fails or holds up a publish:
+// any error is logged and the version simply has no sidecar. The matcher's
+// work is capped (block-ids.js WORK_BUDGET); in the CommentsStore a doc over
+// BLOCK_IDS_DO_MAX_HTML is skipped. A sidecar records the doc's identity and
+// its bytes' hash: one for another doc on the slug or other bytes (a replaced
+// latest) is not read, and is replaced on the next write. Reads never write:
+// a missing sidecar is built in memory (blockSidecarForRead) from the nearest
+// stored one, at most BLOCK_IDS_BACKFILL versions back, the same way a
+// publish would; the build is deterministic.
 //
 // First consumer: comment anchors. A text comment whose words are gone from
 // the version being read is re-anchored to the block it was made on, found
-// by id in that version (blockAnchorsFor; GET /api/comments with blocks=1,
+// by id in that version (withBlockAnchors; GET /api/comments with blocks=1,
 // get_comments' block_id). Dev mode only, like askEditV2.
 /* __TDOC_BLOCK_IDS__ */
 const BLOCK_IDS_BACKFILL = 6;
-const BLOCK_IDS_BUDGET_MS = 1500;
+// Reads: at most this many sidecars built in memory per request, and this
+// many comments looked up (counted work: Date.now does not advance during
+// CPU work in Workers).
+const BLOCK_IDS_READ_BUILDS = 4;
+const BLOCK_IDS_READ_COMMENTS = 100;
+// A browser save runs in the doc's CommentsStore: past this size the
+// sidecar is not built there (the doc would wait on it).
+const BLOCK_IDS_DO_MAX_HTML = 512 * 1024;
 function blockSidecarKey(slug, version) {
   return `docs/${slug}/v${version}/blocks.json`;
 }
@@ -22907,69 +22920,127 @@ function blockIdsEngine() {
   const engine = globalThis.TdocBlockIds;
   return engine && typeof TdocParse5 !== 'undefined' ? engine : null;
 }
-async function readBlockSidecar(env, slug, version) {
+// A version's entry in the doc record, and the hash of its stored bytes.
+function versionEntrySha(meta, version) {
+  const entry = (Array.isArray(meta && meta.versions) ? meta.versions : []).find((v) => Number(v && v.n) === Number(version));
+  return entry && typeof entry.sha === 'string' ? entry.sha : '';
+}
+// A stored sidecar, or null. One recorded for another doc on this slug (a
+// purged one), or for other bytes than the version now holds (a replaced
+// latest), is no sidecar of this version.
+async function readBlockSidecar(env, slug, version, meta) {
   const obj = await env.DOCS.get(blockSidecarKey(slug, version));
   if (!obj) return null;
   try {
     const parsed = JSON.parse(await obj.text());
     const engine = blockIdsEngine();
-    return engine && engine.validSidecar(parsed) ? parsed : null;
+    if (!engine || !engine.validSidecar(parsed)) return null;
+    if (meta) {
+      const doc = docIdentity(meta);
+      if (parsed.doc && doc && parsed.doc !== doc) return null;
+      const sha = versionEntrySha(meta, version);
+      if (parsed.sha && sha && parsed.sha !== sha) return null;
+    }
+    return parsed;
   } catch { return null; }
 }
-// Store a built sidecar unless one is there already; the one stored wins.
-async function storeBlockSidecar(env, slug, version, sidecar) {
-  const wrote = await r2PutOnce(env, blockSidecarKey(slug, version), JSON.stringify(sidecar), {
-    httpMetadata: { contentType: 'application/json; charset=utf-8' },
-  });
-  if (wrote) return sidecar;
-  return (await readBlockSidecar(env, slug, version)) || sidecar;
-}
-// The sidecar of `version`, built (and stored) if missing. `html`: that
-// version's bytes when the caller has them. `memo`: a Map shared by one
-// request's lookups. `deadline`: past it, nothing more is built. null when
-// the version is missing, too big, or out of budget.
-async function blockSidecar(env, slug, version, { html = null, memo = null, deadline = Date.now() + BLOCK_IDS_BUDGET_MS } = {}) {
+// The sidecar of `version` for a READ: the stored one, else built in memory
+// (never stored) from the nearest stored one below, at most
+// BLOCK_IDS_BACKFILL versions back, the same way a publish would have.
+// `ctx`: { memo: Map, builds: remaining builds } shared by one request.
+async function blockSidecarForRead(env, slug, version, meta, ctx) {
   const engine = blockIdsEngine();
   if (!engine || !env.DOCS || !Number.isInteger(version) || version < 1) return null;
-  if (memo && memo.has(version)) return memo.get(version);
-  const remember = (v, s) => { if (memo) memo.set(v, s); return s; };
-  const stored = await readBlockSidecar(env, slug, version);
+  if (ctx.memo.has(version)) return ctx.memo.get(version);
+  const remember = (v, x) => { ctx.memo.set(v, x); return x; };
+  const stored = await readBlockSidecar(env, slug, version, meta);
   if (stored) return remember(version, stored);
-  // Walk down to the nearest stored sidecar (or BLOCK_IDS_BACKFILL back),
-  // then build upwards, each version from the one below it.
   let base = null;
   let from = version;
   while (from > 1 && version - from < BLOCK_IDS_BACKFILL) {
-    const below = (memo && memo.get(from - 1)) || await readBlockSidecar(env, slug, from - 1);
+    const below = ctx.memo.has(from - 1) ? ctx.memo.get(from - 1) : await readBlockSidecar(env, slug, from - 1, meta);
     if (below) { base = below; break; }
     from--;
   }
   let prev = base;
   for (let v = from; v <= version; v++) {
-    if (Date.now() > deadline) return remember(version, null);
-    let bytes = v === version ? html : null;
-    if (bytes == null) {
-      const obj = await env.DOCS.get(`docs/${slug}/v${v}/index.html`);
-      if (!obj) { prev = null; continue; }
-      bytes = await obj.text();
-    }
-    const built = engine.build(bytes, prev, v, TdocParse5);
-    if (!built) { prev = null; remember(v, null); continue; }
-    prev = remember(v, await storeBlockSidecar(env, slug, v, built));
+    if (ctx.memo.has(v)) { prev = ctx.memo.get(v); continue; }
+    if (ctx.builds <= 0) return remember(version, null);
+    ctx.builds--;
+    const obj = await env.DOCS.get(`docs/${slug}/v${v}/index.html`);
+    if (!obj) { prev = remember(v, null); continue; }
+    const bytes = await obj.text();
+    prev = remember(v, docTypeFromHtml(bytes) === 'sheet' ? null : engine.build(bytes, prev, v, TdocParse5));
   }
-  return memo ? (memo.get(version) || null) : prev;
+  return prev;
 }
-// After a publish has committed: the new version's sidecar, matched against
-// the version below it. Logged, never thrown. Returns how long it took (ms).
-async function writeVersionBlockIds(env, slug, version, html) {
-  const t0 = Date.now();
+// Whether this doc's sidecars are written: a PR preview, or its owner (the
+// author, or for a team doc any team admin) in dev mode, like the flag.
+async function blockIdsWriteAllowed(env, meta) {
+  if (env && env.TDOC_PREVIEW === '1') return true;
+  if (!meta) return false;
+  const owners = new Set();
+  if (meta.hosted && typeof meta.hosted.account_id === 'string' && meta.hosted.account_id) owners.add(meta.hosted.account_id);
+  if (meta.workspace_id) {
+    const team = await loadTeam(env, meta.workspace_id);
+    for (const m of (team && team.members) || []) if (m && m.role === 'admin' && m.account_id) owners.add(m.account_id);
+  }
+  if (!owners.size) return false;
+  for (const email of await debugAccountEmails(env)) {
+    const id = await accountIdByEmail(env, email);
+    if (id && owners.has(id) && await devModeOnForEmail(env, email)) return true;
+  }
+  return false;
+}
+// Store a sidecar, unless the doc changed under this write (purged, or the
+// version gone from its record) or a current one is there already. A stale
+// one (other bytes, another doc) is replaced.
+async function storeBlockSidecar(env, slug, version, sidecar) {
+  const now = await loadDocMeta(env, slug);
+  if (!now || docIdentity(now) !== sidecar.doc) return false;
+  if (!(now.versions || []).some((v) => Number(v && v.n) === Number(version))) return false;
+  const key = blockSidecarKey(slug, version);
+  const body = JSON.stringify(sidecar);
+  const httpMetadata = { contentType: 'application/json; charset=utf-8' };
+  if (await r2PutOnce(env, key, body, { httpMetadata })) return true;
+  if (await readBlockSidecar(env, slug, version, now)) return false;
+  await env.DOCS.put(key, body, { httpMetadata });
+  return true;
+}
+// After a publish has committed, for a doc whose owner has the flag: the new
+// version's sidecar, matched against the version below it (built and stored
+// first if missing: the start of this doc's chain) and, for a restore, the
+// restored version's. Never thrown; skipped for sheets, for documents over
+// the size limit, and (`inStore`) over BLOCK_IDS_DO_MAX_HTML in the
+// CommentsStore. Returns what it did, for logs and tests.
+async function writeVersionBlockIds(env, slug, version, html, { meta = null, restoredFrom = 0, inStore = false } = {}) {
   try {
-    if (!blockIdsEngine() || String(html || '').length > globalThis.TdocBlockIds.MAX_HTML) return 0;
-    await blockSidecar(env, slug, Number(version), { html });
+    const engine = blockIdsEngine();
+    const v = Number(version);
+    html = String(html || '');
+    if (!engine || !Number.isInteger(v) || v < 1 || html.length > engine.MAX_HTML) return 'skipped';
+    if (inStore && html.length > BLOCK_IDS_DO_MAX_HTML) return 'too_large';
+    if (docTypeFromHtml(html) === 'sheet') return 'sheet';
+    const record = meta || await loadDocMeta(env, slug);
+    if (!record || !(await blockIdsWriteAllowed(env, record))) return 'off';
+    const doc = docIdentity(record);
+    let prev = v > 1 ? await readBlockSidecar(env, slug, v - 1, record) : null;
+    if (!prev && v > 1) {
+      const obj = await env.DOCS.get(`docs/${slug}/v${v - 1}/index.html`);
+      const bytes = obj ? await obj.text() : '';
+      if (bytes && bytes.length <= (inStore ? BLOCK_IDS_DO_MAX_HTML : engine.MAX_HTML) && docTypeFromHtml(bytes) !== 'sheet') {
+        prev = engine.build(bytes, null, v - 1, TdocParse5, { doc, sha: (await sha256Hex(bytes)).slice(0, 16) });
+        if (prev) await storeBlockSidecar(env, slug, v - 1, prev);
+      }
+    }
+    const also = restoredFrom > 0 && restoredFrom < v - 1 ? await readBlockSidecar(env, slug, restoredFrom, record) : null;
+    const built = engine.build(html, prev, v, TdocParse5, { also, doc, sha: (await sha256Hex(html)).slice(0, 16) });
+    if (!built) return 'too_large';
+    return (await storeBlockSidecar(env, slug, v, built)) ? 'written' : 'not_written';
   } catch (e) {
     console.error('[block-ids] sidecar not written (ignored):', slug, version, e && e.message ? e.message : String(e));
+    return 'error';
   }
-  return Date.now() - t0;
 }
 // The version a comment's current anchor was set on, as of version V: its
 // `created` event, or a later anchor_changed at or before V.
@@ -22985,25 +23056,28 @@ function anchorSetVersion(record, V) {
 }
 // For each open text comment in `shown` (folded, as of version `target`):
 // the block its words were on, where that block is in `target`
-// (anchor_block: { id, from_version, path, tag, head, quote_found, excerpt }).
-// Bounded by BLOCK_IDS_BUDGET_MS; whatever is not found is left alone.
-async function withBlockAnchors(env, slug, shown, records, target) {
+// (anchor_block: { id, from_version, path, tag, head, len, quote_found,
+// excerpt }). Bounded by counts (BLOCK_IDS_READ_*); whatever is not found
+// is left alone. Resolved and deleted threads are skipped.
+async function withBlockAnchors(env, slug, shown, records, target, meta) {
   const engine = blockIdsEngine();
   if (!engine || !Number.isInteger(target) || target < 1) return shown;
   const byId = new Map((records || []).map((c) => [c && c.id, c]));
-  const memo = new Map();
-  const deadline = Date.now() + BLOCK_IDS_BUDGET_MS;
+  const ctx = { memo: new Map(), builds: BLOCK_IDS_READ_BUILDS };
+  let looked = 0;
   const out = [];
   for (const c of shown) {
     const a = c && c.anchor;
-    if (!a || a.kind !== 'text' || !a.text || c.deleted || Date.now() > deadline) { out.push(c); continue; }
+    const open = c && !c.deleted && !c.resolved && c.status !== 'applied';
+    if (!open || !a || a.kind !== 'text' || !a.text || looked >= BLOCK_IDS_READ_COMMENTS) { out.push(c); continue; }
+    looked++;
     try {
       const from = Math.min(target, anchorSetVersion(byId.get(c.id), target) || Number(c.created_in) || target);
-      const made = await blockSidecar(env, slug, from, { memo, deadline });
+      const made = await blockSidecarForRead(env, slug, from, meta, ctx);
       const index = made ? engine.locate(made, a) : -1;
       if (index < 0) { out.push(c); continue; }
       const id = made.blocks[index].id;
-      const now = from === target ? made : await blockSidecar(env, slug, target, { memo, deadline });
+      const now = from === target ? made : await blockSidecarForRead(env, slug, target, meta, ctx);
       const place = now ? engine.place(now, id, a.text) : null;
       out.push(place ? { ...c, anchor_block: { ...place, from_version: from } } : { ...c, anchor_block: { id, from_version: from, gone: true } });
     } catch (e) {
@@ -35541,14 +35615,6 @@ const tdocHandlers = {
       } catch (e) {
         console.error('[upload] comment merge/reconcile failed (non-fatal):', e.message);
       }
-      // Block ids for the version this upload made latest (flag
-      // stableBlockIds): after the response where the runtime allows it.
-      // Logged, never fails the upload.
-      if (incoming && writesLatestMeta) {
-        const blockIds = writeVersionBlockIds(env, slug, verNum, stampedHtml);
-        if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(blockIds);
-        else await blockIds;
-      }
       // `sha` is the hash of the exact stored bytes (post-bake, post-stamp). The
       // client records it so a later edit can ask "has remote moved since I
       // published?" with one HEAD request instead of re-downloading the doc.
@@ -35598,6 +35664,15 @@ const tdocHandlers = {
         }
       }
       const blockLint = blockLintOf(doc);
+      // Block ids for the version this upload made latest (flag
+      // stableBlockIds), started after every other await so it runs after
+      // the response where the runtime allows it. Logged, never fails the
+      // upload.
+      if (incoming && writesLatestMeta) {
+        const blockIds = writeVersionBlockIds(env, slug, verNum, stampedHtml);
+        if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(blockIds);
+        else await blockIds;
+      }
       // `new_doc` and `team` let the CLI place a first publish (its default
       // team) and say where every publish landed, so a doc in the wrong
       // place is seen at once (Julie, 2026-10-10).

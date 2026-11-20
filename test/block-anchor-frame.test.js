@@ -58,4 +58,27 @@ test('nothing when neither the path nor the words fit', () => {
   assert.equal(findBlockElement(null, other), null);
 });
 
+test('a wrapper starting with the same words is set aside for the block inside it', () => {
+  const live = V2.replace('<div class="wrap">', '<div class="banner"></div><div class="wrap">')
+    .replace('<p>Billing ships', '<div><p>Billing ships').replace('three renewals.</p>', 'three renewals.</p></div>');
+  const block = { ...placed, tag: 'p', path: [9] };
+  const el = findBlockElement(block, parseHtml(live).querySelector('body'));
+  assert(el && el.tagName === 'P', 'not the paragraph');
+  const divBlock = { ...placed, tag: 'div', path: [9] };
+  const nested = live.replace('<div><p>Billing ships', '<div><div><p>Billing ships').replace('three renewals.</p></div>', 'three renewals.</p></div></div>');
+  const inner = findBlockElement(divBlock, parseHtml(nested).querySelector('body'));
+  assert(inner && inner.firstElementChild && inner.firstElementChild.tagName === 'P', 'the innermost fitting div');
+});
+
+test('two elements that fit equally are no answer', () => {
+  const twice = V2.replace('<p>Mobile waits.</p>', '<p>Billing ships <b>first</b> because invoices now block three renewals.</p>');
+  const el = findBlockElement({ ...placed, path: [9] }, parseHtml(twice).querySelector('body'));
+  assert.equal(el, null);
+});
+
+test('words of a very different length do not fit', () => {
+  const longer = V2.replace('three renewals.', 'three renewals. ' + 'And a great deal more text appended afterwards. '.repeat(4));
+  assert.equal(findBlockElement({ ...placed, path: [9] }, parseHtml(longer).querySelector('body')), null);
+});
+
 console.log(`block-anchor-frame: ${n} passed`);
