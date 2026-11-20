@@ -1493,7 +1493,7 @@ Remote storage holds optional `meta.access`:
 - **unlisted** ("Anyone with the link"; `--visibility unlisted`): link-readable without login, every response `noindex`, listed nowhere (not on profiles, not in /llms.txt). `/me` still lists the signed-in publisher's docs. `signin_required: true` (Share panel "Require sign-in to view") lets any signed-in account read it instead of anyone. The default for a new doc.
 - **public** ("Public"; `--visibility public`): link-readable without login and indexable by search engines. Profile pins (`/@handle`) are always public. Only on explicit request.
 - **private**: the doc publisher (hosted `github_login`, or `TDOC_OWNER` on BYOK/legacy) + `allowed_users`. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
-- **history_visibility**: version picker visibility (new policies default owner-only / pure-publish).
+- **history_visibility**: who may list the history (version picker, who saved when, change summaries); new policies default owner-only / pure-publish. It does not hide an earlier version's content: any reader can open `/d/<slug>/v/<n>`, and sees "See what changed" on Edited (and "see changes" on an applied reply). Content that must not stay readable needs a new doc, not a new version.
 - Legacy meta without `access` stays world-readable + full history (back-compat); `worker/migrate-public-to-link.mjs` (manual, dry run by default) moves those and other non-profile public docs to unlisted.
 - **Access only ever tightens by omission.** A flag left out keeps what is
   already stored — the CLI leaves an existing `meta.access` alone, and the

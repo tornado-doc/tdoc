@@ -139,10 +139,24 @@ export function DocumentStar({ starred, onToggle }) {
 // latest" and View changes) offered a history this viewer may not see. A
 // reader on an older /v/N link learns that, and the way to the latest, from
 // the old-version strip above the document.
-export function DocumentEdited({ config, onHistory = null, historyOpen = false, disabled = false }) {
+// A reader who may not list the history but may see what changed (the
+// shell passes `onWhatChanged`: config.changesVisible, from v2 on): the same
+// words open the compare of this version against the one they last saw (or
+// the one before). When this version is new to them (`fresh`), the label
+// says so: "Edited just now · See what changed".
+export function DocumentEdited({ config, onHistory = null, historyOpen = false, disabled = false, onWhatChanged = null, fresh = false }) {
   if (config.isLanding || config.mode === 'local') return null;
   const current = (config.versions || []).find((v) => Number(v.n) === Number(config.version)) || null;
   const words = editedAgo(current?.created);
+  if (!onHistory && onWhatChanged) {
+    return (
+      <button id="tdoc-version-toggle" type="button" className={`tdoc-edited${fresh ? ' is-fresh' : ''}`}
+        aria-label={`${words || 'Edited'}. See what changed`} title={disabled ? 'Save or discard your edits first' : 'See what changed'}
+        disabled={disabled} onClick={onWhatChanged}>
+        {words || 'Edited'}{fresh ? <>{'\u00a0·\u00a0'}<span className="tdoc-edited-changes">See what changed</span></> : null}
+      </button>
+    );
+  }
   if (onHistory) {
     return (
       <button id="tdoc-version-toggle" type="button" className="tdoc-edited" aria-expanded={historyOpen}
@@ -297,8 +311,10 @@ export function DocumentOverflowActions({
   onMoveDocument,
   onDelete,
   // Version history: one row that opens the panel, for a viewer who may list
-  // the doc's history; nobody else gets a version row here.
+  // the doc's history. A reader who may not gets "See what changed" instead
+  // (a phone has no "Edited ..." in its bar): the same compare as the label.
   onHistory = null,
+  onWhatChanged = null,
   // Read / Comment / Edit, at the top of ⋯ with the current one ticked
   // (it was a dropdown in the bar): { modes: [{ value, label, Icon }], value, onChange }.
   mode = null,
@@ -337,6 +353,10 @@ export function DocumentOverflowActions({
       {onHistory ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="history" onClick={onHistory}>
           <History size={15} /> Version history
+        </AppMenuItem>
+      ) : onWhatChanged ? (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="what-changed" onClick={onWhatChanged}>
+          <History size={15} /> See what changed
         </AppMenuItem>
       ) : null}
       {onAllowEmbeds ? (

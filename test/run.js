@@ -34,6 +34,7 @@ const OFFLINE = [
   'sheets-outline.test.js',    // sheets structure: groups (nested, 3 levels), collapsed default vs a reader's view, hidden rows, freeze, moves, query re-key, markup round trip, 10k rows
   'sheets-size.test.js',       // sheets: 8 MB sheet cap on every write path (not for prose or a token sheet), history row-count summary, sheet anchors never lost to the aid reconcile
   'sheet-format.test.js',      // sheets: cell formats are whitelisted attributes (hostile values read as none), number formats, Excel codes, merges read and kept through structural edits
+  'reader-what-changed.test.js', // a reader without history rights may see what changed (changesVisible); both compare frames behind the read gate (private doc: none for a stranger); applied replies carry applied_in
   'version-history.test.js', // history rows: same writer within 30 min grouped, paged, what changed cached, access, Restore
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
   'tdoc-ai-mark.test.js',      // tdoc AI's face: tdoc_logo.svg's strokes + the Ask AI star on an accent badge; tdoc AI and unnamed agents wear it
@@ -240,6 +241,7 @@ const BROWSER = [
   'modeless-edit-ui.test.js', // modelessEdit: type with no Edit mode, autosave -> version in place, bubble + "/" menu, table cells, commenter unchanged, two-editor conflict notice, newer version swapped in without reload (marked, reduced motion), phone, flag off unchanged
   'sheet-modeless-edit-ui.test.js', // modelessEdit on sheets: an editor edits a cell with no mode switch or Save (click/type/Enter/Tab/double-click), autosave -> version, kept after reload; structure menus; comments via the pill / cell menu / a commented cell; a comment on a just-inserted row publishes the draft first and lands on that row (v2) after reload; pill hidden while typing and back on Esc; conflict toast says to resolve first; a newer version shows the strip without a hidden load; a #sheet= search view kept while editing; commenter unchanged; flag off unchanged; phone
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
+  'reader-what-changed-ui.test.js', // a reader without history rights: Edited · See what changed opens the compare since the version they last saw; an applied reply's see changes; phone ⋯; a stranger to a private doc gets no frame
   'version-history-ui.test.js', // Edited opens the history panel: grouped rows, Show changes on/off remembered, Share this version, Restore, phone drawer, dev-mode numbers, suggestions row, flag off, earlier-version comment
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments

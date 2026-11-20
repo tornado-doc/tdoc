@@ -70,7 +70,7 @@ import { AppButton } from './ui/button.jsx';
 import { isFeatureOn } from './feature-flags.js';
 import { readDevMode } from './dev-mode.js';
 import { VersionHistory } from './document/version-history.jsx';
-import { CommentDocVersionContext } from './document/comment-card.jsx';
+import { CommentDocVersionContext, CommentSeeChangesContext } from './document/comment-card.jsx';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
@@ -229,11 +229,26 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     frameSrc: String(servedBoot.frameSrc).replace(/\/v\/\d+\/frame/, `/v/${ownVersion.n}/frame`),
   } : servedBoot), [servedBoot, ownVersion]);
   const [comparing, setComparing] = useState(() => new URLSearchParams(location.search).get('compare') === '1');
-  const changeComparison = (next) => {
-    if (next === comparing) return;
+  // The compare's range, from the address (?compare=1&from=K&to=N): none is
+  // the version on screen against the one before it (VersionDiffView).
+  const compareRangeFromUrl = () => {
+    const query = new URLSearchParams(location.search);
+    // Kept as typed: VersionDiffView checks them (whole numbers in range).
+    return { from: query.get('from'), to: query.get('to') };
+  };
+  const [compareRange, setCompareRange] = useState(compareRangeFromUrl);
+  const changeComparison = (next, range = null) => {
+    if (next === comparing && !range) return;
     const url = new URL(location.href);
-    if (next) url.searchParams.set('compare', '1'); else url.searchParams.delete('compare');
+    url.searchParams.delete('from');
+    url.searchParams.delete('to');
+    if (next) {
+      url.searchParams.set('compare', '1');
+      if (range?.from) url.searchParams.set('from', String(range.from));
+      if (range?.to) url.searchParams.set('to', String(range.to));
+    } else url.searchParams.delete('compare');
     history.pushState(null, '', url);
+    setCompareRange(next && range ? { from: range.from || null, to: range.to || null } : { from: null, to: null });
     setComparing(next);
   };
   // Version history: "Edited …" opens the history panel for whoever may
@@ -252,12 +267,43 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     const restore = () => {
       const query = new URLSearchParams(location.search);
       setComparing(query.get('compare') === '1');
+      setCompareRange(compareRangeFromUrl());
       setHistoryOpen(historyEnabled && query.get('history') === '1');
     };
     window.addEventListener('popstate', restore);
     return () => window.removeEventListener('popstate', restore);
   }, [historyEnabled]);
   const [historyDevMode] = useState(() => Boolean(readDevMode()?.on));
+  // See what changed: a reader who may not list the history
+  // (config.changesVisible, the server's canSeeVersionChanges) still sees
+  // how this version differs from the one they last saw here, or from the
+  // one before it. "Last saw" is this browser's: the version on screen when
+  // they last left the page (seenKey), read once as the page opens.
+  const changesEnabled = config.mode === 'published' && !config.isLanding && !historyEnabled
+    && Boolean(config.changesVisible) && Number(config.version) > 1;
+  const seenKey = `tdoc-seen-version:${config.slug}`;
+  const [seenAtOpen] = useState(() => Number(readStored(seenKey)) || 0);
+  const shownVersion = Number(config.version) || 0;
+  const changesFrom = seenAtOpen > 0 && seenAtOpen < shownVersion ? seenAtOpen : shownVersion - 1;
+  const changesFresh = changesEnabled && seenAtOpen > 0 && seenAtOpen < shownVersion;
+  const [changesSeen, setChangesSeen] = useState(false);
+  useEffect(() => {
+    if (config.mode !== 'published' || config.isLanding || !shownVersion) return undefined;
+    const remember = () => {
+      if (shownVersion > (Number(readStored(seenKey)) || 0)) writeStored(seenKey, String(shownVersion));
+    };
+    window.addEventListener('pagehide', remember);
+    return () => window.removeEventListener('pagehide', remember);
+  }, [config.mode, config.isLanding, seenKey, shownVersion]);
+  const openWhatChanged = changesEnabled ? () => {
+    setChangesSeen(true);
+    changeComparison(true, changesFrom !== shownVersion - 1 ? { from: changesFrom } : null);
+  } : null;
+  // See changes on an agent's applied reply: that version against the one
+  // before it, for anyone who may see what changed (or list the history).
+  const seeReplyChanges = config.mode === 'published' && !config.isLanding && (historyEnabled || config.changesVisible)
+    ? (n) => { if (Number(n) > 0) changeComparison(true, { to: Number(n) }); }
+    : null;
   const narrow = useNarrowViewport({ bodyClass: 'tdoc-narrow' });
   // The frame's address carries this page's embed key (sheet-embed.js).
   const [frameSrc] = useState(() => embedFrameSrc(boot.frameSrc));
@@ -2505,7 +2551,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       onMarkRead={markAgentReplyRead}
       onMarkAllRead={markAllAgentRepliesRead}
       autoRead={autoReadEnabled}
-      onViewChanges={() => { closeAskAi(); changeComparison(true); }}
+      onViewChanges={(comment) => { closeAskAi(); changeComparison(true, comment?.applied_in ? { to: Number(comment.applied_in) } : null); }}
       onReply={config.canComment ? async (comment, text) => replyTo(comment.id, text,
         canSendToAgent ? { sendToAgent: true, handoffCommentId: comment.id, recipient: comment.handoff_to }
           : { target: comment.handoff_to, askOnly: true }) : null}
@@ -2625,6 +2671,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       <AgentMentionContext.Provider value={agentMentions}>
       <SuggestContext.Provider value={suggestContext}>
       <CommentDocVersionContext.Provider value={config.mode === 'published' ? Number(config.version) : null}>
+      <CommentSeeChangesContext.Provider value={seeReplyChanges}>
       <TopBar
         identity={config.identity}
         onboardingTest={config.debug ? {
@@ -2648,6 +2695,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
               config={config}
               onHistory={historyEnabled ? () => changeHistory(!historyOpen) : null}
               historyOpen={historyOpen}
+              onWhatChanged={openWhatChanged}
+              fresh={changesFresh && !changesSeen}
               disabled={editor.mode === 'edit' && editor.dirty && !editor.modeless}
             />
             {editor.modeless ? <EditorSaveStatus status={editor.saveStatus} /> : null}
@@ -2714,6 +2763,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
             onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
             onHistory={historyEnabled ? () => changeHistory(true) : null}
+            onWhatChanged={openWhatChanged}
             mode={editor.modeless ? null : { modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
             onAllowEmbeds={embedsHeld ? () => setDialog({ type: 'allow-embeds' }) : null}
             onConvertToSheet={canConvertToSheet ? () => setDialog({ type: 'convert-sheet' }) : null}
@@ -2760,7 +2810,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         <button type="button" onClick={guestAction.onClick}>{guestAction.label}</button>
         {guestInviteStatus ? <span>{guestInviteStatus}</span> : null}
       </div> : null}
-      {comparing ? <VersionDiffView config={config} theme={theme} narrow={narrow} onClose={() => changeComparison(false)} /> : null}
+      {comparing ? <VersionDiffView config={config} theme={theme} narrow={narrow} from={compareRange.from} to={compareRange.to} onClose={() => changeComparison(false)} /> : null}
       {historyOpen && !comparing ? (
         <VersionHistory
           config={config}
@@ -3155,6 +3205,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         const left = Math.min(window.innerWidth - 120, (frameBox?.left || 0) + suggestions.rect.right - 40);
         return <SuggestInlineChip suggestions={suggestions} style={{ top, left }} />;
       })() : null}
+      </CommentSeeChangesContext.Provider>
       </CommentDocVersionContext.Provider>
       </SuggestContext.Provider>
       </AgentMentionContext.Provider>

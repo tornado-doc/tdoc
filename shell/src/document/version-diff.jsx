@@ -117,9 +117,37 @@ export function ComparisonFrames({ slug, before, after, narrow, theme, bare = fa
   </>;
 }
 
-export function VersionDiffView({ config, theme, narrow, onClose }) {
-  const after = Number(config.version);
-  const before = Math.max(0, after - 1);
+// The page's compare (?compare=1): the version on screen against the one
+// before it, unless a range is asked for -- `from` (the version a reader last
+// saw, "See what changed") and `to` (the version an agent's reply says it
+// changed, "See changes"). Both frames go through the doc's read gate.
+// What a ?compare=1&from=K&to=N range compares, or why it cannot: whole
+// numbers only, 1..latest, from before to. Checked before any frame loads, so
+// a bad link says so at once instead of timing out.
+export function compareRange({ from = null, to = null, version, latest }) {
+  const whole = (v) => (v === null || v === undefined || v === '' ? null : (/^\d+$/.test(String(v)) ? Number(v) : NaN));
+  const top = Math.max(1, Number(latest) || 0, Number(version) || 0);
+  const f = whole(from), t = whole(to);
+  if (Number.isNaN(f) || Number.isNaN(t)) return { error: 'This link asks for a version that is not a number.' };
+  const after = t === null ? Number(version) : t;
+  if (!(after >= 1 && after <= top)) return { error: `There is no v${t} of this document. The latest is v${top}.` };
+  if (f === null) return { before: Math.max(0, after - 1), after };
+  if (!(f >= 1 && f < after)) return { error: `Changes are shown from an earlier version to a later one (v1 to v${top}).` };
+  return { before: f, after };
+}
+
+export function VersionDiffView({ config, theme, narrow, onClose, from = null, to = null }) {
+  const range = compareRange({ from, to, version: Number(config.version), latest: config.latestVersion });
+  if (range.error) {
+    return <main className="tdoc-version-diff" aria-label="Version changes">
+      <div className="tdoc-diff-heading">
+        <strong>Changes</strong>
+        <button type="button" onClick={onClose}>Back to document</button>
+      </div>
+      <p role="alert">{range.error}</p>
+    </main>;
+  }
+  const { before, after } = range;
   return <main className="tdoc-version-diff" aria-label="Version changes">
     <div className="tdoc-diff-heading">
       <strong>{before ? `v${after} · Changes from v${before}` : `v${after} · First version`}</strong>
