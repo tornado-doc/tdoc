@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppSwitch } from '../ui/switch.jsx';
 import { AppTextarea } from '../ui/textarea.jsx';
+import { AppDialog } from '../ui/dialog.jsx';
+import { AppButton } from '../ui/button.jsx';
+import { copyText } from './model.js';
 import { readStored, writeStored } from '../safe-storage.js';
 
 // The Markdown switch (flag markdownEditMode): while a doc is being edited,
@@ -35,7 +38,9 @@ function loadConverter() {
 }
 
 // available: the flag is on and this person is editing a prose doc here.
-export function useMarkdownEdit({ available, editor, send, login, frameEpoch, showToast }) {
+// version: the version the page shows now (it moves when this page saves
+// in place, e.g. a sheet's column width, or a newer version is swapped in).
+export function useMarkdownEdit({ available, editor, send, login, frameEpoch, showToast, version = 0 }) {
   const prefKey = markdownPrefKey(login);
   const [wanted, setWanted] = useState(() => readStored(prefKey) === 'markdown');
   // { snapshot, text } while the Markdown view is showing.
@@ -53,6 +58,13 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
   // Markdown kept from Edit because it could not be converted: tried once,
   // on leaving Edit, and not again until Edit is back.
   const kept = useRef(false);
+  // The version the page showed when the text was kept: text kept against
+  // an older page is never applied over a newer one (that would revert
+  // whatever changed); it is offered to copy instead.
+  const keptVersion = useRef(0);
+  const versionRef = useRef(version);
+  versionRef.current = version;
+  const [stale, setStale] = useState(null);
   const timer = useRef(0);
   const dirtyText = useRef(false);
   const lastSent = useRef(null);
@@ -183,15 +195,30 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
       // Leaving Edit: what was typed goes to the page first. Markdown that
       // can't be converted is kept (not shown) and comes back with Edit;
       // flush has said why, and leaving the page asks first (below).
-      if (viewRef.current && !kept.current && !close()) kept.current = true;
+      if (viewRef.current && !kept.current && !close()) { kept.current = true; keptVersion.current = versionRef.current; }
       return undefined;
     }
+    const wasKept = kept.current;
+    const keptAt = keptVersion.current;
     kept.current = false;
     let cancelled = false;
     const id = window.setTimeout(async () => {
       if (cancelled) return;
-      // Back in Edit with Markdown still waiting to be fixed: that text.
-      if (viewRef.current && dirtyText.current) { setView(viewRef.current); return; }
+      // Back in Edit with Markdown still waiting to be fixed: that text, on
+      // the page it was written against. A newer page (saved in place, or
+      // swapped in) keeps its changes; the text is offered to copy.
+      if (viewRef.current && dirtyText.current) {
+        if (wasKept && keptAt !== versionRef.current) {
+          setStale({ text: viewRef.current.text });
+          cancel();
+          viewRef.current = null;
+          setView(null);
+          if (wanted) await open({ quiet: true });
+          return;
+        }
+        setView(viewRef.current);
+        return;
+      }
       if (wanted && !viewRef.current) await open({ quiet: true });
     }, 250);
     return () => { cancelled = true; window.clearTimeout(id); };
@@ -272,9 +299,25 @@ export function useMarkdownEdit({ available, editor, send, login, frameEpoch, sh
     </div>
   ) : null;
 
+  const dialog = stale ? (
+    <AppDialog
+      open
+      onOpenChange={(next) => { if (!next) setStale(null); }}
+      title="This doc changed while your Markdown waited"
+      description="Your Markdown was not applied, so the newer changes stay. Copy it to bring your edits over."
+      actions={(
+        <>
+          <AppButton onClick={async () => { const ok = await copyText(stale.text); showToast(ok ? 'Markdown copied' : 'Copy failed', !ok); }}>Copy my Markdown</AppButton>
+          <AppButton variant="primary" className="primary" onClick={() => setStale(null)}>OK</AppButton>
+        </>
+      )}
+    />
+  ) : null;
+
   return {
     available,
     on,
+    dialog,
     loading,
     blocked: available && !on ? blocked : '',
     toggle,

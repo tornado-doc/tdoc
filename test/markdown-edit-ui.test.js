@@ -272,6 +272,40 @@ const SHEET = `<!doctype html>
       await context.close();
     });
 
+    await test('Markdown kept from Edit is never applied over a newer page: the doc saved in place in Read keeps its change, and the text is offered to copy', async () => {
+      reset('notes');
+      const context = await newContext({ storage: { 'tdoc-edit-view:owner': 'markdown' } });
+      const { page } = await openDoc(context, 'notes', '?edit=1');
+      await source(page).waitFor();
+      const md = await source(page).inputValue();
+      const bad = md.replace('We ship', 'We will ship').replace('The end.', `The end.\n\n${'> '.repeat(40)}deep`);
+      await source(page).fill(bad);
+      await page.locator('.tdoc-shell-toast', { hasText: 'nested too deeply' }).first().waitFor({ timeout: 3000 });
+      await chooseMode(page, 'Read');
+      await page.waitForTimeout(400);
+      // In Read, the page saves itself in place (as a sheet's column width
+      // does): a newer version with a change of its own.
+      const frame = await (await page.locator('iframe.tdoc-doc-frame').elementHandle()).contentFrame();
+      await frame.evaluate(() => {
+        document.querySelector('#last').textContent = 'Changed in place.';
+        window.parent.postMessage({ source: 'tdoc-frame', type: 'tdoc:sheetLayoutSave' }, '*');
+      });
+      await until(() => latest('notes') === 2, 8000);
+      assert(latest('notes') === 2 && versionHtml('notes', 2).includes('Changed in place.'), 'the in-place save did not happen');
+      await chooseMode(page, 'Edit');
+      await page.getByRole('dialog').filter({ hasText: 'changed while your Markdown waited' }).waitFor({ timeout: 5000 });
+      assert(await page.getByRole('button', { name: 'Copy my Markdown' }).count() === 1, 'no way to copy the kept text');
+      await page.getByRole('button', { name: 'OK', exact: true }).click();
+      // The view reopens on the newer page; the kept text was not applied.
+      await source(page).waitFor({ timeout: 5000 });
+      const now = await source(page).inputValue();
+      assert(now.includes('Changed in place.') && !now.includes('We will ship'), `the kept text was applied over v2:\n${now}`);
+      const text = await frame.evaluate(() => document.querySelector('main').textContent);
+      assert(text.includes('Changed in place.') && !text.includes('We will ship'), 'the page lost the newer change');
+      await page.close({ runBeforeUnload: false });
+      await context.close();
+    });
+
     await test('Discard right after typing: the typing does not reach the discarded page', async () => {
       reset('notes');
       const context = await newContext({ storage: { 'tdoc-edit-view:owner': 'markdown' } });

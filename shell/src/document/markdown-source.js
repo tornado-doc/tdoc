@@ -21,7 +21,7 @@
 // block whose Markdown did not change keeps its original bytes, and an
 // edited block that stays the same kind keeps its attributes (ids, aids,
 // classes), as typing into it in the rich editor would.
-import { Marked } from 'marked';
+import { Lexer, Marked } from 'marked';
 import '../../../server/shell.js';
 
 const builder = () => globalThis.TDOC_SHELL_BUILDER;
@@ -228,16 +228,20 @@ const marked = new Marked({
   },
 });
 
-function renderTokens(tokens, links) {
-  const list = tokens.slice();
-  list.links = links || {};
-  try { return sanitizeHtml(marked.parser(list)); } catch (error) {
+// One block's Markdown as HTML: its inline text read only now (the doc
+// itself is read block by block, below), with the doc's link definitions.
+function renderBlock(raw, links) {
+  try {
+    const lexer = new Lexer(marked.defaults);
+    Object.assign(lexer.tokens.links, links || {});
+    const tokens = lexer.lex(raw);
+    return sanitizeHtml(marked.parser(tokens));
+  } catch (error) {
     throw new MarkdownTooComplex('This Markdown is too large to convert');
   }
 }
 export function markdownToHtml(md) {
-  const tokens = marked.lexer(String(md || ''));
-  return renderTokens(tokens, tokens.links);
+  return renderBlock(String(md || ''), null);
 }
 
 // ---- comparing a block with what its Markdown gives back ------------------
@@ -505,9 +509,13 @@ export function toMarkdown(bodyHtml) {
   };
 }
 
-// Top-level blocks as Markdown reads them: { text, token }.
+// Top-level blocks as Markdown reads them: { text, token }. Block structure
+// only: the inline text of a block is read when it is rendered, so blocks
+// nobody edited cost nothing each time the page follows the view.
 function blockTokens(md) {
-  const tokens = marked.lexer(md);
+  const lexer = new Lexer(marked.defaults);
+  const tokens = lexer.blockTokens(String(md).replace(/\r\n?/g, '\n'), []);
+  tokens.links = lexer.tokens.links;
   const out = [];
   for (const token of tokens) {
     if (token.type === 'space') continue;
@@ -568,6 +576,11 @@ function alignBlocks(a, b) {
 
 const MAX_LIKENESS_PAIRS = 250_000;
 const LIKENESS_WINDOW = 6;
+// The numbers in a block, in order: "team 10, week 3" -> "10 3".
+function numberKey(text) {
+  const nums = String(text).match(/\d+(?:[.,]\d+)*/g);
+  return nums ? nums.join(' ') : '';
+}
 // How alike two blocks' words are (0..1): an edited block keeps the
 // attributes of the block it replaced only when it is that block.
 function words(text) {
@@ -665,13 +678,26 @@ export function fromMarkdown(markdown, snapshot) {
     const oldWords = new Map(olds.map((o) => [o, words(segs[o].md)]));
     compared += olds.length * news.length;
     if (compared > MAX_LIKENESS_PAIRS) {
-      // Thousands rewritten at once: in order, each edited block looks at
-      // the next few originals only (linear), with the same 50% bar.
+      // Thousands rewritten at once: in order and linear. A block with
+      // numbers in it ("team 10") only looks at originals with the same
+      // numbers (an index, so a run of deleted look-alikes in between can't
+      // hand it their ids); any other block, at the next few originals.
+      const byNumbers = new Map();
+      olds.forEach((o, k) => {
+        const key = numberKey(segs[o].md);
+        if (!key) return;
+        const list = byNumbers.get(key);
+        if (list) list.push(k); else byNumbers.set(key, [k]);
+      });
       let at = 0;
       for (const nn of news) {
         const mine = words(blocks[nn].text);
+        const key = numberKey(blocks[nn].text);
+        const candidates = key
+          ? (byNumbers.get(key) || []).filter((k) => k >= at).slice(0, LIKENESS_WINDOW)
+          : Array.from({ length: Math.max(0, Math.min(olds.length, at + LIKENESS_WINDOW) - at) }, (_, i) => at + i).filter((k) => !numberKey(segs[olds[k]].md));
         let best = -1, score = 0.5;
-        for (let k = at; k < Math.min(olds.length, at + LIKENESS_WINDOW); k++) {
+        for (const k of candidates) {
           const sc = likeness(mine, oldWords.get(olds[k]));
           if (sc >= score) { best = k; score = sc; }
         }
@@ -731,7 +757,7 @@ export function fromMarkdown(markdown, snapshot) {
       out += '\n' + keepHtml(byId.get(Number(key.slice(6))));
       return;
     }
-    let blockHtml = renderTokens([b.token], blocks.links).replace(/\s+$/, '');
+    let blockHtml = renderBlock(b.token.raw, blocks.links).replace(/\s+$/, '');
     const was = replaces.has(nn) ? segs[replaces.get(nn)] : null;
     if (was && was.kind === 'md') blockHtml = withAttrs(blockHtml, was.tag, was.attrs);
     if (blockHtml) out += (was ? was.sep : '\n') + blockHtml;
@@ -759,6 +785,21 @@ const MAX_LIST_DEPTH = 16;
 // counted; and only runs with a line that is not in the doc as it opened
 // are checked, so text that was already there is never refused.
 const MAX_DELIMITERS_PER_RUN = 800;
+// Link openers `](` waiting for their `)`: worse still (400 of them 0.4 s,
+// 800 3 s). And since the cost of a run grows with the square of its count,
+// the whole edited text has a budget too: many runs each just under their
+// cap (50 list items of 790) would add up to seconds.
+const MAX_LINK_OPENERS_PER_RUN = 150;
+const MAX_TOTAL_COST = 4;
+function linkOpeners(line) {
+  let n = 0;
+  for (let i = line.indexOf(']('); i !== -1; i = line.indexOf('](', i + 2)) {
+    let slashes = 0;
+    for (let k = i - 1; k >= 0 && line[k] === '\\'; k--) slashes++;
+    if (slashes % 2 === 0) n++;
+  }
+  return n;
+}
 const ALNUM = /[\p{L}\p{N}]/u;
 function delimiterRuns(line) {
   let n = 0;
@@ -786,14 +827,21 @@ const indentOf = (line) => /^[ \t]*/.exec(line)[0].replace(/\t/g, '    ').length
 export function guardMarkdown(md, known = null) {
   if (md.length > MAX_MD_CHARS) throw new MarkdownTooComplex('This Markdown is too long to convert');
   let run = 0;
+  let links = 0;
+  let total = 0;
   let runNew = false;
   let fence = null;
   let prevBlank = true;
   let inCode = false;
   let stack = [];
   const endRun = () => {
-    if (runNew && run > MAX_DELIMITERS_PER_RUN) throw new MarkdownTooComplex('A paragraph has too much * or _ formatting to convert');
-    run = 0; runNew = false;
+    if (runNew) {
+      if (run > MAX_DELIMITERS_PER_RUN) throw new MarkdownTooComplex('A paragraph has too much * or _ formatting to convert');
+      if (links > MAX_LINK_OPENERS_PER_RUN) throw new MarkdownTooComplex('A paragraph has too many links to convert');
+      total += (run / MAX_DELIMITERS_PER_RUN) ** 2 + (links / MAX_LINK_OPENERS_PER_RUN) ** 2;
+      if (total > MAX_TOTAL_COST) throw new MarkdownTooComplex('This edit has too much formatting to convert at once');
+    }
+    run = 0; links = 0; runNew = false;
   };
   let start = 0;
   while (start <= md.length) {
@@ -834,6 +882,7 @@ export function guardMarkdown(md, known = null) {
     }
     if (/^[ \t]*(?:#{1,6}[ \t]|\|)/.test(line)) endRun();
     run += delimiterRuns(line);
+    links += linkOpeners(line);
     if (isNew) runNew = true;
     if (/^[ \t]*#{1,6}[ \t]/.test(line)) endRun();
     prevBlank = false;

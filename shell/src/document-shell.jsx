@@ -961,6 +961,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     login: config.identity?.login,
     frameEpoch,
     showToast,
+    version: Math.max(Number(config.version) || 0, Number(ownVersion?.n) || 0),
   });
 
   // The frame decides whether a click dismisses or acts, so it has to know when
@@ -2726,6 +2727,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         src={frameSrc}
       />
       {markdown.pane}
+      {markdown.dialog}
 
       <DocumentFooter footerRef={footerRef} visible={bridge.layout.footerVisible && !bridge.layout.fullBleed} />
 

@@ -339,5 +339,46 @@ const assert = require('assert/strict');
     assert.equal((out.match(/data-tdoc-aid/g) || []).length, 2000);
   });
 
+  // Third delta review of #1089 --------------------------------------------
+  t('unclosed link openers are bounded per paragraph, and the whole edit has a budget', () => {
+    const r = toMarkdown('<p>Intro</p>\n<p>Outro</p>\n');
+    const slow = [
+      '[a]('.repeat(1000),
+      Array(20).fill(',*a '.repeat(790)).join('\n\n'),
+      Array(50).fill('- ' + ',*a '.repeat(790)).join('\n'),
+      '|h|\n|-|\n' + Array(50).fill('|' + ',*a '.repeat(790) + '|').join('\n'),
+    ];
+    for (const text of slow) {
+      const t0 = Date.now();
+      assert.throws(() => fromMarkdown(`${r.markdown}\n\n${text}\n`, r.snapshot), (e) => e instanceof MarkdownTooComplex);
+      assert.ok(Date.now() - t0 < 500, `${Date.now() - t0} ms`);
+    }
+    // Plenty of real links, closed, across a list: fine.
+    const ok = Array.from({ length: 500 }, (_, i) => `- [doc ${i}](https://tdoc.dev/d/${i}) and [more](https://x.dev/${i})`).join('\n');
+    assert.ok(fromMarkdown(`${r.markdown}\n\n${ok}\n`, r.snapshot).bodyHtml.includes('href="https://tdoc.dev/d/499"'));
+  });
+
+  t('blocks nobody edited cost nothing per sync, however heavy', () => {
+    let html = '<p>Intro</p>\n';
+    for (let i = 0; i < 40; i++) html += '<p>' + '<em>a</em>,'.repeat(390) + i + '</p>\n';
+    const r = toMarkdown(html);
+    const t0 = Date.now();
+    fromMarkdown(r.markdown.replace('Intro', 'Intro!'), r.snapshot);
+    assert.ok(Date.now() - t0 < 300, `${Date.now() - t0} ms`);
+  });
+
+  t('look-alike blocks deleted in a long rewrite never hand their aids on', () => {
+    for (const n of [100, 1000]) {
+      let html = '';
+      for (let i = 0; i < n; i++) html += `<p data-tdoc-aid="a${i}">Weekly status for team ${i} is green and on track</p>\n`;
+      const r = toMarkdown(html);
+      const paras = r.markdown.trim().split('\n\n').map((p) => p.replace('green', 'amber')).slice(10);
+      const out = fromMarkdown(paras.join('\n\n') + '\n', r.snapshot).bodyHtml;
+      const wrong = [...out.matchAll(/data-tdoc-aid="a(\d+)">Weekly status for team (\d+)/g)].filter((m) => m[1] !== m[2]);
+      assert.equal(wrong.length, 0, `${n}: ${wrong.slice(0, 3).map((m) => `a${m[1]} on team ${m[2]}`)}`);
+      assert.ok(!/data-tdoc-aid="a[0-9]"/.test(out), 'a deleted block\'s aid is still on the page');
+    }
+  });
+
   if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 })();
