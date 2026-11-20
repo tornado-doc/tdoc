@@ -539,7 +539,7 @@ async function touchSelect(page, phrase) {
       await dragSelect(page, 'Humans and agents collaborate');
       const pop = page.locator('.tdoc-popup');
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
-      if (labels.join('|') !== '@agent|Comment') throw new Error(`composer buttons: ${labels.join('|')}`);
+      if (labels.join('|') !== '@agent|Post') throw new Error(`composer buttons: ${labels.join('|')}`);
       // Typing @ lists the demo agents above people.
       await pop.locator('textarea').pressSequentially('Make the headline shorter @');
       const rows = (await page.locator('.tdoc-mention-option').allTextContents()).map((x) => x.trim());
@@ -551,7 +551,7 @@ async function touchSelect(page, phrase) {
       if (!(await pop.textContent()).includes('Claude (demo)')) throw new Error('no Claude (demo) pill in the composer');
       await shot('desktop-composer-agent.png');
       if (await pill.count()) await pill.waitFor();
-      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await pop.getByRole('button', { name: 'Post', exact: true }).click();
       const card = page.locator('[data-comment-id]').filter({ hasText: 'Make the headline shorter' }).first();
       await card.waitFor({ timeout: 5000 });
       await page.waitForTimeout(300);
@@ -576,7 +576,7 @@ async function touchSelect(page, phrase) {
       await dragSelect(page, 'or endless formatting');
       const pop = page.locator('.tdoc-popup');
       await pop.locator('textarea').fill('Say this in fewer words');
-      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await pop.getByRole('button', { name: 'Post', exact: true }).click();
       await pop.waitFor({ state: 'detached' });
       await page.locator('#tdoc-send-agent-btn').click();
       const panel = page.locator('.tdoc-ask-panel');
@@ -625,7 +625,7 @@ async function touchSelect(page, phrase) {
       const box = await pop.boundingBox();
       if (box.x < 0 || box.x + box.width > 390) throw new Error(`composer off screen: ${JSON.stringify(box)}`);
       await shot('phone-composer-agent.png');
-      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await pop.getByRole('button', { name: 'Post', exact: true }).click();
       await pop.waitFor({ state: 'detached' });
       await page.locator('.tdoc-fab').click();
       const card = page.locator('#tdoc-comment-layer [data-comment-id]').filter({ hasText: 'Shorter headline please' }).first();

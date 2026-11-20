@@ -556,6 +556,10 @@ ${uiCss}
   // The overlay's "Finish signing in in the tdoc window…" line; set by the app.
   let connectWaiting = () => {};
   let connecting = null;
+  // The tdoc window this page last opened. A new attempt (a Post while
+  // signed out after an earlier Cancel) reuses it while it is still open
+  // rather than putting a second tdoc window on screen.
+  let connectWindow = null;
   function connect({ invite = null } = {}) {
     if (connecting) return connecting;
     const attempt = new Promise((resolve, reject) => {
@@ -609,7 +613,13 @@ ${uiCss}
         if (Date.now() > deadline) { failWith('Signing in took too long.', { timedOut: true }); return; }
         poll = setTimeout(collect, CLAIM_POLL_MS);
       };
-      const openPopup = () => window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
+      const openPopup = () => {
+        if (connectWindow && !connectWindow.closed) {
+          try { connectWindow.location.href = url; connectWindow.focus(); return connectWindow; } catch (_) {}
+        }
+        connectWindow = window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
+        return connectWindow;
+      };
       const controls = {
         // A new window makes a new claim; the old ones are still collected.
         reopen: () => {
@@ -617,7 +627,12 @@ ${uiCss}
           if (next) { popup = next; deadline = Date.now() + CLAIM_WAIT_MS; }
           return Boolean(next);
         },
-        cancel: () => failWith('Not connected.', { cancelled: true }),
+        cancel: () => {
+          // Cancel means this window too: a later attempt opens a fresh one.
+          try { if (popup && !popup.closed) popup.close(); } catch (_) {}
+          connectWindow = null;
+          failWith('Not connected.', { cancelled: true });
+        },
       };
       const watchPopup = () => {
         watch = setInterval(() => {
@@ -1444,7 +1459,7 @@ ${uiCss}
       if (result?.ok) {
         setSurface(result);
         if (result.config) setSession((prev) => ({ ...(prev || {}), ...result.config, token: (prev && prev.token) || result.config.token }));
-        setNotice(result.signedIn === false ? { status: 401, error: 'Connect your tdoc account to comment here.' } : null);
+        setNotice(result.signedIn === false ? { kind: 'connect', status: 401, error: 'Connect your tdoc account to comment here.' } : null);
         if (result.handoff) say(result.handoff.message, !result.handoff.ok);
         // The comment held while connecting has posted: its composer is done.
         if (result.postedDraft) { setSelected(null); setAreaSel(null); setPicking(false); if (!result.handoff) say('Comment posted'); }
@@ -1621,12 +1636,12 @@ ${uiCss}
       seenTransport: space ? SITE_SEEN : undefined,
     });
     const unreadComments = area.unread;
-    // Copy for agent (flag copyForAgent): ⋯ on a thread and on the list, C
+    // Copy for agent: ⋯ on a thread and on the list, C
     // and H while the list or a thread is open (comments/panel/copy-for-agent.jsx).
     // The tdoc link is the thread on the space's own page.
     const [markersHidden, setMarkersHidden] = useState(false);
     const copyForAgent = useCopyForAgent({
-      enabled: flagOn('copyForAgent', session),
+      enabled: true,
       area,
       selectedId: listId || openId,
       title: document.title,
@@ -1634,7 +1649,8 @@ ${uiCss}
       linkFor: (c) => (slug && c && c.id ? `${base}/d/${encodeURIComponent(slug)}?comment=${encodeURIComponent(c.id)}` : ''),
       say,
       markers: { hidden: markersHidden, toggle: () => setMarkersHidden((h) => !h) },
-      keysEnabled: shown && (panelOpen || Boolean(openId)),
+      // Not while the composer is open (as on the doc page): its words are typing.
+      keysEnabled: shown && (panelOpen || Boolean(openId)) && !selected,
     });
     const teamMember = Boolean(surface?.teamMember);
     // Who may send to an agent: the server's rule, shared with the doc page
@@ -1644,6 +1660,9 @@ ${uiCss}
     // account) is another viewer to the agent-list cache.
     const notifyViewer = session?.token || '';
     const agent = useNotifyTargets(slug, Boolean(sendMay && slug && session?.notify), notifyViewer);
+    // Signed out (no token, or the server no longer knows it): Post keeps
+    // the words and opens the tdoc window; the composer says so first.
+    const signInToPost = !session?.token || surface?.signedIn === false;
     const canSendToAgent = Boolean(agent.ready && agent.available && agent.reason !== 'no_agent_bound'
       && (agent.default || agent.candidates.length || agent.fallback));
     // Send to agent in the dock, as on the doc page. The owner always has it:
@@ -2002,13 +2021,18 @@ ${uiCss}
 
     // Esc steps back one level (comments/panel/keyboard.js): a press in
     // progress → composer → picking → card → list. Window capture: a host
-    // modal underneath must not close on the same press.
+    // modal underneath must not close on the same press. Closing the
+    // composer ends the pick too, as on the doc page: Esc closes it (the
+    // words are kept in the composer: comment-composer.jsx closedDrafts),
+    // not back to picking, and the next Esc closes what is behind it. Like
+    // ×, it abandons the held signed-out post (writeDraft), so connecting
+    // later never posts words the person walked away from.
     useEscapeLadder([
       { active: () => Boolean(gestureRef.current && gestureRef.current.pressing()), close: () => {
         gestureRef.current.cancel();
         setDrag(null); setHovered(null);
       } },
-      { active: Boolean(selected), close: () => { setSelected(null); setAreaSel(null); setQuoteSel(null); } },
+      { active: Boolean(selected), close: () => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); setHovered(null); } },
       { active: Boolean(picking || reanchorId), close: () => { setPicking(false); setReanchorId(null); setHovered(null); } },
       { active: Boolean(openId), close: () => setOpenId(null) },
       { active: panelOpen, close: () => setPanelOpen(false) },
@@ -2258,7 +2282,7 @@ ${uiCss}
         {marquee(drag, 'Comment on this area')}
         {marquee(areaBox)}
         {!selected ? marquee(openSpot) : null}
-        {(copyForAgent && markersHidden ? [] : pins).map(({ comment, element }) => {
+        {(markersHidden ? [] : pins).map(({ comment, element }) => {
           if (!element) return null;
           const rect = spotOf(comment, element);
           if (!rect || rect.bottom < 0 || rect.top > innerHeight) return null;
@@ -2282,7 +2306,9 @@ ${uiCss}
           /* The shared composer adds the document shell's 48px bar. Feedback
              already has viewport coordinates, so cancel that offset here. */
           <CommentComposer
-            selection={{ kind: 'element', label: pageSel ? 'This page' : frameSel ? frameLabel(frameSel.anchor) : quoteSel ? quoteLabel(quoteSel.quote) : areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)), rect: {
+            selection={{ kind: 'element', label: pageSel ? 'This page' : frameSel ? frameLabel(frameSel.anchor) : quoteSel ? quoteLabel(quoteSel.quote) : areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)),
+              draftKey: `${canonical()}|${pageSel ? 'page' : frameSel ? `frame:${JSON.stringify(frameSel.anchor || {}).slice(0, 300)}` : quoteSel ? `quote:${String(quoteSel.quote?.text || '').slice(0, 200)}` : areaBox ? `area:${Math.round(areaBox.left)},${Math.round(areaBox.top)},${Math.round(areaBox.width)},${Math.round(areaBox.height)}` : `el:${contextFor(selected).selector || ''}`}`,
+              rect: {
               top: composerRect.top - TOP_BAR_HEIGHT,
               bottom: composerRect.bottom - TOP_BAR_HEIGHT,
               left: Math.min(composerRect.left, Math.max(8, innerWidth - rightInset - COMPOSER_WIDTH - 8)),
@@ -2292,8 +2318,13 @@ ${uiCss}
             connectAgentPrompt={sendToAgentConnectPrompt}
             agentSetupHref={sendToAgentSetupHref}
             sendToAgentDisabledReason={sendToAgentDisabledReason}
-            onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); }}
+            signInToPost={signInToPost}
+            onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); }}
             onSubmit={async (text, opts = {}) => {
+              // Signed out: the composer's foot already says Post signs in
+              // and keeps the words; an older "Not connected" notice would be
+              // a second, stale explanation beside the tdoc window opening.
+              if (signInToPost) setNotice(null);
               const anchor = pageSel ? pageContext()
                 : frameSel ? frameContext(frameSel.anchor)
                 : quoteSel ? { ...contextFor(selected), quote: quoteSel.quote, label: quoteLabel(quoteSel.quote) }
@@ -2333,7 +2364,11 @@ ${uiCss}
           />
         ) : null}
 
-        {notice ? (
+        {/* An open composer that already says "Sign in to post" is the one
+            explanation: the page-load "Connect your tdoc account" notice
+            (kind 'connect') waits until it closes. Every other notice (a
+            blocked window, a timeout, a network error) still shows. */}
+        {notice && !(selected && signInToPost && notice.kind === 'connect') ? (
           <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
             <div className="head"><span className="h">{notice.reconnect ? 'Reconnect tdoc' : notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" aria-label="Close" onClick={() => setNotice(null)}><X size={14} aria-hidden="true" /></button></div>
             <p>{notice.error}</p>

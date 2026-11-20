@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { AgentMentionContext, MentionText } from './mention-field.jsx';
-import { AGENT_BUTTON_LABEL, AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sendToAgentState, sendToAgentWords, setupLinkProps, taggedAgent, taggedAgentSpan, targetKey } from './agent-choices.js';
+import { AGENT_BUTTON_LABEL, AGENT_TAG_JOINER, SEND_TO_AGENT_WHO, agentDisplayName, agentMentionName, sendToAgentState, sendToAgentWords, setupLinkProps, taggedAgent, taggedAgentSpan, targetKey } from './agent-choices.js';
 import { AppCheckbox } from '../ui/checkbox.jsx';
 import { mentionsAi, onlyMeDefault } from './ai-answerer.js';
 
@@ -149,7 +149,8 @@ export function AgentButton({ ask, busy = false, className = 'tdoc-composer-agen
 // drift. Ready: its click puts this box's default agent in as a pill, and
 // then it steps aside for the pill (whose menu swaps or drops it). Connect: the viewer could send
 // but nobody is linked, so it opens the connect prompt instead of failing.
-// Disabled: it stays visible and says why on hover.
+// Disabled: it stays visible and says why on hover -- except for somebody
+// who may never send here (SEND_TO_AGENT_WHO): no button at all.
 export function SendToAgentToggle({ ask, busy = false, className = 'tdoc-send-agent-toggle ui-btn ui-btn-secondary ui-btn-m', onConnect = null }) {
   const { agents, choices, target } = ask;
   // An agent named in the text (its pill): the pill's own menu changes it or
@@ -187,6 +188,13 @@ export function SendToAgentToggle({ ask, busy = false, className = 'tdoc-send-ag
     return <button className={className} type="button" disabled title={title}>{AGENT_BUTTON_LABEL}</button>;
   }
   if (state.kind !== 'ready' && !askable) {
+    // Somebody who may never send here (a reader, a commenter on someone
+    // else's doc): no button. A disabled @agent whose only explanation is a
+    // tooltip read as broken, on a phone above all (dogfood 2026-11-20).
+    // Every surface: doc page, slides, sheets, widget. Anyone who may send
+    // keeps the disabled button and its reason (no team daemon, admin only,
+    // no team agent, ...), and "Finding your agents…" while it loads.
+    if (state.reason === SEND_TO_AGENT_WHO) return null;
     return <button className={className} type="button" disabled title={state.reason}>{AGENT_BUTTON_LABEL}</button>;
   }
   const words = sendToAgentWords(shown, { editable, offer, asking: state.kind !== 'ready' });

@@ -39,6 +39,10 @@ export function TopBar({
   children,
   actions,
   overflowActions,
+  // Rows only the phone's ⋯ shows (each .tdoc-mobile-overflow-only): a page
+  // whose desktop bar has the same link in it (the landing's Feedback for
+  // your site). Unlike overflowActions they do not put ⋯ on the desktop bar.
+  mobileOverflowActions = null,
   theme,
   onThemeChange,
   supportsTheme = true,
@@ -197,6 +201,7 @@ export function TopBar({
           </button>
         )}>
           {overflowActions}
+          {mobileOverflowActions}
           {supportsTheme ? (
             <>
               <AppMenuSeparator className={themeInMore && overflowActions ? '' : 'tdoc-mobile-overflow-only'} />

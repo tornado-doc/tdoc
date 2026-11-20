@@ -1,4 +1,4 @@
-// Copy for agent (flag copyForAgent): the Markdown a thread becomes
+// Copy for agent (on for everyone since 2026-11-20): the Markdown a thread becomes
 // (shell/src/comments/core/agent-markdown.js) and the single-key guard
 // (shell/src/comments/panel/keyboard.js commentShortcutFor). The formatter
 // keeps every piece of context it is given, leaves out what is missing
@@ -216,6 +216,18 @@ const key = (k, target, extra = {}) => ({ key: k, target, composedPath: () => [t
     }
   });
 
+  t('a custom element with a closed shadow root (its field unseen) is not ours; an open one is looked into', () => {
+    const closed = el('app-editor', {}, body);
+    assert.equal(kb.isOpaqueHost(closed), true);
+    assert.equal(kb.commentShortcutFor(key('c', closed)), null, 'C taken from a closed web component');
+    assert.equal(kb.commentShortcutFor({ key: 'h', target: closed, composedPath: () => [closed, body] }), null, 'H taken from a closed web component');
+    const open = el('app-card', {}, body);
+    open.shadowRoot = {};
+    assert.equal(kb.isOpaqueHost(open), false, 'an open shadow root is seen into');
+    assert.equal(kb.commentShortcutFor(key('c', open)), 'copy');
+    assert.equal(kb.isOpaqueHost(el('div', {}, body)), false, 'a plain element');
+  });
+
   t('the innermost target wins: a field inside a shadow root (the widget) is a field', () => {
     const host = el('div', {}, body);
     const field = el('textarea', {}, null);
@@ -228,12 +240,12 @@ const key = (k, target, extra = {}) => ({ key: k, target, composedPath: () => [t
     assert.deepEqual(kb.COMMENT_SHORTCUTS.map((s) => s.key), ['C', 'H', 'Esc']);
   });
 
-  t('wiring: every surface provides Copy for agent; card and list read it; the flag gates it; frame forwards C and H', () => {
+  t('wiring: every surface provides Copy for agent; card and list read it; no flag gates it; frame forwards C and H', () => {
     const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
     for (const p of ['shell/src/document-shell.jsx', 'feedback/src/main.jsx', 'shell/src/feedback-space.jsx']) {
       const src = read(p);
       assert.ok(src.includes('<CopyForAgentContext.Provider value={copyForAgent}>') && src.includes('useCopyForAgent({'), `${p} does not provide Copy for agent`);
-      assert.match(src, /copyForAgent'/, `${p} does not read the copyForAgent flag`);
+      assert.ok(!/copyForAgent'/.test(src), `${p} still reads the removed copyForAgent flag`);
     }
     assert.ok(read('shell/src/document/comment-card.jsx').includes('copyForAgent.copyThread(comment)'));
     assert.ok(read('shell/src/comments/panel/comment-panel.jsx').includes('<CommentListMenu area={area} />'));

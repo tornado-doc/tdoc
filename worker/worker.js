@@ -10857,11 +10857,11 @@ async function createFeedbackSiteSpace(env, req, session, { origins, team, title
 // never the person's dev-mode status as such: the page holding the token
 // can read this answer. UI only -- nothing the server allows depends on it.
 // feedbackAreaSelect, feedbackDocFramePick and agentProgress graduated
-// (default: true, 2026-11-16), so none is left here; a new dev-mode flag the
-// widget reads goes on this list. copyForAgent: Copy for agent and the
-// C / H keys in the widget (feedback/src/main.jsx). reactSourceCapture: the
-// React component and source on the widget's element anchors.
-const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['copyForAgent', 'reactSourceCapture']);
+// (default: true, 2026-11-16) and copyForAgent was removed (on for everyone,
+// 2026-11-20), so none of those is left here; a new dev-mode flag the widget
+// reads goes on this list. reactSourceCapture: the React component and source
+// on the widget's element anchors.
+const FEEDBACK_WIDGET_DEV_FLAGS = Object.freeze(['reactSourceCapture']);
 async function feedbackDevFlags(env, session) {
   if (!session || !FEEDBACK_WIDGET_DEV_FLAGS.length) return [];
   let dev = null;

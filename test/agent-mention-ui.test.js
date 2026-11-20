@@ -84,7 +84,7 @@ async function t(name, fn) {
         assert.deepEqual(typed, ['CodexMine', 'Claude CodeMine'], JSON.stringify(typed));
         await page.keyboard.press('Enter');
         assert.equal(await box.inputValue(), `please fix @${JOINER}Codex `);
-        await page.getByRole('button', { name: 'Comment', exact: true }).click();
+        await page.getByRole('button', { name: 'Post', exact: true }).click();
         await page.waitForFunction(() => window.__posts.length === 1);
         const post = await page.evaluate(() => window.__posts[0]);
         assert.equal(post.opts.sendToAgent, true, 'a tagged comment was not handed to the agent');
@@ -122,7 +122,7 @@ async function t(name, fn) {
       await context.close();
       const plain = await open(390, '?used=1');
       await plain.page.locator('textarea').fill('just a note');
-      await plain.page.getByRole('button', { name: 'Comment', exact: true }).click();
+      await plain.page.getByRole('button', { name: 'Post', exact: true }).click();
       await plain.page.waitForFunction(() => window.__posts.length === 1);
       const note = await plain.page.evaluate(() => window.__posts[0]);
       assert.equal(note.opts.sendToAgent, false, 'a plain comment reached an agent');
@@ -156,7 +156,7 @@ async function t(name, fn) {
       await page.locator('textarea').fill('looks good @dana');
       // The @ list is open over the composer's only button: close it first.
       await page.locator('.tdoc-popup .h').click();
-      await page.getByRole('button', { name: 'Comment', exact: true }).click();
+      await page.getByRole('button', { name: 'Post', exact: true }).click();
       await page.waitForFunction(() => window.__posts.length === 1);
       const post = await page.evaluate(() => window.__posts[0]);
       assert.equal(post.opts.sendToAgent, false);

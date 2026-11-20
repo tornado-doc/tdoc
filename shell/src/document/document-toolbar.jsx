@@ -14,6 +14,7 @@ import {
   FileText,
   FolderInput,
   History,
+  MessageSquareText,
   Share2,
   Sheet,
   Star,
@@ -23,7 +24,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
+import { AppMenu, AppMenuItem, AppMenuLinkItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
 import { AppButton } from '../ui/button.jsx';
 import { AskIcon } from '../ui/ask-icon.jsx';
 import { usePortalContainer } from '../ui/portal.js';
@@ -441,10 +442,26 @@ function starCount(stars) {
   return stars >= 1000 ? `${(stars / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(stars);
 }
 
+// The landing's way to the feedback widget for one's own site (/feedback):
+// a quiet text link in the desktop bar, a row in the phone's ⋯ (the bar has
+// no room for words there). Dogfood 2026-11-20: nothing on the landing's
+// first screen led there.
+export const LANDING_FEEDBACK_LABEL = 'Feedback for your site';
+export const LANDING_FEEDBACK_HREF = '/feedback';
+
+export function LandingFeedbackMenuItem() {
+  return (
+    <AppMenuLinkItem className="tdoc-action-menu-item tdoc-mobile-overflow-only tdoc-landing-feedback-item" href={LANDING_FEEDBACK_HREF}>
+      <MessageSquareText size={15} /> {LANDING_FEEDBACK_LABEL}
+    </AppMenuLinkItem>
+  );
+}
+
 export function LandingActions({ stars }) {
   const count = starCount(stars);
   return (
     <>
+    <a className="tdoc-landing-feedback-link" href={LANDING_FEEDBACK_HREF}>{LANDING_FEEDBACK_LABEL}</a>
     <a
       id="tdoc-github-btn"
       className="tdoc-github-btn"

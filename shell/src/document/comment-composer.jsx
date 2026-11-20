@@ -33,6 +33,11 @@ function readViewport() {
 }
 
 export const COMPOSER_WIDTH = 320;
+// The composer's send button, on every surface (doc page, slides, sheets,
+// the feedback widget). Not "Comment": that is the button that starts one.
+export const POST_LABEL = 'Post';
+export const SIGN_IN_TO_POST_HINT = 'Sign in to post — your comment is saved';
+export const SIGNING_IN_HINT = 'Finish signing in — your comment posts after';
 export const COMPOSER_HEIGHT = 190;
 
 // Where the card goes, as arithmetic — no DOM, so the keyboard cases are unit
@@ -60,6 +65,34 @@ export function composerPosition(rect, viewport) {
   return { top, left };
 }
 
+// Words in a composer closed without posting (Esc, ×, a click away) come
+// back when the same thing is commented on again in this page's life: the
+// same on every surface (doc page, slides, sheets, feedback widget). Keyed by
+// what the composer is about; a few at most.
+const closedDrafts = new Map();
+const CLOSED_DRAFTS_MAX = 20;
+// A surface that knows more (the widget: the page and the element's
+// selector) passes selection.draftKey, so two look-alike elements or two
+// pages of one app never share words.
+export function composerDraftKey(selection) {
+  const s = selection || {};
+  // The path only: the doc shell rewrites ?comment= / #hash as it goes.
+  const page = typeof location !== 'undefined' ? location.pathname : '';
+  if (s.draftKey) return `key|${s.draftKey}`;
+  return `${page}|${s.kind || ''}|${s.label || ''}|${String(s.text || '').slice(0, 200)}`;
+}
+export function rememberClosedDraft(key, text) {
+  closedDrafts.delete(key);
+  if (!String(text || '').trim()) return;
+  closedDrafts.set(key, text);
+  while (closedDrafts.size > CLOSED_DRAFTS_MAX) closedDrafts.delete(closedDrafts.keys().next().value);
+}
+export function takeClosedDraft(key) {
+  const text = closedDrafts.get(key) || '';
+  closedDrafts.delete(key);
+  return text;
+}
+
 export function CommentComposer({
   selection,
   inline = false,
@@ -82,8 +115,27 @@ export function CommentComposer({
   privateAsk = null,
   onMakePublic = null,
   onCopyToast = null,
+  // A signed-out person who may comment once signed in: Post keeps the words
+  // and asks them to sign in (doc page: the sign-in dialog; feedback widget:
+  // the tdoc window). The foot says so before they press it.
+  signInToPost = false,
 }) {
-  const [text, setText] = useState(initialText);
+  const draftKey = composerDraftKey(selection);
+  const [text, setText] = useState(() => initialText || takeClosedDraft(draftKey));
+  // Set when the words are sent; typing again (a post that failed and stayed
+  // open) clears it. Closing without sending keeps the draft for next time.
+  const sent = useRef(false);
+  const latest = useRef({ text, draftKey, privateAsk });
+  latest.current = { text, draftKey, privateAsk };
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (!sent.current) rememberClosedDraft(latest.current.draftKey, latest.current.text);
+    };
+  }, []);
+  const changeText = (next) => { sent.current = false; setText(next); };
   const [connectOpen, setConnectOpen] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
   const agentButtons = useContext(AgentButtonsContext);
@@ -135,6 +187,7 @@ export function CommentComposer({
     if (busy || !text.trim()) return;
     if (sendToAgent && !agentButtons && !target && !agents.preselected) { ask.putDefault(); return; }
     setBusy(true);
+    sent.current = true;
     try {
       if (agentButtons) {
         // The feedback overlay: its @agent button hands the comment to the
@@ -156,6 +209,12 @@ export function CommentComposer({
       });
     } finally {
       setBusy(false);
+      // Still open a moment after the submit settled: it did not post (a
+      // refusal, a cancelled sign-in), so closing now keeps the words. A
+      // post that went through has unmounted the composer by then. An
+      // "Only me" question went through too: the composer turned into its
+      // answer, so the question is not a draft.
+      setTimeout(() => { if (mounted.current && !latest.current.privateAsk) sent.current = false; }, 50);
     }
   };
 
@@ -198,7 +257,7 @@ export function CommentComposer({
             : 'What should change? Type @ to notify someone'}
         value={text}
         people={mentionable}
-        onChange={setText}
+        onChange={changeText}
         onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
       /></div>
       {!agentButtons ? <AgentAskRow ask={ask} /> : null}
@@ -214,7 +273,9 @@ export function CommentComposer({
         </div>
       ) : null}
       <div className="foot">
-        {target && !agentButtons ? (
+        {signInToPost && !demo ? (
+          <span className="hint tdoc-sign-in-to-post" role="status">{busy ? SIGNING_IN_HINT : SIGN_IN_TO_POST_HINT}</span>
+        ) : target && !agentButtons ? (
           <span className="hint">{agentAskHint(ask)}</span>
         ) : (
           <span className={demo ? 'hint' : 'hint tdoc-keyboard-shortcut-hint'}>
@@ -232,7 +293,7 @@ export function CommentComposer({
           />
           {!agentButtons ? <AskOnlyToggle ask={ask} busy={busy} /> : null}
           <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
-            {busy ? 'Posting…' : 'Comment'}
+            {busy ? (signInToPost ? 'Signing in…' : 'Posting…') : POST_LABEL}
           </button>
         </div>
       </div>

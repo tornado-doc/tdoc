@@ -630,6 +630,40 @@ t('tdoc-new copies sandboxed widget files while keeping host HTML script-free', 
   }
 });
 
+t('tdoc-new --publish --no-server publishes (path, then URL), and a failed publish is exit 1, not silence', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-nosrv-pub-'));
+  try {
+    // A checkout whose tdoc-publish (beside tdoc-new, which tdoc-new runs
+    // first) is faked: records the slug it was given. Everything else is
+    // the real repo, linked in.
+    const repo = path.join(__dirname, '..');
+    const checkout = path.join(dir, 'checkout');
+    const fakeBinDir = path.join(checkout, 'bin');
+    fs.mkdirSync(fakeBinDir, { recursive: true });
+    for (const entry of fs.readdirSync(repo)) if (!['bin', 'node_modules', '.git'].includes(entry)) fs.symlinkSync(path.join(repo, entry), path.join(checkout, entry));
+    for (const entry of fs.readdirSync(BIN)) if (entry !== 'tdoc-publish') fs.symlinkSync(path.join(BIN, entry), path.join(fakeBinDir, entry));
+    const publisher = path.join(fakeBinDir, 'tdoc-publish');
+    const html = '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body { background:#fff }</style></head><body><main><h1>Hi</h1><p>Text.</p></main></body></html>';
+    const run = (slug, script) => {
+      fs.writeFileSync(publisher, script);
+      const env = { ...process.env, HOME: dir, TDOC_DIR: path.join(dir, 'tdocs') };
+      return spawnSync(path.join(fakeBinDir, 'tdoc-new'), ['--slug', slug, '--title', 'Hi', '--html-stdin', '--no-server', '--publish', '--quiet'],
+        { input: html, env, encoding: 'utf8', timeout: 20000 });
+    };
+    const good = run('pub-ok', '#!/usr/bin/env bash\necho "$1" > "$HOME/published-slug"\necho "Published: https://tdoc.dev/d/$1"\n');
+    assert(good.status === 0, `exit ${good.status}\nstdout: ${good.stdout}\nstderr: ${good.stderr}`);
+    const lines = good.stdout.trim().split('\n');
+    assert(lines[lines.length - 2].endsWith(path.join('pub-ok', 'v1', 'index.html')), `doc path line: ${good.stdout}`);
+    assert(lines[lines.length - 1] === 'https://tdoc.dev/d/pub-ok', `published URL line: ${good.stdout}`);
+    assert(fs.readFileSync(path.join(dir, 'published-slug'), 'utf8').trim() === 'pub-ok', 'tdoc-publish was not run');
+    const badPub = run('pub-bad', '#!/usr/bin/env bash\necho "upload refused" >&2\nexit 1\n');
+    assert(badPub.status === 1, `a failed publish exited ${badPub.status}`);
+    assert(/NOT published/.test(badPub.stderr) && /upload refused/.test(badPub.stderr), badPub.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 t('tdoc-new validates the default template before replacing an existing doc', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cli-'));
   try {

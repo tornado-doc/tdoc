@@ -42,7 +42,10 @@ fi
 
 RESP="$(curl -sS --connect-timeout 10 --max-time 60 -X DELETE "$BASE/api/doc?slug=$SLUG" \
   -H "Authorization: Bearer $TOKEN")"
-printf '%s' "$RESP" | json_pretty
+# --forever: the Trash step's answer (retention_days, purge_at) describes a
+# 30-day wait that the purge below cancels, so it is not printed; only the
+# outcome is.
+[ "${2:-}" = "--forever" ] || printf '%s' "$RESP" | json_pretty
 if [ "${2:-}" = "--forever" ]; then
   # Already in Trash answers not_found above; either way, erase it now.
   case "$(printf '%s' "$RESP" | json_error || true)" in ""|not_found) ;; *) echo "[tdoc] $SLUG was not deleted: $(printf '%s' "$RESP" | json_error)" >&2; exit 1 ;; esac
