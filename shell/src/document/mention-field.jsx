@@ -89,8 +89,10 @@ export function MentionField({
   // Typing an address is already a complete tag — asking GitHub's user search
   // about "dana@corp.com" offers strangers and leaks the address upstream. And
   // no search while an agent answers what was typed: the menu has its row.
+  // A surface may turn the search off (`githubSearch: false`): the feedback
+  // widget's demo sends nothing off the page.
   const remote = useGithubUserSearch(query ? query.query : '', {
-    enabled: Boolean(query) && localMatches.length === 0 && !query.query.includes('@')
+    enabled: agentsOnOffer.githubSearch !== false && Boolean(query) && localMatches.length === 0 && !query.query.includes('@')
       && agentMatches.length === 0,
   });
   const matches = useMemo(() => {

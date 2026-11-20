@@ -9,9 +9,11 @@ export function setApiTransport(next) { transport = next || null; }
 export function hasAccountSession() { return !transport; }
 export function tdocUrl(path) { return transport ? `${transport.base}${path}` : path; }
 
+// A transport may bring its own `fetch`: the feedback widget's demo on
+// tdoc's /feedback page answers every call from the tab (feedback/src/demo.js).
 async function request(path, options) {
   const response = transport
-    ? await fetch(`${transport.base}${path}`, {
+    ? await (transport.fetch || fetch)(`${transport.base}${path}`, {
       credentials: 'omit',
       ...options,
       headers: { ...((options && options.headers) || {}), ...transport.headers() },

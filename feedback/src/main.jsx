@@ -21,6 +21,7 @@ import { createPickGesture, rangeBetweenPoints } from '../../shell/src/comments/
 import { useCommentFeed } from '../../shell/src/comments/core/use-comment-feed.js';
 import { isNarrowViewport } from '../../shell/src/comments/core/narrow.js';
 import { AppSelect } from '../../shell/src/ui/select.jsx';
+import { AppButton } from '../../shell/src/ui/button.jsx';
 import { withPostedComment } from '../../shell/src/comments/core/posted-comment.js';
 import { productPageUrl } from '../../shell/src/document/product-url.js';
 import { AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
@@ -39,6 +40,7 @@ import { PortalContainerContext } from '../../shell/src/ui/portal.js';
 import { AppMenu, AppMenuItem } from '../../shell/src/ui/menu.jsx';
 import { SideResizeHandle, useSideWidth } from '../../shell/src/ui/side-resize.jsx';
 import { FeedbackSharePanel } from '../../shell/src/feedback-share-panel.jsx';
+import { createDemoBackend, demoAllowed, demoSession } from './demo.js';
 import chromeCss from '../../server/chrome.css?inline';
 // ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
 // controls keep the browser's default button look on foreign pages.
@@ -207,6 +209,19 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-space-item span { flex: 1; }
     #tdoc-feedback-root .tdoc-fb-space-item svg { width: 14px; height: 14px; color: var(--td-accent); }
     #tdoc-feedback-root .tdoc-feedback-notice .tdoc-fb-invite-err { color: #ffb4ab; }
+    /* Try it on this page (demo.js): the note above the dock. */
+    #tdoc-feedback-root .tdoc-fb-demo {
+      position: fixed; right: 18px; bottom: 66px; z-index: 2147483642; pointer-events: auto;
+      display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 36px);
+      padding: 6px 6px 6px 12px; border-radius: 999px; background: var(--td-ground); color: var(--td-ink);
+      border: 1px solid var(--td-line); box-shadow: 0 6px 24px rgba(0,0,0,.10);
+      font: 600 12.5px/1.2 system-ui, -apple-system, sans-serif;
+    }
+    #tdoc-feedback-root .tdoc-fb-toast.over-demo { bottom: 116px; }
+    #tdoc-feedback-root .tdoc-fb-demo-tag { white-space: nowrap; color: var(--td-ink); padding: 5px 0; }
+    #tdoc-feedback-root .tdoc-fb-demo-tag::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--td-accent); vertical-align: 1px; }
+    @media (max-width: 700px) { #tdoc-feedback-root .tdoc-fb-demo.panel-open { display: none; } }
+    @media (max-width: 400px) { #tdoc-feedback-root .tdoc-fb-demo { right: 8px; } }
     /* A small phone: the dock's buttons sit closer so the row stays on screen. */
     @media (max-width: 400px) {
       #tdoc-feedback-root .tdoc-feedback-dock { right: 8px; gap: 2px; }
@@ -426,6 +441,18 @@ ${uiCss}
   // (production, a PR preview or a local server), never from GitHub, Clerk
   // or a logo CDN: the app's CSP then needs to allow only tdoc.
   setTdocOrigin(base);
+  // Try it on this page (demo.js): tdoc's own /feedback page only, asked
+  // for by the <script data-tdoc-demo> it adds. Comments stay in this tab;
+  // nothing is posted, no tdoc window opens.
+  const demo = (() => {
+    const own = document.currentScript;
+    if (!own || !own.hasAttribute('data-tdoc-demo')) return null;
+    if (!demoAllowed({ scriptSrc: own.src, href: location.href })) return null;
+    let storage = null;
+    try { storage = window.sessionStorage; } catch (_) {}
+    return createDemoBackend({ storage });
+  })();
+  const net = demo ? demo.fetch : (...args) => fetch(...args);
   const autoOpen = Boolean(document.currentScript && document.currentScript.getAttribute('data-tdoc-open'));
   // A site's own comment space (the SDK): <script … data-tdoc-space="…">.
   // Its visitors comment there, so their session is kept apart from any
@@ -435,7 +462,10 @@ ${uiCss}
       || window.__TDOC_SPACE__ || '';
     return /^[a-z0-9][a-z0-9-]{0,80}$/.test(String(raw)) ? String(raw) : '';
   })();
-  const storageKey = space ? `tdoc-feedback:${base}:${space}` : `tdoc-feedback:${base}`;
+  // The demo keeps its own keys (hidden, drafts, invites): a real widget
+  // on the same tdoc page never reads or overwrites them.
+  const storageKey = demo ? 'tdoc-feedback-demo:widget'
+    : space ? `tdoc-feedback:${base}:${space}` : `tdoc-feedback:${base}`;
 
   // The click that follows a pick (see onPointerUp in FeedbackApp).
   let swallowClickUntil = 0;
@@ -463,7 +493,7 @@ ${uiCss}
     try { return flag.preview === true && isPreviewHostname(new URL(base).hostname); } catch (_) { return false; }
   };
   // Share and invites inside the widget (feature-flags.js feedbackInvites).
-  const invitesOn = flagOn('feedbackInvites');
+  const invitesOn = !demo && flagOn('feedbackInvites');
 
   // An invite link opens the site with ?tdoc_invite=<id>. The id is taken
   // off the address at once (it is a one-time key; a reload or a copied URL
@@ -492,10 +522,12 @@ ${uiCss}
   // (see getSession in the worker). It lives with the app's origin: one per
   // app, not one per page.
   const readSession = () => {
+    if (demo) return demoSession();
     try { return JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch (_) { return null; }
   };
   const writeSession = (session) => {
     // Signed out or another session: no agent list cached for the last one.
+    if (demo) return;
     if (!session || session.token !== (readSession() || {}).token) clearNotifyTargetsCache();
     try {
       if (session) localStorage.setItem(storageKey, JSON.stringify(session));
@@ -507,6 +539,7 @@ ${uiCss}
   // it at the tdoc host with this app's feedback token.
   setApiTransport({
     base,
+    ...(demo ? { fetch: demo.fetch } : {}),
     headers: () => {
       const session = readSession();
       return session && session.token ? { authorization: `Bearer ${session.token}` } : {};
@@ -521,7 +554,7 @@ ${uiCss}
 
   async function request(pathname, options = {}) {
     const session = readSession();
-    const response = await fetch(`${base}${pathname}`, {
+    const response = await net(`${base}${pathname}`, {
       credentials: 'omit', ...options,
       headers: {
         'content-type': 'application/json',
@@ -563,6 +596,8 @@ ${uiCss}
   // rather than putting a second tdoc window on screen.
   let connectWindow = null;
   function connect({ invite = null } = {}) {
+    // The demo has no account to connect (its session is always there).
+    if (demo) { const error = new Error('Not in the demo.'); error.status = 0; error.cancelled = true; return Promise.reject(error); }
     if (connecting) return connecting;
     const attempt = new Promise((resolve, reject) => {
       // With an invite, the window asks Join and connecting takes it.
@@ -1688,11 +1723,13 @@ ${uiCss}
       selectedId: listId || openId,
       title: document.title,
       pageUrl: canonical(),
-      linkFor: (c) => (slug && c && c.id ? `${base}/d/${encodeURIComponent(slug)}?comment=${encodeURIComponent(c.id)}` : ''),
+      linkFor: (c) => (!demo && slug && c && c.id ? `${base}/d/${encodeURIComponent(slug)}?comment=${encodeURIComponent(c.id)}` : ''),
       say,
       markers: { hidden: markersHidden, toggle: () => setMarkersHidden((h) => !h) },
       // Not while the composer is open (as on the doc page): its words are typing.
-      keysEnabled: shown && (panelOpen || Boolean(openId)) && !selected,
+      // The demo runs on tdoc's own page, whose keys are ours: C copies
+      // without opening the list first.
+      keysEnabled: shown && (Boolean(demo) || panelOpen || Boolean(openId)) && !selected,
     });
     const teamMember = Boolean(surface?.teamMember);
     // Who may send to an agent: the server's rule, shared with the doc page
@@ -1750,6 +1787,8 @@ ${uiCss}
       ai: null, privateAskSupported: false, teamAskSupported: Boolean(session?.own_agent),
       ownAskSupported: Boolean(session?.own_agent),
       fixesTheApp: true,
+      // The demo asks nobody: no GitHub user search behind @.
+      githubSearch: !demo,
       canSendToAgent,
       sendToAgentDisabledReason,
       connectAgentPrompt: sendToAgentConnectPrompt,
@@ -1774,6 +1813,7 @@ ${uiCss}
         },
         base,
         space: space || null,
+        demo: Boolean(demo),
       };
       window.tdocFeedback = api;
       // The public name. A page that already defines `tdoc` keeps its own.
@@ -2376,7 +2416,15 @@ ${uiCss}
                 : quoteSel ? { ...contextFor(selected), quote: quoteSel.quote, label: quoteLabel(quoteSel.quote) }
                 : areaBox ? regionContext(areaBox, selected) : contextFor(selected);
               const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: threadAskPick(opts) });
-              if (apply(result)) { setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); }
+              if (apply(result)) {
+                setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false);
+                // The demo shows the thread it saved, and what to do next.
+                const madeId = demo && result.posted && result.posted.made && result.posted.made.id;
+                if (madeId) {
+                  setOpenId(madeId);
+                  say(isNarrowViewport() ? 'Saved in this tab only. Copy for agent is in ⋯' : 'Saved in this tab only. Press C to copy it for your agent');
+                }
+              }
             }}
           />
         ) : null}
@@ -2441,7 +2489,18 @@ ${uiCss}
 
         {shareOpen && slug ? <FeedbackSharePanel slug={slug} open onClose={() => setShareOpen(false)} request={request} /> : null}
 
-        {toast ? <div className={`tdoc-fb-toast${toast.bad ? ' bad' : ''}`} role="status" style={{ right: innerWidth - rightInset >= 240 ? 18 + rightInset : 18 }}>{toast.text}</div> : null}
+        {demo ? (
+          // Try it on this page: said on screen the whole time, and once
+          // something is written, the one next step.
+          <aside className={`tdoc-fb-demo${panelOpen ? ' panel-open' : ''}`} aria-label="Demo" style={panelOpen && !isNarrowViewport() ? { right: panelSide.width + 18 } : null}>
+            <span className="tdoc-fb-demo-tag">Demo — only you see this</span>
+            {(surface?.allComments || []).some((c) => !c.deleted) ? (
+              <AppButton variant="primary" size="s" className="tdoc-fb-demo-cta" onClick={() => { hide(); location.assign(`${base}/feedback#add`); }}>Add to your site</AppButton>
+            ) : null}
+          </aside>
+        ) : null}
+
+        {toast ? <div className={`tdoc-fb-toast${toast.bad ? ' bad' : ''}${demo ? ' over-demo' : ''}`} role="status" style={{ right: innerWidth - rightInset >= 240 ? 18 + rightInset : 18 }}>{toast.text}</div> : null}
 
         <Dock
           session={session || surface?.config}

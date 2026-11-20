@@ -21,13 +21,13 @@ t('the hero is a row of real screenshots, each linking to the real thing', () =>
   const links = [...work.matchAll(/<a class="hd-real" href="([^"]+)">([\s\S]*?)<\/a>/g)];
   assert(links.length === 4, `expected 4 hero slides (doc, sheet, deck, any web app), got ${links.length}`);
   for (const [, href, body] of links) {
-    assert(/^\/d\/[a-z0-9-]+$/.test(href) || href === '/feedback', `a slide should link to a /d/<slug> doc or /feedback, got ${href}`);
+    assert(/^\/d\/[a-z0-9-]+$/.test(href) || href === '/feedback#try', `a slide should link to a /d/<slug> doc or /feedback#try, got ${href}`);
     const img = body.match(/<img src="data:image\/(webp|jpeg|png);base64,([A-Za-z0-9+\/=]+)"[^>]*>/);
     assert(img, `${href}: the screenshot must be inline (the release payload ships index.html only)`);
     assert(img[2].length < 250000, `${href}: the screenshot is ${img[2].length} base64 chars; keep it under 250k`);
     assert(/alt="[^"]{20,}"/.test(body) && /width="\d+" height="\d+"/.test(body), `${href}: the screenshot needs alt text and a size`);
   }
-  assert(links.map((l) => l[1]).join(' ') === '/d/maui-trip /d/maui-budget /d/maui-deck /feedback', `slides: ${links.map((l) => l[1])}`);
+  assert(links.map((l) => l[1]).join(' ') === '/d/maui-trip /d/maui-budget /d/maui-deck /feedback#try', `slides: ${links.map((l) => l[1])}`);
 });
 
 // Each demo carries its own call to action, to a route that exists: the
@@ -42,7 +42,9 @@ t('each slide has its own CTA to a real route', () => {
   const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
   // "Add to your site" is the SDK (Julie, 2026-11-14: the homepage had no
   // place that said the feedback SDK exists); the caption names both ways.
-  assert(/<a class="hd-real-cap" href="\/feedback#sdk">Any web app: [^<]*bookmark[^<]*<b>[^<]*SDK/.test(work), 'the Any web app caption does not name the bookmark and the SDK');
+  // Its caption and screenshot try the widget on /feedback, no account
+  // (#try starts the demo there); the CTA stays the SDK.
+  assert(/<a class="hd-real-cap" href="\/feedback#try">Any web app: [^<]*bookmark[^<]*SDK[^<]*<b>Try it now, no account/.test(work), 'the Any web app caption does not name the bookmark and the SDK, and try it');
   for (const route of ['/setup', '/me', '/feedback']) {
     assert(worker.includes(`p === '${route}'`), `the worker has no ${route} route`);
   }

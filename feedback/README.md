@@ -14,6 +14,15 @@ build:feedback` writes one self-contained IIFE to `server/runtime/feedback.js`,
 which `bin/tdoc-bundle` inlines into the worker (served at `/feedback.js`) and
 `server/server.js` serves as-is. Commit the built file with the source.
 
+**Try it on this page** (`/feedback`, and the homepage's Any web app via
+`/feedback#try`): the same client in a demo mode, no account. `src/demo.js`
+answers every call the widget makes (comments, the @ list, read state, the
+session) from the tab's sessionStorage, through the same request path
+(`setApiTransport({ fetch })`), so nothing is posted and no tdoc window opens.
+It turns on only for a `<script data-tdoc-demo>` loaded from the page's own
+origin on `/feedback` (`demoAllowed`); there is no URL parameter or
+global, and on any other site the attribute is ignored.
+
 Everything the client loads comes from the tdoc origin that served it, so a
 site's CSP needs only that origin in `script-src`, `connect-src` and
 `img-src`. A site that sends Cross-Origin-Opener-Policy must use
