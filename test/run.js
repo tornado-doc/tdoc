@@ -21,7 +21,6 @@ const OFFLINE = [
   'frame-part.test.js', // what the doc frame says it picked is rebuilt: known keys, one line, finite numbers, under the anchor size cap
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
   'selection-bundle.test.js',  // the shared selection modules bundle into the doc frame without a bundler; container keys, adapters, the pick gesture
-  'send-to-agent-visibility.test.js', // @agent rendered: hidden only for who may never send (SEND_TO_AGENT_WHO); disabled with its reason for a permitted person (no team daemon, admin only, no team agent, not a writer, Finding your agents…); connect link
   'copy-for-agent.test.js',    // Copy for agent: thread Markdown (context, missing pieces, escaping, http(s) links) and the C / H key guard (never in fields, menus, with modifiers)
   'comment-query.test.js',     // one comment query on every surface: Open by default, counts, deleted rule, waiting on you, search, sort, groupBy
   'thread-seen-api.test.js',   // server read state: authorized like reading the comments, no cross-doc reads, no thread-id leaks
@@ -301,6 +300,7 @@ const BROWSER = [
   'comment-selection-ui.test.js', // one selection engine: old cssPath anchors resolve, slide comments follow reordered slides across versions, area boxes on charts, + Comment picks (whole doc on nothing), widget quotes and page comments; desktop + phone
   'comment-parity-ui.test.js', // doc page and widget run the same cases: Open by default with counts (remembered), a polled agent reply appears, read state is the server's (widget ↔ space page, fresh browser), autoReadComments in the widget, the seen endpoint refuses non-readers; desktop + phone
   'copy-for-agent-ui.test.js', // Copy for agent on the doc page, the widget and the space page: thread ⋯ and list ⋯ copy Markdown, toast, C / H keys (never while typing), Esc still closes, on for everyone (a signed-out reader too); desktop + phone
+  'send-to-agent-visibility-ui.test.js', // needs npm ci (esbuild, react-dom), so it runs with the browser suites. @agent rendered: hidden only for who may never send (SEND_TO_AGENT_WHO); disabled with its reason for a permitted person (no team daemon, admin only, no team agent, not a writer, Finding your agents…); connect link
   'dogfood-frictions-ui.test.js', // dogfood 2026-11-20: landing Any web app tab readable on a phone, Feedback for your site (bar / phone ⋯), comment button over no CTA; widget signed out: Post + sign-in line, no @agent, one tdoc window, Esc closes the composer and keeps the words
   'feedback-panel-parity-ui.test.js', // the widget's comment list = the doc page's: same side width, same filter row (one line, options inside the pill, same geometry), on a plain and a hostile host page; desktop + phone
   'comment-one-behaviour-ui.test.js', // doc page, feedback space and widget draw one card: reply prefill rule, one agent-list height, a reply draft per thread, floating card fits the screen, panel drag width
