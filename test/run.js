@@ -352,7 +352,7 @@ const EXTENDED_BROWSER = [
   'browser-editing.test.js', // playwright: Read/Comment/Edit + explicit snapshot save/conflict
   'feedback-browser.test.js', // playwright: #564 bookmarklet on a localhost app → connect popup → pin → doc
   'feedback-doc-frame-ui.test.js', // the widget on tdoc's own doc page picks inside the doc frame (element, quote, pins follow its scroll); a phone tap never opens the doc composer too
-  'feedback-connect-coop-ui.test.js', // playwright: sign-in through a COOP page cuts the popup off; the claim still connects and the held comment posts; blocked / cancelled keep it
+  'feedback-connect-coop-ui.test.js', // playwright: sign-in through a COOP page cuts the popup off; the claim still connects and the held comment posts; blocked keeps it; the held draft posts only on Post / Connect (not a reload with a token) and expires after 15 min; a lost window reopens from the composer
   'mobile-comment-nav.test.js', // playwright phone: highlight ↔ comment, iOS bare tap
 ];
 

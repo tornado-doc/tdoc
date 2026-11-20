@@ -17,6 +17,8 @@
 //   - a blocked popup keeps the comment and posts it after Connect tdoc;
 //   - the window lost mid sign-in: the composer's Post ("Open sign-in")
 //     opens it again, and the comment posts once;
+//   - the held draft posts only on an explicit Post / Connect: a reload
+//     with a valid token posts nothing, one older than 15 minutes is dropped;
 //   - the bookmark itself opens no window (comment first, sign in later);
 //     the composer, not a separate notice, says signing in is under way.
 // TDOC_UI_SHOTS=<dir> saves screenshots (1440 and 390).
@@ -245,6 +247,67 @@ function listen(handler, port) {
         const posted = await comments();
         assert.equal(posted.length, 1, `comments: ${posted.length}`);
         assert.equal(posted[0].text, 'Blocked, then posted');
+      } finally { await context.close(); }
+    });
+
+    // The held draft (sessionStorage) posts only on the person's own Post
+    // or Connect, and only while fresh: a later load that happens to have a
+    // session never sends it.
+    const holdBlocked = async (page, text) => {
+      await compose(page, text);
+      await page.evaluate(() => { window.open = () => null; });
+      await fb(page, '.tdoc-popup button.submit').click();
+      await fb(page, '.tdoc-feedback-notice').waitFor();
+      const held = await page.evaluate((key) => JSON.parse(sessionStorage.getItem(`${key}:draft`) || 'null'), storageKey);
+      assert.equal(held && held.text, text, 'the signed-out post was not held');
+      assert(Number.isFinite(held.at), 'the held draft has no time');
+    };
+
+    await t('held draft: a reload with a valid token posts nothing; an explicit Post posts', async () => {
+      const { context, page } = await start(1440);
+      try {
+        await holdBlocked(page, 'Held, never sent by a load');
+        // A valid token for this app, as a connect would leave it.
+        const r = await worker.fetch(new Request('https://tdoc.dev/api/feedback/connect', {
+          method: 'POST',
+          headers: { cookie: await putSession(env, 'julie'), origin: appBase, 'content-type': 'application/json' },
+          body: JSON.stringify({ origin: appBase }),
+        }), env, { waitUntil() {} });
+        const session = await r.json();
+        assert(session.token, `no token: ${JSON.stringify(session)}`);
+        await page.evaluate(([key, value]) => localStorage.setItem(key, JSON.stringify(value)), [storageKey, session]);
+        await page.reload();
+        await page.addScriptTag({ url: `${tdocBase}/feedback.js` });
+        await page.waitForFunction(() => window.tdocFeedback && window.tdocFeedback.base);
+        await page.evaluate(() => window.tdocFeedback.open());
+        await fb(page, '.tdoc-feedback-dock').waitFor();
+        await page.waitForTimeout(2500);
+        assert.equal((await comments()).length, 0, 'a load with a session posted the held draft');
+        // The person's own Post sends their comment.
+        await compose(page, 'Sent by Post');
+        await fb(page, '.tdoc-popup button.submit').click();
+        await fb(page, '.tdoc-pin').first().waitFor({ timeout: 8000 });
+        const posted = await comments();
+        assert.deepEqual(posted.map((c) => c.text), ['Sent by Post']);
+      } finally { await context.close(); }
+    });
+
+    await t('held draft: older than 15 minutes, Connect posts nothing and drops it', async () => {
+      const { context, page } = await start(1440, { signedIn: true });
+      try {
+        await holdBlocked(page, 'Too old to send');
+        await page.evaluate((key) => {
+          const draft = JSON.parse(sessionStorage.getItem(`${key}:draft`));
+          sessionStorage.setItem(`${key}:draft`, JSON.stringify({ ...draft, at: Date.now() - 16 * 60 * 1000 }));
+          window.open = window.__realOpen;
+        }, storageKey);
+        const notice = fb(page, '.tdoc-feedback-notice');
+        const [popup] = await Promise.all([context.waitForEvent('page'), notice.locator('button.submit').click()]);
+        await popup.locator('#connect').click();
+        await page.waitForFunction((key) => { try { return Boolean(JSON.parse(localStorage.getItem(key)).token); } catch (_) { return false; } }, storageKey);
+        await page.waitForTimeout(2000);
+        assert.equal((await comments()).length, 0, 'an expired held draft posted');
+        assert.equal(await page.evaluate((key) => sessionStorage.getItem(`${key}:draft`), storageKey), null, 'the expired draft was kept');
       } finally { await context.close(); }
     });
 
