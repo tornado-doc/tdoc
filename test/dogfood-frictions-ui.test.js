@@ -280,6 +280,35 @@ const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p
       });
     }
 
+    await t('widget, signed out, composer open, the browser blocks the tdoc window: the blocked message shows (only the page-load connect notice waits)', async () => {
+      const ctx = await browser.newContext(DESK);
+      await ctx.addInitScript(() => { window.open = () => null; });
+      const page = await ctx.newPage();
+      page.errors = [];
+      page.on('pageerror', (e) => page.errors.push(e.message));
+      await page.goto(`${base}/__page`);
+      const root = page.locator('#tdoc-feedback-root');
+      await root.locator('.tdoc-feedback-dock').waitFor({ timeout: 15000 });
+      await root.locator('.tdoc-feedback-dock button', { hasText: 'Comment' }).first().click();
+      await root.locator('.tdoc-fb-banner').waitFor({ timeout: 5000 });
+      await page.waitForTimeout(500);
+      const b = await page.locator('#trial').boundingBox();
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+      await page.waitForTimeout(100);
+      await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+      const composer = root.locator('.tdoc-popup:has(textarea)');
+      await composer.locator('textarea').waitFor({ timeout: 5000 });
+      await composer.locator('textarea').fill('blocked window');
+      await composer.locator('button.submit').click();
+      const blocked = root.locator('.tdoc-feedback-notice', { hasText: 'blocked the tdoc window' });
+      await blocked.waitFor({ timeout: 5000 });
+      assert.ok(await blocked.isVisible(), 'the blocked-window message is hidden behind the open composer');
+      assert.ok(await composer.isVisible(), 'the composer closed');
+      await shot(page, 'widget-desktop-blocked-window');
+      assert.deepEqual(page.errors, []);
+      await ctx.close();
+    });
+
     await t('landing phone 320px: the comment button in the bar covers none of the bar\'s own items', async () => {
       const { ctx, page } = await openLanding({ ...PHONE, viewport: { width: 320, height: 640 } });
       const fab = await page.locator('.tdoc-fab').boundingBox();

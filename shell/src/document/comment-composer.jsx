@@ -76,7 +76,8 @@ const CLOSED_DRAFTS_MAX = 20;
 // pages of one app never share words.
 export function composerDraftKey(selection) {
   const s = selection || {};
-  const page = typeof location !== 'undefined' ? `${location.pathname}${location.search}${location.hash}` : '';
+  // The path only: the doc shell rewrites ?comment= / #hash as it goes.
+  const page = typeof location !== 'undefined' ? location.pathname : '';
   if (s.draftKey) return `key|${s.draftKey}`;
   return `${page}|${s.kind || ''}|${s.label || ''}|${String(s.text || '').slice(0, 200)}`;
 }
@@ -124,8 +125,8 @@ export function CommentComposer({
   // Set when the words are sent; typing again (a post that failed and stayed
   // open) clears it. Closing without sending keeps the draft for next time.
   const sent = useRef(false);
-  const latest = useRef({ text, draftKey });
-  latest.current = { text, draftKey };
+  const latest = useRef({ text, draftKey, privateAsk });
+  latest.current = { text, draftKey, privateAsk };
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -210,8 +211,10 @@ export function CommentComposer({
       setBusy(false);
       // Still open a moment after the submit settled: it did not post (a
       // refusal, a cancelled sign-in), so closing now keeps the words. A
-      // post that went through has unmounted the composer by then.
-      setTimeout(() => { if (mounted.current) sent.current = false; }, 50);
+      // post that went through has unmounted the composer by then. An
+      // "Only me" question went through too: the composer turned into its
+      // answer, so the question is not a draft.
+      setTimeout(() => { if (mounted.current && !latest.current.privateAsk) sent.current = false; }, 50);
     }
   };
 

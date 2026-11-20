@@ -1433,7 +1433,7 @@ ${uiCss}
       if (result?.ok) {
         setSurface(result);
         if (result.config) setSession((prev) => ({ ...(prev || {}), ...result.config, token: (prev && prev.token) || result.config.token }));
-        setNotice(result.signedIn === false ? { status: 401, error: 'Connect your tdoc account to comment here.' } : null);
+        setNotice(result.signedIn === false ? { kind: 'connect', status: 401, error: 'Connect your tdoc account to comment here.' } : null);
         if (result.handoff) say(result.handoff.message, !result.handoff.ok);
         // The comment held while connecting has posted: its composer is done.
         if (result.postedDraft) { setSelected(null); setAreaSel(null); setPicking(false); if (!result.handoff) say('Comment posted'); }
@@ -2325,8 +2325,10 @@ ${uiCss}
         ) : null}
 
         {/* An open composer that already says "Sign in to post" is the one
-            explanation: the connect notice waits until it closes. */}
-        {notice && !(selected && signInToPost && !notice.reconnect) ? (
+            explanation: the page-load "Connect your tdoc account" notice
+            (kind 'connect') waits until it closes. Every other notice (a
+            blocked window, a timeout, a network error) still shows. */}
+        {notice && !(selected && signInToPost && notice.kind === 'connect') ? (
           <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
             <div className="head"><span className="h">{notice.reconnect ? 'Reconnect tdoc' : notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" aria-label="Close" onClick={() => setNotice(null)}><X size={14} aria-hidden="true" /></button></div>
             <p>{notice.error}</p>

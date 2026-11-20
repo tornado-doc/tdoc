@@ -94,7 +94,9 @@ export function commentShortcutFor(event) {
 
 // A custom element (a dash in its name) with no open shadow root: its
 // shadow root is closed, so the key's real target (maybe a field in a host
-// app's web component) cannot be seen. Not ours to take.
+// app's web component) cannot be seen. Not ours to take. A light-DOM custom
+// element (no shadow root at all) is treated the same: it fails safe, the
+// key stays the page's.
 export function isOpaqueHost(target) {
   const el = target && target.nodeType === 1 ? target : null;
   if (!el) return false;
