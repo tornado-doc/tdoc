@@ -699,7 +699,7 @@ export function fromMarkdown(markdown, snapshot) {
         let best = -1, score = 0.5;
         for (const k of candidates) {
           const sc = likeness(mine, oldWords.get(olds[k]));
-          if (sc >= score) { best = k; score = sc; }
+          if (sc > score || (best === -1 && sc >= score)) { best = k; score = sc; }
         }
         if (best !== -1) { replaces.set(nn, olds[best]); at = best + 1; }
       }
@@ -712,7 +712,8 @@ export function fromMarkdown(markdown, snapshot) {
       for (const o of olds) {
         if (taken.has(o)) continue;
         const sc = likeness(mine, oldWords.get(o));
-        if (sc >= score) { best = o; score = sc; }
+        // On a tie the earlier original wins (two paragraphs merged keep the first's id).
+        if (sc > score || (best === -1 && sc >= score)) { best = o; score = sc; }
       }
       if (best !== -1) { taken.add(best); replaces.set(nn, best); }
     }
@@ -733,6 +734,16 @@ export function fromMarkdown(markdown, snapshot) {
     }
     pending.push(nn);
   }
+  // Every block that will be read as Markdown now (not matched to an
+  // original) is bounded first, whatever its lines looked like before: a
+  // code fence's opening line deleted turns its known lines into a new
+  // paragraph, and that paragraph is new to marked.
+  const fresh = [];
+  blocks.forEach((b, nn) => {
+    if (b.def || matchedNew.has(nn) || newKeys[nn].startsWith('\u0000keep:')) return;
+    fresh.push(b.token.raw);
+  });
+  if (fresh.length) guardMarkdown(fresh.join('\n\n'));
   let out = snapshot.prefix || '';
   const uses = new Map();
   const keepHtml = (seg) => {

@@ -380,5 +380,29 @@ const assert = require('assert/strict');
     }
   });
 
+  // Fourth delta review of #1089 -------------------------------------------
+  t('a code block turned into text by deleting its fence is bounded like any new block', () => {
+    const esc = (x) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const py = Array.from({ length: 1000 }, (_, i) => `def f_${i}(*args, **kwargs): return a * b * c_${i}`).join('\n');
+    for (const code of [',*a '.repeat(6000), '[a]('.repeat(1000), Array.from({ length: 300 }, () => ',*a '.repeat(20)).join('\n'), py]) {
+      const r = toMarkdown(`<p>Intro</p>\n<pre><code>${esc(code)}\n</code></pre>\n<p>Outro</p>\n`);
+      assert.equal(r.ok, true);
+      for (const md of [r.markdown.replace(/```\n/, ''), r.markdown.replace(/```\n/, '\n')]) {
+        const t0 = Date.now();
+        try { fromMarkdown(md, r.snapshot); } catch (e) { assert.ok(e instanceof MarkdownTooComplex, e.message); }
+        assert.ok(Date.now() - t0 < 1000, `${code.slice(0, 20)}: ${Date.now() - t0} ms`);
+      }
+    }
+  });
+
+  t('two paragraphs merged keep the first one\'s id', () => {
+    let html = '<p>Intro</p>\n';
+    for (let i = 0; i < 5; i++) html += `<p data-tdoc-aid="p${i}">para ${i}</p>\n`;
+    const r = toMarkdown(html);
+    const out = fromMarkdown(r.markdown.replace('para 1\n\npara 2', 'para 1\npara 2'), r.snapshot).bodyHtml;
+    assert.match(out, /<p data-tdoc-aid="p1">para 1\npara 2<\/p>/);
+    assert.ok(!out.includes('data-tdoc-aid="p2"'), out);
+  });
+
   if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 })();
