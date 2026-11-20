@@ -90,7 +90,7 @@ t('the skill names exactly the tools the worker serves', () => {
   // A dev-mode-only tool (devMode: true) is not in the skill yet.
   const heads = [...block.matchAll(/^  ([a-z_]+): \{$/gm)];
   const served = heads.filter((m, i) => !/^    devMode: true,$/m.test(block.slice(m.index, i + 1 < heads.length ? heads[i + 1].index : undefined))).map((m) => m[1]).sort();
-  assert(served.join(',') === 'answer_question,commit_upload,create_doc,create_feedback_space,create_upload,edit_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,report_progress,resolve_comment,share_doc,update_doc', served.join(','));
+  assert(served.join(',') === 'answer_question,commit_upload,create_doc,create_feedback_space,create_upload,edit_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,report_progress,resolve_comment,share_doc,update_doc,wait_for_comments', served.join(','));
 });
 
 t('README cites sources and marks unverified fields', () => {

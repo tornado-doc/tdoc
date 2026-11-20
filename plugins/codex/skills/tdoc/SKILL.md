@@ -52,6 +52,11 @@ Short answers and edits to files in a repository do not need tdoc.
 - `get_doc`: latest HTML or text, with title, version and link.
 - `list_docs`: My docs and team docs.
 - `get_comments`: comments on a doc, with anchors and status.
+- `wait_for_comments`: waits (up to 25 seconds) for new comments, reopened
+  threads and replies on a doc or feedback space (never your own replies) and
+  returns those threads with a `cursor`. To keep receiving feedback, call
+  `wait_for_comments` in a loop, passing the last `cursor` as `since`; the
+  first call (no `since`) returns the open threads already there.
 - `reply_to_comment`: reply with a status.
 - `resolve_comment`: mark a comment handed to you as handled.
 - `report_progress`: optional, while working on a comment handed to you, one short line saying what you are doing now (shown in the comment's progress steps).

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# tdoc-watch — keep receiving new comments and replies on a doc or feedback
+# space, as they are left, without anyone pressing "Send to agent".
+#
+# Prints the open threads already there, then each thread with something new
+# (a new comment, a reopened thread, or a reply that is not your own agent's)
+# as one Markdown block (the Copy for agent format), so
+# `tdoc-watch my-site | agent` works. Loops GET /api/comments/wait, the same
+# endpoint as the MCP tool wait_for_comments; the cursor to resume from goes
+# to stderr after each batch. Uses the hosted Bearer in ~/.tdoc/published.json.
+#
+# Usage:
+#   tdoc-watch <slug|doc url> [--since <cursor>] [--once] [--json]
+#     --since <cursor>  only what came after this cursor (from a previous run)
+#     --once            stop after the first batch (or the first empty wait)
+#     --json            one JSON line per thread instead of Markdown
+#   tdoc-watch --help
+set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+command -v node >/dev/null 2>&1 || { echo "[tdoc] tdoc-watch needs Node 18+" >&2; exit 1; }
+exec node "$TDOC_BIN_DIR/lib/watch.js" "$@"
