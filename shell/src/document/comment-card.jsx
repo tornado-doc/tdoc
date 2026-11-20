@@ -531,6 +531,8 @@ function ReplyCard({
 }) {
   const reacted = hasReactions(reply);
   const author = replyName(reply.author);
+  const seeChanges = useContext(CommentSeeChangesContext);
+  const appliedIn = Number(reply.applied_in) || 0;
 
   if (reply.deleted) {
     return (
@@ -559,6 +561,14 @@ function ReplyCard({
           {reacted ? null : (
             <ReactionPicker onPick={(emoji) => onReact(reply.id, emoji)} />
           )}
+          {seeChanges && appliedIn ? (
+            // A link (it is a place: this page's compare of that version),
+            // opened in place without a reload.
+            <a className="tdoc-reply-changes" href={`?compare=1&to=${appliedIn}`}
+              onClick={(event) => { event.preventDefault(); seeChanges(appliedIn); }}>
+              see changes
+            </a>
+          ) : null}
           <button
             type="button"
             className="tdoc-reply-toggle"
@@ -642,6 +652,12 @@ function ProductWhere({ anchor, origin, onGoTo = null }) {
 // this one, which is why it sits apart. Surfaces without versions (the
 // feedback overlay) provide nothing and the line never shows.
 export const CommentDocVersionContext = createContext(null);
+// "See changes" on an agent's reply that says it applied the comment in vN:
+// the page's compare of vN against the version before it. The doc page
+// provides it (its read gate guards both versions); a surface without
+// versions (the feedback widget, a space) provides nothing and the reply has
+// no link.
+export const CommentSeeChangesContext = createContext(null);
 
 export function CommentCard({
   comment,

@@ -148,7 +148,7 @@ export function HandoffDetailsPanel({
                       {latestAgentReply(comment)?.text ? <div>{shortCommentPreview(latestAgentReply(comment).text)}</div> : null}
                       {comment.handoff_delivery?.status === 'failed' ? <div>Delivery failed: {deliveryErrorText(comment.handoff_delivery.error) || 'Unknown reason'}</div> : null}
                         {stuck && onSendElsewhere ? <button type="button" className="tdoc-handoff-details-elsewhere" onClick={() => onSendElsewhere(comment)}>Send to another agent</button> : null}
-                        {state === 'resolved' && comment.applied_in && onViewChanges ? <button type="button" className="tdoc-handoff-details-elsewhere" onClick={onViewChanges}>Updated to v{comment.applied_in} · View changes</button> : null}
+                        {state === 'resolved' && comment.applied_in && onViewChanges ? <button type="button" className="tdoc-handoff-details-elsewhere" onClick={() => onViewChanges(comment)}>Updated to v{comment.applied_in} · View changes</button> : null}
                     </div>
                   ) : null}
                   {pillState === 'question' && onReply ? <form className="tdoc-handoff-details-reply-form" onSubmit={async (event) => {

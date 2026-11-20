@@ -427,8 +427,10 @@
   .tdoc-margin-comment .copy-md:hover { color: var(--td-accent); }
   .tdoc-margin-comment .copy-md svg { width: 14px; height: 14px; display: block; }
   .tdoc-margin-comment .tdoc-reply-toggle,
+  .tdoc-margin-comment .tdoc-reply-changes,
   .tdoc-margin-comment .tdoc-edit-toggle { cursor: pointer; color: var(--td-accent); }
   .tdoc-margin-comment .tdoc-reply-toggle:hover,
+  .tdoc-margin-comment .tdoc-reply-changes:hover,
   .tdoc-margin-comment .tdoc-edit-toggle:hover { text-decoration: underline; }
 
   /* ===== Pins model (wide mode only) =====
@@ -592,8 +594,11 @@
   /* A thread is one flat list, flush with the top comment (Google Docs). */
   .tdoc-replies > .tdoc-reply + .tdoc-reply { padding-top: 10px; border-top: 1px dashed #eee; }
   .tdoc-reply .tdoc-reply-toggle,
+  .tdoc-reply .tdoc-reply-changes,
   .tdoc-reply .tdoc-edit-toggle { cursor: pointer; color: var(--td-accent); font-size: 11px; }
+  .tdoc-reply .tdoc-reply-changes { text-decoration: none; }
   .tdoc-reply .tdoc-reply-toggle:hover,
+  .tdoc-reply .tdoc-reply-changes:hover,
   .tdoc-reply .tdoc-edit-toggle:hover { text-decoration: underline; }
   /* Bridge 2 on the owner's card: the one instruction in the journey, as a line
      to paste and a button, then the state the server reports back. */
@@ -1563,6 +1568,9 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
    just now" lights up for a moment, then settles. */
 .tdoc-bar .tdoc-edited[data-just-updated] { background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); transition: background-color .6s ease, color .6s ease; }
 @media (prefers-reduced-motion: reduce) { .tdoc-bar .tdoc-edited[data-just-updated] { transition: none; } }
+/* A reader who may not list the history but may see what changed: the same
+   words open the compare; a version new to them says so in the accent. */
+.tdoc-bar .tdoc-edited .tdoc-edited-changes { color: var(--td-accent, #1652f0); }
 /* A viewer who may not list the history: when, in words, and nothing to open. */
 .tdoc-bar .tdoc-edited.is-static { display: inline-flex; align-items: center; cursor: default; }
 .tdoc-bar .tdoc-edited.is-static:hover { background: transparent; color: #8a8a8f; }

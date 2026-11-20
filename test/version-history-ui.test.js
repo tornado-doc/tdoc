@@ -10,9 +10,10 @@
 //   - Restore saves the old version as a new one and opens it.
 //   - a phone gets the same rows in a bottom drawer from ⋯ → Version history.
 //   - dev mode adds version numbers; normal mode shows none.
-//   - a viewer who may not list the history: "Edited …" is plain text, no
-//     menu, no View changes or Versions in ⋯; a shared /v/N link still says
-//     which version it is and links to the latest.
+//   - a viewer who may not list the history: "Edited …" opens what changed
+//     (this version against the one before), no menu, no history panel, no
+//     View changes or Versions in ⋯ (See what changed instead); a shared
+//     /v/N link still says which version it is and links to the latest.
 //   - a comment whose words are gone and which was written on an older
 //     version says "Commented on an earlier version".
 // Run with: node test/version-history-ui.test.js
@@ -267,27 +268,31 @@ async function startServer(worker, env) {
     // The doc's history is its owner's (history_visibility default): a
     // signed-in reader and a signed-out one may read the doc, not its history.
     for (const [who, as] of [['a signed-in reader', strangerSid], ['a signed-out reader', null]]) {
-      await t(`${who} without history rights: "Edited …" is plain text; no version menu anywhere`, async () => {
+      await t(`${who} without history rights: "Edited …" opens what changed, not the history; no version menu anywhere`, async () => {
         const slug = await newDoc();
         const v = await open(slug, { as });
         const edited = v.page.locator('.tdoc-bar .tdoc-edited');
         await edited.waitFor();
         assert.match(await edited.innerText(), /^Edited /);
-        assert.equal(await edited.evaluate((el) => el.tagName), 'SPAN', 'not a button');
-        assert.equal(await edited.getAttribute('aria-expanded'), null);
-        assert.equal(await v.page.locator('.tdoc-bar button.tdoc-edited').count(), 0);
+        assert.equal(await edited.evaluate((el) => el.tagName), 'BUTTON');
+        assert.equal(await edited.getAttribute('aria-expanded'), null, 'not the history toggle');
+        assert.match(await edited.getAttribute('aria-label'), /See what changed$/);
+        await shot(v.page, `history-reader-plain-${as ? 'signed-in' : 'signed-out'}.png`);
         await edited.click();
-        await v.page.waitForTimeout(300);
+        await v.page.getByRole('main', { name: 'Version changes' }).waitFor();
         assert.equal(await v.page.locator('[role="menu"]').count(), 0, 'no menu opens');
         assert.equal(await v.page.locator('.tdoc-history-panel').count(), 0, 'no panel opens');
-        assert.doesNotMatch(v.page.url(), /history=1|compare=1/);
-        await shot(v.page, `history-reader-plain-${as ? 'signed-in' : 'signed-out'}.png`);
-        // ⋯ has no View changes, Versions or Version history either.
+        assert.doesNotMatch(v.page.url(), /history=1/);
+        assert.match(v.page.url(), /compare=1/);
+        assert.equal(await v.page.locator('.tdoc-diff-heading strong').innerText(), 'v5 · Changes from v4');
+        await v.page.getByRole('button', { name: 'Back to document' }).click();
+        // ⋯ has no View changes, Versions or Version history; See what changed instead.
         await v.page.locator('.tdoc-bar [aria-label="More actions"], .tdoc-bar [aria-label="More"], .tdoc-bar .tdoc-more-trigger').first().click();
         await v.page.locator('[role="menu"]').first().waitFor();
         for (const name of ['View changes', 'Versions', 'Version history']) {
           assert.equal(await v.page.getByRole('menuitem', { name, exact: true }).count(), 0, `no ${name} in ⋯`);
         }
+        assert.equal(await v.page.getByRole('menuitem', { name: 'See what changed', exact: true }).count(), 1);
         assert.equal(await v.page.locator('[data-action="compare"], [data-action="history"], .tdoc-version-submenu-trigger').count(), 0);
         await shot(v.page, `history-reader-overflow-${as ? 'signed-in' : 'signed-out'}.png`);
         await v.ctx.close();
@@ -298,6 +303,7 @@ async function startServer(worker, env) {
         for (const name of ['View changes', 'Versions', 'Version history']) {
           assert.equal(await m.page.getByRole('menuitem', { name, exact: true }).count(), 0, `no ${name} in phone ⋯`);
         }
+        assert.equal(await m.page.getByRole('menuitem', { name: 'See what changed', exact: true }).count(), 1);
         await shot(m.page, `history-reader-phone-overflow-${as ? 'signed-in' : 'signed-out'}.png`);
         await m.ctx.close();
       });
@@ -312,7 +318,7 @@ async function startServer(worker, env) {
         assert.match(await strip.innerText(), /You're viewing v2 - the latest is v5/);
         assert.equal(await strip.locator('a').getAttribute('href'), `/d/${slug}`, 'the live doc, not a pinned version');
         if (!phone) {
-          assert.equal(await v.page.locator('.tdoc-bar .tdoc-edited').evaluate((el) => el.tagName), 'SPAN');
+          assert.equal(await v.page.locator('.tdoc-bar .tdoc-edited').getAttribute('aria-expanded'), null, 'not the history toggle');
           assert.equal(await v.page.locator('[role="menu"]').count(), 0);
         }
         await shot(v.page, `history-reader-old-version-${name}.png`);

@@ -117,9 +117,13 @@ export function ComparisonFrames({ slug, before, after, narrow, theme, bare = fa
   </>;
 }
 
-export function VersionDiffView({ config, theme, narrow, onClose }) {
-  const after = Number(config.version);
-  const before = Math.max(0, after - 1);
+// The page's compare (?compare=1): the version on screen against the one
+// before it, unless a range is asked for -- `from` (the version a reader last
+// saw, "See what changed") and `to` (the version an agent's reply says it
+// changed, "See changes"). Both frames go through the doc's read gate.
+export function VersionDiffView({ config, theme, narrow, onClose, from = null, to = null }) {
+  const after = Number(to) > 0 ? Number(to) : Number(config.version);
+  const before = Number(from) >= 1 && Number(from) < after ? Number(from) : Math.max(0, after - 1);
   return <main className="tdoc-version-diff" aria-label="Version changes">
     <div className="tdoc-diff-heading">
       <strong>{before ? `v${after} · Changes from v${before}` : `v${after} · First version`}</strong>

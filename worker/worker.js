@@ -3644,6 +3644,10 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     // (canListHistory), and restore a version (the browser
     // save's own rule: owner or editor, where the version store exists).
     historyVisible: !!(oidc && oidc.historyVisible) && !isLanding,
+    // What changed between versions (canSeeVersionChanges): any reader of
+    // the doc, history or not. The compare reads the versions' own /frame
+    // pages, which the read gate guards.
+    changesVisible: !!(oidc && oidc.changesVisible) && !isLanding,
     canRestore: !!versionWritesEnabled && (!!isOwner || !!(oidc && oidc.teamManage && !oidc.teamManage.guest)) && !isLanding
       && !(docMeta && docMeta.created_from === 'feedback'),
     stars: stars || null,
@@ -4716,6 +4720,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
       versions = [{ n: version, created: (hit && hit.created) || null }];
     }
   } catch {}
+  const changesVisible = canSeeVersionChanges(gate);
   // JUL-36: owner-only manage data (Delete / Unpublish / visibility switch),
   // computed fresh on THIS request and embedded only for the owner. A
   // non-owner's bootCfg carries `ownerManage: null` — the overlay's manage
@@ -4807,7 +4812,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, historyVisible, agent, agentView, ask: askConfig(env), folder: docFolder, seoAuthor: isLanding ? null : await docSeoAuthor(env, gate.meta, reqUrl.origin), askEditV2Preview: env.TDOC_PREVIEW === '1', ...(await devModeBoot(env, session)) }, pageUrl), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, historyVisible, changesVisible, agent, agentView, ask: askConfig(env), folder: docFolder, seoAuthor: isLanding ? null : await docSeoAuthor(env, gate.meta, reqUrl.origin), askEditV2Preview: env.TDOC_PREVIEW === '1', ...(await devModeBoot(env, session)) }, pageUrl), {
       headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'private, no-store', 'Vary': 'Accept', ...(agent ? { 'Link': docAgentLinkHeader(agent) } : {}) },
     }),
   };
@@ -9227,6 +9232,8 @@ function snapshotAt(c, V) {
           mentions: Array.isArray(e.reply.mentions) ? e.reply.mentions : [],
           edited: null,
           agent_status: e.reply.agent_status || null,
+          // The version an applied reply says it changed ("See changes").
+          applied_in: e.reply.agent_status === 'applied' ? e.at_version : null,
           created: e.at,
           reactions: {},
           deleted: false,
@@ -19257,6 +19264,20 @@ async function canListHistory(env, gate, teamMember = null) {
   if (!session || session.feedback || !gate.meta.workspace_id) return false;
   if (teamMember !== null) return !!teamMember;
   try { return await isTeamMemberSession(env, session, gate.meta.workspace_id); } catch { return false; }
+}
+
+// Who may see what changed between two versions of a doc (the reader's "See
+// what changed" on "Edited ...", and "See changes" on an agent's applied
+// reply): anyone this request lets read the doc. history_visibility (owner
+// by default, "pure-publish") decides who may LIST the history -- who saved
+// when, the change summaries, the version picker -- not who may open an
+// earlier version: every /d/<slug>/v/<n>, /frame and /raw is gated by
+// enforceDocAccess alone, so a reader with the link already opens v1. The
+// compare is built in the browser from those same two /frame pages, so the
+// read gate is what enforces it, and a viewer who may not read the doc gets
+// neither frame. Not a feedback space (it takes no versions).
+function canSeeVersionChanges(gate) {
+  return !!(gate && gate.ok && gate.meta && gate.meta.created_from !== 'feedback');
 }
 
 // Whose names a history shows: the owner (and the owner's token), the doc's
