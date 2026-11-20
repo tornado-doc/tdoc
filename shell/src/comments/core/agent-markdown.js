@@ -17,7 +17,7 @@
 // "---", a code fence) can end the block or forge another thread. Links are
 // http(s) only, as <autolinks>. A React component chain and source file
 // (anchor.react, reactSourceCapture) come from the site's page: names must
-// look like identifiers (at most 8), the file is one line and cut, the line
+// look like identifiers (at most 8), the file a plain path, the line
 // and column small integers; names inline-escaped, the file a code span.
 // No imports: bin/lib/watch.js and the tests load this file on its own.
 
@@ -133,6 +133,7 @@ function elementLine(anchor) {
 // "App › Pricing › PlanCard" and `src/Pricing.jsx:42:7`, from anchor.react
 // (the rules of selection/anchors/react-source.js cleanReactSource).
 const REACT_NAME = /^[A-Z][A-Za-z0-9_$.]{2,59}$/;
+const REACT_PATH = /^[A-Za-z0-9._@+\-/]{1,200}$/;
 const smallInt = (n) => (Number.isInteger(n) && n >= 1 && n <= 10000000 ? n : null);
 function reactLines(anchor) {
   const react = anchor && anchor.react;
@@ -141,7 +142,7 @@ function reactLines(anchor) {
   const names = (Array.isArray(react.components) ? react.components : [])
     .filter((name) => typeof name === 'string' && REACT_NAME.test(name)).slice(-8);
   if (names.length) out.push(`- component: ${names.map(escapeInline).join(' › ')}`);
-  const file = typeof react.file === 'string' ? clip(oneLine(react.file.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')), 200) : '';
+  const file = typeof react.file === 'string' && REACT_PATH.test(react.file) && !react.file.split('/').includes('..') ? react.file : '';
   if (file) {
     const line = smallInt(react.line);
     const column = line ? smallInt(react.column) : null;

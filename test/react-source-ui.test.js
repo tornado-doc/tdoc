@@ -125,13 +125,12 @@ const PLAIN_HTML = `<!doctype html><meta charset="utf-8"><meta name="viewport" c
       await p.close();
     });
 
-    await test('hostile component names and source paths: shown as text, never run, no markup in the tag', async () => {
+    await test('hostile component names and source paths: dropped, never run; only the real App is named', async () => {
       const { p, errors } = await open(desk, '/');
       await hoverOn(p, '#evil');
       const h = await hint(p);
-      assert(h, 'no hint on the hostile element');
-      assert(!h.text.includes('onerror=') || !/<img/i.test(h.html), `markup rendered: ${h.html}`);
-      assert(!h.text.includes('window.__pwned=2'), `the hostile displayName was kept: ${h.text}`);
+      // App is still a component around it, the hostile name and path are not.
+      assert(h && h.text === 'App', `hint on the hostile element: ${h && h.html}`);
       assert(await p.evaluate(() => !window.__pwned && !document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-fb-react-hint img')), 'hostile markup ran');
       assert(errors.length === 0, errors.join('\n'));
       await p.close();
@@ -152,6 +151,45 @@ const PLAIN_HTML = `<!doctype html><meta charset="utf-8"><meta name="viewport" c
       assert(c && !('react' in c.anchor), `react part on a plain page: ${JSON.stringify(c && c.anchor)}`);
       assert(errors.length === 0, errors.join('\n'));
       await p.close();
+    });
+
+    await test('the tag stays inside the viewport at the right edge, the top, and over a full-height element', async () => {
+      const { p, errors } = await open(desk, '/');
+      for (const style of ['position:fixed;top:0;right:0;width:150px', 'position:fixed;top:0;left:0;right:0;height:100vh']) {
+        await p.evaluate((css) => { document.getElementById('plan-pro').style.cssText = css; }, style);
+        await p.mouse.move(1, 1);
+        await hoverOn(p, '#plan-pro');
+        const h = await hint(p);
+        assert(h, `no hint (${style})`);
+        assert(h.rect.left >= 0 && h.rect.right <= 1200 && h.rect.top >= 0 && h.rect.bottom <= 800, `tag outside the viewport (${style}): ${JSON.stringify(h.rect)}`);
+      }
+      await shot(p, 'desktop-edge');
+      assert(errors.length === 0, errors.join('\n'));
+      await p.close();
+    });
+
+    await test('the flag can come from the session (dev mode), with nothing pinned on the page', async () => {
+      for (const [devFlags, want] of [[['reactSourceCapture'], true], [[], false]]) {
+        const p = await desk.newPage();
+        await p.route(`${tdocBase}/api/feedback/session`, async (route) => {
+          const res = await route.fetch();
+          const body = await res.json();
+          await route.fulfill({ response: res, json: { ...body, dev_flags: devFlags } });
+        });
+        const answered = p.waitForResponse(`${tdocBase}/api/feedback/session`, { timeout: 5000 });
+        await p.goto(`${appBase}/`);
+        assert(await p.evaluate(() => window.__TDOC_FLAGS__ === undefined), 'a flag is pinned');
+        await p.evaluate((src) => { const s = document.createElement('script'); s.src = src; document.documentElement.appendChild(s); }, `${tdocBase}/feedback.js`);
+        await answered;
+        await p.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor({ state: 'attached', timeout: 5000 });
+        await p.waitForTimeout(150);
+        await p.evaluate(() => window.tdocFeedback.comment());
+        await p.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
+        await hoverOn(p, '#plan-starter');
+        const h = await hint(p);
+        assert(Boolean(h) === want, `dev_flags ${JSON.stringify(devFlags)}: hint ${JSON.stringify(h)}`);
+        await p.close();
+      }
     });
 
     await test('flag off: no tag on a React page', async () => {

@@ -12,7 +12,8 @@
 //   the `.return` chain gives the component names, `_debugSource` (dev
 //   builds of React 16-18) the file / line / column. React 19 dropped
 //   `_debugSource`, so there it is names only (unless an attribute below).
-// - source attributes some build plugins add: react-dev-inspector
+// - source attributes some build plugins add (on the element or at most
+//   two levels above it): react-dev-inspector
 //   (data-inspector-relative-path / -line / -column), Sentry's component
 //   annotation (data-sentry-component, data-sentry-source-file) and the
 //   plain data-source-file / data-source-line.
@@ -29,6 +30,9 @@ export const REACT_MAX_COMPONENTS = 8;
 const MAX_NAME = 60;
 const MAX_FILE = 200;
 const MAX_DOM_UP = 8;
+// Source attributes count only on the element or close above it (2 levels):
+// an attribute far up the page says nothing about this element.
+const MAX_ATTR_UP = 2;
 const MAX_FIBERS = 400;
 const MAX_LINE = 10_000_000;
 
@@ -41,20 +45,36 @@ export function cleanComponentName(value) {
   return name.length <= MAX_NAME && NAME_RE.test(name) ? name : '';
 }
 
-// A source path: one line, no control characters, no protocol or query, the
-// person's home folder dropped (/Users/<name>/, /home/<name>/, C:\Users\<name>\),
-// at most MAX_FILE characters from the end (the file name is what matters).
+// A source path, or '' when it is not one. Read off the site's page (an
+// attribute any script can set), so it must look like a path and nothing
+// else: [A-Za-z0-9._@+-/] only (no spaces, quotes, backticks, brackets or
+// "·", so it cannot pose as another field or line for an agent), no ".."
+// segment, at most MAX_FILE characters (the end kept, from a "/"). The
+// protocol and host go first (file:///, webpack:///, http://localhost:5173/),
+// then the query, a drive letter, and the person's home folder (/Users/<name>,
+// /home/<name>, /var/home/<name>, /mnt/c/Users/<name>, /root, ~).
+// worker.js cleanSourcePath holds the same rules for the server.
+const PATH_RE = /^[A-Za-z0-9._@+\-/]{1,200}$/;
 export function cleanSourceFile(value) {
   if (typeof value !== 'string') return '';
-  let file = value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!file) return '';
-  file = file.replace(/\\/g, '/')
-    .replace(/^(?:webpack|webpack-internal|file|https?|vite):\/*(?:[^/]*\/)?/i, '/')
+  let file = value.trim().replace(/\\/g, '/');
+  if (!file || file.length > 2000) return '';
+  file = file
+    .replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/]*/, '')
+    .replace(/^(?:webpack-internal|webpack|vite|file):/i, '')
     .replace(/[?#].*$/, '')
-    .replace(/^\/?(?:[A-Za-z]:\/)?(?:Users|home)\/[^/]+\//, '')
-    .replace(/^\.\//, '')
-    .replace(/^\/+/, '');
-  if (file.length > MAX_FILE) file = `…${file.slice(-(MAX_FILE - 1))}`;
+    .replace(/^\/?[A-Za-z]:(?=\/)/, '')
+    .replace(/^~(?=\/|$)/, '')
+    .replace(/^\/(?:mnt\/[A-Za-z]\/)?(?:Users|home|var\/home)\/[^/]+(?=\/|$)/i, '')
+    .replace(/^\/root(?=\/|$)/, '')
+    .replace(/^(?:\.?\/)+/, '');
+  if (file.length > MAX_FILE) {
+    file = file.slice(-MAX_FILE);
+    const cut = file.indexOf('/');
+    file = cut >= 0 ? file.slice(cut + 1) : '';
+  }
+  if (!PATH_RE.test(file)) return '';
+  if (file.split('/').some((part) => part === '..')) return '';
   return file;
 }
 
@@ -166,12 +186,12 @@ export function reactSourceFor(element) {
     let fiberInfo = null;
     let attrs = null;
     let node = element;
-    for (let up = 0; node && node.nodeType === 1 && up < MAX_DOM_UP && !(fiberInfo && attrs); up++) {
+    for (let up = 0; node && node.nodeType === 1 && up < MAX_DOM_UP && !(fiberInfo && (attrs || up > MAX_ATTR_UP)); up++) {
       if (!fiberInfo) {
         const fiber = fiberOf(node);
         if (fiber) fiberInfo = fromFiber(fiber);
       }
-      if (!attrs) attrs = fromAttributes(node);
+      if (!attrs && up <= MAX_ATTR_UP) attrs = fromAttributes(node);
       node = node.parentElement;
     }
     if (!fiberInfo && !attrs) return null;

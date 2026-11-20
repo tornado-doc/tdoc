@@ -188,12 +188,11 @@ ${uiCss}
     /* The React component under the pointer (reactSourceCapture): a quiet
        tag on the hover outline, cut to one line. */
     #tdoc-feedback-root .tdoc-fb-react-hint {
-      position: absolute; left: -2px; bottom: 100%; margin-bottom: 4px; padding: 2px 6px; border-radius: 5px;
-      max-width: min(360px, calc(100vw - 16px)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      position: fixed; z-index: 2147483641; pointer-events: none; box-sizing: border-box; height: 20px; padding: 2px 6px; border-radius: 5px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       background: var(--td-ground); color: var(--td-muted); border: 1px solid var(--td-line);
       font: 500 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
     }
-    #tdoc-feedback-root .tdoc-fb-react-hint.below { bottom: auto; top: 100%; margin: 4px 0 0; }
     /* The box keeps a ground-colored hairline so it shows on accent-colored
        content (a blue chart) as well as on white. */
     #tdoc-feedback-root .tdoc-drag-marquee { box-shadow: 0 0 0 1px var(--td-ground); }
@@ -2166,6 +2165,17 @@ ${uiCss}
       : null;
     // The component under the pointer (reactSourceCapture), as plain text.
     const hoverHint = hoverRect && hovered && hovered !== docFrame() ? reactSourceHint(reactOf(hovered)) : '';
+    // Where it sits: above the outline, else below it, else just inside its
+    // top; its left edge and width kept inside the viewport.
+    const hintSpot = (() => {
+      if (!hoverHint) return null;
+      const H = 22, M = 4;
+      const top = hoverRect.top - H - M >= M ? hoverRect.top - H - M
+        : hoverRect.bottom + M + H <= innerHeight - M ? hoverRect.bottom + M
+          : Math.min(Math.max(M, hoverRect.top + M), innerHeight - H - M);
+      const left = Math.min(Math.max(M, hoverRect.left), Math.max(M, innerWidth - 120));
+      return { top, left, maxWidth: Math.min(360, innerWidth - left - M) };
+    })();
     const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     const bannerText = !areaSelectOn
       ? (reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it')
@@ -2243,9 +2253,8 @@ ${uiCss}
             <button type="button" onClick={() => { setPicking(false); setReanchorId(null); setHovered(null); }}>Cancel · Esc</button>
           </div>
         ) : null}
-        {hoverRect ? <div className="tdoc-hover-outline" style={{ left: hoverRect.left, top: hoverRect.top, width: hoverRect.width, height: hoverRect.height }}>
-          {hoverHint ? <span className={`tdoc-fb-react-hint${hoverRect.top < 30 ? ' below' : ''}`}>{hoverHint}</span> : null}
-        </div> : null}
+        {hoverRect ? <div className="tdoc-hover-outline" style={{ left: hoverRect.left, top: hoverRect.top, width: hoverRect.width, height: hoverRect.height }} /> : null}
+        {hintSpot ? <span className="tdoc-fb-react-hint" style={hintSpot}>{hoverHint}</span> : null}
         {marquee(drag, 'Comment on this area')}
         {marquee(areaBox)}
         {!selected ? marquee(openSpot) : null}
