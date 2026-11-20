@@ -200,6 +200,7 @@ async function loadWorker({ previewRenderer = false } = {}) {
   src = src.replace('/* __TDOC_HTML_PARSER__ */', () => fs.readFileSync(path.join(root, 'server', 'html-parser', 'parse5.js'), 'utf8'));
   src = src.replace('/* __TDOC_VERSION_DIFF__ */', () => fs.readFileSync(path.join(root, 'server', 'version-diff.js'), 'utf8'));
   src = src.replace('/* __TDOC_BLOCK_LINT__ */', () => fs.readFileSync(path.join(root, 'server', 'block-lint.js'), 'utf8'));
+  src = src.replace('/* __TDOC_BLOCK_IDS__ */', () => fs.readFileSync(path.join(root, 'server', 'block-ids.js'), 'utf8'));
   src = src.replace('/* __TDOC_AI_TIMING__ */', () => fs.readFileSync(path.join(root, 'server', 'ai-timing.js'), 'utf8'));
   src = src.replace('/* __TDOC_AGENT_TIMING__ */', () => fs.readFileSync(path.join(root, 'server', 'agent-timing.js'), 'utf8'));
   src = src.replace('/* __TDOC_SHEET_EMBED__ */', () => require(path.join(root, 'server', 'sheet-embed-source.js')).sheetEmbedSource());

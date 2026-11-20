@@ -13,6 +13,7 @@ const FILES = [
   'anchors/element.js',
   'anchors/region.js',
   'anchors/text-range.js',
+  'anchors/block.js',
   'anchors/registry.js',
   'pick-gesture.js',
 ];

@@ -47,6 +47,9 @@ class Element extends Node {
   getAttribute(n) { return this.attrs.has(n) ? this.attrs.get(n) : null; }
   setAttribute(n, v) { this.attrs.set(n, String(v)); }
   hasAttribute(n) { return this.attrs.has(n); }
+  get id() { return this.getAttribute('id') || ''; }
+  contains(n) { for (let x = n; x; x = x.parentNode) if (x === this) return true; return false; }
+  getElementsByTagName(tag) { const t = String(tag).toLowerCase(); return [...this.walk()].filter((e) => e.localName === t); }
   removeAttribute(n) { this.attrs.delete(n); }
   hasAttributes() { return this.attrs.size > 0; }
   get children() { return this.childNodes.filter((c) => c.nodeType === 1); }
