@@ -184,11 +184,13 @@ export function SendToAgentToggle({ ask, busy = false, className = 'tdoc-send-ag
     if (state.href) {
       return <a className={className} href={state.href} title={title} {...setupLinkProps(state.href)}>{AGENT_BUTTON_LABEL}</a>;
     }
-    return <button className={className} type="button" disabled title={title}>{AGENT_BUTTON_LABEL}</button>;
+    return null;
   }
-  if (state.kind !== 'ready' && !askable) {
-    return <button className={className} type="button" disabled title={state.reason}>{AGENT_BUTTON_LABEL}</button>;
-  }
+  // Nobody this person may send to or ask (a reader, a commenter on someone
+  // else's doc, a host without notify): no button. A disabled @agent whose
+  // only explanation is a tooltip read as broken, on a phone above all
+  // (dogfood 2026-11-20). Every surface: doc page, slides, sheets, widget.
+  if (state.kind !== 'ready' && !askable) return null;
   const words = sendToAgentWords(shown, { editable, offer, asking: state.kind !== 'ready' });
   // Nothing named yet: the control is the @agent button, as before #1034
   // (Julie, 2026-11-14: "@agent", not "Send to agent · Name"). Its click

@@ -228,12 +228,12 @@ const key = (k, target, extra = {}) => ({ key: k, target, composedPath: () => [t
     assert.deepEqual(kb.COMMENT_SHORTCUTS.map((s) => s.key), ['C', 'H', 'Esc']);
   });
 
-  t('wiring: every surface provides Copy for agent; card and list read it; the flag gates it; frame forwards C and H', () => {
+  t('wiring: every surface provides Copy for agent; card and list read it; no flag gates it; frame forwards C and H', () => {
     const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
     for (const p of ['shell/src/document-shell.jsx', 'feedback/src/main.jsx', 'shell/src/feedback-space.jsx']) {
       const src = read(p);
       assert.ok(src.includes('<CopyForAgentContext.Provider value={copyForAgent}>') && src.includes('useCopyForAgent({'), `${p} does not provide Copy for agent`);
-      assert.match(src, /copyForAgent'/, `${p} does not read the copyForAgent flag`);
+      assert.ok(!/copyForAgent'/.test(src), `${p} still reads the removed copyForAgent flag`);
     }
     assert.ok(read('shell/src/document/comment-card.jsx').includes('copyForAgent.copyThread(comment)'));
     assert.ok(read('shell/src/comments/panel/comment-panel.jsx').includes('<CommentListMenu area={area} />'));

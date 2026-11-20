@@ -62,6 +62,11 @@
   .tdoc-bar .tdoc-github-btn svg { display: block; }
   .tdoc-bar .tdoc-gh-stars { display: inline-flex; align-items: center; gap: 3px; color: #444; }
   .tdoc-bar .tdoc-gh-stars svg { display: block; }
+  /* The landing's "Feedback for your site": a quiet text link like the
+     GitHub entry beside it. A phone has it in ⋯ instead (no room for words). */
+  .tdoc-bar .tdoc-landing-feedback-link { display: inline-flex; align-items: center; height: 32px; padding: 0 9px; border-radius: 8px; color: #555; font: 600 12.5px/1 -apple-system, system-ui, sans-serif; text-decoration: none; white-space: nowrap; }
+  .tdoc-bar .tdoc-landing-feedback-link:hover { background: #f0f1f4; color: #1a1a1a; }
+  @media (max-width: 700px) { .tdoc-bar .tdoc-landing-feedback-link { display: none; } }
 
   /* Left cluster: the version chip and the document title. */
   /* flex-grow 0 (was 1): the title must hug its text so the star sits right
@@ -915,6 +920,12 @@
   body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   body.tdoc-narrow .tdoc-fab.is-hidden { display: none; }
   body.tdoc-narrow[data-tdoc-suggest-bar] .tdoc-fab { bottom: calc(var(--tdoc-suggest-bar-h, 110px) + 12px); }
+  /* The landing on a phone: its full-width CTAs (Make your doc, Add to your
+     site, ...) scroll under the bottom corner, so the comment button sits in
+     the top bar instead, after the logo, where nothing of the page goes (after
+     the suggest-bar rule, which would pull it back down).
+     Same button, smaller; only its place changes (AGENTS.md). */
+  body.tdoc-narrow[data-tdoc-landing] .tdoc-fab { top: 8px; bottom: auto; left: 52px; right: auto; padding: 0 12px; height: 32px; z-index: 1000000; box-shadow: none; }
   body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid var(--td-ground, #fff); border-radius: 50%; background: var(--td-accent, #1652f0); box-sizing: border-box; }
   body.tdoc-narrow .tdoc-drawer-tabs { display: flex; flex: none; justify-content: center; margin: 0 0 10px; }
   body.tdoc-narrow .tdoc-drawer-list, body.tdoc-narrow .tdoc-drawer-ask { flex: 1; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
@@ -1592,7 +1603,7 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
    the doc's phone drawer, the space page and the feedback widget's panel. */
 .tdoc-comment-refresh { color: var(--td-muted, #6b6a66); }
 .tdoc-comment-list-more { color: var(--td-muted, #6b6a66); }
-/* Copy for agent (flag copyForAgent): the key beside a menu row, and the
+/* Copy for agent: the key beside a menu row, and the
    keys line under the list's ⋯ (comments/panel/copy-for-agent.jsx). */
 .ui-menu-item .tdoc-menu-key {
   margin-left: auto; padding: 0 5px; min-width: 18px; box-sizing: border-box; text-align: center;

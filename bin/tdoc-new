@@ -56,6 +56,8 @@
 #   --no-server                scaffold only: skip starting/pinging the local
 #                              server (CI, or programmatic callers that serve
 #                              elsewhere). Prints the doc path instead of a URL.
+#                              With --publish it still publishes (and fails,
+#                              exit 1, if publishing does).
 #
 # Behavior:
 #   - Refuses to clobber an existing slug unless --force.
@@ -403,8 +405,46 @@ info "scaffolded $DOC_DIR (v$VERSION_N)"
 # --no-server: scaffold-only mode for CI and programmatic callers that don't
 # want a local server (or run where $SKILL_DIR isn't installed). Prints the
 # doc path instead of a URL and skips publish-independent serving entirely.
+# The publish step, shared by both modes. tdoc-publish needs no local server:
+# it reads the doc from $TDOC_DIR. The installed skill's copy, else the one
+# beside this script (a checkout, CI).
+PUBLISHED_URL=""
+run_publish() {
+  local publisher="$SKILL_DIR/bin/tdoc-publish"
+  [ -f "$publisher" ] || publisher="$(cd "$(dirname "$0")" && pwd)/tdoc-publish"
+  if [ ! -f "$publisher" ]; then
+    err "--publish: tdoc-publish not found (looked in $SKILL_DIR/bin and beside tdoc-new)."
+    return 1
+  fi
+  info "publishing to tdoc..."
+  if PUB_OUT=$(bash "$publisher" "$SLUG" 2>&1); then
+    PUBLISHED_URL=$(printf '%s\n' "$PUB_OUT" | awk '/^Published:/ { print $2 }')
+    [ -n "$PUBLISHED_URL" ] && info "published: $PUBLISHED_URL"
+    return 0
+  fi
+  err "publish failed; local doc is still available."
+  err "$PUB_OUT"
+  return 1
+}
+
+# --no-server --publish publishes too (it used to exit here, silently, with
+# nothing published). Prints the doc path, then the published URL; a failed
+# publish is an error here, since publishing was the point of the call.
 if [ "${NO_SERVER:-0}" = "1" ]; then
+  if [ "$PUBLISH" = "1" ]; then
+    if ! run_publish; then
+      err "the doc was scaffolded at $HTML_PATH but NOT published."
+      echo "$HTML_PATH"
+      exit 1
+    fi
+    if [ -z "$PUBLISHED_URL" ]; then
+      err "tdoc-publish reported no URL; the doc was scaffolded at $HTML_PATH but may not be published."
+      echo "$HTML_PATH"
+      exit 1
+    fi
+  fi
   echo "$HTML_PATH"
+  [ -n "$PUBLISHED_URL" ] && echo "$PUBLISHED_URL"
   exit 0
 fi
 
@@ -465,16 +505,8 @@ fi
 LOCAL_URL="http://localhost:${TDOC_PORT}/d/$SLUG/v/$VERSION_N"
 
 # ─────────────────────────────── publish? ─────────────────────────────────
-PUBLISHED_URL=""
 if [ "$PUBLISH" = "1" ]; then
-  info "publishing to Cloudflare Worker..."
-  if PUB_OUT=$(bash "$SKILL_DIR/bin/tdoc-publish" "$SLUG" 2>&1); then
-    PUBLISHED_URL=$(printf '%s\n' "$PUB_OUT" | awk '/^Published:/ { print $2 }')
-    [ -n "$PUBLISHED_URL" ] && info "published: $PUBLISHED_URL"
-  else
-    err "publish failed; local doc is still available."
-    err "$PUB_OUT"
-  fi
+  run_publish || true
 fi
 
 # ─────────────────────────────── open? ────────────────────────────────────

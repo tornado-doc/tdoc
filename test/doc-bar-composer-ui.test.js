@@ -300,7 +300,7 @@ async function dragSelect(page, phrase) {
       if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'Billing ships first') throw new Error('anonymous reader could not copy the quote');
       await pop.locator('textarea').fill('Can we clarify this?');
       if (await page.getByRole('dialog', { name: 'Sign in with GitHub' }).count()) throw new Error('writing a draft opened sign-in');
-      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await pop.getByRole('button', { name: 'Post', exact: true }).click();
       await page.getByRole('dialog', { name: 'Sign in with GitHub' }).waitFor();
       const saved = await page.evaluate(() => JSON.parse(sessionStorage.getItem('tdoc-comment-signin-draft:launch-plan:v1') || 'null'));
       if (saved?.text !== 'Can we clarify this?' || !saved.selection?.text?.includes('Billing ships')) throw new Error('sign-in discarded the comment draft or quote');
@@ -361,7 +361,7 @@ async function dragSelect(page, phrase) {
         if (!(await pop.locator('textarea').evaluate((el) => document.activeElement === el))) throw new Error('anonymous WebKit composer did not focus');
         if (await page.getByRole('dialog', { name: 'Sign in with GitHub' }).count()) throw new Error('WebKit selection opened sign-in');
         await pop.locator('textarea').fill('WebKit question');
-        await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+        await pop.getByRole('button', { name: 'Post', exact: true }).click();
         await page.getByRole('dialog', { name: 'Sign in with GitHub' }).waitFor();
         await context.close();
       } finally { await browser.close(); }
@@ -529,7 +529,7 @@ async function dragSelect(page, phrase) {
       const box = pop.locator('.tdoc-ask-only [role=checkbox]');
       if (await box.getAttribute('aria-checked') !== 'false' || await box.getAttribute('data-disabled') !== null) throw new Error('Ask only is not offered, off, for an agent that may edit');
       if (await pop.getByText('Edit with AI').count()) throw new Error('Edit with AI is back');
-      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await pop.getByRole('button', { name: 'Post', exact: true }).click();
       let queued = [];
       for (let i = 0; i < 40 && !queued.length; i++) { queued = (await pending('juliesmac', julie.token)).filter((h) => h.kind !== 'ask'); if (!queued.length) await page.waitForTimeout(250); }
       if (queued.length !== 1) throw new Error(`not handed to edit: ${JSON.stringify(queued)}`);
@@ -548,7 +548,7 @@ async function dragSelect(page, phrase) {
         const fits = await pop.evaluate((el) => { const r = el.getBoundingClientRect(); return r.right <= innerWidth + 0.5 && el.scrollWidth <= el.clientWidth + 1; });
         if (!fits) throw new Error('the composer foot overflows');
         await shot(page, phone ? 'composer-ask-only-phone.png' : 'composer-ask-only.png');
-        await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+        await pop.getByRole('button', { name: 'Post', exact: true }).click();
         let asks = [];
         for (let i = 0; i < 40 && !asks.length; i++) { asks = (await pending('juliesmac', julie.token)).filter((h) => h.kind === 'ask'); if (!asks.length) await page.waitForTimeout(250); }
         if (!asks.length) throw new Error('no question queued');
@@ -569,7 +569,7 @@ async function dragSelect(page, phrase) {
       if (await answersOnly(pop)) throw new Error('"Answers only" for the team agent on its own doc');
       if (await pop.locator('.tdoc-only-me').count()) throw new Error('Only me for a team agent');
       await shot(page, 'composer-team-edit.png');
-      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await pop.getByRole('button', { name: 'Post', exact: true }).click();
       let queued = [];
       for (let i = 0; i < 40 && !queued.length; i++) { queued = (await pending('team-box', agentToken)).filter((h) => h.kind !== 'ask'); if (!queued.length) await page.waitForTimeout(250); }
       if (queued.length !== 1) throw new Error(`not handed to the team agent: ${JSON.stringify(queued)}`);
@@ -616,7 +616,7 @@ async function dragSelect(page, phrase) {
       await pop.locator('.tdoc-agent-pill').waitFor();
       if (!(await answersOnly(pop))) throw new Error('no "Answers only"');
       await shot(page, 'composer-ask-only-locked.png');
-      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await pop.getByRole('button', { name: 'Post', exact: true }).click();
       let asks = [];
       for (let i = 0; i < 40 && !asks.length; i++) { asks = (await pending('team-box', agentToken)).filter((h) => h.kind === 'ask'); if (!asks.length) await page.waitForTimeout(250); }
       const posted = (await comments('julies-draft')).find((c) => c.text.startsWith('Can we move billing?'));

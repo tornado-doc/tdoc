@@ -785,7 +785,7 @@ export function CommentCard({
     return result;
   };
 
-  // Copy for agent (flag copyForAgent): set where the surface provides it.
+  // Copy for agent: set where the surface provides it.
   const copyForAgent = useCopyForAgentActions();
   const reactionCount = hasReactions(comment);
   const isMine = authoredBy(comment, currentUser);

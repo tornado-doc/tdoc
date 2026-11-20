@@ -547,6 +547,10 @@ ${uiCss}
   // The overlay's "Finish signing in in the tdoc window…" line; set by the app.
   let connectWaiting = () => {};
   let connecting = null;
+  // The tdoc window this page last opened. A new attempt (a Post while
+  // signed out after an earlier Cancel) reuses it while it is still open
+  // rather than putting a second tdoc window on screen.
+  let connectWindow = null;
   function connect({ invite = null } = {}) {
     if (connecting) return connecting;
     const attempt = new Promise((resolve, reject) => {
@@ -600,7 +604,13 @@ ${uiCss}
         if (Date.now() > deadline) { failWith('Signing in took too long.', { timedOut: true }); return; }
         poll = setTimeout(collect, CLAIM_POLL_MS);
       };
-      const openPopup = () => window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
+      const openPopup = () => {
+        if (connectWindow && !connectWindow.closed) {
+          try { connectWindow.location.href = url; connectWindow.focus(); return connectWindow; } catch (_) {}
+        }
+        connectWindow = window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
+        return connectWindow;
+      };
       const controls = {
         // A new window makes a new claim; the old ones are still collected.
         reopen: () => {
@@ -608,7 +618,12 @@ ${uiCss}
           if (next) { popup = next; deadline = Date.now() + CLAIM_WAIT_MS; }
           return Boolean(next);
         },
-        cancel: () => failWith('Not connected.', { cancelled: true }),
+        cancel: () => {
+          // Cancel means this window too: a later attempt opens a fresh one.
+          try { if (popup && !popup.closed) popup.close(); } catch (_) {}
+          connectWindow = null;
+          failWith('Not connected.', { cancelled: true });
+        },
       };
       const watchPopup = () => {
         watch = setInterval(() => {
@@ -1595,12 +1610,12 @@ ${uiCss}
       seenTransport: space ? SITE_SEEN : undefined,
     });
     const unreadComments = area.unread;
-    // Copy for agent (flag copyForAgent): ⋯ on a thread and on the list, C
+    // Copy for agent: ⋯ on a thread and on the list, C
     // and H while the list or a thread is open (comments/panel/copy-for-agent.jsx).
     // The tdoc link is the thread on the space's own page.
     const [markersHidden, setMarkersHidden] = useState(false);
     const copyForAgent = useCopyForAgent({
-      enabled: flagOn('copyForAgent', session),
+      enabled: true,
       area,
       selectedId: listId || openId,
       title: document.title,
@@ -1618,6 +1633,9 @@ ${uiCss}
     // account) is another viewer to the agent-list cache.
     const notifyViewer = session?.token || '';
     const agent = useNotifyTargets(slug, Boolean(sendMay && slug && session?.notify), notifyViewer);
+    // Signed out (no token, or the server no longer knows it): Post keeps
+    // the words and opens the tdoc window; the composer says so first.
+    const signInToPost = !session?.token || surface?.signedIn === false;
     const canSendToAgent = Boolean(agent.ready && agent.available && agent.reason !== 'no_agent_bound'
       && (agent.default || agent.candidates.length || agent.fallback));
     // Send to agent in the dock, as on the doc page. The owner always has it:
@@ -1976,13 +1994,16 @@ ${uiCss}
 
     // Esc steps back one level (comments/panel/keyboard.js): a press in
     // progress → composer → picking → card → list. Window capture: a host
-    // modal underneath must not close on the same press.
+    // modal underneath must not close on the same press. Closing the
+    // composer ends the pick too, as on the doc page: Esc closes it (the
+    // words are kept: comment-composer.jsx closedDrafts), not back to
+    // picking, and the next Esc closes what is behind it.
     useEscapeLadder([
       { active: () => Boolean(gestureRef.current && gestureRef.current.pressing()), close: () => {
         gestureRef.current.cancel();
         setDrag(null); setHovered(null);
       } },
-      { active: Boolean(selected), close: () => { setSelected(null); setAreaSel(null); setQuoteSel(null); } },
+      { active: Boolean(selected), close: () => { setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); setHovered(null); } },
       { active: Boolean(picking || reanchorId), close: () => { setPicking(false); setReanchorId(null); setHovered(null); } },
       { active: Boolean(openId), close: () => setOpenId(null) },
       { active: panelOpen, close: () => setPanelOpen(false) },
@@ -2218,7 +2239,7 @@ ${uiCss}
         {marquee(drag, 'Comment on this area')}
         {marquee(areaBox)}
         {!selected ? marquee(openSpot) : null}
-        {(copyForAgent && markersHidden ? [] : pins).map(({ comment, element }) => {
+        {(markersHidden ? [] : pins).map(({ comment, element }) => {
           if (!element) return null;
           const rect = spotOf(comment, element);
           if (!rect || rect.bottom < 0 || rect.top > innerHeight) return null;
@@ -2252,8 +2273,13 @@ ${uiCss}
             connectAgentPrompt={sendToAgentConnectPrompt}
             agentSetupHref={sendToAgentSetupHref}
             sendToAgentDisabledReason={sendToAgentDisabledReason}
-            onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); }}
+            signInToPost={signInToPost}
+            onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); }}
             onSubmit={async (text, opts = {}) => {
+              // Signed out: the composer's foot already says Post signs in
+              // and keeps the words; an older "Not connected" notice would be
+              // a second, stale explanation beside the tdoc window opening.
+              if (signInToPost) setNotice(null);
               const anchor = pageSel ? pageContext()
                 : frameSel ? frameContext(frameSel.anchor)
                 : quoteSel ? { ...contextFor(selected), quote: quoteSel.quote, label: quoteLabel(quoteSel.quote) }

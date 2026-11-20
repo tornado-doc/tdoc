@@ -206,7 +206,7 @@ async function touchSelect(page, phrase) {
       const onlyMe = pop.locator('.tdoc-only-me [role=checkbox]');
       if (await onlyMe.getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
       await shot(page, 'composer-only-me.png');
-      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await pop.getByRole('button', { name: 'Post', exact: true }).click();
       const card = page.locator('.tdoc-private-ask');
       await card.getByText('invoices block renewals').waitFor({ timeout: 10000 });
       await card.getByText('Only you can see this').waitFor();
@@ -246,7 +246,7 @@ async function touchSelect(page, phrase) {
       await answersOnly(pop);
       if (await pop.locator('.tdoc-only-me [role=checkbox]').getAttribute('aria-checked') !== 'false') throw new Error('Only me is on for an agent');
       await shot(page, 'composer-own-agent.png');
-      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await pop.getByRole('button', { name: 'Post', exact: true }).click();
       let pending = [];
       for (let i = 0; i < 40 && !pending.length; i++) {
         pending = (await api('/api/notify/local/pending?device=readerbox', { token: reader.token })).body.pending;
@@ -322,7 +322,7 @@ async function touchSelect(page, phrase) {
       const popBox = await pop.boundingBox();
       if (popBox.x < 0 || popBox.x + popBox.width > 390) throw new Error(`popover off screen ${JSON.stringify(popBox)}`);
       await shot(page, 'phone-composer.png');
-      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await pop.getByRole('button', { name: 'Post', exact: true }).click();
       let answered = false;
       for (let i = 0; i < 40 && !answered; i++) {
         const posted = (await comments()).find((c) => c.text.startsWith('Why Q4?'));

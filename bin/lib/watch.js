@@ -57,18 +57,29 @@ async function formatter() {
   return import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`);
 }
 
+// Seconds per wait (the server's cap is 25). TDOC_WATCH_WAIT_SECONDS lets a
+// test wait less.
+const WAIT_S = Math.min(25, Math.max(1, Number(process.env.TDOC_WATCH_WAIT_SECONDS) || 25));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
   const md = asJson ? null : await formatter();
   let failures = 0;
   let stop = false;
+  let first = true;
   process.on('SIGINT', () => { stop = true; process.exit(0); });
   process.stdout.on('error', () => process.exit(0)); // the reader went away
   while (!stop) {
-    const q = new URLSearchParams({ slug, timeout: '25' });
+    const q = new URLSearchParams({ slug, timeout: String(WAIT_S) });
     if (since) q.set('since', since);
     let res, body = null, started = Date.now();
+    // The first wait on a doc with nothing new is silent for up to 25 s: say
+    // what is happening (stderr, so `tdoc-watch slug | agent` is unchanged),
+    // unless the answer comes at once.
+    const hint = first ? setTimeout(() => {
+      console.error(`[tdoc] no new comments on ${slug} yet; waiting ${once ? `up to ${WAIT_S} s` : 'for new ones (Ctrl-C to stop)'}…`);
+    }, 1500) : null;
+    first = false;
     try {
       started = Date.now();
       res = await fetch(`${base}/api/comments/wait?${q}`, {
@@ -77,6 +88,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       });
       try { body = await res.json(); } catch {}
     } catch (e) {
+      clearTimeout(hint);
       // A dropped connection: back off and wait again from the same cursor.
       failures += 1;
       if (failures > 5) { console.error(`[tdoc] no response from ${base}: ${clean(e && e.message)}`); process.exit(1); }
@@ -84,6 +96,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       continue;
     }
     if (!res.ok || !body || !Array.isArray(body.comments)) {
+      clearTimeout(hint);
       const error = clean(body && body.error);
       // Busy (429) or the store briefly away (5xx): wait what it asks, at
       // least a second, and back off further each time.
@@ -99,6 +112,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       else console.error(`[tdoc] ${clean(body && body.message) || error || `HTTP ${res.status}`}`);
       process.exit(1);
     }
+    clearTimeout(hint);
     failures = 0;
     since = /^\d+$/.test(String(body.cursor)) ? String(body.cursor) : since;
     const comments = scrub(body.comments);
@@ -112,6 +126,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       })}\n`);
     }
     if (comments.length) console.error(`[tdoc] ${comments.length} comment${comments.length === 1 ? '' : 's'}; resume with --since ${since}`);
+    if (once && !comments.length && body.timed_out) console.error(`[tdoc] no new comments on ${slug}${since ? `; resume with --since ${since}` : ''}`);
     if (once && (comments.length || body.timed_out)) break;
     // An empty answer that came back early (a timeout cut short) is never
     // followed by a tight loop.

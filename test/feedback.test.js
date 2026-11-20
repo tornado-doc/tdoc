@@ -901,9 +901,10 @@ const APP = 'http://localhost:3000';
     // feedbackAreaSelect, feedbackDocFramePick and agentProgress graduated
     // (2026-11-16): on for everyone from feature-flags.js, so no session
     // names them, dev mode or not.
-    // copyForAgent (dev mode, 2026-11-19) is the one the widget reads now.
+    // copyForAgent was removed (on for everyone, 2026-11-20): the widget
+    // reads no dev-only flag now, so even dev mode gets an empty list.
     const dev = await cookieFor('devy', 'dev@tdoc.test');
-    assert(JSON.stringify(await flagsOf(dev)) === JSON.stringify(['copyForAgent']), 'dev mode on: only the widget\'s dev-only flags');
+    assert(JSON.stringify(await flagsOf(dev)) === JSON.stringify([]), 'dev mode on: only the widget\'s dev-only flags');
     const off = await cookieFor('offy', 'off@tdoc.test');
     await env.META.put('dev-mode:off@tdoc.test', 'off');
     assert((await flagsOf(off)).length === 0, 'dev mode switched off got flags');
