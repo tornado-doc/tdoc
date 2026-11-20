@@ -38,6 +38,12 @@ export const COMPOSER_WIDTH = 320;
 export const POST_LABEL = 'Post';
 export const SIGN_IN_TO_POST_HINT = 'Sign in to post — your comment is saved';
 export const SIGNING_IN_HINT = 'Finish signing in — your comment posts after';
+// Back from a sign-in that had to leave the page (the popup was blocked):
+// the words are in the composer again, waiting for one press.
+export const DRAFT_RESTORED_HINT = 'Your comment is saved — Post';
+// While signing in, Post brings the sign-in window back (it may be behind
+// this one, or closed).
+export const REOPEN_SIGN_IN_LABEL = 'Open sign-in';
 export const COMPOSER_HEIGHT = 190;
 
 // Where the card goes, as arithmetic — no DOM, so the keyboard cases are unit
@@ -119,6 +125,12 @@ export function CommentComposer({
   // and asks them to sign in (doc page: the sign-in dialog; feedback widget:
   // the tdoc window). The foot says so before they press it.
   signInToPost = false,
+  // Signing in happens in a window of its own: while it is open the Post
+  // button brings it back to the front (or opens it again).
+  onReopenSignIn = null,
+  // The words came back after leaving the page to sign in: the foot says
+  // they are saved and one Post sends them.
+  restored = false,
 }) {
   const draftKey = composerDraftKey(selection);
   const [text, setText] = useState(() => initialText || takeClosedDraft(draftKey));
@@ -275,6 +287,8 @@ export function CommentComposer({
       <div className="foot">
         {signInToPost && !demo ? (
           <span className="hint tdoc-sign-in-to-post" role="status">{busy ? SIGNING_IN_HINT : SIGN_IN_TO_POST_HINT}</span>
+        ) : restored && !busy && text.trim() ? (
+          <span className="hint tdoc-draft-restored" role="status">{DRAFT_RESTORED_HINT}</span>
         ) : target && !agentButtons ? (
           <span className="hint">{agentAskHint(ask)}</span>
         ) : (
@@ -292,9 +306,13 @@ export function CommentComposer({
             onConnect={connectAgentPrompt ? () => setConnectOpen(true) : null}
           />
           {!agentButtons ? <AskOnlyToggle ask={ask} busy={busy} /> : null}
-          <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
-            {busy ? (signInToPost ? 'Signing in…' : 'Posting…') : POST_LABEL}
-          </button>
+          {busy && signInToPost && onReopenSignIn ? (
+            <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={onReopenSignIn}>{REOPEN_SIGN_IN_LABEL}</button>
+          ) : (
+            <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
+              {busy ? (signInToPost ? 'Signing in…' : 'Posting…') : POST_LABEL}
+            </button>
+          )}
         </div>
       </div>
     </div>

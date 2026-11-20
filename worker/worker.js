@@ -1881,7 +1881,7 @@ async function listTrash(env, session, team, now = Date.now(), hints = {}) {
 // the brand onto a bare browser-styled card, and the boot JSON is the entire
 // contract: title, message, optional link-shaped actions, optional
 // request-access affordance.
-function statusPageResponse({ docTitle, title, message, note = null, error = false, status = 200, actions = null, requestAccess = null, acceptInvite = null, retry = null }) {
+function statusPageResponse({ docTitle, title, message, note = null, error = false, status = 200, actions = null, requestAccess = null, acceptInvite = null, retry = null, signedInWindow = false }) {
   // A worker with no shell runtime (Vercel shim, stripped test builds) still
   // owes the visitor a working page: same content, plain HTML, the actions
   // as links. Request-access needs the shell's fetch and is simply absent.
@@ -1913,6 +1913,7 @@ h1{font-size:18px;margin:0 0 8px}p{margin:0 0 12px;color:#444}a{color:#1652f0}</
       ...(requestAccess ? { requestAccess } : {}),
       ...(acceptInvite ? { acceptInvite } : {}),
       ...(retry ? { retry } : {}),
+      ...(signedInWindow ? { signedInWindow: true } : {}),
     }),
   }), {
     status,
@@ -30785,6 +30786,26 @@ const tdocHandlers = {
     }
 
     // ---- auth ----
+    // The sign-in window's last page (shell/src/sign-in-popup.js): a doc page
+    // that kept a comment opened sign-in in a window of its own, with this as
+    // the return. It tells that page to check /api/auth/me now and closes.
+    // It hands over nothing: the session is the cookie the provider's
+    // callback just set, and the waiting page asks the server for it.
+    if (p === '/auth/signed-in' && method === 'GET') {
+      const s = await getSession(env, req);
+      const signedIn = Boolean(sessionPrincipal(s));
+      const out = statusPageResponse({
+        docTitle: signedIn ? 'tdoc - signed in' : 'tdoc - not signed in',
+        title: signedIn ? "You're signed in" : 'Not signed in',
+        message: signedIn ? 'Your comment is posting in the tdoc tab. You can close this window.' : 'Close this window and try again from the tdoc tab.',
+        error: !signedIn,
+        signedInWindow: signedIn,
+      });
+      out.headers.set('Cache-Control', 'no-store');
+      out.headers.set('Referrer-Policy', 'no-referrer');
+      return out;
+    }
+
     if (p === '/api/auth/me' && method === 'GET') {
       const s = await getSession(env, req);
       return json({
