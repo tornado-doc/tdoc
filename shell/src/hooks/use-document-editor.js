@@ -70,6 +70,10 @@ export function useDocumentEditor({
   onPublished = null,
 }) {
   const requests = useRef(new Map());
+  // The Markdown view (flag markdownEditMode; document/markdown-edit.jsx):
+  // what it has typed reaches the page before anything reads the page, and
+  // it hears when the page's body is replaced from elsewhere.
+  const markdownHooks = useRef({ beforeSerialize: null, onSnapshot: null });
   // Set for the save's own navigation, so the unload warning below can tell a
   // deliberate hop to the new version from a tab closing mid-edit.
   const leavingForSave = useRef(false);
@@ -144,6 +148,9 @@ export function useDocumentEditor({
   }, [config, dirty, modeless, onDisableCommentSelection, showToast, storeKey]);
 
   const requestDocumentMessage = useCallback(() => new Promise((resolve, reject) => {
+    // The Markdown view hands the page what was typed first; Markdown it
+    // can't convert stops the read (and so the save), with its reason.
+    try { markdownHooks.current.beforeSerialize?.(); } catch (error) { reject(error); return; }
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const timer = window.setTimeout(() => {
       requests.current.delete(requestId);
@@ -396,6 +403,7 @@ export function useDocumentEditor({
     editSnapshot(message) {
       consideringDraft.current = false;
       if (typeof message.bodyHtml !== 'string') return;
+      try { markdownHooks.current.onSnapshot?.(message); } catch {}
       const nextDirty = Boolean(message.dirty);
       setChecking(false);
       if (nextDirty && modeless) {
@@ -442,6 +450,11 @@ export function useDocumentEditor({
     keepPublished,
     closeConflict: () => setConflict(null),
     format: (command, value) => send({ type: 'tdoc:editFormat', command, value }),
+    // The Markdown view: the body as the page has it now, typing there
+    // counts as typing, and its hooks (above).
+    requestBody: () => requestDocumentMessage().then((message) => message.bodyHtml),
+    noteTyping,
+    setMarkdownHooks: (hooks) => { markdownHooks.current = hooks || { beforeSerialize: null, onSnapshot: null }; },
     frameHandlers,
   };
 }

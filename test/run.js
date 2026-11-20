@@ -275,6 +275,7 @@ const BROWSER = [
   'sheets-integration-ui.test.js', // release 2026-11-11d: merges x hidden rows/columns, groups and freeze; rule fill wins over a cell's own fill; Find skips hidden columns and opens a group, Replace all reaches hidden cells; fill handle x hidden rows/columns and merges; insert/delete rows x merges x groups x rules; formulas x merges/hidden/collapsed rows/rules, find & replace in the formula, fill handle moves references
   'doc-types-top-bar-ui.test.js', // doc, sheet and deck: the same top bar, ⋯ menu (Read / Comment / Edit) and editor bar; a sheet full screen or on its own page keeps them; desktop + phone
   'sheet-doc-standalone-ui.test.js', // a sheet-only doc is a full page sheet: ?sheet=N and #expand=1 open the tab in place, no way back / Open on its own / close; a prose doc's sheet keeps them, with a "Doc / Tab" breadcrumb whose doc title goes back (closes full screen; opens the doc from its own page); desktop + phone
+  'markdown-edit-ui.test.js', // Edit as Markdown (flag markdownEditMode): the switch in Edit mode and beside autosave; edits save, house blocks byte for byte, raw HTML stays text, choice remembered, disabled with a reason, no switch on sheets or flag off; desktop + phone
   'convert-to-sheet-ui.test.js', // ⋯ › Convert to Sheet (flag convertToSheet): offered to an editor of a prose doc holding a sheet only; confirm, v2 is a sheet doc (no Open the doc), title and prose kept in a .sheet-note, cell comments on their cells, v1 intact; the conversion's cases in the browser; desktop + phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
@@ -362,6 +363,7 @@ const PERF = [
 const RUNTIME = [
   'preview-workerd.test.js', // needs npm ci; real workerd WASM and font modules
   'doc-download-deps.test.js', // needs npm ci; download output read back with marked and SheetJS (CI: shell runtime job)
+  'markdown-source.test.js', // needs npm ci (marked); Edit as Markdown (flag markdownEditMode): plain docs round-trip, untouched blocks byte for byte, unshowable blocks kept behind placeholders, nothing typed becomes markup outside the allow-list (CI: shell runtime job)
 ];
 const runAll = process.argv.includes('--all');
 const runPerf = process.argv.includes('--perf');

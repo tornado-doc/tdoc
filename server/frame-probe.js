@@ -1640,7 +1640,7 @@
       onEditInput();
     } catch (e) {}
   }
-  function enableEditing() {
+  function enableEditing(opts) {
     var root = findEditRoot();
     if (!root) return;
     root.setAttribute('data-tdoc-editor-root', '');
@@ -1670,7 +1670,9 @@
     // as much as writing. Taking focus there would put a caret (and, on a
     // phone, the keyboard) in front of someone who came to read; only a
     // blank doc, whose placeholder asks to be typed into, gets the caret.
-    var focusRoot = !modeless || !!root.querySelector('[data-tdoc-placeholder]');
+    // A body written from the shell's Markdown view (keepFocus) leaves the
+    // caret in that view: the page is only following it.
+    var focusRoot = !(opts && opts.keepFocus) && (!modeless || !!root.querySelector('[data-tdoc-placeholder]'));
     if (focusRoot) try {
       if (!selectionInsideRoot()) {
         var caretAt = root.querySelector('[data-tdoc-placeholder]') || root;
@@ -2636,11 +2638,12 @@
       if (restoreRoot && typeof d.bodyHtml === 'string') {
         restoreRoot.innerHTML = d.bodyHtml;
         prepareDiagrams();
-        if (interactionMode === 'edit') { disableEditing(); enableEditing(); }
+        if (interactionMode === 'edit') { disableEditing(); enableEditing({ keepFocus: d.keepFocus === true }); }
         var restoredHtml = draftBodyHtml();
         var restoredDirty = restoredHtml !== editBaselineHtml;
         setDirty(restoredDirty, false);
-        post({ type: 'tdoc:editSnapshot', bodyHtml: restoredHtml, dirty: restoredDirty });
+        // requestId: the shell's Markdown view knows its own body by it.
+        post({ type: 'tdoc:editSnapshot', bodyHtml: restoredHtml, dirty: restoredDirty, requestId: typeof d.requestId === 'string' ? d.requestId : undefined });
         refreshTableLayout();
         rereportPins();
       }
