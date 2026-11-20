@@ -16,6 +16,7 @@ import { findElement, selectorFor as sharedSelectorFor } from '../../shell/src/c
 import { enclosingFor as sharedEnclosingFor, regionOf, regionRect, toRect as sharedToRect } from '../../shell/src/comments/selection/anchors/region.js';
 import { captureTextAnchor, collectTextNodes, findTextRange } from '../../shell/src/comments/selection/anchors/text-range.js';
 import { cleanFrameAnchor, cleanRect, frameLabel } from '../../shell/src/comments/selection/anchors/frame-part.js';
+import { reactSourceFor, reactSourceHint } from '../../shell/src/comments/selection/anchors/react-source.js';
 import { createPickGesture, rangeBetweenPoints } from '../../shell/src/comments/selection/pick-gesture.js';
 import { useCommentFeed } from '../../shell/src/comments/core/use-comment-feed.js';
 import { isNarrowViewport } from '../../shell/src/comments/core/narrow.js';
@@ -184,6 +185,15 @@ ${uiCss}
       background: var(--td-accent); color: var(--td-ground); font: 600 11.5px/1.2 system-ui, -apple-system, sans-serif; white-space: nowrap;
     }
     #tdoc-feedback-root .tdoc-fb-area-tag.below { bottom: auto; top: 100%; margin: 4px 0 0; }
+    /* The React component under the pointer (reactSourceCapture): a quiet
+       tag on the hover outline, cut to one line. */
+    #tdoc-feedback-root .tdoc-fb-react-hint {
+      position: absolute; left: -2px; bottom: 100%; margin-bottom: 4px; padding: 2px 6px; border-radius: 5px;
+      max-width: min(360px, calc(100vw - 16px)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      background: var(--td-ground); color: var(--td-muted); border: 1px solid var(--td-line);
+      font: 500 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    #tdoc-feedback-root .tdoc-fb-react-hint.below { bottom: auto; top: 100%; margin: 4px 0 0; }
     /* The box keeps a ground-colored hairline so it shows on accent-colored
        content (a blue chart) as well as on white. */
     #tdoc-feedback-root .tdoc-drag-marquee { box-shadow: 0 0 0 1px var(--td-ground); }
@@ -733,8 +743,22 @@ ${uiCss}
     return state;
   }
 
+  // The React component and source of an element (reactSourceCapture,
+  // selection/anchors/react-source.js): set by FeedbackApp from the flag.
+  // Off, nothing is read. Cached per element for the hover hint.
+  let reactSourceOn = false;
+  const reactCache = new WeakMap();
+  function reactOf(element) {
+    if (!reactSourceOn || !element || element.nodeType !== 1) return null;
+    if (reactCache.has(element)) return reactCache.get(element);
+    const react = reactSourceFor(element);
+    reactCache.set(element, react);
+    return react;
+  }
+
   function contextFor(element) {
     const rect = element.getBoundingClientRect();
+    const react = reactOf(element);
     return {
       state: stateFor(element),
       kind: 'product',
@@ -748,6 +772,7 @@ ${uiCss}
         width: Math.round(rect.width), height: Math.round(rect.height),
       },
       viewport: { width: innerWidth, height: innerHeight, device_pixel_ratio: devicePixelRatio },
+      ...(react ? { react } : {}),
     };
   }
 
@@ -1356,6 +1381,8 @@ ${uiCss}
     const areaSelectOn = flagOn('feedbackAreaSelect', session);
     // Picking inside the doc frame on tdoc's own doc page (docFrame above).
     framePickOn = flagOn('feedbackDocFramePick', session);
+    // React component and source on element anchors, and the hover hint.
+    reactSourceOn = flagOn('reactSourceCapture', session);
     const [hovered, setHovered] = useState(null);
     const [selected, setSelected] = useState(null);
     // A box being commented on: fractions of `selected` (its container).
@@ -2137,6 +2164,8 @@ ${uiCss}
     const hoverRect = (picking || reanchorId) && !drag
       ? (hovered && hovered === docFrame() ? (frameHover || null) : hovered?.getBoundingClientRect())
       : null;
+    // The component under the pointer (reactSourceCapture), as plain text.
+    const hoverHint = hoverRect && hovered && hovered !== docFrame() ? reactSourceHint(reactOf(hovered)) : '';
     const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
     const bannerText = !areaSelectOn
       ? (reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it')
@@ -2214,7 +2243,9 @@ ${uiCss}
             <button type="button" onClick={() => { setPicking(false); setReanchorId(null); setHovered(null); }}>Cancel · Esc</button>
           </div>
         ) : null}
-        {hoverRect ? <div className="tdoc-hover-outline" style={{ left: hoverRect.left, top: hoverRect.top, width: hoverRect.width, height: hoverRect.height }} /> : null}
+        {hoverRect ? <div className="tdoc-hover-outline" style={{ left: hoverRect.left, top: hoverRect.top, width: hoverRect.width, height: hoverRect.height }}>
+          {hoverHint ? <span className={`tdoc-fb-react-hint${hoverRect.top < 30 ? ' below' : ''}`}>{hoverHint}</span> : null}
+        </div> : null}
         {marquee(drag, 'Comment on this area')}
         {marquee(areaBox)}
         {!selected ? marquee(openSpot) : null}

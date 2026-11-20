@@ -18,6 +18,7 @@ const path = require('path');
 const OFFLINE = [
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
   'feedback-frame-anchor.test.js', // a comment inside a tdoc doc (anchor.frame): get_comments shows it on one line, no brackets, short, as author content, only for tdoc's own pages
+  'react-source.test.js', // feedback on a React site: component chain + source from fiber / bundler attributes, best effort, never throws, nothing read without React, capped, escaped in Copy for agent and get_comments, rebuilt on save
   'frame-part.test.js', // what the doc frame says it picked is rebuilt: known keys, one line, finite numbers, under the anchor size cap
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
   'selection-bundle.test.js',  // the shared selection modules bundle into the doc frame without a bundler; container keys, adapters, the pick gesture
@@ -299,6 +300,7 @@ const BROWSER = [
   'ask-send-switch-ui.test.js', // Ask AI: quiet Ask ▾ / Edit ▾ mode picker in the input row (instruction input, N comments included · Choose, Send to <agent>, instruction-only becomes a whole-document comment handed off, mode remembered), long agent name on a 320/390 phone stays one row, one row per team agent, team agent answers in public; no phone paper-plane
   'comment-selection-ui.test.js', // one selection engine: old cssPath anchors resolve, slide comments follow reordered slides across versions, area boxes on charts, + Comment picks (whole doc on nothing), widget quotes and page comments; desktop + phone
   'comment-parity-ui.test.js', // doc page and widget run the same cases: Open by default with counts (remembered), a polled agent reply appears, read state is the server's (widget ↔ space page, fresh browser), autoReadComments in the widget, the seen endpoint refuses non-readers; desktop + phone
+  'react-source-ui.test.js', // feedback widget on a React app (reactSourceCapture): hover tag names the component + file:line as text, anchor.react stored, hostile names never run, no tag without React or with the flag off; desktop + phone
   'copy-for-agent-ui.test.js', // Copy for agent on the doc page, the widget and the space page: thread ⋯ and list ⋯ copy Markdown, toast, C / H keys (never while typing), Esc still closes, flag off shows nothing; desktop + phone
   'feedback-panel-parity-ui.test.js', // the widget's comment list = the doc page's: same side width, same filter row (one line, options inside the pill, same geometry), on a plain and a hostile host page; desktop + phone
   'comment-one-behaviour-ui.test.js', // doc page, feedback space and widget draw one card: reply prefill rule, one agent-list height, a reply draft per thread, floating card fits the screen, panel drag width

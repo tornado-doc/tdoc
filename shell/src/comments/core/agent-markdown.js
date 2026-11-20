@@ -15,7 +15,11 @@
 // backticks inside it; the comment, a reply and a quote are block quotes
 // with every line prefixed, so nothing written in a comment ("## 2.",
 // "---", a code fence) can end the block or forge another thread. Links are
-// http(s) only, as <autolinks>.
+// http(s) only, as <autolinks>. A React component chain and source file
+// (anchor.react, reactSourceCapture) come from the site's page: names must
+// look like identifiers (at most 8), the file is one line and cut, the line
+// and column small integers; names inline-escaped, the file a code span.
+// No imports: bin/lib/watch.js and the tests load this file on its own.
 
 const MAX_QUOTE = 1000;
 const MAX_ELEMENT_TEXT = 200;
@@ -126,6 +130,26 @@ function elementLine(anchor) {
   return parts.join(' ');
 }
 
+// "App › Pricing › PlanCard" and `src/Pricing.jsx:42:7`, from anchor.react
+// (the rules of selection/anchors/react-source.js cleanReactSource).
+const REACT_NAME = /^[A-Z][A-Za-z0-9_$.]{2,59}$/;
+const smallInt = (n) => (Number.isInteger(n) && n >= 1 && n <= 10000000 ? n : null);
+function reactLines(anchor) {
+  const react = anchor && anchor.react;
+  if (!react || typeof react !== 'object') return [];
+  const out = [];
+  const names = (Array.isArray(react.components) ? react.components : [])
+    .filter((name) => typeof name === 'string' && REACT_NAME.test(name)).slice(-8);
+  if (names.length) out.push(`- component: ${names.map(escapeInline).join(' › ')}`);
+  const file = typeof react.file === 'string' ? clip(oneLine(react.file.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')), 200) : '';
+  if (file) {
+    const line = smallInt(react.line);
+    const column = line ? smallInt(react.column) : null;
+    out.push(`- source: ${codeSpan(`${file}${line ? `:${line}${column ? `:${column}` : ''}` : ''}`)}`);
+  }
+  return out;
+}
+
 function liveReplies(comment) {
   return (comment.replies || []).filter((reply) => reply && !reply.deleted && oneLine(reply.text));
 }
@@ -147,6 +171,7 @@ export function threadMarkdown(comment, { n = 1, of = 1, pageUrl = '', linkFor =
   if (element) facts.push(`- element: ${element}`);
   const elementText = anchor.kind === 'product' && !anchor.quote && !anchor.page ? oneLine(anchor.text) : '';
   if (elementText && elementText !== oneLine(anchor.accessible_name)) facts.push(`- element text: "${escapeInline(clip(elementText, MAX_ELEMENT_TEXT))}"`);
+  facts.push(...reactLines(anchor));
   const state = stateLine(anchor.state);
   if (state) facts.push(`- state: ${state}`);
   const area = areaLine(anchor);
