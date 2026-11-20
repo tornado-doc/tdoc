@@ -8,7 +8,12 @@
 //   - C copies the thread as Markdown for an agent;
 //   - not one request to a comment, mention, reaction, seen, session,
 //     connect or handoff API, and no tdoc window (popup) opens;
-//   - /feedback#try (the homepage's Any web app) starts it straight away.
+//   - not one request to any other host either (no GitHub user search
+//     behind @); only the page's own handwriting font is fetched from Google;
+//   - /feedback#try (the homepage's Any web app) starts it straight away;
+//   - a real widget already on the page (the bookmark): Try says the demo is
+//     off and does nothing, so nothing is posted for real;
+//   - the script on another origin, attribute and all, is the real widget.
 const assert = require('assert/strict');
 const http = require('http');
 const fs = require('fs');
@@ -19,6 +24,8 @@ const { loadRuntimeAssets } = require('../server/runtime-assets');
 const { chromium } = requirePlaywrightOrSkip('feedback-try-demo-ui.test.js');
 
 const COMMENT_API = /\/api\/(comments|mentions|reactions|feedback|notify|me\/agents|my-agent)/;
+// The /feedback page's own handwriting (useHandFont), loaded with the page.
+const PAGE_FONT_HOSTS = new Set(['fonts.googleapis.com', 'fonts.gstatic.com']);
 
 async function startServer(worker, env) {
   const assets = loadRuntimeAssets();
@@ -82,12 +89,20 @@ async function startServer(worker, env) {
     const errors = [];
     const calls = [];
     const popups = [];
+    const elsewhere = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    page.on('request', (request) => { const u = new URL(request.url()); if (COMMENT_API.test(u.pathname)) calls.push(`${request.method()} ${u.pathname}`); });
+    page.on('request', (request) => {
+      const u = new URL(request.url());
+      if (u.protocol === 'data:' || u.protocol === 'blob:') return;
+      if (u.origin !== base) { if (!PAGE_FONT_HOSTS.has(u.hostname)) elsewhere.push(request.url()); return; }
+      if (COMMENT_API.test(u.pathname)) calls.push(`${request.method()} ${u.pathname}`);
+    });
+    // Nothing leaves the machine, whatever is asked.
+    await context.route((url) => new URL(url).origin !== base, (route) => route.abort());
     context.on('page', (p) => { if (p !== page) popups.push(p.url()); });
     await page.goto(`${base}${path}`);
     await page.locator('#try-demo').waitFor();
-    return { context, page, errors, calls, popups };
+    return { context, page, errors, calls, popups, elsewhere };
   };
   const shot = async (page, name) => {
     const dir = process.env.TDOC_SHOTS_DIR;
@@ -98,7 +113,7 @@ async function startServer(worker, env) {
   try {
     for (const [device, viewport, phone] of [['desktop', { width: 1280, height: 860 }, false], ['phone', { width: 390, height: 844 }, true]]) {
       await t(`${device}: try it, pick, post locally, pin + thread, C copies Markdown, nothing sent`, async () => {
-        const { context, page, errors, calls, popups } = await open(viewport, phone);
+        const { context, page, errors, calls, popups, elsewhere } = await open(viewport, phone);
         try {
           const tryBtn = page.locator('#try-demo');
           assert.match(await tryBtn.innerText(), /Try it on this page/);
@@ -116,6 +131,9 @@ async function startServer(worker, env) {
           else await page.mouse.click(h.x + 40, h.y + h.height / 2);
           const composer = fb(page, '.tdoc-popup textarea');
           await composer.first().waitFor({ timeout: 5000 });
+          // @ with no one local: the real widget would ask GitHub's user search.
+          await composer.first().fill('@octo');
+          await page.waitForTimeout(700);
           await composer.first().fill('Make this heading say what it does');
           await shot(page, `${device}-03-composer`);
           await fb(page, '.tdoc-popup button.submit').last().click();
@@ -142,6 +160,7 @@ async function startServer(worker, env) {
           // Nothing sent, nothing opened, the dock fits.
           assert.deepEqual(calls, [], `comment APIs called: ${calls.join(', ')}`);
           assert.deepEqual(popups, [], `a window opened: ${popups.join(', ')}`);
+          assert.deepEqual(elsewhere, [], `requests to other hosts: ${elsewhere.join(', ')}`);
           const dock = await fb(page, '.tdoc-feedback-dock').boundingBox();
           const note = await fb(page, '.tdoc-fb-demo').boundingBox();
           assert.ok(dock.x >= 0 && dock.x + dock.width <= viewport.width, `dock off screen ${JSON.stringify(dock)}`);
@@ -168,11 +187,56 @@ async function startServer(worker, env) {
       } finally { await context.close(); }
     });
 
+    await t('a real widget already on /feedback: Try says the demo is off, posts nothing', async () => {
+      const { context, page, errors, calls, elsewhere } = await open({ width: 1280, height: 860 }, false);
+      try {
+        // The bookmark, clicked on this page: the real widget, no demo.
+        await page.evaluate((src) => new Promise((resolve) => {
+          const s = document.createElement('script');
+          s.src = src; s.onload = resolve; s.onerror = resolve;
+          document.documentElement.appendChild(s);
+        }), `${base}/feedback.js?b=1`);
+        await page.waitForFunction(() => window.tdocFeedback);
+        assert.equal(await page.evaluate(() => window.tdocFeedback.demo), false);
+        await page.locator('#try-demo').click();
+        await page.locator('#try-note').filter({ hasText: 'The tdoc widget is already on — this demo is off' }).waitFor();
+        await page.waitForTimeout(500);
+        assert.equal(await fb(page, '.tdoc-fb-banner').count(), 0, 'Try started picking in the real widget');
+        assert.equal(await fb(page, '.tdoc-fb-demo').count(), 0, 'a demo note on the real widget');
+        assert.equal(await page.locator('#tdoc-feedback-demo-script').count(), 0, 'a second (demo) script was added');
+        assert.deepEqual(calls.filter((c) => !c.startsWith('GET')), [], `real writes: ${calls.join(', ')}`);
+        assert.deepEqual(elsewhere, []);
+        assert.deepEqual(errors, []);
+      } finally { await context.close(); }
+    });
+
+    await t('the script from another origin, data-tdoc-demo and all, is the real widget', async () => {
+      // localhost and 127.0.0.1 are two origins: a "site" loading tdoc's script.
+      const site = base.replace('127.0.0.1', 'localhost');
+      const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+      const page = await context.newPage();
+      const calls = [];
+      page.on('request', (request) => { const u = new URL(request.url()); if (COMMENT_API.test(u.pathname)) calls.push(`${request.method()} ${u.origin}${u.pathname}`); });
+      try {
+        await page.goto(`${site}/feedback`);
+        await page.evaluate((src) => new Promise((resolve) => {
+          const s = document.createElement('script');
+          s.src = src; s.setAttribute('data-tdoc-demo', '1'); s.setAttribute('data-tdoc-open', '1'); s.onload = resolve; s.onerror = resolve;
+          document.documentElement.appendChild(s);
+        }), `${base}/feedback.js`);
+        await page.waitForFunction(() => window.tdocFeedback);
+        assert.equal(await page.evaluate(() => window.tdocFeedback.demo), false, 'demo mode on another origin');
+        await fb(page, '.tdoc-feedback-dock').waitFor();
+        assert.equal(await fb(page, '.tdoc-fb-demo').count(), 0, 'demo note on another origin');
+        assert.equal(await page.evaluate(() => sessionStorage.getItem('tdoc-feedback-demo:comments')), null);
+      } finally { await context.close(); }
+    });
+
     await t('the same script elsewhere on tdoc (not /feedback) is not a demo', async () => {
       const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
       const page = await context.newPage();
       try {
-        await page.goto(`${base}/pricing`).catch(() => {});
+        await page.goto(`${base}/`).catch(() => {});
         await page.evaluate((src) => new Promise((resolve) => {
           const s = document.createElement('script');
           s.src = src; s.setAttribute('data-tdoc-demo', '1'); s.onload = resolve; s.onerror = resolve;

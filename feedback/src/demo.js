@@ -9,12 +9,12 @@
 // Who may turn it on: only tdoc's own page. The script must have been
 // loaded by a <script data-tdoc-demo> whose src is on the same origin as
 // the page (the tdoc host that serves feedback.js), and the page must be
-// /feedback or the landing (/). A site that loads tdoc.dev/feedback.js
+// /feedback (the homepage links there with #try). A site that loads tdoc.dev/feedback.js
 // with the attribute, or sets a global, gets the normal widget, which
 // signs in before it posts. There is no URL parameter. Either way demo mode
 // never posts: it has no network path at all.
 
-export const DEMO_PATHS = Object.freeze(['/feedback', '/']);
+export const DEMO_PATHS = Object.freeze(['/feedback']);
 export const DEMO_SLUG = 'try-tdoc-feedback';
 export const DEMO_STORAGE_KEY = 'tdoc-feedback-demo:comments';
 

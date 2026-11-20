@@ -20,7 +20,7 @@ answers every call the widget makes (comments, the @ list, read state, the
 session) from the tab's sessionStorage, through the same request path
 (`setApiTransport({ fetch })`), so nothing is posted and no tdoc window opens.
 It turns on only for a `<script data-tdoc-demo>` loaded from the page's own
-origin on `/feedback` or `/` (`demoAllowed`); there is no URL parameter or
+origin on `/feedback` (`demoAllowed`); there is no URL parameter or
 global, and on any other site the attribute is ignored.
 
 Everything the client loads comes from the tdoc origin that served it, so a

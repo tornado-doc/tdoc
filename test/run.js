@@ -47,7 +47,7 @@ const OFFLINE = [
   'marketplaces.test.js',     // repo marketplaces (.claude-plugin, .agents/plugins) parse and point at real plugin folders
   'plugins.test.js',          // plugins/: Claude, Codex/ChatGPT, Cursor, Gemini, VS Code packages for the remote MCP server
   'remote-mcp.test.js',       // /mcp + OAuth 2.1: PKCE, redirect URIs, consent CSRF, token mapping, refresh/revoke, tools and refusals, rate limit
-  'feedback-demo.test.js',    // Try it on this page: demo mode only on tdoc's own /feedback (or landing), script from that origin; no URL switch; answers stay in the tab
+  'feedback-demo.test.js',    // Try it on this page: demo mode only on tdoc's own /feedback, script from that origin; answers stay in the tab
   'feedback.test.js',         // #564 product feedback: token door, space, bookmarklet + one-line entry
   'feedback-invites.test.js', // share from the widget: signed expiring invites, owner-only, email pending, revoke, Join / Keep my own, switcher, landing page
   'comment-history.test.js',  // event-log fold + cross-version pull

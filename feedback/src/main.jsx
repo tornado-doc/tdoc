@@ -462,7 +462,10 @@ ${uiCss}
       || window.__TDOC_SPACE__ || '';
     return /^[a-z0-9][a-z0-9-]{0,80}$/.test(String(raw)) ? String(raw) : '';
   })();
-  const storageKey = space ? `tdoc-feedback:${base}:${space}` : `tdoc-feedback:${base}`;
+  // The demo keeps its own keys (hidden, drafts, invites): a real widget
+  // on the same tdoc page never reads or overwrites them.
+  const storageKey = demo ? 'tdoc-feedback-demo:widget'
+    : space ? `tdoc-feedback:${base}:${space}` : `tdoc-feedback:${base}`;
 
   // The click that follows a pick (see onPointerUp in FeedbackApp).
   let swallowClickUntil = 0;
@@ -1784,6 +1787,8 @@ ${uiCss}
       ai: null, privateAskSupported: false, teamAskSupported: Boolean(session?.own_agent),
       ownAskSupported: Boolean(session?.own_agent),
       fixesTheApp: true,
+      // The demo asks nobody: no GitHub user search behind @.
+      githubSearch: !demo,
       canSendToAgent,
       sendToAgentDisabledReason,
       connectAgentPrompt: sendToAgentConnectPrompt,

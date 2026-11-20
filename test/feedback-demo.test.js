@@ -1,6 +1,8 @@
 // Try it on this page (feedback/src/demo.js): the widget's demo mode turns on
-// only on tdoc's own /feedback (or landing) page, loaded from that same
-// origin, and its answers never leave the tab.
+// only on tdoc's own /feedback page, loaded from that same origin, and its
+// answers never leave the tab. How the widget uses it (a cross-origin page,
+// a real widget already loaded) is the browser test's,
+// feedback-try-demo-ui.test.js.
 const assert = require('assert/strict');
 const path = require('path');
 const fs = require('fs');
@@ -13,12 +15,11 @@ const fs = require('fs');
   const t = async (name, fn) => { await fn(); console.log(`  ✓ ${name}`); pass++; };
   console.log('feedback demo mode');
 
-  await t('on: tdoc\'s own /feedback and landing, the script from the same origin', () => {
+  await t('on: tdoc\'s own /feedback, the script from the same origin', () => {
     for (const [scriptSrc, href] of [
       ['https://tdoc.dev/feedback.js', 'https://tdoc.dev/feedback'],
       ['https://tdoc.dev/feedback.js', 'https://tdoc.dev/feedback#try'],
       ['https://tdoc.dev/feedback.js?b=1', 'https://tdoc.dev/feedback/'],
-      ['https://tdoc.dev/feedback.js', 'https://tdoc.dev/'],
       ['https://pr-12-tdoc-preview.example.workers.dev/feedback.js', 'https://pr-12-tdoc-preview.example.workers.dev/feedback'],
       ['http://127.0.0.1:8787/feedback.js', 'http://127.0.0.1:8787/feedback'],
     ]) assert.equal(demoAllowed({ scriptSrc, href }), true, `${scriptSrc} on ${href}`);
@@ -38,6 +39,7 @@ const fs = require('fs');
 
   await t('off: other tdoc pages, no script address (an inline copy, a global), junk', () => {
     for (const [scriptSrc, href] of [
+      ['https://tdoc.dev/feedback.js', 'https://tdoc.dev/'],
       ['https://tdoc.dev/feedback.js', 'https://tdoc.dev/d/some-doc'],
       ['https://tdoc.dev/feedback.js', 'https://tdoc.dev/feedback/share/space'],
       ['https://tdoc.dev/feedback.js', 'https://tdoc.dev/feedback/connect?origin=x'],
@@ -92,17 +94,6 @@ const fs = require('fs');
         assert.equal((await b.fetch(`https://tdoc.dev${p}`, { method: 'POST', body: '{}' })).status, 404, p);
       }
     } finally { globalThis.fetch = realFetch; }
-  });
-
-  await t('the widget turns demo on only through demoAllowed, and has no URL switch', () => {
-    const main = fs.readFileSync(path.join(__dirname, '..', 'feedback/src/main.jsx'), 'utf8');
-    assert.match(main, /hasAttribute\('data-tdoc-demo'\)[\s\S]{0,200}demoAllowed\(\{ scriptSrc: own\.src, href: location\.href \}\)/);
-    assert.doesNotMatch(main, /searchParams\.get\(['"][^'"]*demo/i, 'a URL parameter turns the demo on');
-    assert.doesNotMatch(main, /window\.__TDOC_DEMO/i, 'a page global turns the demo on');
-    // Every request the widget makes goes through the demo's fetch.
-    assert.match(main, /setApiTransport\(\{\s*base,\s*\.\.\.\(demo \? \{ fetch: demo\.fetch \} : \{\}\)/);
-    assert.match(main, /const response = await net\(`\$\{base\}\$\{pathname\}`/);
-    assert.match(main, /function connect\(\{ invite = null \} = \{\}\) \{\s*\/\/[^\n]*\n\s*if \(demo\)/);
   });
 
   console.log(`\n${pass} passed, 0 failed.`);
