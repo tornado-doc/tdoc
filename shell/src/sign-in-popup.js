@@ -31,7 +31,7 @@ export function signInHref({ oidcAuth = false, webAuth = false } = {}, returnTo 
   return null;
 }
 
-async function signedInIdentity() {
+export async function signedInIdentity() {
   const response = await fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store' });
   if (!response.ok) return null;
   const body = await response.json().catch(() => null);
@@ -53,6 +53,8 @@ export function startSignInPopup(href, { check = signedInIdentity, pollMs = POLL
   let resolveDone;
   let rejectDone;
   const done = new Promise((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
+  // Called off with nobody awaiting it is not an error.
+  done.catch(() => {});
   const started = Date.now();
   const stop = () => {
     settled = true;

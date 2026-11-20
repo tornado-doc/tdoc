@@ -680,10 +680,19 @@ ${uiCss}
   // connecting can be blocked, cancelled or fail, and the person retries
   // (the tab can even reload). It is posted by the first call that has a
   // session, then dropped.
+  // Held a short while only (a sign-in takes minutes, not hours), and
+  // posted only by the person's own Post or Connect, never by a later
+  // load that happens to have a session.
   const draftKey = `${storageKey}:draft`;
-  const readDraft = () => { try { return JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch (_) { return null; } };
+  const DRAFT_MAX_AGE_MS = 15 * 60 * 1000;
   const writeDraft = (draft) => {
-    try { if (draft) sessionStorage.setItem(draftKey, JSON.stringify(draft)); else sessionStorage.removeItem(draftKey); } catch (_) {}
+    try { if (draft) sessionStorage.setItem(draftKey, JSON.stringify({ ...draft, at: Date.now() })); else sessionStorage.removeItem(draftKey); } catch (_) {}
+  };
+  const readDraft = () => {
+    let draft = null;
+    try { draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch (_) { return null; }
+    if (draft && !(Number.isFinite(draft.at) && Date.now() - draft.at < DRAFT_MAX_AGE_MS)) { writeDraft(null); return null; }
+    return draft;
   };
   // The composer closed (×, Esc) without posting: the held post is dropped,
   // and a sign-in still in progress for it is called off (its window
@@ -1149,7 +1158,9 @@ ${uiCss}
       // UI is answered as soon as the POST is (see `followUp` below).
       let posted = null;
       let handOff = null;
-      const draft = readDraft();
+      // Only the person's own Post (submit) or Connect (signin, from the
+      // "Your comment is kept: connect to post it" notice) sends it.
+      const draft = message.type === 'tdoc-feedback-submit' || message.type === 'tdoc-feedback-signin' ? readDraft() : null;
       if (draft && draft.text && draft.anchor) {
         // Taken before posting, so two calls at once cannot post it twice.
         writeDraft(null);

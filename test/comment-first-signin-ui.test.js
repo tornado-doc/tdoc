@@ -10,9 +10,12 @@
 //     before, and on the way back the words are in the composer again,
 //     "Your comment is saved — Post", posted only by that Post; Back
 //     without signing in restores them too ("Sign in to post");
-//   - × / Esc while signing in: the window closes, nothing is held, and
-//     finishing the sign-in later posts nothing; the words stay for the
-//     same passage.
+//   - × / Esc while signing in, a click in the doc, or a new selection:
+//     the window closes, nothing is held, and finishing the sign-in later
+//     posts nothing (one held post at a time); the words stay for the
+//     same passage;
+//   - signed in in another tab meanwhile: Post posts nothing by itself as
+//     that account; the page reloads as them and the words wait.
 // The widget's side (no window from the bookmark, Post opens it, the held
 // comment posts after connecting) is in dogfood-frictions-ui.test.js and
 // feedback-connect-coop-ui.test.js.
@@ -273,6 +276,76 @@ async function select(page, phrase) {
         await select(page, 'Billing ships first');
         assert.equal(await composer(page).locator('textarea').inputValue(), 'Walked away');
         assert.deepEqual(page.errors, []);
+      } finally { await context.close(); }
+    });
+
+    await t('a click in the doc while signing in abandons the held post: the window closes, signing in posts nothing', async () => {
+      await clear();
+      const { context, page } = await open(DESK);
+      try {
+        await select(page, 'Billing ships first');
+        await composer(page).locator('textarea').fill('Clicked away');
+        const [win] = await Promise.all([context.waitForEvent('page'), composer(page).getByRole('button', { name: 'Post', exact: true }).click()]);
+        await win.waitForLoadState();
+        // A plain click in the document clears the selection and the composer.
+        const frameEl = await page.locator('iframe').first().elementHandle();
+        const box = await frameEl.boundingBox();
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height - 40);
+        await composer(page).waitFor({ state: 'detached', timeout: 5000 });
+        await page.waitForTimeout(300);
+        assert.ok(win.isClosed(), 'the sign-in window stayed open');
+        assert.equal(await page.evaluate(() => sessionStorage.getItem('tdoc-comment-signin-draft:launch-plan:v1')), null, 'the post stayed held');
+        const other = await context.newPage();
+        await other.goto(`${base}/__test/signin?return=/auth/signed-in`);
+        await page.waitForTimeout(2500);
+        assert.equal((await posted()).length, 0, 'an abandoned comment posted');
+        assert.equal(new URL(page.url()).searchParams.get('comment'), null, 'the page reloaded for an abandoned comment');
+        await other.close().catch(() => {});
+        assert.deepEqual(page.errors, []);
+      } finally { await context.close(); }
+    });
+
+    await t('a new selection while signing in replaces the held post: nothing posts from the first; one wait at a time', async () => {
+      await clear();
+      const { context, page } = await open(DESK);
+      try {
+        await select(page, 'Billing ships first');
+        await composer(page).locator('textarea').fill('First passage');
+        const [win] = await Promise.all([context.waitForEvent('page'), composer(page).getByRole('button', { name: 'Post', exact: true }).click()]);
+        await win.waitForLoadState();
+        // The first press in the doc only dismisses the open composer
+        // (the dismiss-first rule); the next drag is the new selection. The
+        // passage beside the composer, not under it.
+        await select(page, 'invoices block').catch(() => {});
+        await page.waitForTimeout(300);
+        assert.ok(win.isClosed(), 'the first sign-in window stayed open');
+        if (!/invoices block/.test(await page.locator('.tdoc-popup .head .h').textContent().catch(() => ''))) await select(page, 'invoices block');
+        await composer(page).locator('textarea').fill('Second passage');
+        const [win2] = await Promise.all([context.waitForEvent('page'), composer(page).getByRole('button', { name: 'Post', exact: true }).click()]);
+        await win2.waitForLoadState();
+        await win2.locator('#continue').click();
+        await page.waitForURL((u) => new URL(u).searchParams.get('comment'), { timeout: 15000 });
+        const list = await posted();
+        assert.deepEqual(list.map((c) => c.text), ['Second passage']);
+        assert.deepEqual(page.errors, []);
+      } finally { await context.close(); }
+    });
+
+    await t('signed in in another tab meanwhile: Post does not post as that account by itself; the page shows who, the words wait', async () => {
+      await clear();
+      const { context, page } = await open(DESK);
+      try {
+        await select(page, 'Billing ships first');
+        await composer(page).locator('textarea').fill('Whose comment?');
+        const other = await context.newPage();
+        await other.goto(`${base}/__test/signin?return=/`);
+        await other.close();
+        await composer(page).getByRole('button', { name: 'Post', exact: true }).click();
+        await page.waitForFunction(() => document.body.dataset.tdocReady === '1' && document.querySelector('.tdoc-popup textarea'), null, { timeout: 15000 });
+        const pop = composer(page);
+        assert.equal(await pop.locator('textarea').inputValue(), 'Whose comment?');
+        assert.match(await pop.locator('.tdoc-draft-restored').innerText(), /Your comment is saved — Post/);
+        assert.equal((await posted()).length, 0, 'posted by itself as the other tab\'s account');
       } finally { await context.close(); }
     });
 
