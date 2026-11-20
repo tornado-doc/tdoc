@@ -1315,6 +1315,21 @@
       // one is approximate, so it is NOT painted as a highlight and its pin is
       // flagged: the card reads unanchored and offers Re-anchor.
       var approximate = false;
+      // Flag stableBlockIds: the words are gone, but the server knows which
+      // block they were on and where that block is now (anchor_block, by its
+      // stable id). The comment stays on that block, as "on an edited
+      // passage": a real anchor, not a guess. Surviving words inside it, if
+      // any, narrow it down.
+      var edited = false;
+      if (!r && c.anchor_block && !c.anchor_block.gone) {
+        var bel = TS.findBlockElement(c.anchor_block);
+        if (bel) {
+          var frag = findSurvivingFragment(c.anchor, docView());
+          if (frag && bel.contains(frag.commonAncestorContainer)) r = frag;
+          else { r = document.createRange(); r.selectNodeContents(bel); }
+          edited = true;
+        }
+      }
       if (!r) {
         r = findNearContext(c.anchor, docView());
         approximate = !!r;
@@ -1327,12 +1342,14 @@
       _anchorTargets[c.id] = { range: r };
       // Rewritten words: mark the block that replaced this visible thread.
       if (approximate && hlMoved && !c.deleted) { var mv = blockForMoved(r); if (mv) hlMoved.add(mv); }
-      if (hl && !c.deleted && !approximate) hl.add(r);
+      // The block found by id is itself the edited passage.
+      if (edited && hlMoved && !c.deleted) hlMoved.add(r);
+      if (hl && !c.deleted && !approximate && !edited) hl.add(r);
       var rect = r.getBoundingClientRect();
       // Second line of defence: findNearContext already measures its candidates,
       // but an exact hit can be invisible too (a rule moved into a hidden block).
-      if (approximate && !rect.width && !rect.height) return seat(c);
-      pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), lost: approximate || undefined, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
+      if ((approximate || edited) && !rect.width && !rect.height) return seat(c);
+      pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), lost: approximate || undefined, edited: edited || undefined, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
     });
     var revealNow = _wantedScroll && !!(_wantedAnchorId && _anchorTargets[_wantedAnchorId]);
     if (revealNow) _wantedScroll = false;

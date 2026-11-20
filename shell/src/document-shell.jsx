@@ -70,7 +70,7 @@ import { AppButton } from './ui/button.jsx';
 import { isFeatureOn } from './feature-flags.js';
 import { readDevMode } from './dev-mode.js';
 import { VersionHistory } from './document/version-history.jsx';
-import { CommentDocVersionContext, CommentSeeChangesContext } from './document/comment-card.jsx';
+import { CommentDocVersionContext, CommentEditedPassageContext, CommentSeeChangesContext } from './document/comment-card.jsx';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
@@ -1110,6 +1110,12 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // while it still reads — and styles — as unanchored, with the way back.
   const pinIds = useMemo(
     () => new Set(bridge.layout.pins.filter((pin) => !pin.lost).map((pin) => pin.id)),
+    [bridge.layout.pins],
+  );
+  // Flag stableBlockIds: anchored to the block they were made on, whose
+  // words have since changed (the frame's `edited` pins).
+  const editedPassageIds = useMemo(
+    () => new Set(bridge.layout.pins.filter((pin) => pin.edited && !pin.lost).map((pin) => pin.id)),
     [bridge.layout.pins],
   );
   const clusters = useMemo(
@@ -2672,6 +2678,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       <SuggestContext.Provider value={suggestContext}>
       <CommentDocVersionContext.Provider value={config.mode === 'published' ? Number(config.version) : null}>
       <CommentSeeChangesContext.Provider value={seeReplyChanges}>
+      <CommentEditedPassageContext.Provider value={editedPassageIds}>
       <TopBar
         identity={config.identity}
         onboardingTest={config.debug ? {
@@ -3205,6 +3212,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
         const left = Math.min(window.innerWidth - 120, (frameBox?.left || 0) + suggestions.rect.right - 40);
         return <SuggestInlineChip suggestions={suggestions} style={{ top, left }} />;
       })() : null}
+      </CommentEditedPassageContext.Provider>
       </CommentSeeChangesContext.Provider>
       </CommentDocVersionContext.Provider>
       </SuggestContext.Provider>

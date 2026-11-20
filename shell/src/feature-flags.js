@@ -145,6 +145,17 @@ export const FLAGS = Object.freeze({
   // pass it on. Best effort, never throws, nothing read on a page without
   // React. The widget reads it like feedbackAreaSelect (the session's dev
   // flags, worker FEEDBACK_WIDGET_DEV_FLAGS).
+  // Stable block ids ("block-first" step 2): every published version's
+  // top-level blocks get ids that follow the same block into the next
+  // version, kept in a sidecar beside it (server/block-ids.js, R2
+  // docs/<slug>/v<N>/blocks.json; the stored HTML is unchanged). The
+  // sidecars are written on every publish whatever the flag (bounded, never
+  // failing it); the flag gates what reads them: a text comment whose words
+  // are gone from the version shown stays on the block it was made on, "On
+  // an edited passage" (GET /api/comments blocks=1 -> anchor_block, the doc
+  // frame's selection/anchors/block.js), and get_comments gives block_id.
+  // The server decides like askEditV2 (worker stableBlockIdsAllowed).
+  stableBlockIds: Object.freeze({ label: 'Comments follow their block across versions', owner: 'julie', added: '2026-11-20', default: false, preview: true, graduate_by: '2026-11-27' }),
   reactSourceCapture: Object.freeze({ label: 'Feedback: React component and source on comments', owner: 'julie', added: '2026-11-20', default: false, preview: true, graduate_by: '2026-11-27' }),
 });
 

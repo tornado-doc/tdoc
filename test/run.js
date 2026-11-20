@@ -27,6 +27,9 @@ const OFFLINE = [
   'thread-seen-api.test.js',   // server read state: authorized like reading the comments, no cross-doc reads, no thread-id leaks
   'feedback-team-agents.test.js', // the widget's @ lists team agents (answer only) only through tdoc's own-origin token door
   'version-diff.test.js', // bounded block matching and Unicode edits
+  'block-ids.test.js', // stable block ids: segmentation, matcher (insert above, light edit, split, merge, duplicates, p -> li, moves), quote location, bounds
+  'block-ids-publish.test.js', // stable block ids end to end: every publish path writes the sidecar and never fails over it, lazy backfill, comment re-anchors after an agent republish (dev mode: blocks=1, get_comments block_id)
+  'block-anchor-frame.test.js', // the frame finds a comment's block by its path, tag and opening words (selection/anchors/block.js)
   'sheet-formula.test.js',     // sheets: formulas (parser, functions, errors, refs, cycles, incremental recompute, ref shifting, Excel, hostile input, 10k formulas < 200 ms)
   'sheets.test.js',            // sheets: view query (search/filter/sort/URL), CSV parsing + type inference, markup round trip
   'sheet-rules.test.js',       // sheets: find & replace, rule JSON parsing (hostile input dropped), conditional formats, dropdowns, fill series, 10k rows in budget

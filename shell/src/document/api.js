@@ -55,8 +55,11 @@ export function restoreVersion(slug, n) {
   });
 }
 
-export function listComments(slug, version) {
+// `blocks`: flag stableBlockIds -- text comments also carry anchor_block,
+// the block they were made on as it stands in this version.
+export function listComments(slug, version, { blocks = false } = {}) {
   const query = new URLSearchParams({ slug, version: String(version) });
+  if (blocks) query.set('blocks', '1');
   return request(`/api/comments?${query}`);
 }
 

@@ -658,6 +658,11 @@ export const CommentDocVersionContext = createContext(null);
 // versions (the feedback widget, a space) provides nothing and the reply has
 // no link.
 export const CommentSeeChangesContext = createContext(null);
+// Flag stableBlockIds: the ids of comments whose words are gone from this
+// version but which still sit on the block they were made on (the frame found
+// it by its stable id). They are anchored, and say the passage was edited.
+// Surfaces without versions provide nothing.
+export const CommentEditedPassageContext = createContext(null);
 
 export function CommentCard({
   comment,
@@ -717,6 +722,8 @@ export function CommentCard({
   const canReview = Boolean(suggest?.enabled) && !comment.resolved && comment.status !== 'applied' && !comment.deleted
     && suggest.pendingFor(comment.id);
   const docVersion = useContext(CommentDocVersionContext);
+  const editedPassages = useContext(CommentEditedPassageContext);
+  const onEditedPassage = Boolean(!unanchored && editedPassages && editedPassages.has(comment.id));
   const earlierVersion = Boolean(unanchored && docVersion && comment.anchor?.kind !== 'document'
     && Number(comment.created_in) > 0 && Number(comment.created_in) < Number(docVersion));
   const thinkingId = asking?.thinking?.id;
@@ -1024,6 +1031,7 @@ export function CommentCard({
       </header>
       <ProductWhere anchor={comment.anchor} origin={productLinkOrigin} onGoTo={onGoTo ? goTo : null} />
       {earlierVersion ? <p className="tdoc-cc-earlier">Commented on an earlier version</p> : null}
+      {onEditedPassage ? <p className="tdoc-cc-earlier">On an edited passage</p> : null}
       {editTarget === comment.id ? (
         <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />
       ) : (

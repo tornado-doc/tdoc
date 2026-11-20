@@ -10,6 +10,7 @@ import {
 } from '../document/api.js';
 import { anchorFromSelection } from '../document/model.js';
 import { withPostedComment } from '../comments/core/posted-comment.js';
+import { isFeatureOn } from '../feature-flags.js';
 
 function demoId() {
   return `demo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -45,7 +46,7 @@ export function useComments({ slug, version, versionNow = null, onChange, onUnau
       return latest.current;
     }
     try {
-      const next = await listComments(slug, version);
+      const next = await listComments(slug, version, { blocks: isFeatureOn('stableBlockIds') });
       const safeComments = Array.isArray(next) ? next : [];
       latest.current = safeComments;
       setComments(safeComments);
