@@ -82,7 +82,7 @@ t('a press on a list card only selects; Go to comment is in ⋯ and on the place
   // Julie, 2026-11-16: a press anywhere on a card jumped to its place.
   const card = read(CARD);
   assert.match(card, /<AppMenuItem className="tdoc-goto-comment" onClick=\{goTo\}>\s*Go to comment/, 'the card has no Go to comment in ⋯');
-  assert.match(card, /isMine \|\| canDelete \|\| canMutate \|\| goTo \?/, '⋯ is missing when Go to comment is all there is');
+  assert.match(card, /isMine \|\| canDelete \|\| canMutate \|\| goTo( \|\| copyForAgent)? \?/, '⋯ is missing when Go to comment is all there is');
   assert.match(card, /onGoTo=\{onGoTo \? goTo : null\}/, 'the place line is not the card\'s Go to');
   // The press handler selects (activate) and nothing else.
   const press = card.slice(card.indexOf('onClick={(event) => {\n        if (!onActivate) return;'), card.indexOf('<div className="tdoc-cc-body">\n      {demo'));

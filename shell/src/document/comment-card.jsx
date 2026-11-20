@@ -7,6 +7,7 @@ import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { usePortalContainer } from '../ui/portal.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
+import { useCopyForAgentActions } from '../comments/panel/copy-for-agent.jsx';
 import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AskOnlyToggle, PrivateAnswer, SendToAgentToggle, agentAskHint, useAgentAsk } from './agent-ask.jsx';
@@ -784,6 +785,8 @@ export function CommentCard({
     return result;
   };
 
+  // Copy for agent (flag copyForAgent): set where the surface provides it.
+  const copyForAgent = useCopyForAgentActions();
   const reactionCount = hasReactions(comment);
   const isMine = authoredBy(comment, currentUser);
   const canDelete = mayDelete(comment, currentUser, isOwner);
@@ -955,7 +958,7 @@ export function CommentCard({
               <Check size={16} />
             </button>
           ) : null}
-          {isMine || canDelete || canMutate || goTo ? (
+          {isMine || canDelete || canMutate || goTo || copyForAgent ? (
             <AppMenu
               trigger={(
                 <button type="button" className="tdoc-cc-icon" title="More" aria-label="More actions">
@@ -966,6 +969,11 @@ export function CommentCard({
               {goTo ? (
                 <AppMenuItem className="tdoc-goto-comment" onClick={goTo}>
                   Go to comment
+                </AppMenuItem>
+              ) : null}
+              {copyForAgent ? (
+                <AppMenuItem className="tdoc-action-menu-item tdoc-copy-for-agent" onClick={() => copyForAgent.copyThread(comment)}>
+                  <span>Copy for agent</span><kbd className="tdoc-menu-key" aria-hidden="true">C</kbd>
                 </AppMenuItem>
               ) : null}
               {isMine ? (

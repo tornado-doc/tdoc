@@ -1,11 +1,12 @@
 import React, { useEffect, useRef } from 'react';
-import { Check, ChevronDown, Plus, RefreshCw, X } from 'lucide-react';
+import { Check, ChevronDown, MoreHorizontal, Plus, RefreshCw, X } from 'lucide-react';
 import { AppButton } from '../../ui/button.jsx';
 import { AppMenu, AppMenuItem, AppMenuSeparator } from '../../ui/menu.jsx';
 import { AppSelect } from '../../ui/select.jsx';
 import { SegmentedControl } from '../../ui/segmented-control.jsx';
 import { CommentThreadList } from '../../document/comment-thread-list.jsx';
 import { filterName, filterOptions, SORT_OPTIONS } from '../core/comment-query.js';
+import { openThreads, useCopyForAgentActions } from './copy-for-agent.jsx';
 
 // The one comment list, on every surface: the widget's side panel and phone
 // sheet, the feedback space page, the doc page's side panel and phone sheet.
@@ -29,12 +30,13 @@ export function CommentFilter({ area, prefs, ariaLabel = 'Show comments' }) {
 }
 
 // Search (text, author:name, agent:name) and order.
-export function CommentListQuery({ search = '', onSearch, sort, onSort }) {
+export function CommentListQuery({ search = '', onSearch, sort, onSort, children = null }) {
   return (
     <div className="tdoc-comment-query">
       <input type="search" className="tdoc-comment-search" placeholder="Search comments" aria-label="Search comments"
         value={search} onChange={(event) => onSearch(event.target.value)} />
       <AppSelect className="tdoc-comment-sort" ariaLabel="Order" value={sort} onChange={onSort} options={SORT_OPTIONS} />
+      {children}
     </div>
   );
 }
@@ -45,6 +47,32 @@ export function RefreshButton({ onRefresh, refreshing = false }) {
       aria-busy={refreshing ? 'true' : 'false'} onClick={() => onRefresh()}>
       <RefreshCw size={14} aria-hidden="true" />
     </AppButton>
+  );
+}
+
+// The list's ⋯ (flag copyForAgent, where the surface provides it): copy
+// every open thread for an agent, hide / show the markers on the page, and
+// the keys for both (keyboard.js). One menu rather than a button per action.
+export function CommentListMenu({ area }) {
+  const actions = useCopyForAgentActions();
+  if (!actions) return null;
+  const open = openThreads(area).length;
+  return (
+    <AppMenu align="end" popupClassName="tdoc-comment-list-menu" trigger={(
+      <AppButton variant="icon" size="s" className="tdoc-comment-list-more" aria-label="Comment list actions" title="More">
+        <MoreHorizontal size={15} aria-hidden="true" />
+      </AppButton>
+    )}>
+      <AppMenuItem className="tdoc-action-menu-item tdoc-copy-open-for-agent" disabled={!open} onClick={() => actions.copyOpen()}>
+        <span>{open ? `Copy ${open} open for agent` : 'No open comments to copy'}</span><kbd className="tdoc-menu-key" aria-hidden="true">C</kbd>
+      </AppMenuItem>
+      {actions.markers ? (
+        <AppMenuItem className="tdoc-action-menu-item tdoc-toggle-markers" onClick={() => actions.markers.toggle()}>
+          <span>{actions.markers.hidden ? 'Show comment markers' : 'Hide comment markers'}</span><kbd className="tdoc-menu-key" aria-hidden="true">H</kbd>
+        </AppMenuItem>
+      ) : null}
+      <div className="tdoc-menu-label tdoc-comment-keys-hint">C copies the selected thread, or all open · Esc closes</div>
+    </AppMenu>
   );
 }
 
@@ -159,9 +187,10 @@ export function CommentPanel({
                 <Plus size={14} aria-hidden="true" /> {addLabel}
               </AppButton>
             ) : null}
+            <CommentListMenu area={area} />
             {onRefresh ? <RefreshButton onRefresh={onRefresh} refreshing={refreshing} /> : null}
             {onClose ? (
-              <AppButton variant="icon" size="s" className="tdoc-cpanel-close" aria-label={closeLabel} title={closeLabel} onClick={onClose}>
+              <AppButton variant="icon" size="s" className="tdoc-cpanel-close" aria-label={closeLabel} title={`${closeLabel} (Esc)`} onClick={onClose}>
                 <X size={15} aria-hidden="true" />
               </AppButton>
             ) : null}
@@ -171,7 +200,11 @@ export function CommentPanel({
           <CommentFilter area={area} prefs={prefs} />
           {!showTitle && onRefresh ? <RefreshButton onRefresh={onRefresh} refreshing={refreshing} /> : null}
         </div>
-        <CommentListQuery search={prefs.search} onSearch={prefs.setSearch} sort={prefs.sort} onSort={prefs.setSort} />
+        {/* No title row (the phone drawer): the list's ⋯ ends the search
+            row, where the filter row has no room left for it. */}
+        <CommentListQuery search={prefs.search} onSearch={prefs.setSearch} sort={prefs.sort} onSort={prefs.setSort}>
+          {!showTitle ? <CommentListMenu area={area} /> : null}
+        </CommentListQuery>
       </header>
       <MarkAllBar area={area} />
       <div className="tdoc-cpanel-scroll" ref={scroller}>

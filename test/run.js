@@ -21,6 +21,7 @@ const OFFLINE = [
   'frame-part.test.js', // what the doc frame says it picked is rebuilt: known keys, one line, finite numbers, under the anchor size cap
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
   'selection-bundle.test.js',  // the shared selection modules bundle into the doc frame without a bundler; container keys, adapters, the pick gesture
+  'copy-for-agent.test.js',    // Copy for agent: thread Markdown (context, missing pieces, escaping, http(s) links) and the C / H key guard (never in fields, menus, with modifiers)
   'comment-query.test.js',     // one comment query on every surface: Open by default, counts, deleted rule, waiting on you, search, sort, groupBy
   'thread-seen-api.test.js',   // server read state: authorized like reading the comments, no cross-doc reads, no thread-id leaks
   'feedback-team-agents.test.js', // the widget's @ lists team agents (answer only) only through tdoc's own-origin token door
@@ -274,6 +275,7 @@ const BROWSER = [
   'sheets-integration-ui.test.js', // release 2026-11-11d: merges x hidden rows/columns, groups and freeze; rule fill wins over a cell's own fill; Find skips hidden columns and opens a group, Replace all reaches hidden cells; fill handle x hidden rows/columns and merges; insert/delete rows x merges x groups x rules; formulas x merges/hidden/collapsed rows/rules, find & replace in the formula, fill handle moves references
   'doc-types-top-bar-ui.test.js', // doc, sheet and deck: the same top bar, ⋯ menu (Read / Comment / Edit) and editor bar; a sheet full screen or on its own page keeps them; desktop + phone
   'sheet-doc-standalone-ui.test.js', // a sheet-only doc is a full page sheet: ?sheet=N and #expand=1 open the tab in place, no way back / Open on its own / close; a prose doc's sheet keeps them, with a "Doc / Tab" breadcrumb whose doc title goes back (closes full screen; opens the doc from its own page); desktop + phone
+  'markdown-edit-ui.test.js', // Edit as Markdown (flag markdownEditMode): the switch in Edit mode and beside autosave; edits save, house blocks byte for byte, raw HTML stays text, choice remembered, disabled with a reason, no switch on sheets or flag off; desktop + phone
   'convert-to-sheet-ui.test.js', // ⋯ › Convert to Sheet (flag convertToSheet): offered to an editor of a prose doc holding a sheet only; confirm, v2 is a sheet doc (no Open the doc), title and prose kept in a .sheet-note, cell comments on their cells, v1 intact; the conversion's cases in the browser; desktop + phone
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
@@ -296,11 +298,14 @@ const BROWSER = [
   'ask-send-switch-ui.test.js', // Ask AI: quiet Ask ▾ / Edit ▾ mode picker in the input row (instruction input, N comments included · Choose, Send to <agent>, instruction-only becomes a whole-document comment handed off, mode remembered), long agent name on a 320/390 phone stays one row, one row per team agent, team agent answers in public; no phone paper-plane
   'comment-selection-ui.test.js', // one selection engine: old cssPath anchors resolve, slide comments follow reordered slides across versions, area boxes on charts, + Comment picks (whole doc on nothing), widget quotes and page comments; desktop + phone
   'comment-parity-ui.test.js', // doc page and widget run the same cases: Open by default with counts (remembered), a polled agent reply appears, read state is the server's (widget ↔ space page, fresh browser), autoReadComments in the widget, the seen endpoint refuses non-readers; desktop + phone
+  'copy-for-agent-ui.test.js', // Copy for agent on the doc page, the widget and the space page: thread ⋯ and list ⋯ copy Markdown, toast, C / H keys (never while typing), Esc still closes, flag off shows nothing; desktop + phone
   'feedback-panel-parity-ui.test.js', // the widget's comment list = the doc page's: same side width, same filter row (one line, options inside the pill, same geometry), on a plain and a hostile host page; desktop + phone
   'comment-one-behaviour-ui.test.js', // doc page, feedback space and widget draw one card: reply prefill rule, one agent-list height, a reply draft per thread, floating card fits the screen, panel drag width
   'ask-edit-feedback-ui.test.js', // Ask/Edit v2 feedback: @agent in a comment or reply asks for suggestions (phone drawer, ⌘⇧Enter), nothing changes outside dev mode, a reply box is not held by delivery, rewrites read as blocks, edits stay text
   'suggest-accept-ui.test.js', // a suggestion's Accept in the real shell: readable refusals, decided rows leave silently, the list stays true without a refresh, Accept lands on /v/N
   'suggest-overlap-ui.test.js', // pending suggestions on the same words (copies, overlapping finds) show once each, never one inside another; Reject takes exact copies; the held-back one then shows; Accept publishes
+  'suggest-accept-all-ui.test.js', // Accept all is one call and one version: with KV a step behind, every set lands and nothing stays pending on the version the page moves to; an exact copy is accepted with its twin
+  'needs-you-edits-ui.test.js', // Needs you: "Review N edits" for a doc with suggestions waiting on this person, desktop + phone; opens the doc with the review on the first; deciding or Mark done takes it away until new edits
   'ask-edit-v2-gate-ui.test.js', // Ask/Edit v2 is dev-mode only: not on the list (desktop + phone), flag pinned, switch off -> Ask AI and comments exactly as before, no suggestions request; dev mode on is the control
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
   'comment-overflow-ask-dismiss-ui.test.js', // a long markdown reply (inline code, paths, a code block) never scrolls a comment card, its thread or an Ask AI answer sideways; Ask AI closes on a click in the document or Escape and keeps the draft; V1 + V2, desktop + phone
@@ -358,6 +363,7 @@ const PERF = [
 const RUNTIME = [
   'preview-workerd.test.js', // needs npm ci; real workerd WASM and font modules
   'doc-download-deps.test.js', // needs npm ci; download output read back with marked and SheetJS (CI: shell runtime job)
+  'markdown-source.test.js', // needs npm ci (marked); Edit as Markdown (flag markdownEditMode): plain docs round-trip, untouched blocks byte for byte, unshowable blocks kept behind placeholders, nothing typed becomes markup outside the allow-list (CI: shell runtime job)
 ];
 const runAll = process.argv.includes('--all');
 const runPerf = process.argv.includes('--perf');

@@ -709,3 +709,22 @@ export function decideSuggestion(slug, id, decision, editIds = null) {
     body: JSON.stringify(editIds ? { edit_ids: editIds } : {}),
   });
 }
+
+// Accept edits from several sets at once, in ONE version (Accept all).
+// sets: [{ id, editIds }] -> { version, sets: [{ id, accepted, stale, suggestion }] }
+export function acceptSuggestions(slug, sets) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/suggestions/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sets: sets.map((s) => ({ id: s.id, edit_ids: s.editIds })) }),
+  });
+}
+
+// Needs you's Mark done on "Review N edits" (the suggestions themselves stay).
+export function markSuggestPendingDone(slug) {
+  return request('/api/suggestions/pending/done', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+  });
+}

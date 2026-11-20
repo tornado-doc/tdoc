@@ -1209,7 +1209,7 @@ export function DocsHub({ boot }) {
       const comments = card.allOfDoc ? 0 : Math.max(0, (Number(activity.comments) || 0) - (card.ids.length ? card.count : 0));
       const agent = card.kind === 'agent' && !activity.agent_threads ? 0
         : Math.max(0, (Number(activity.agent) || 0) - ((activity.agent_threads || []).length - threads.length));
-      return { ...activity, comments, agent, agent_threads: threads };
+      return { ...activity, comments, agent, agent_threads: threads, ...(card.kind === 'edits' ? { suggestions: 0 } : {}) };
     };
     const clear = (list) => list.map((doc) => (doc.slug === card.slug && doc.activity ? { ...doc, activity: lessActivity(doc.activity) } : doc));
     hub.setDocs(clear);

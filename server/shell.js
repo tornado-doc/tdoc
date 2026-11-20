@@ -596,7 +596,9 @@
           const src = resolve(attr(m[3], 'src'));
           if (/^https?:/i.test(src)) { add(' ![' + literal(a) + '](' + mdUrl(src) + ') '); continue; }
         }
-        if (a) { const s = ' [image: ' + a + '] '; if (cell != null) cell += s; else buf += s; }
+        // In the Markdown file the alt text is author text like any other:
+        // escaped, so a `*` in it is never emphasis.
+        if (a) { const s = ' [image: ' + (rich ? literal(a) : a) + '] '; if (cell != null) cell += s; else buf += s; }
         continue;
       }
       if (/^h[1-6]$/.test(tag)) { flush(); if (!close) { kind = 'h'; level = Number(tag[1]); } continue; }
