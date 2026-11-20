@@ -12,7 +12,10 @@
 //   - the store numbers comments in the write that makes them
 //   - replies (the whole thread, even one marked done) and reopened threads
 //     wake a waiter; the caller's own account's agent replies do not
-//   - signed-in callers only; waits capped per caller and per doc (429);
+//   - access is checked again when there is something to deliver: a reader
+//     removed, or a doc trashed, mid-wait gets nothing
+//   - signed-in callers only; waits capped per caller and per doc (429), with
+//     slots readers cannot fill kept for the doc's writers;
 //     a failing store is a 503 with retry_after, not an instant empty 200
 //   - a cursor older than the kept log gets the backlog again (gap);
 //     legacy-KV comments come with the backlog; imported ones are numbered
@@ -265,14 +268,18 @@ const ORIGIN = 'https://tdoc.dev';
     const state = env.COMMENTS.stateFor(SLUG);
     const seq = state.storage.map.get('commentSeq');
     assert(seq && String(seq.n) === cursor && seq.log.length === seq.n, JSON.stringify(seq));
-    // A waiter reads the store twice (before and after), whatever it waits.
-    let reads = 0;
+    // The store is read a fixed number of times per call (before and after
+    // the wait, plus the access checks), however long it waits.
     const orig = state.storage.transaction.bind(state.storage);
-    state.storage.transaction = (fn) => { reads += 1; return orig(fn); };
-    try {
-      await wait(`since=${cursor}&timeout=2`);
-    } finally { state.storage.transaction = orig; }
-    assert(reads <= 2, `${reads} store reads in a 2s wait`);
+    const readsFor = async (seconds) => {
+      let reads = 0;
+      state.storage.transaction = (fn) => { reads += 1; return orig(fn); };
+      try { await wait(`since=${cursor}&timeout=${seconds}`); } finally { state.storage.transaction = orig; }
+      return reads;
+    };
+    const short = await readsFor(1);
+    const long = await readsFor(4);
+    assert(long === short && long <= 4, `${short} store reads in a 1s wait, ${long} in a 4s wait`);
   });
 
   // ---------------------------------------------------- replies, reopen
@@ -375,6 +382,56 @@ const ORIGIN = 'https://tdoc.dev';
       const r = await wait(`since=${await (async () => { env.COMMENTS.get = orig; const c = await now(); env.COMMENTS.get = () => ({ fetch: async () => { throw new Error('store restarted'); } }); return c; })()}&timeout=5`);
       assert(r.status === 503 && r.body.error === 'wait_unavailable' && r.body.retry_after >= 1, `${r.status} ${r.text}`);
     } finally { env.COMMENTS.get = orig; }
+  });
+
+  // ------------------------------------- access re-checked at delivery
+  await t('access removed mid-wait: the reader gets nothing posted after it (403)', async () => {
+    const slug = 'wait-revoke';
+    const up = await call('/api/upload', { method: 'POST', token: julie.token, body: { slug, version: 1, html: '<h1>r</h1><p>x</p>', meta: { title: 'R', access: { visibility: 'private', allowed_users: ['ivy'] } } } });
+    assert(up.status === 200, up.text);
+    const c0 = (await call(`/api/comments/wait?slug=${slug}&since=0&timeout=0`, { token: ivy.token })).body.cursor;
+    const pending = call(`/api/comments/wait?slug=${slug}&since=${c0}&timeout=20`, { token: ivy.token });
+    await sleep(150);
+    const rev = await call('/api/doc/access', { method: 'PATCH', cookie: julie.cookie, headers: { Origin: ORIGIN }, body: { slug, access: { visibility: 'private', allowed_users: [] } } });
+    assert(rev.status === 200, `revoke ${rev.status} ${rev.text}`);
+    const posted = await call('/api/comments', { method: 'POST', cookie: julie.cookie, body: { slug, version: 1, text: 'secret after revoke', anchor: null } });
+    assert(posted.status === 200, posted.text);
+    const r = await pending;
+    assert(r.status === 403 && !/secret after revoke/.test(r.text), `${r.status} ${r.text}`);
+  });
+
+  await t('doc moved to Trash mid-wait: nothing is delivered (404)', async () => {
+    const slug = 'wait-trash';
+    const up = await call('/api/upload', { method: 'POST', token: julie.token, body: { slug, version: 1, html: '<h1>t</h1><p>x</p>', meta: { title: 'T', access: { visibility: 'private', allowed_users: ['ivy'] } } } });
+    assert(up.status === 200, up.text);
+    const c0 = (await call(`/api/comments/wait?slug=${slug}&since=0&timeout=0`, { token: ivy.token })).body.cursor;
+    const pending = call(`/api/comments/wait?slug=${slug}&since=${c0}&timeout=20`, { token: ivy.token });
+    await sleep(150);
+    const posted = await call('/api/comments', { method: 'POST', cookie: julie.cookie, body: { slug, version: 1, text: 'posted then trashed', anchor: null } });
+    assert(posted.status === 200, posted.text);
+    // Within the batch window, before the wait answers.
+    const tr = await call(`/api/doc?slug=${slug}`, { method: 'DELETE', cookie: julie.cookie, headers: { Origin: ORIGIN } });
+    assert(tr.status === 200, `trash ${tr.status} ${tr.text}`);
+    const r = await pending;
+    assert(r.status === 404 && !/posted then trashed/.test(r.text), `${r.status} ${r.text}`);
+  });
+
+  await t('writers keep slots: with 40 readers waiting, the owner and its agent can still wait', async () => {
+    const c0 = await now();
+    const stub = env.COMMENTS.get(SLUG);
+    const doWait = (who, writer) => stub.fetch('https://do/wait', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug: SLUG, op: { since: Number(c0), timeout_ms: 20000, who, writer, exclude: [] } }) }).then((r) => r.json());
+    const readers = Array.from({ length: 40 }, (_, i) => doWait(`reader-${i}`, false));
+    await sleep(100);
+    const reader41 = await doWait('reader-41', false);
+    assert(reader41.busy === true, `a 41st reader: ${JSON.stringify(reader41)}`);
+    const invitee = await wait(`since=${c0}&timeout=20`, ivy.token);
+    assert(invitee.status === 429, `invitee (a reader) ${invitee.status}`);
+    const owner = wait(`since=${c0}&timeout=20`);
+    await sleep(100);
+    await post('owner still hears this');
+    const r = await owner;
+    assert(r.status === 200 && r.body.comments.length === 1, `owner ${r.status} ${r.text}`);
+    await Promise.all(readers);
   });
 
   // ------------------------------------------- gap, legacy, imported

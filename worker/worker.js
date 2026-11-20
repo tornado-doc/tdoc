@@ -20436,6 +20436,11 @@ async function handleCommentsWait(env, req, url) {
   if (!env.COMMENTS) return json({ error: 'wait_unavailable', message: 'Waiting needs the comment store; call GET /api/comments instead.' }, { status: 503 });
   // The caller's own account's agent replies do not wake it.
   const exclude = account ? [`agent:${account}`] : [];
+  // The doc's writers (owner, team, their agents) have slots readers cannot fill.
+  const writer = actor
+    ? Boolean((await requireDocWriteAccess(env, actor, slug).catch(() => ({ ok: false }))).ok)
+    : Boolean(viewer && (isDocOwnerSession(env, viewer, gate.meta)
+      || (gate.meta.workspace_id && Array.isArray(viewer.team_ids) && viewer.team_ids.includes(gate.meta.workspace_id))));
   const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
   const deadline = Date.now() + timeoutMs;
   const unavailable = () => json({ error: 'wait_unavailable', message: 'The comment store did not answer. Try again.', retry_after: 2 }, { status: 503, headers: { 'Retry-After': '2' } });
@@ -20447,7 +20452,7 @@ async function handleCommentsWait(env, req, url) {
     try {
       const r = await stub.fetch('https://do/wait', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug, op: { since, timeout_ms: Math.max(0, deadline - Date.now()), exclude, who } }),
+        body: JSON.stringify({ slug, op: { since, timeout_ms: Math.max(0, deadline - Date.now()), exclude, who, writer } }),
       });
       out = await r.json();
     } catch (e) {
@@ -20464,12 +20469,15 @@ async function handleCommentsWait(env, req, url) {
     const threads = out.threads && typeof out.threads === 'object' ? out.threads : {};
     let comments = [];
     if (Object.keys(threads).length) {
+      // Access is checked again now, not only when the wait began (up to 25
+      // seconds ago): a reader removed, or a doc moved to Trash, meanwhile
+      // gets nothing posted since.
+      const now = await enforceDocAccess(env, req, slug, 1);
+      if (!now.ok) return json({ error: now.gone ? 'not_found' : 'access_denied' }, { status: now.gone ? 404 : (now.response.status || 403) });
+      if (feedbackScopeDenied(now.session, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       // The comments themselves, read for this caller exactly as GET
       // /api/comments reads them (redaction, handoffs, email privacy).
-      // Only an agent's token counts as an agent pulling them (a person's
-      // waiting tab does not stamp the doc read or ack handoffs).
-      if (actor) await noteCommentsPulled(env, req, slug, agentAuth);
-      const list = await readCommentsForReader(env, req, url, slug, gate, agentAuth, 'all');
+      const list = await readCommentsForReader(env, req, url, slug, now, agentAuth, 'all');
       comments = (Array.isArray(list) ? list : []).filter((c) => {
         const kinds = c && typeof threads[c.id] === 'string' ? threads[c.id] : '';
         if (!kinds || c.deleted) return false;
@@ -20477,6 +20485,10 @@ async function handleCommentsWait(env, req, url) {
         return kinds.includes('r') || (c.status !== 'applied' && !c.resolved);
       });
     }
+    // Only an agent's token that was handed threads counts as an agent
+    // pulling them (stamps the doc read, acks handoffs); a person's waiting
+    // tab, or an empty answer, does not.
+    if (actor && comments.length) await noteCommentsPulled(env, req, slug, agentAuth);
     const timedOut = Boolean(out.timed_out);
     if (comments.length || timedOut || deadline - Date.now() < 1000) {
       return json({ ok: true, slug, cursor: String(cursor), comments, timed_out: !comments.length && timedOut, ...(out.gap ? { gap: true } : {}) });
@@ -20637,6 +20649,9 @@ const COMMENT_WAIT_BATCH_MS = 3_000;
 const COMMENT_SEQ_LOG_MAX = 1000;
 // Held waits: per doc store, and per caller on one doc.
 const COMMENT_WAITERS_PER_DOC = 50;
+// Readers fill at most this many, so the doc's writers (owner, team, their
+// agents) can always wait.
+const COMMENT_WAITERS_READERS = 40;
 const COMMENT_WAITERS_PER_CALLER = 3;
 // slug -> Set of waiters. A slug's store is one instance in one isolate, so
 // the write and the waiter it wakes meet here.
@@ -21302,7 +21317,7 @@ export class CommentsStore {
       const timeout = Math.min(COMMENT_WAIT_MAX_MS, Math.max(0, Number(op && op.timeout_ms) || 0));
       const exclude = new Set(Array.isArray(op && op.exclude) ? op.exclude.filter((x) => typeof x === 'string' && x) : []);
       const who = op && typeof op.who === 'string' ? op.who : '';
-      return Response.json(await this._waitForComments(slug, since, timeout, { exclude, who }));
+      return Response.json(await this._waitForComments(slug, since, timeout, { exclude, who, writer: Boolean(op && op.writer) }));
     }
 
     if (u.pathname === '/read' || u.pathname === '/count') {
@@ -21388,13 +21403,16 @@ export class CommentsStore {
     return answer;
   }
 
-  async _waitForComments(slug, since, timeoutMs, { exclude = new Set(), who = '' } = {}) {
+  async _waitForComments(slug, since, timeoutMs, { exclude = new Set(), who = '', writer = false } = {}) {
     const reply = (a, timedOut = false) => ({ cursor: a.n, threads: a.threads, gap: a.gap, timed_out: timedOut && !Object.keys(a.threads).length });
     if (since === null || timeoutMs <= 0) return reply(await this._commentsAfter(slug, since, exclude));
     let set = COMMENT_WAITERS.get(slug);
     if (!set) { set = new Set(); COMMENT_WAITERS.set(slug, set); }
     // Held waits are bounded per doc and per caller; past either, come back.
-    if (set.size >= COMMENT_WAITERS_PER_DOC || [...set].filter((w) => w.who === who).length >= COMMENT_WAITERS_PER_CALLER) {
+    const held = [...set];
+    if (set.size >= COMMENT_WAITERS_PER_DOC
+        || (!writer && held.filter((w) => !w.writer).length >= COMMENT_WAITERS_READERS)
+        || held.filter((w) => w.who === who).length >= COMMENT_WAITERS_PER_CALLER) {
       if (!set.size) COMMENT_WAITERS.delete(slug);
       return { busy: true };
     }
@@ -21404,7 +21422,7 @@ export class CommentsStore {
     let resolveWait;
     const waited = new Promise((resolve) => { resolveWait = resolve; });
     let timedOut = false;
-    const waiter = { woken: false, timer: null, exclude, who };
+    const waiter = { woken: false, timer: null, exclude, who, writer };
     const done = () => {
       clearTimeout(waiter.timer);
       set.delete(waiter);
