@@ -133,7 +133,9 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
     'minting a terminal token stamps agent_connected beside account-terminal');
   const get = worker.slice(worker.indexOf("if (p === '/api/comments' && method === 'GET')"), worker.indexOf("if (p === '/api/mentions' && method === 'GET')"));
   assert(get.includes("url.searchParams.get('version') === 'all'"), 'version=all — the shape only tdoc-pull asks for — marks the doc read');
-  assert(get.includes('markAgentRead(env, slug)'), 'the read is per doc, so the card on that doc can flip');
+  assert(get.includes('noteCommentsPulled(env, req, slug, agentAuth)'), 'the GET route notes the pull');
+  const pulled = worker.slice(worker.indexOf('async function noteCommentsPulled('), worker.indexOf('async function readCommentsForReader('));
+  assert(pulled.includes('markAgentRead(env, slug)'), 'the read is per doc, so the card on that doc can flip');
   // A reply counts as the gesture. The seeded comment is a question and its
   // Reply button is the most obvious thing on the page, so excluding replies
   // left the doc's corner row ticking while My docs stayed at 2 of 4 with row
@@ -146,7 +148,7 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   // A saved comment's follow-ups (onboarding among them) run after the response.
   assert(/if \(res\.status === 200\) await afterResponse\(ctx, \(async \(\) => \{[\s\S]{0,4000}?if \(isDocOwner\) \{/.test(worker), "only the owner's own words move their journey");
   assert(get.includes("stampOnboardingFor(agentAuth.actor.account_id, 'comments_read')") === false
-    && get.includes("'comments_read'"), 'a Bearer read stamps comments_read on the account');
+    && pulled.includes("'comments_read'"), 'a Bearer read stamps comments_read on the account');
   const upload = worker.slice(worker.indexOf("if (p === '/api/upload' && method === 'POST')"), worker.indexOf("if (p === '/api/doc/access' && method === 'PATCH')"));
   assert(/if \(firstHostedPublish \|\| \(journey\.started && !journey\.first_doc\)\) \{[\s\S]*'published_first', \{ first_doc: slug \}/.test(upload),
     'the first doc published after the journey started stamps published_first with the slug');

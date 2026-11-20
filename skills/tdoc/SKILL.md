@@ -901,7 +901,7 @@ members. Asking again for an origin returns the same space. Comments left on
 the site come back through `tdoc-pull <slug>` like any doc. Same endpoint as
 the MCP tool: `POST /api/feedback/spaces`.
 
-### `tdoc-watch` — keep receiving new comments
+### `tdoc-watch` — keep receiving new comments and replies
 
 To keep receiving feedback on a doc or feedback space without anyone pressing
 "Send to agent", wait for comments in a loop. CLI:
@@ -910,14 +910,17 @@ To keep receiving feedback on a doc or feedback space without anyone pressing
 bash "$SKILL_DIR/bin/tdoc-watch" <slug> [--since <cursor>] [--once] [--json]
 ```
 
-It prints the open comments already there, then each new one as it arrives,
-one Markdown block per comment (the Copy for agent format), so
-`tdoc-watch my-site | <agent>` works; the resume cursor goes to stderr.
-`--once` stops after the first batch. MCP: call `wait_for_comments` in a loop,
-passing the `cursor` it returns as `since`; each call returns as soon as there
-are new open comments (with a 3-second window for more), or none after up to
-25 seconds. Same endpoint: `GET /api/comments/wait`, same access as reading
-the comments. Reply on each with `tdoc-agent-reply` as usual.
+It prints the open threads already there, then each thread with something new
+as it arrives: a new comment, a reopened thread, or a reply (the whole thread,
+also on one marked done; never a reply your own agents posted). One Markdown
+block per thread (the Copy for agent format), so `tdoc-watch my-site | <agent>`
+works; the resume cursor goes to stderr. `--once` stops after the first batch.
+MCP: call `wait_for_comments` in a loop, passing the `cursor` it returns as
+`since`; each call returns as soon as there is something new (with a 3-second
+window for more), or nothing after up to 25 seconds. Same endpoint: `GET
+/api/comments/wait`, same access as reading the comments, signed-in only, at
+most 3 waits held per account on a doc. Reply on each with
+`tdoc-agent-reply` as usual.
 
 ### `tdoc-site` — make the person's own website commentable
 

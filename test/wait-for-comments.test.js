@@ -10,6 +10,12 @@
 //   - cursor: across calls, every comment exactly once, none missed, also
 //     ones left between two calls; resolved and deleted ones are not sent
 //   - the store numbers comments in the write that makes them
+//   - replies (the whole thread, even one marked done) and reopened threads
+//     wake a waiter; the caller's own account's agent replies do not
+//   - signed-in callers only; waits capped per caller and per doc (429);
+//     a failing store is a 503 with retry_after, not an instant empty 200
+//   - a cursor older than the kept log gets the backlog again (gap);
+//     legacy-KV comments come with the backlog; imported ones are numbered
 // Run with: node test/wait-for-comments.test.js
 
 const fs = require('fs');
@@ -219,20 +225,22 @@ const ORIGIN = 'https://tdoc.dev';
     fs.mkdirSync(path.join(home, '.tdoc'));
     const base = `http://127.0.0.1:${server.address().port}`;
     fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base, upload_token: julie.token }));
-    const run = (args) => new Promise((resolve) => {
-      const child = spawn(path.join(__dirname, '..', 'bin', 'tdoc-watch'), args, { env: { ...process.env, HOME: home } });
+    // As SKILL.md documents it (`bash "$SKILL_DIR/bin/tdoc-watch"`), and directly.
+    const run = (args, viaBash = false) => new Promise((resolve) => {
+      const bin = path.join(__dirname, '..', 'bin', 'tdoc-watch');
+      const child = viaBash ? spawn('bash', [bin, ...args], { env: { ...process.env, HOME: home } }) : spawn(bin, args, { env: { ...process.env, HOME: home } });
       let stdout = '', stderr = '';
       child.stdout.on('data', (d) => { stdout += d; });
       child.stderr.on('data', (d) => { stderr += d; });
       child.on('close', (status) => resolve({ status, stdout, stderr }));
     });
     try {
-      const pending = run([SLUG, '--since', cursor, '--once']);
+      const pending = run([SLUG, '--since', cursor, '--once'], true);
       await sleep(800);
       const id = await post('watch me\n## not a heading');
       const out = await pending;
       assert(out.status === 0, `${out.status} ${out.stderr}`);
-      assert(out.stdout.startsWith(`# 1 new comment on ${SLUG}\nPage: <${base}/d/${SLUG}>`), out.stdout);
+      assert(out.stdout.startsWith(`# 1 comment on ${SLUG}\nPage: <${base}/d/${SLUG}>`), out.stdout);
       assert(out.stdout.includes(`- id: \`${id}\``) && out.stdout.includes('> watch me\n> ## not a heading'), out.stdout);
       assert(out.stdout.includes(`?comment=${id}>`), 'tdoc link');
       const resume = (out.stderr.match(/--since (\d+)/) || [])[1];
@@ -246,6 +254,8 @@ const ORIGIN = 'https://tdoc.dev';
         return run([SLUG, '--once']);
       })();
       assert(denied.status === 1 && /cannot read/.test(denied.stderr) && !denied.stdout, `${denied.status} ${denied.stderr}`);
+      const help = await run(['--help'], true);
+      assert(help.status === 0 && /^tdoc-watch — /.test(help.stdout) && /--since <cursor>/.test(help.stdout) && !/set -euo/.test(help.stdout), `help ${help.status} ${help.stdout} ${help.stderr}`);
     } finally {
       server.close();
     }
@@ -263,6 +273,137 @@ const ORIGIN = 'https://tdoc.dev';
       await wait(`since=${cursor}&timeout=2`);
     } finally { state.storage.transaction = orig; }
     assert(reads <= 2, `${reads} store reads in a 2s wait`);
+  });
+
+  // ---------------------------------------------------- replies, reopen
+  const now = async (token = julie.token) => (await wait('since=0&timeout=0', token)).body.cursor;
+  const reply = async (parent, text, who = julie) => {
+    const r = await call('/api/comments', { method: 'POST', cookie: who.cookie, body: { slug: SLUG, version: 1, text, parent_id: parent } });
+    assert(r.status === 200, `reply ${r.status} ${r.text}`);
+    return r.body.id;
+  };
+  const resolve = async (id, resolved) => {
+    const r = await call('/api/comments', { method: 'PATCH', cookie: julie.cookie, headers: { Origin: ORIGIN }, body: { slug: SLUG, id, version: 1, resolved } });
+    assert(r.status === 200, `resolve ${r.status} ${r.text}`);
+  };
+
+  await t('a reply wakes a waiter and brings the whole thread, even one marked done', async () => {
+    const thread = await post('thread for replies');
+    await resolve(thread, true);
+    const c0 = await now();
+    const pending = wait(`since=${c0}&timeout=20`);
+    await sleep(150);
+    const rid = await reply(thread, 'still wrong', ivy);
+    const r = await pending;
+    assert(r.status === 200 && r.body.comments.length === 1, r.text);
+    const got = r.body.comments[0];
+    assert(got.id === thread && got.replies.some((x) => x.id === rid && x.text === 'still wrong'), JSON.stringify(got));
+    // Its next call does not get it again.
+    const again = await wait(`since=${r.body.cursor}&timeout=1`);
+    assert(again.body.comments.length === 0, again.text);
+  });
+
+  await t('a thread reopened wakes a waiter', async () => {
+    const thread = await post('to reopen');
+    await resolve(thread, true);
+    const c0 = await now();
+    const pending = wait(`since=${c0}&timeout=20`);
+    await sleep(150);
+    await resolve(thread, false);
+    const r = await pending;
+    assert(r.body.comments.map((c) => c.id).join(',') === thread, r.text);
+  });
+
+  await t("the caller's own agent's reply does not wake it; another account's waiter does wake", async () => {
+    const thread = await post('agent answers this');
+    const c0 = await now();
+    const mine = wait(`since=${c0}&timeout=4`);
+    const theirs = wait(`since=${c0}&timeout=20`, ivy.token);
+    await sleep(150);
+    const ar = await call('/api/agent/reply', { method: 'POST', token: julie.token, body: { slug: SLUG, parent_id: thread, text: 'Done: see v1.', status: 'answered' } });
+    assert(ar.status === 200 && !ar.body.skipped, `agent reply ${ar.status} ${ar.text}`);
+    const [m, o] = await Promise.all([mine, theirs]);
+    assert(m.status === 200 && m.body.comments.length === 0 && m.body.timed_out === true, `own agent woke it: ${m.text}`);
+    assert(Number(m.body.cursor) > Number(c0), 'cursor still moves past it');
+    assert(o.status === 200 && o.body.comments.length === 1 && o.body.comments[0].id === thread, o.text);
+    // The person's answer to the agent wakes the agent's account again.
+    const pending = wait(`since=${m.body.cursor}&timeout=20`);
+    await sleep(150);
+    await reply(thread, 'thanks, but one more thing', ivy);
+    const back = await pending;
+    assert(back.body.comments.length === 1 && back.body.comments[0].id === thread, back.text);
+  });
+
+  // ------------------------------------------------------- abuse bounds
+  await t('anonymous callers cannot hold a wait, even on a public doc', async () => {
+    const pub = await call('/api/upload', { method: 'POST', token: julie.token, body: { slug: 'wait-public', version: 1, html: '<h1>p</h1><p>x</p>', meta: { title: 'Pub', access: { visibility: 'public' } } } });
+    assert(pub.status === 200, pub.text);
+    const anon = await call('/api/comments/wait?slug=wait-public&timeout=1');
+    assert(anon.status === 401 && anon.body.error === 'sign_in_required', `${anon.status} ${anon.text}`);
+    const signed = await call('/api/comments/wait?slug=wait-public&timeout=1', { token: bob.token });
+    assert(signed.status === 200, signed.text);
+  });
+
+  await t('waits held are capped per caller (3) and per doc (50): 429 with retry_after', async () => {
+    const c0 = await now();
+    const held = [1, 2, 3].map(() => wait(`since=${c0}&timeout=20`));
+    await sleep(100);
+    const fourth = await wait(`since=${c0}&timeout=20`);
+    assert(fourth.status === 429 && fourth.body.error === 'too_many_waiters' && fourth.body.retry_after > 0, `${fourth.status} ${fourth.text}`);
+    const other = wait(`since=${c0}&timeout=20`, ivy.token);
+    await sleep(50);
+    // Fill the doc to its cap with other callers, straight at the store.
+    const stub = env.COMMENTS.get(SLUG);
+    const doWait = (who) => stub.fetch('https://do/wait', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug: SLUG, op: { since: Number(c0), timeout_ms: 20000, who, exclude: [] } }) }).then((r) => r.json());
+    const fill = Array.from({ length: 46 }, (_, i) => doWait(`filler-${i}`));
+    await sleep(100);
+    const over = await doWait('one-too-many');
+    assert(over.busy === true, JSON.stringify(over));
+    const viaRoute = await wait(`since=${c0}&timeout=20`, bob.token);
+    assert(viaRoute.status === 403 || viaRoute.status === 429, `${viaRoute.status}`);
+    // One comment releases them all (after the batch window).
+    await post('release');
+    const done = await Promise.all([...held, other]);
+    assert(done.every((r) => r.status === 200 && r.body.comments.length === 1), done.map((r) => r.text).join('\n'));
+    await Promise.all(fill);
+  });
+
+  await t('a store that fails answers 503 with retry_after, never an instant empty 200', async () => {
+    const orig = env.COMMENTS.get.bind(env.COMMENTS);
+    env.COMMENTS.get = () => ({ fetch: async () => { throw new Error('store restarted'); } });
+    try {
+      const r = await wait(`since=${await (async () => { env.COMMENTS.get = orig; const c = await now(); env.COMMENTS.get = () => ({ fetch: async () => { throw new Error('store restarted'); } }); return c; })()}&timeout=5`);
+      assert(r.status === 503 && r.body.error === 'wait_unavailable' && r.body.retry_after >= 1, `${r.status} ${r.text}`);
+    } finally { env.COMMENTS.get = orig; }
+  });
+
+  // ------------------------------------------- gap, legacy, imported
+  await t('a cursor older than the kept log gets the open backlog again, marked gap', async () => {
+    const state = env.COMMENTS.stateFor(SLUG);
+    const seq = state.storage.map.get('commentSeq');
+    const saved = JSON.parse(JSON.stringify(seq));
+    try {
+      seq.log = seq.log.slice(5); // as if the first five had been trimmed
+      const r = await wait('since=1&timeout=1');
+      assert(r.status === 200 && r.body.gap === true && r.body.comments.length > 0, r.text);
+      assert(r.body.comments.every((c) => c.status !== 'applied' && !c.resolved), 'open backlog only');
+    } finally { state.storage.map.set('commentSeq', saved); }
+  });
+
+  await t('comments only in the legacy KV value come with the backlog; imported ones are numbered', async () => {
+    const slug = 'wait-legacy';
+    const r0 = await call('/api/upload', { method: 'POST', token: julie.token, body: { slug, version: 1, html: '<h1>l</h1><p>x</p>', meta: { title: 'L', access: { visibility: 'private', allowed_users: [] } } } });
+    assert(r0.status === 200, r0.text);
+    env.COMMENTS.stateFor(slug).storage.map.delete('list');
+    await env.META.put(`comments:${slug}`, JSON.stringify([{ id: 'c_legacy_1', author: { login: 'julie', name: 'julie' }, text: 'from before', created: new Date().toISOString(), created_in: 1, anchor: null }]));
+    const r = await call(`/api/comments/wait?slug=${slug}&timeout=1`, { token: julie.token });
+    assert(r.status === 200 && r.body.comments.some((c) => c.id === 'c_legacy_1'), r.text);
+    const c0 = Number(r.body.cursor);
+    const stub = env.COMMENTS.get(slug);
+    const merged = await (await stub.fetch('https://do/x', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, op: { kind: 'publish_merge', localComments: [{ id: 'c_imported_1', author: { login: 'julie', name: 'julie' }, text: 'imported', created: new Date().toISOString(), created_in: 1, anchor: null }], aids: [], version: 1 } }) })).json();
+    assert(merged.status === 200, JSON.stringify(merged));
+    const after = await call(`/api/comments/wait?slug=${slug}&since=${c0}&timeout=1`, { token: julie.token });
+    assert(after.body.comments.map((c) => c.id).join(',') === 'c_imported_1', after.text);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

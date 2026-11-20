@@ -152,7 +152,7 @@ Use this when a user gives you a tdoc.dev document URL and asks you to read, sum
 The plain-HTTP routes above only read. To write, connect tdoc's MCP server, \`https://tdoc.dev/mcp\` (OAuth sign-in; how to add it to each app is in https://tdoc.dev/llms.txt), which has tools to create, upload and edit documents, read comments and reply to them. Without MCP, use the tdoc skill: install it with ${TDOC_ONBOARDING_URL} and sign in with \`tdoc-publish --signin-only\`. The commands are in the skill's \`bin/\`:
 
 - Pull every comment into \`~/tdocs/<slug>/comments.json\`: \`tdoc-pull <slug>\`.
-- Keep receiving new comments as they are left: \`tdoc-watch <slug>\` (one Markdown block per comment on stdout, e.g. \`tdoc-watch <slug> | <agent>\`).
+- Keep receiving new comments and replies as they are left: \`tdoc-watch <slug>\` (one Markdown block per comment on stdout, e.g. \`tdoc-watch <slug> | <agent>\`).
 - Comment: anyone the doc lets comment does it in the browser at the doc URL.
 - Reply to a comment (the doc owner's agent): \`tdoc-agent-reply --slug <slug> --parent <comment_id> --text "..." [--status applied --applied-in <n>]\`.
 - Edit and publish a new version (the doc's owner only, today): \`tdoc-write --slug <slug> --title "<title>" --html-file <file> --version next\`, then \`tdoc-publish <slug>\`. A new document is the same without \`--version next\`.
@@ -187,7 +187,7 @@ const LLMS_TXT = `# tdoc
 
 tdoc is a remote MCP server: \`https://tdoc.dev/mcp\` (Streamable HTTP). You sign in with OAuth the first time an app connects; there is no API key to paste. An app that cannot do OAuth can send an existing tdoc account token as \`Authorization: Bearer tdoc_...\`. Tools: get_writing_guide, create_doc, update_doc, edit_doc, create_upload, commit_upload, get_doc, list_docs, get_comments, wait_for_comments, reply_to_comment, resolve_comment, report_progress, answer_question, share_doc, create_feedback_space (a private comment space for a website, returned with the one-line <script> to embed).
 
-To keep receiving feedback, call wait_for_comments in a loop: it returns as soon as a doc or feedback space has new open comments (the first call, without \`since\`, returns the open ones already there), or nothing after up to 25 seconds; pass the \`cursor\` it returns as \`since\` in the next call. With the CLI: \`tdoc-watch <slug>\` prints each new comment as a Markdown block. Over HTTP: \`GET https://tdoc.dev/api/comments/wait?slug=<slug>&since=<cursor>\` with a tdoc account token.
+To keep receiving feedback, call wait_for_comments in a loop: it returns as soon as a doc or feedback space has new open comments, reopened threads or replies (the whole thread; never your own replies), or nothing after up to 25 seconds (the first call, without \`since\`, returns the open threads already there); pass the \`cursor\` it returns as \`since\` in the next call. With the CLI: \`tdoc-watch <slug>\` prints each new comment as a Markdown block. Over HTTP: \`GET https://tdoc.dev/api/comments/wait?slug=<slug>&since=<cursor>\` with a tdoc account token.
 
 Add tdoc feedback to a project ("add tdoc feedback to my project"): call create_feedback_space with the site's origins (production and local dev, e.g. \`https://app.example.com\`, \`http://localhost:3000\`; optional \`team\` you are an admin of), or run \`tdoc-feedback init --site <origin> [--site ...] [--write index.html]\` with the CLI. Add the returned \`<script src="https://tdoc.dev/feedback.js" data-tdoc-space="<slug>" async></script>\` before \`</head>\` in the project's HTML entry (or set \`TDOC_FEEDBACK_SPACE=<slug>\` where the app reads it, \`--env\`). The space is private (you and people you invite, or the team); comments people leave on the site come back through get_comments. Over HTTP: \`POST https://tdoc.dev/api/feedback/spaces\` with \`{"origins": [...]}\` and a tdoc account token.
 
@@ -20342,15 +20342,75 @@ async function afterResponse(ctx, promise, label = 'background') {
   await guarded;
 }
 
+// An agent pulled this doc's comments (GET /api/comments with a token or
+// version=all, or a wait that answered an agent's token with comments). The
+// agent reading the comments is what bridge 2 waits for. Never fails the read.
+async function noteCommentsPulled(env, req, slug, agentAuth) {
+  try {
+    await markAgentRead(env, slug);
+    if (agentAuth && agentAuth.ok && agentAuth.actor && agentAuth.actor.kind === 'hosted') {
+      await stampOnboardingFor(env, agentAuth.actor.account_id, 'comments_read');
+    }
+  } catch {}
+  // An agent that can write this doc and just pulled its comments has
+  // picked up whatever was handed to it. Nothing in the skill ever called
+  // /api/notify/ack, so every handoff sat at "waiting on agent" until the
+  // reply landed, and a person could not tell a working agent from a
+  // dead one (Julie, 2026-10-13). First ack wins, as on the ack route.
+  if (agentAuth && agentAuth.ok) {
+    try {
+      const writable = await requireDocWriteAccess(env, agentAuth.actor, slug);
+      if (writable.ok) {
+        // Which agent this pull is, when it says (X-Tdoc-Agent /
+        // X-Tdoc-Raft-Agent, checked against the account's own targets):
+        // only handoffs addressed to it flip to "on it".
+        const claimed = agentAuth.actor.kind === 'hosted'
+          ? await actingAgent(env, req, agentAuth.actor) : null;
+        await ackOpenHandoffs(env, slug, agentAuth.actor, claimed, MCP_INTERNAL_REQUESTS.has(req) ? 'mcp_poll' : 'pull');
+      }
+    } catch {}
+  }
+}
+
+// GET /api/comments past its gate: the folded threads this reader may see.
+async function readCommentsForReader(env, req, url, slug, gate, agentAuth, V) {
+  // Read from the DO (source of truth; it lazily migrates from KV on first
+  // touch). Migrate-in-memory for this response only — never persist from a
+  // read (writes go through the DO).
+  const list = await readComments(env, slug);
+  ensureMigrated(list);
+  // `?version=all` returns every comment across all versions (lossless,
+  // used by tdoc-pull). A numeric/absent version returns that version's
+  // snapshot (used by the overlay viewing a specific /v/<n>).
+  const folded = V === 'all' ? historyList(list) : snapshotList(list, V);
+  // Conversation activity is live even on an older document. Keep its
+  // timestamps separate from the historical text, anchors and resolution.
+  const activity = new Map(list.map(c => [c.id, commentThreadActivity(c)]));
+  const live = folded.map(c => ({ ...c, thread_activity: activity.get(c.id) }));
+  // Handoff state is derived from the handoff records, not stored on the
+  // comment: the comment log stays a log of what people said, and "has
+  // this been handed over" is a fact about the handoff, not the comment.
+  const handoffs = await loadHandoffs(env, slug);
+  const decorated = withHandoffStatus(live, handoffs);
+  const viewerSession = gate.session || (agentAuth?.ok ? await sessionFromHostedBearer(env, req) : null);
+  const visible = redactCommentHandoffs(env, { ...gate, session: viewerSession, ownerToken: gate.ownerToken || agentAuth?.actor?.kind === 'admin' }, decorated, handoffs, list);
+  const linked = V !== 'all' && hostedRegistrationEnabled(env, url.origin)
+    ? await withCommentProfileLinks(env, visible) : visible;
+  return (await redactCommentEmails(linked, await emailPrivacyFor(env, gate.session, slug, gate.meta)));
+}
+
 // GET /api/comments/wait?slug=&since=&timeout= -> { ok, slug, cursor,
-// comments, timed_out }. `comments` are open threads in GET /api/comments
-// shape (version=all), only those numbered after `since`; without `since`,
-// every open thread at once (the backlog), else the first new one. `cursor`
-// goes into the next call. Cost per call: the read gate (as GET
-// /api/comments), one request to the doc's CommentsStore that sits idle until
-// a create wakes it or the timeout ends it, and, only when there are new
-// comments, one in-process GET /api/comments.
-async function handleCommentsWait(env, req, url, ctx) {
+// comments, timed_out[, gap] }. `comments` are threads in GET /api/comments
+// shape (version=all) with something new after `since`: a new open comment, a
+// thread reopened, or a reply (the whole thread, whatever its status; never
+// for a reply by the caller's own account's agent). Without `since`, every
+// open thread at once (the backlog), else the first new one. `cursor` goes
+// into the next call. Signed-in callers only, at most
+// COMMENT_WAITERS_PER_CALLER held per doc. Cost per call: the read gate (as
+// GET /api/comments), one request to the doc's CommentsStore that sits idle
+// until a write wakes it or the timeout ends it, and, only when there is
+// something new, one read of the comments (as GET /api/comments).
+async function handleCommentsWait(env, req, url) {
   const slug = url.searchParams.get('slug');
   if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
   const rawSince = url.searchParams.get('since');
@@ -20365,50 +20425,61 @@ async function handleCommentsWait(env, req, url, ctx) {
   if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
   if (feedbackScopeDenied(gate.session, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
   if (!gate.meta) return json({ error: 'not_found' }, { status: 404 });
+  // Holding a request open is for someone: a public doc's anonymous reader
+  // reads GET /api/comments instead.
+  const agentAuth = req.headers.get('authorization') ? await requireUploadAuth(req, env) : null;
+  const actor = agentAuth && agentAuth.ok ? agentAuth.actor : null;
+  const viewer = gate.session || (actor ? await sessionFromHostedBearer(env, req) : null);
+  const account = (actor && typeof actor.account_id === 'string' && actor.account_id) || (viewer && typeof viewer.account_id === 'string' && viewer.account_id) || '';
+  const who = account || (viewer ? actorKey(viewer) : '') || (actor && actor.kind === 'admin' ? 'admin' : '');
+  if (!who) return json({ error: 'sign_in_required', message: 'Waiting for comments needs a tdoc account (a token or a signed-in session).' }, { status: 401 });
   if (!env.COMMENTS) return json({ error: 'wait_unavailable', message: 'Waiting needs the comment store; call GET /api/comments instead.' }, { status: 503 });
+  // The caller's own account's agent replies do not wake it.
+  const exclude = account ? [`agent:${account}`] : [];
   const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
   const deadline = Date.now() + timeoutMs;
-  // A store answer can hold no open comment (none yet, or the new one was
-  // resolved or deleted at once): wait again on its cursor, within the same
-  // deadline. Bounded: each round either timed out or saw a new comment.
+  const unavailable = () => json({ error: 'wait_unavailable', message: 'The comment store did not answer. Try again.', retry_after: 2 }, { status: 503, headers: { 'Retry-After': '2' } });
+  // A store answer can hold nothing to send (no open comment yet, or the new
+  // one was resolved or deleted at once): wait again on its cursor, within the
+  // same deadline. Bounded: each round either timed out or saw something new.
   for (let round = 0; round < 4; round++) {
     let out;
     try {
       const r = await stub.fetch('https://do/wait', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug, op: { since, timeout_ms: Math.max(0, deadline - Date.now()) } }),
+        body: JSON.stringify({ slug, op: { since, timeout_ms: Math.max(0, deadline - Date.now()), exclude, who } }),
       });
       out = await r.json();
     } catch (e) {
-      // The store restarted under the wait (a deploy): nothing was missed,
-      // so a caller with a cursor just waits again from it.
+      // The store restarted under the wait (a deploy): nothing was missed;
+      // the caller waits again from its cursor, after a pause.
       console.error('[comments-wait] store wait failed:', e && e.message ? e.message : String(e));
-      if (since === null) return json({ error: 'wait_unavailable', message: 'Try again.', retry_after: 1 }, { status: 503 });
-      return json({ ok: true, slug, cursor: String(since), comments: [], timed_out: true });
+      return unavailable();
     }
-    const cursor = Number.isInteger(out && out.cursor) ? out.cursor : 0;
-    const ids = new Set(Array.isArray(out && out.ids) ? out.ids : []);
+    if (!out || out.busy) {
+      if (out && out.busy) return json({ error: 'too_many_waiters', message: 'Too many waits held on this doc. Try again shortly.', retry_after: 5 }, { status: 429, headers: { 'Retry-After': '5' } });
+      return unavailable();
+    }
+    const cursor = Number.isInteger(out.cursor) ? out.cursor : 0;
+    const threads = out.threads && typeof out.threads === 'object' ? out.threads : {};
     let comments = [];
-    if (ids.size) {
-      // The comments themselves, through the reader route with the caller's
-      // own credentials: every rule of GET /api/comments applies unchanged.
-      const headers = new Headers();
-      for (const k of ['authorization', 'cookie', 'cf-connecting-ip', 'user-agent', 'x-tdoc-client', 'x-tdoc-agent', 'x-tdoc-raft-agent']) {
-        const v = req.headers.get(k); if (v) headers.set(k, v);
-      }
-      const sub = new Request(`${url.origin}/api/comments?slug=${encodeURIComponent(slug)}&version=all`, { method: 'GET', headers });
-      if (MCP_INTERNAL_REQUESTS.has(req)) MCP_INTERNAL_REQUESTS.add(sub);
-      const res = await tdocHandlers.fetch(sub, env, ctx);
-      if (res.status !== 200) {
-        let body = null; try { body = await res.json(); } catch {}
-        return json(body || { error: 'access_denied' }, { status: res.status });
-      }
-      const list = await res.json();
-      comments = (Array.isArray(list) ? list : []).filter((c) => c && ids.has(c.id) && !c.deleted && c.status !== 'applied' && !c.resolved);
+    if (Object.keys(threads).length) {
+      // The comments themselves, read for this caller exactly as GET
+      // /api/comments reads them (redaction, handoffs, email privacy).
+      // Only an agent's token counts as an agent pulling them (a person's
+      // waiting tab does not stamp the doc read or ack handoffs).
+      if (actor) await noteCommentsPulled(env, req, slug, agentAuth);
+      const list = await readCommentsForReader(env, req, url, slug, gate, agentAuth, 'all');
+      comments = (Array.isArray(list) ? list : []).filter((c) => {
+        const kinds = c && typeof threads[c.id] === 'string' ? threads[c.id] : '';
+        if (!kinds || c.deleted) return false;
+        // A reply is an answer to read even on a thread marked done.
+        return kinds.includes('r') || (c.status !== 'applied' && !c.resolved);
+      });
     }
-    const timedOut = Boolean(out && out.timed_out);
+    const timedOut = Boolean(out.timed_out);
     if (comments.length || timedOut || deadline - Date.now() < 1000) {
-      return json({ ok: true, slug, cursor: String(cursor), comments, timed_out: !comments.length && timedOut });
+      return json({ ok: true, slug, cursor: String(cursor), comments, timed_out: !comments.length && timedOut, ...(out.gap ? { gap: true } : {}) });
     }
     since = cursor;
   }
@@ -20548,21 +20619,27 @@ function docIdentity(meta) {
 }
 
 // ---- Waiting for new comments (GET /api/comments/wait, MCP wait_for_comments)
-// The doc's CommentsStore numbers each comment it creates (1, 2, 3, ...; key
-// 'commentSeq'), in the same transaction that writes it, so a cursor is exact:
-// no two comments share a number and none is numbered after it is visible.
-// A waiter is a request held open in this store, woken in memory by the
-// create that follows; nothing polls storage, KV or R2 while it waits.
-// Comments made before this shipped carry no number: a call without a cursor
-// gets every comment there is, numbered or not.
+// The doc's CommentsStore numbers each thing that asks for an answer (a new
+// comment, a reply, a thread reopened; 1, 2, 3, ...; key 'commentSeq') in the
+// same transaction that writes it, so a cursor is exact: no two share a
+// number and none is numbered after it is visible. A log entry is
+// [n, thread id, kind ('c' comment, 'r' reply, 'o' reopened), tag]; the tag
+// marks an agent's reply as `agent:<account>`, so a waiter never wakes for its
+// own account's agent. A waiter is a request held open in this store, woken
+// in memory by the write that follows; nothing polls storage, KV or R2 while
+// it waits. Comments made before this shipped carry no number: a call
+// without a cursor gets every thread there is, numbered or not.
 const COMMENT_WAIT_MAX_MS = 25_000;
 // After the first new comment, how long to wait for more to arrive with it.
 const COMMENT_WAIT_BATCH_MS = 3_000;
-// Numbers kept per doc. A waiter is at most one call behind, so this only
-// bounds the record; a cursor older than the oldest kept number gets them all.
+// Numbers kept per doc. A cursor older than the oldest kept number gets the
+// whole open backlog again, marked `gap`.
 const COMMENT_SEQ_LOG_MAX = 1000;
+// Held waits: per doc store, and per caller on one doc.
+const COMMENT_WAITERS_PER_DOC = 50;
+const COMMENT_WAITERS_PER_CALLER = 3;
 // slug -> Set of waiters. A slug's store is one instance in one isolate, so
-// the create and the waiter it wakes meet here.
+// the write and the waiter it wakes meet here.
 const COMMENT_WAITERS = new Map();
 
 function commentSeqRecord(raw) {
@@ -20571,10 +20648,30 @@ function commentSeqRecord(raw) {
   return { n, log };
 }
 
-function wakeCommentWaiters(slug) {
+// What a successful comment op adds to the log: [thread id, kind, tag] each.
+// `before`: the thread ids there were before a publish_merge.
+function commentSeqEntries(op, res, list, before) {
+  if (!op || !res || res.status !== 200) return [];
+  switch (op.kind) {
+    case 'create': return [[String(op.id), 'c', '']];
+    case 'reply': return res.body && res.body.thread_id ? [[String(res.body.thread_id), 'r', '']] : [];
+    case 'set_status': return op.resolved === false ? [[String(op.id), 'o', '']] : [];
+    case 'raw_events': {
+      const replies = (Array.isArray(op.events) ? op.events : []).filter((e) => e && e.kind === 'reply_added');
+      if (!replies.length) return [];
+      const agent = replies.some((e) => e.reply && e.reply.author && e.reply.author.kind === 'agent');
+      return [[String(op.id), 'r', agent && typeof op.actor_account === 'string' && op.actor_account ? `agent:${op.actor_account}` : '']];
+    }
+    case 'publish_merge': return list.filter((c) => c && typeof c.id === 'string' && !before.has(c.id)).map((c) => [c.id, 'c', '']);
+    default: return [];
+  }
+}
+
+// `entries`: [n, thread id, kind, tag] as logged.
+function wakeCommentWaiters(slug, entries) {
   const set = COMMENT_WAITERS.get(slug);
   if (!set) return;
-  for (const w of set) w.wake();
+  for (const w of set) if (entries.some((e) => !e[3] || !w.exclude.has(e[3]))) w.wake();
 }
 
 export class CommentsStore {
@@ -21203,7 +21300,9 @@ export class CommentsStore {
     if (u.pathname === '/wait') {
       const since = op && Number.isInteger(op.since) && op.since >= 0 ? op.since : null;
       const timeout = Math.min(COMMENT_WAIT_MAX_MS, Math.max(0, Number(op && op.timeout_ms) || 0));
-      return Response.json(await this._waitForComments(slug, since, timeout));
+      const exclude = new Set(Array.isArray(op && op.exclude) ? op.exclude.filter((x) => typeof x === 'string' && x) : []);
+      const who = op && typeof op.who === 'string' ? op.who : '';
+      return Response.json(await this._waitForComments(slug, since, timeout, { exclude, who }));
     }
 
     if (u.pathname === '/read' || u.pathname === '/count') {
@@ -21231,15 +21330,17 @@ export class CommentsStore {
     try {
       await this.state.storage.transaction(async (txn) => {
         const list = await this._loadInTxn(txn, slug);
+        const before = op && op.kind === 'publish_merge' ? new Set(list.map((c) => c && c.id)) : null;
         const res = applyCommentOp(list, op);
         if (res.status === 200) await txn.put('list', res.__wipe ? [] : list);
-        if (res.status === 200 && op && op.kind === 'create') {
+        const fresh = res.__wipe ? [] : commentSeqEntries(op, res, list, before);
+        if (fresh.length) {
           const seq = commentSeqRecord(await txn.get('commentSeq'));
-          seq.n += 1;
-          seq.log.push([seq.n, String(op.id)]);
+          const entries = fresh.map(([id, kind, tag]) => { seq.n += 1; return [seq.n, id, kind, tag]; });
+          seq.log.push(...entries);
           if (seq.log.length > COMMENT_SEQ_LOG_MAX) seq.log.splice(0, seq.log.length - COMMENT_SEQ_LOG_MAX);
           await txn.put('commentSeq', seq);
-          out = { res, created: true };
+          out = { res, entries };
           return;
         }
         out = { res };
@@ -21255,42 +21356,55 @@ export class CommentsStore {
       }
       throw e;
     }
-    if (out.created) wakeCommentWaiters(slug);
+    if (out.entries) wakeCommentWaiters(slug, out.entries);
     const { __wipe, ...clean } = out.res;
     return Response.json(clean);
   }
 
-  // What a waiter answers: the cursor, and the comments after `since`, read
-  // together so nothing lands between them. `since` null: every comment.
-  async _commentsAfter(since) {
+  // What a waiter answers: the cursor, and the threads with something new
+  // after `since` (id -> kinds), read together so nothing lands between them.
+  // `since` null, or older than the oldest kept number: every thread (`gap`
+  // says which). Entries tagged with one of `exclude` (the caller's own
+  // agent's replies) are passed over.
+  async _commentsAfter(slug, since, exclude = new Set()) {
     let answer;
     await this.state.storage.transaction(async (txn) => {
       const seq = commentSeqRecord(await txn.get('commentSeq'));
-      if (since === null) {
-        const list = await txn.get('list');
-        const ids = Array.isArray(list) ? list.map((c) => c && c.id).filter((id) => typeof id === 'string') : [];
-        answer = { n: seq.n, ids };
+      const gap = since !== null && seq.log.length > 0 && since < seq.log[0][0] - 1;
+      if (since === null || gap) {
+        const list = await this._loadInTxn(txn, slug);
+        const threads = {};
+        for (const c of list) if (c && typeof c.id === 'string') threads[c.id] = 'c';
+        answer = { n: seq.n, threads, gap };
         return;
       }
-      answer = { n: seq.n, ids: seq.log.filter(([n]) => n > since).map(([, id]) => id) };
+      const threads = {};
+      for (const [n, id, kind, tag] of seq.log) {
+        if (n <= since || (tag && exclude.has(tag))) continue;
+        threads[id] = (threads[id] || '') + (kind || 'c');
+      }
+      answer = { n: seq.n, threads, gap: false };
     });
     return answer;
   }
 
-  async _waitForComments(slug, since, timeoutMs) {
-    if (since === null || timeoutMs <= 0) {
-      const now = await this._commentsAfter(since);
-      return { cursor: now.n, ids: now.ids, timed_out: false };
-    }
-    // Listening before the first read: a create that commits between that
-    // read and the wait still wakes it.
-    const deadline = Date.now() + timeoutMs;
+  async _waitForComments(slug, since, timeoutMs, { exclude = new Set(), who = '' } = {}) {
+    const reply = (a, timedOut = false) => ({ cursor: a.n, threads: a.threads, gap: a.gap, timed_out: timedOut && !Object.keys(a.threads).length });
+    if (since === null || timeoutMs <= 0) return reply(await this._commentsAfter(slug, since, exclude));
     let set = COMMENT_WAITERS.get(slug);
     if (!set) { set = new Set(); COMMENT_WAITERS.set(slug, set); }
+    // Held waits are bounded per doc and per caller; past either, come back.
+    if (set.size >= COMMENT_WAITERS_PER_DOC || [...set].filter((w) => w.who === who).length >= COMMENT_WAITERS_PER_CALLER) {
+      if (!set.size) COMMENT_WAITERS.delete(slug);
+      return { busy: true };
+    }
+    // Listening before the first read: a write that commits between that read
+    // and the wait still wakes it.
+    const deadline = Date.now() + timeoutMs;
     let resolveWait;
     const waited = new Promise((resolve) => { resolveWait = resolve; });
     let timedOut = false;
-    const waiter = { woken: false, timer: null };
+    const waiter = { woken: false, timer: null, exclude, who };
     const done = () => {
       clearTimeout(waiter.timer);
       set.delete(waiter);
@@ -21306,19 +21420,18 @@ export class CommentsStore {
     waiter.wake = () => { if (waiter.woken) return; waiter.woken = true; if (waiter.armed) batch(); };
     set.add(waiter);
     let first;
-    try { first = await this._commentsAfter(since); } catch (e) { done(); throw e; }
+    try { first = await this._commentsAfter(slug, since, exclude); } catch (e) { done(); throw e; }
     // Something to answer already, or a cursor this doc never gave (ahead of
     // its count): answered at once, with the real cursor.
-    if (first.ids.length || since > first.n) {
+    if (Object.keys(first.threads).length || since > first.n) {
       done();
-      return { cursor: first.n, ids: first.ids, timed_out: false };
+      return reply(first);
     }
     waiter.armed = true;
     if (waiter.woken) batch();
     else waiter.timer = setTimeout(() => { timedOut = true; done(); }, Math.max(0, deadline - Date.now()));
     await waited;
-    const after = await this._commentsAfter(since);
-    return { cursor: after.n, ids: after.ids, timed_out: timedOut && !after.ids.length };
+    return reply(await this._commentsAfter(slug, since, exclude), timedOut);
   }
 }
 
@@ -27730,7 +27843,7 @@ const MCP_TOOLS = {
 
   wait_for_comments: {
     title: 'Wait for new comments',
-    description: `Returns open comments newer than since (as get_comments) and the next cursor; none after timeout_seconds (max 25). Loop it, passing the cursor, to keep receiving feedback. No since: the open ones now. ${MCP_UNTRUSTED_ACT}`,
+    description: `Returns threads with new comments or replies since the cursor (as get_comments; not your own replies) and the next cursor; none after timeout_seconds (max 25). Loop it, passing the cursor, to keep receiving feedback. ${MCP_UNTRUSTED_ACT}`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -32777,7 +32890,7 @@ const tdocHandlers = {
     // seconds (at most 25). The same read gate as GET /api/comments, and the
     // comments come from it, so a waiter sees nothing a reader could not.
     if (p === '/api/comments/wait' && method === 'GET') {
-      return handleCommentsWait(env, req, url, ctx);
+      return handleCommentsWait(env, req, url);
     }
 
     if (p === '/api/comments' && method === 'GET') {
@@ -32787,60 +32900,11 @@ const tdocHandlers = {
       const gate = await enforceDocAccess(env, req, slug, parseVersionParam(url) || 1);
       if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
       if (feedbackScopeDenied(gate.session, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
-      // The agent reading the comments is what bridge 2 waits for. A Bearer
-      // token names the agent; `version=all` is the shape only tdoc-pull asks
-      // for. Neither ever fails the read.
+      // A Bearer token names the agent; `version=all` is the shape only
+      // tdoc-pull asks for.
       const agentAuth = req.headers.get('authorization') ? await requireUploadAuth(req, env) : null;
-      if ((agentAuth && agentAuth.ok) || url.searchParams.get('version') === 'all') {
-        try {
-          await markAgentRead(env, slug);
-          if (agentAuth && agentAuth.ok && agentAuth.actor && agentAuth.actor.kind === 'hosted') {
-            await stampOnboardingFor(env, agentAuth.actor.account_id, 'comments_read');
-          }
-        } catch {}
-        // An agent that can write this doc and just pulled its comments has
-        // picked up whatever was handed to it. Nothing in the skill ever called
-        // /api/notify/ack, so every handoff sat at "waiting on agent" until the
-        // reply landed, and a person could not tell a working agent from a
-        // dead one (Julie, 2026-10-13). First ack wins, as on the ack route.
-        if (agentAuth && agentAuth.ok) {
-          try {
-            const writable = await requireDocWriteAccess(env, agentAuth.actor, slug);
-            if (writable.ok) {
-              // Which agent this pull is, when it says (X-Tdoc-Agent /
-              // X-Tdoc-Raft-Agent, checked against the account's own targets):
-              // only handoffs addressed to it flip to "on it".
-              const claimed = agentAuth.actor.kind === 'hosted'
-                ? await actingAgent(env, req, agentAuth.actor) : null;
-              await ackOpenHandoffs(env, slug, agentAuth.actor, claimed, MCP_INTERNAL_REQUESTS.has(req) ? 'mcp_poll' : 'pull');
-            }
-          } catch {}
-        }
-      }
-      // Read from the DO (source of truth; it lazily migrates from KV on first
-      // touch). Migrate-in-memory for this response only — never persist from a
-      // read (writes go through the DO).
-      const list = await readComments(env, slug);
-      ensureMigrated(list);
-      const V = parseVersionParam(url);
-      // `?version=all` returns every comment across all versions (lossless,
-      // used by tdoc-pull). A numeric/absent version returns that version's
-      // snapshot (used by the overlay viewing a specific /v/<n>).
-      const folded = V === 'all' ? historyList(list) : snapshotList(list, V);
-      // Conversation activity is live even on an older document. Keep its
-      // timestamps separate from the historical text, anchors and resolution.
-      const activity = new Map(list.map(c => [c.id, commentThreadActivity(c)]));
-      const live = folded.map(c => ({ ...c, thread_activity: activity.get(c.id) }));
-      // Handoff state is derived from the handoff records, not stored on the
-      // comment: the comment log stays a log of what people said, and "has
-      // this been handed over" is a fact about the handoff, not the comment.
-      const handoffs = await loadHandoffs(env, slug);
-      const decorated = withHandoffStatus(live, handoffs);
-      const viewerSession = gate.session || (agentAuth?.ok ? await sessionFromHostedBearer(env, req) : null);
-      const visible = redactCommentHandoffs(env, { ...gate, session: viewerSession, ownerToken: gate.ownerToken || agentAuth?.actor?.kind === 'admin' }, decorated, handoffs, list);
-      const linked = V !== 'all' && hostedRegistrationEnabled(env, url.origin)
-        ? await withCommentProfileLinks(env, visible) : visible;
-      return json(await redactCommentEmails(linked, await emailPrivacyFor(env, gate.session, slug, gate.meta)));
+      if ((agentAuth && agentAuth.ok) || url.searchParams.get('version') === 'all') await noteCommentsPulled(env, req, slug, agentAuth);
+      return json(await readCommentsForReader(env, req, url, slug, gate, agentAuth, parseVersionParam(url)));
     }
 
     // This person's "seen up to" per thread (GET reads it, POST raises it).
@@ -34356,6 +34420,9 @@ const tdocHandlers = {
       }
       const res = await mutateComments(env, slug, {
         kind: 'raw_events', slug, id: parent.id, events,
+        // Whose agent this is: a waiter of that account does not wake for it
+        // (GET /api/comments/wait).
+        ...(auth.actor && typeof auth.actor.account_id === 'string' ? { actor_account: auth.actor.account_id } : {}),
         // The same gate, re-run inside the serialized write: two follow-ups
         // sent at once both pass the check above, only one lands.
         gate: { agent_login: agent.login, text: replyText, next: { status: verdict, applied_in: verdict === 'applied' ? V : null, latest } },
