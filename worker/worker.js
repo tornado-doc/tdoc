@@ -16679,7 +16679,9 @@ async function inboxRowGate(env, session, rows, { now = Date.now(), maxReads = I
     const expired = [];
     for (const slug of slugs) {
       const hit = inboxReadableCache.get(`${who}\n${slug}`);
-      if (hit && hit.until > now && !((newest.get(slug) || 0) > (hit.checked || 0))) verdict.set(slug, hit);
+      // A row stamped in the same millisecond as the check may have been
+      // written after it (fast machines): newer-or-equal is stale.
+      if (hit && hit.until > now && !((newest.get(slug) || 0) >= (hit.checked || 0))) verdict.set(slug, hit);
       else (hit ? expired : never).push(slug);
     }
     const fresh = [...never, ...expired].slice(0, maxReads);
