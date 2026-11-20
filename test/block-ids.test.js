@@ -2,7 +2,12 @@
 // segmentation, the version-to-version matcher (insert above, light edit,
 // split, merge, duplicates, p -> li, moves), quote location, bounds.
 const assert = require('assert/strict');
-const parse5 = require('parse5');
+// The vendored parser the worker bundle inlines (server/html-parser/parse5.js).
+const parse5 = (() => {
+  const ctx = {};
+  require('vm').runInNewContext(require('fs').readFileSync(require('path').join(__dirname, '..', 'server', 'html-parser', 'parse5.js'), 'utf8') + ';this.TdocParse5 = TdocParse5;', ctx);
+  return ctx.TdocParse5;
+})();
 const B = require('../server/block-ids');
 
 const page = (body) => `<!doctype html><html><head><title>t</title><style>p{}</style></head><body>${body}</body></html>`;

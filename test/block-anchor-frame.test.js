@@ -11,7 +11,12 @@ const assert = require('assert/strict');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const parse5 = require('parse5');
+// The vendored parser the worker bundle inlines (server/html-parser/parse5.js).
+const parse5 = (() => {
+  const ctx = {};
+  require('vm').runInNewContext(require('fs').readFileSync(require('path').join(__dirname, '..', 'server', 'html-parser', 'parse5.js'), 'utf8') + ';this.TdocParse5 = TdocParse5;', ctx);
+  return ctx.TdocParse5;
+})();
 const { parseHtml } = require('./helpers/mini-dom');
 const B = require('../server/block-ids');
 
