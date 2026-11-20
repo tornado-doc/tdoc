@@ -406,14 +406,16 @@ info "scaffolded $DOC_DIR (v$VERSION_N)"
 # want a local server (or run where $SKILL_DIR isn't installed). Prints the
 # doc path instead of a URL and skips publish-independent serving entirely.
 # The publish step, shared by both modes. tdoc-publish needs no local server:
-# it reads the doc from $TDOC_DIR. The installed skill's copy, else the one
-# beside this script (a checkout, CI).
+# it reads the doc from $TDOC_DIR. The one beside this script first (a
+# checkout runs its own publisher, as it runs its own validator and baker),
+# else the installed skill's.
 PUBLISHED_URL=""
 run_publish() {
-  local publisher="$SKILL_DIR/bin/tdoc-publish"
-  [ -f "$publisher" ] || publisher="$(cd "$(dirname "$0")" && pwd)/tdoc-publish"
+  local publisher
+  publisher="$(cd "$(dirname "$0")" && pwd)/tdoc-publish"
+  [ -f "$publisher" ] || publisher="$SKILL_DIR/bin/tdoc-publish"
   if [ ! -f "$publisher" ]; then
-    err "--publish: tdoc-publish not found (looked in $SKILL_DIR/bin and beside tdoc-new)."
+    err "--publish: tdoc-publish not found (looked beside tdoc-new and in $SKILL_DIR/bin)."
     return 1
   fi
   info "publishing to tdoc..."

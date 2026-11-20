@@ -251,10 +251,51 @@ const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p
         await composer.locator('button.submit').click({ force: true }).catch(() => {});
         await page.waitForTimeout(400);
         assert.equal(ctx.pages().length, now, 'a second tdoc window');
+        // The window closed before connecting: nothing posted, the composer
+        // stays; closing it now (×) keeps the words for next time.
+        const heldDraft = () => page.evaluate(() => Object.keys(sessionStorage).filter((k) => k.endsWith(':draft')).length);
+        assert.equal(await heldDraft(), 1, 'the signed-out post was not held');
+        for (const p of ctx.pages()) if (p !== page) await p.close().catch(() => {});
+        await page.waitForFunction(() => {
+          const root = document.querySelector('#tdoc-feedback-root')?.shadowRoot;
+          const b = root && root.querySelector('.tdoc-popup button.submit');
+          return b && !b.disabled;
+        }, null, { timeout: 5000 });
+        await page.waitForTimeout(150);
+        await composer.locator('button.x[aria-label="Close"]').click();
+        await composer.waitFor({ state: 'detached' });
+        await pick();
+        await composer.locator('textarea').waitFor({ timeout: 5000 });
+        assert.equal(await composer.locator('textarea').inputValue(), 'CTA label is vague', 'a failed Post lost the words on close');
+        // Esc abandons the held signed-out post too (as × does): connecting
+        // later must not post words the person walked away from.
+        await composer.locator('button.submit').click();
+        await page.waitForTimeout(400);
+        assert.equal(await heldDraft(), 1, 'Post did not hold the words');
+        await page.keyboard.press('Escape');
+        await composer.waitFor({ state: 'detached' });
+        assert.equal(await heldDraft(), 0, 'Esc left the signed-out post held, to post on the next connect');
         assert.deepEqual(page.errors, []);
         await ctx.close();
       });
     }
+
+    await t('landing phone 320px: the comment button in the bar covers none of the bar\'s own items', async () => {
+      const { ctx, page } = await openLanding({ ...PHONE, viewport: { width: 320, height: 640 } });
+      const fab = await page.locator('.tdoc-fab').boundingBox();
+      const items = await page.locator('.tdoc-bar a:visible, .tdoc-bar button:visible').evaluateAll((els) => els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, w: r.width, h: r.height, what: el.className || el.tagName };
+      }).filter((r) => r.w && r.h));
+      assert.ok(items.length >= 2, JSON.stringify(items));
+      for (const r of items) {
+        const overlaps = fab.x < r.x + r.w && fab.x + fab.width > r.x && fab.y < r.y + r.h && fab.y + fab.height > r.y;
+        assert.ok(!overlaps, `the comment button covers ${r.what}`);
+      }
+      assert.ok(fab.x + fab.width <= 320, 'off screen');
+      await shot(page, 'landing-phone-320');
+      await ctx.close();
+    });
   } finally {
     await browser.close();
     server.close();

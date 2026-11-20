@@ -1623,7 +1623,8 @@ ${uiCss}
       linkFor: (c) => (slug && c && c.id ? `${base}/d/${encodeURIComponent(slug)}?comment=${encodeURIComponent(c.id)}` : ''),
       say,
       markers: { hidden: markersHidden, toggle: () => setMarkersHidden((h) => !h) },
-      keysEnabled: shown && (panelOpen || Boolean(openId)),
+      // Not while the composer is open (as on the doc page): its words are typing.
+      keysEnabled: shown && (panelOpen || Boolean(openId)) && !selected,
     });
     const teamMember = Boolean(surface?.teamMember);
     // Who may send to an agent: the server's rule, shared with the doc page
@@ -1996,14 +1997,16 @@ ${uiCss}
     // progress → composer → picking → card → list. Window capture: a host
     // modal underneath must not close on the same press. Closing the
     // composer ends the pick too, as on the doc page: Esc closes it (the
-    // words are kept: comment-composer.jsx closedDrafts), not back to
-    // picking, and the next Esc closes what is behind it.
+    // words are kept in the composer: comment-composer.jsx closedDrafts),
+    // not back to picking, and the next Esc closes what is behind it. Like
+    // ×, it abandons the held signed-out post (writeDraft), so connecting
+    // later never posts words the person walked away from.
     useEscapeLadder([
       { active: () => Boolean(gestureRef.current && gestureRef.current.pressing()), close: () => {
         gestureRef.current.cancel();
         setDrag(null); setHovered(null);
       } },
-      { active: Boolean(selected), close: () => { setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); setHovered(null); } },
+      { active: Boolean(selected), close: () => { writeDraft(null); setSelected(null); setAreaSel(null); setQuoteSel(null); setPageSel(false); setPicking(false); setHovered(null); } },
       { active: Boolean(picking || reanchorId), close: () => { setPicking(false); setReanchorId(null); setHovered(null); } },
       { active: Boolean(openId), close: () => setOpenId(null) },
       { active: panelOpen, close: () => setPanelOpen(false) },
@@ -2263,7 +2266,9 @@ ${uiCss}
           /* The shared composer adds the document shell's 48px bar. Feedback
              already has viewport coordinates, so cancel that offset here. */
           <CommentComposer
-            selection={{ kind: 'element', label: pageSel ? 'This page' : frameSel ? frameLabel(frameSel.anchor) : quoteSel ? quoteLabel(quoteSel.quote) : areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)), rect: {
+            selection={{ kind: 'element', label: pageSel ? 'This page' : frameSel ? frameLabel(frameSel.anchor) : quoteSel ? quoteLabel(quoteSel.quote) : areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)),
+              draftKey: `${canonical()}|${pageSel ? 'page' : frameSel ? `frame:${JSON.stringify(frameSel.anchor || {}).slice(0, 300)}` : quoteSel ? `quote:${String(quoteSel.quote?.text || '').slice(0, 200)}` : areaBox ? `area:${Math.round(areaBox.left)},${Math.round(areaBox.top)},${Math.round(areaBox.width)},${Math.round(areaBox.height)}` : `el:${contextFor(selected).selector || ''}`}`,
+              rect: {
               top: composerRect.top - TOP_BAR_HEIGHT,
               bottom: composerRect.bottom - TOP_BAR_HEIGHT,
               left: Math.min(composerRect.left, Math.max(8, innerWidth - rightInset - COMPOSER_WIDTH - 8)),
@@ -2319,7 +2324,9 @@ ${uiCss}
           />
         ) : null}
 
-        {notice ? (
+        {/* An open composer that already says "Sign in to post" is the one
+            explanation: the connect notice waits until it closes. */}
+        {notice && !(selected && signInToPost && !notice.reconnect) ? (
           <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
             <div className="head"><span className="h">{notice.reconnect ? 'Reconnect tdoc' : notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" aria-label="Close" onClick={() => setNotice(null)}><X size={14} aria-hidden="true" /></button></div>
             <p>{notice.error}</p>

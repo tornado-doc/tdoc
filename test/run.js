@@ -21,6 +21,7 @@ const OFFLINE = [
   'frame-part.test.js', // what the doc frame says it picked is rebuilt: known keys, one line, finite numbers, under the anchor size cap
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
   'selection-bundle.test.js',  // the shared selection modules bundle into the doc frame without a bundler; container keys, adapters, the pick gesture
+  'send-to-agent-visibility.test.js', // @agent rendered: hidden only for who may never send (SEND_TO_AGENT_WHO); disabled with its reason for a permitted person (no team daemon, admin only, no team agent, not a writer, Finding your agents…); connect link
   'copy-for-agent.test.js',    // Copy for agent: thread Markdown (context, missing pieces, escaping, http(s) links) and the C / H key guard (never in fields, menus, with modifiers)
   'comment-query.test.js',     // one comment query on every surface: Open by default, counts, deleted rule, waiting on you, search, sort, groupBy
   'thread-seen-api.test.js',   // server read state: authorized like reading the comments, no cross-doc reads, no thread-id leaks

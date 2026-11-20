@@ -192,7 +192,7 @@ async function touchSelect(page, phrase) {
       // (tdoc AI): the control says Ask, as submitting does -- never "Send to
       // agent". It names no agent (no default here), so its click is the
       // bare @ to pick from, not somebody it did not name.
-      if (labels.join('|') !== 'Ask agent|Comment') throw new Error(`popover buttons: ${labels.join('|')}`);
+      if (labels.join('|') !== 'Ask agent|Post') throw new Error(`popover buttons: ${labels.join('|')}`);
       const toggle0 = pop.locator('.tdoc-composer-foot-actions button').first();
       const tip = await toggle0.getAttribute('title');
       if (!/^Ask /.test(tip || '') || /Send/.test(tip || '')) throw new Error(`toggle tooltip: ${tip}`);
@@ -343,7 +343,7 @@ async function touchSelect(page, phrase) {
       const pop = page.locator('.tdoc-popup');
       await pop.waitFor();
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
-      if (labels.join('|') !== '@agent|Comment') throw new Error(`owner popover buttons: ${labels.join('|')}`);
+      if (labels.join('|') !== '@agent|Post') throw new Error(`owner popover buttons: ${labels.join('|')}`);
       await pop.locator('textarea').fill('Tighten this');
       await pop.locator('.tdoc-composer-agent').click();
       await pop.getByText('No agent is connected yet.').waitFor();

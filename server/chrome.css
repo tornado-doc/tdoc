@@ -64,8 +64,8 @@
   .tdoc-bar .tdoc-gh-stars svg { display: block; }
   /* The landing's "Feedback for your site": a quiet text link like the
      GitHub entry beside it. A phone has it in ⋯ instead (no room for words). */
-  .tdoc-bar .tdoc-landing-feedback-link { display: inline-flex; align-items: center; height: 32px; padding: 0 9px; border-radius: 8px; color: #555; font: 600 12.5px/1 -apple-system, system-ui, sans-serif; text-decoration: none; white-space: nowrap; }
-  .tdoc-bar .tdoc-landing-feedback-link:hover { background: #f0f1f4; color: #1a1a1a; }
+  .tdoc-bar .tdoc-landing-feedback-link { display: inline-flex; align-items: center; height: 32px; padding: 0 9px; border-radius: 8px; color: var(--td-muted); font: 600 12.5px/1 -apple-system, system-ui, sans-serif; text-decoration: none; white-space: nowrap; }
+  .tdoc-bar .tdoc-landing-feedback-link:hover { background: var(--td-surface); color: var(--td-ink); }
   @media (max-width: 700px) { .tdoc-bar .tdoc-landing-feedback-link { display: none; } }
 
   /* Left cluster: the version chip and the document title. */
@@ -922,10 +922,10 @@
   body.tdoc-narrow[data-tdoc-suggest-bar] .tdoc-fab { bottom: calc(var(--tdoc-suggest-bar-h, 110px) + 12px); }
   /* The landing on a phone: its full-width CTAs (Make your doc, Add to your
      site, ...) scroll under the bottom corner, so the comment button sits in
-     the top bar instead, after the logo, where nothing of the page goes (after
+     the top bar instead, after the logo (its 44px phone target), where nothing of the page goes (after
      the suggest-bar rule, which would pull it back down).
      Same button, smaller; only its place changes (AGENTS.md). */
-  body.tdoc-narrow[data-tdoc-landing] .tdoc-fab { top: 8px; bottom: auto; left: 52px; right: auto; padding: 0 12px; height: 32px; z-index: 1000000; box-shadow: none; }
+  body.tdoc-narrow[data-tdoc-landing] .tdoc-fab { top: 8px; bottom: auto; left: 60px; right: auto; padding: 0 12px; height: 32px; z-index: 1000000; box-shadow: none; }
   body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid var(--td-ground, #fff); border-radius: 50%; background: var(--td-accent, #1652f0); box-sizing: border-box; }
   body.tdoc-narrow .tdoc-drawer-tabs { display: flex; flex: none; justify-content: center; margin: 0 0 10px; }
   body.tdoc-narrow .tdoc-drawer-list, body.tdoc-narrow .tdoc-drawer-ask { flex: 1; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }

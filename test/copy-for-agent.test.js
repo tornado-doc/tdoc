@@ -1,4 +1,4 @@
-// Copy for agent (flag copyForAgent): the Markdown a thread becomes
+// Copy for agent (on for everyone since 2026-11-20): the Markdown a thread becomes
 // (shell/src/comments/core/agent-markdown.js) and the single-key guard
 // (shell/src/comments/panel/keyboard.js commentShortcutFor). The formatter
 // keeps every piece of context it is given, leaves out what is missing
@@ -214,6 +214,18 @@ const key = (k, target, extra = {}) => ({ key: k, target, composedPath: () => [t
     for (const extra of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { isComposing: true }, { defaultPrevented: true }]) {
       assert.equal(kb.commentShortcutFor(key('c', plain, extra)), null, `C taken with ${JSON.stringify(extra)}`);
     }
+  });
+
+  t('a custom element with a closed shadow root (its field unseen) is not ours; an open one is looked into', () => {
+    const closed = el('app-editor', {}, body);
+    assert.equal(kb.isOpaqueHost(closed), true);
+    assert.equal(kb.commentShortcutFor(key('c', closed)), null, 'C taken from a closed web component');
+    assert.equal(kb.commentShortcutFor({ key: 'h', target: closed, composedPath: () => [closed, body] }), null, 'H taken from a closed web component');
+    const open = el('app-card', {}, body);
+    open.shadowRoot = {};
+    assert.equal(kb.isOpaqueHost(open), false, 'an open shadow root is seen into');
+    assert.equal(kb.commentShortcutFor(key('c', open)), 'copy');
+    assert.equal(kb.isOpaqueHost(el('div', {}, body)), false, 'a plain element');
   });
 
   t('the innermost target wins: a field inside a shadow root (the widget) is a field', () => {

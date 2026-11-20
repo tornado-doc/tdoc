@@ -539,7 +539,7 @@ async function touchSelect(page, phrase) {
       await dragSelect(page, 'Humans and agents collaborate');
       const pop = page.locator('.tdoc-popup');
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
-      if (labels.join('|') !== '@agent|Comment') throw new Error(`composer buttons: ${labels.join('|')}`);
+      if (labels.join('|') !== '@agent|Post') throw new Error(`composer buttons: ${labels.join('|')}`);
       // Typing @ lists the demo agents above people.
       await pop.locator('textarea').pressSequentially('Make the headline shorter @');
       const rows = (await page.locator('.tdoc-mention-option').allTextContents()).map((x) => x.trim());

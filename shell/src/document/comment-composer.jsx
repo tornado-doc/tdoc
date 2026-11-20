@@ -71,9 +71,14 @@ export function composerPosition(rect, viewport) {
 // what the composer is about; a few at most.
 const closedDrafts = new Map();
 const CLOSED_DRAFTS_MAX = 20;
+// A surface that knows more (the widget: the page and the element's
+// selector) passes selection.draftKey, so two look-alike elements or two
+// pages of one app never share words.
 export function composerDraftKey(selection) {
   const s = selection || {};
-  return `${s.kind || ''}|${s.label || ''}|${String(s.text || '').slice(0, 200)}`;
+  const page = typeof location !== 'undefined' ? `${location.pathname}${location.search}${location.hash}` : '';
+  if (s.draftKey) return `key|${s.draftKey}`;
+  return `${page}|${s.kind || ''}|${s.label || ''}|${String(s.text || '').slice(0, 200)}`;
 }
 export function rememberClosedDraft(key, text) {
   closedDrafts.delete(key);
@@ -121,8 +126,13 @@ export function CommentComposer({
   const sent = useRef(false);
   const latest = useRef({ text, draftKey });
   latest.current = { text, draftKey };
-  useEffect(() => () => {
-    if (!sent.current) rememberClosedDraft(latest.current.draftKey, latest.current.text);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (!sent.current) rememberClosedDraft(latest.current.draftKey, latest.current.text);
+    };
   }, []);
   const changeText = (next) => { sent.current = false; setText(next); };
   const [connectOpen, setConnectOpen] = useState(false);
@@ -198,6 +208,10 @@ export function CommentComposer({
       });
     } finally {
       setBusy(false);
+      // Still open a moment after the submit settled: it did not post (a
+      // refusal, a cancelled sign-in), so closing now keeps the words. A
+      // post that went through has unmounted the composer by then.
+      setTimeout(() => { if (mounted.current) sent.current = false; }, 50);
     }
   };
 
