@@ -158,6 +158,30 @@ async function startServer(worker, env) {
       await ctx.close();
     });
 
+    await t('a bad range in the address fails at once with a reason, and loads no version', async () => {
+      const ctx = await context();
+      const p = await ctx.newPage();
+      for (const [query, says] of [
+        ['from=abc', /not a number/],
+        ['to=1.5', /not a number/],
+        ['to=99', /There is no v99 of this document\. The latest is v2\./],
+        ['to=0', /There is no v0/],
+        ['from=2&to=1', /from an earlier version to a later one/],
+        ['from=2', /from an earlier version to a later one/],
+      ]) {
+        const frames = [];
+        p.on('request', (r) => { if (/\/frame\?tdoc_compare=1/.test(r.url())) frames.push(r.url()); });
+        await goto(p, `/d/${slug}?compare=1&${query}`);
+        const alert = p.getByRole('main', { name: 'Version changes' }).getByRole('alert');
+        await alert.waitFor({ timeout: 3000 });
+        assert.match(await alert.innerText(), says, query);
+        assert.equal(await p.locator('.tdoc-version-diff iframe').count(), 0, `${query}: no frame`);
+        assert.equal(frames.length, 0, `${query}: no frame requested`);
+        p.removeAllListeners('request');
+      }
+      await ctx.close();
+    });
+
     await t('phone: ⋯ → See what changed opens the same compare', async () => {
       const ctx = await context({ phone: true });
       const p = await ctx.newPage();

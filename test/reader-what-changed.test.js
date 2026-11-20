@@ -112,6 +112,77 @@ const page = (line) => `<!doctype html><html><head><title>Plan</title></head><bo
     assert.equal(asked.replies[0].applied_in, null);
   });
 
+  const refused = async (slug, auth, label) => {
+    for (const n of [1, 2]) {
+      const f = await call(`/d/${slug}/v/${n}/frame?tdoc_compare=1`, { ...auth, headers: { 'Sec-Fetch-Dest': 'iframe' } });
+      assert.notEqual(f.status, 200, `${label}: frame v${n} ${f.status}`);
+      assert.doesNotMatch(f.text, /7 days|14 days/, `${label}: frame v${n} leaked`);
+    }
+    const pageRes = await call(`/d/${slug}/v/2`, auth);
+    assert.notEqual(pageRes.status, 200, `${label}: page ${pageRes.status}`);
+    assert.doesNotMatch(pageRes.text, /changesVisible|14 days/, `${label}: page leaked`);
+  };
+  const allowed = async (slug, auth, label) => {
+    assert.match((await call(`/d/${slug}/v/2`, auth)).text, /"changesVisible":true/, `${label}: boot`);
+    for (const n of [1, 2]) assert.equal((await frame(slug, n, auth.cookie)).status, 200, `${label}: frame v${n}`);
+  };
+
+  await t('a reader taken off a private doc\'s invite list is refused both frames from then on', async () => {
+    await allowed(privateDoc, { cookie: reader.cookie }, 'invited');
+    const r = await call('/api/doc/access', { method: 'PATCH', token: owner.token, body: { slug: privateDoc, access: { allowed_users: [] } } });
+    assert.equal(r.status, 200, r.text);
+    await refused(privateDoc, { cookie: reader.cookie }, 'removed');
+  });
+
+  await t('a private team doc: a member and an invited guest may see what changed; an outsider gets nothing', async () => {
+    const slug = 'reader-changes-team';
+    await publish(slug, { visibility: 'private', history_visibility: 'owner', commenting: 'invited', allowed_users: ['guest'] });
+    const member = await issue(worker, env, 'member');
+    const guest = await issue(worker, env, 'guest');
+    const outsider = await issue(worker, env, 'outsider');
+    const O = { Origin: 'https://tdoc.dev' };
+    const team = (await call('/api/teams', { method: 'POST', cookie: owner.cookie, headers: O, body: { name: 'Pricing' } })).body.team;
+    const joined = await call('/api/team/join', { method: 'POST', cookie: member.cookie, body: { token: team.invite_url.split('/').pop() } });
+    assert.ok(joined.status < 300, joined.text);
+    const moved = await call('/api/team/move', { method: 'POST', cookie: owner.cookie, headers: O, body: { team: team.id, slugs: [slug] } });
+    assert.ok(moved.status < 300, moved.text);
+    await allowed(slug, { cookie: member.cookie }, 'member');
+    await allowed(slug, { cookie: guest.cookie }, 'guest');
+    // The guest sees what changed, not the history; the member lists it.
+    assert.equal((await call(`/api/docs/${slug}/history`, { cookie: guest.cookie })).status, 403);
+    assert.equal((await call(`/api/docs/${slug}/history`, { cookie: member.cookie })).status, 200);
+    await refused(slug, { cookie: outsider.cookie }, 'outsider');
+    await refused(slug, {}, 'signed out');
+  });
+
+  await t('"Require sign-in to view": a signed-in reader may; a signed-out visitor and a feedback-widget token may not', async () => {
+    const slug = 'reader-changes-signin';
+    await publish(slug, { visibility: 'unlisted', signin_required: true, history_visibility: 'owner', commenting: 'signed_in', allowed_users: [] });
+    assert.equal(JSON.parse(env.META.map.get(`meta:${slug}`)).access.signin_required, true);
+    await allowed(slug, { cookie: reader.cookie }, 'signed in');
+    await refused(slug, {}, 'signed out');
+    const space = await call('/api/feedback/connect', { method: 'POST', cookie: reader.cookie, headers: { Origin: 'https://tdoc.dev' }, body: { origin: 'https://app.example.com' } });
+    assert.ok(space.body && space.body.token, space.text);
+    await refused(slug, { token: space.body.token }, 'feedback token');
+    // Nor a private doc the token's account is not invited to.
+    await refused(privateDoc, { token: space.body.token }, 'feedback token, private');
+  });
+
+  await t('a feedback space takes no versions: changesVisible is false on its doc page', async () => {
+    const space = await call('/api/feedback/spaces', { method: 'POST', token: owner.token, body: { origins: ['https://other.example.com'] } });
+    assert.ok(space.body && space.body.slug, space.text);
+    const html = (await call(`/d/${space.body.slug}/v/1?doc=1`, { cookie: owner.cookie })).text;
+    assert.match(html, /"changesVisible":false/, 'the doc page boot, not the space page');
+    // canSeeVersionChanges itself: either feedback mark is enough.
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+    const body = src.slice(src.indexOf('function canSeeVersionChanges'), src.indexOf('\n}\n', src.indexOf('function canSeeVersionChanges')) + 2);
+    const canSee = new Function(`${body}; return canSeeVersionChanges;`)();
+    assert.equal(canSee({ ok: true, meta: { created_from: 'feedback' } }), false);
+    assert.equal(canSee({ ok: true, meta: { feedback: { origin: 'https://x' } } }), false);
+    assert.equal(canSee({ ok: true, meta: {} }), true);
+    assert.equal(canSee({ ok: false, meta: {} }), false);
+  });
+
   console.log(failed ? `\n${failed} failed` : '\nall passed');
   process.exit(failed ? 1 : 0);
 })();

@@ -233,7 +233,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // the version on screen against the one before it (VersionDiffView).
   const compareRangeFromUrl = () => {
     const query = new URLSearchParams(location.search);
-    return { from: Number(query.get('from')) || null, to: Number(query.get('to')) || null };
+    // Kept as typed: VersionDiffView checks them (whole numbers in range).
+    return { from: query.get('from'), to: query.get('to') };
   };
   const [compareRange, setCompareRange] = useState(compareRangeFromUrl);
   const changeComparison = (next, range = null) => {

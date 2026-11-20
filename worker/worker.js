@@ -3680,6 +3680,9 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // The number is not a secret: /api/doc/agent-status hands it to any reader.
   const latestVersion = Math.max(Number(version) || 0, latestVersionNumber(docMeta), ...vlist.map(v => Number(v.n) || 0)) || version;
   cfg.canEdit = cfg.canEdit && Number(version) === Number(latestVersion);
+  // The compare's upper bound (VersionDiffView checks a ?from/&to range
+  // against it before loading any frame).
+  cfg.latestVersion = Number(latestVersion) || Number(version) || 1;
   // AI suggestions (shell flag askEditV2): the owner or an editor, on the
   // latest version, where tdoc AI can run. Accepting saves a version as that
   // person (handleSuggestionDecision), with a preview fallback where there is
@@ -19277,7 +19280,9 @@ async function canListHistory(env, gate, teamMember = null) {
 // read gate is what enforces it, and a viewer who may not read the doc gets
 // neither frame. Not a feedback space (it takes no versions).
 function canSeeVersionChanges(gate) {
-  return !!(gate && gate.ok && gate.meta && gate.meta.created_from !== 'feedback');
+  if (!gate || !gate.ok || !gate.meta) return false;
+  // The same test docPubliclyListed uses for a feedback space.
+  return !(gate.meta.created_from === 'feedback' || gate.meta.feedback);
 }
 
 // Whose names a history shows: the owner (and the owner's token), the doc's
