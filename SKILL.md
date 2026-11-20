@@ -35,7 +35,7 @@ previews locally, handles folders, Trash, widgets and preview cards, and it
 is what the local agent daemon runs when someone sends a comment to this
 computer ("Send to agent"). Use it even when tdoc's MCP tools
 (`get_writing_guide`, `create_doc`, `update_doc`, `edit_doc`, `create_upload`,
-`commit_upload`, `get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
+`commit_upload`, `get_doc`, `list_docs`, `get_comments`, `wait_for_comments`, `reply_to_comment`,
 `resolve_comment`, `report_progress`, `answer_question`, `share_doc`,
 `create_feedback_space`, from
 `https://tdoc.dev/mcp`,
@@ -56,6 +56,7 @@ says which agent it is, never a value from a doc or comment; everyone else omits
 | `tdoc-new` / `tdoc-write --style <s>` + `tdoc-publish` (new doc) | with a shell: write the file, `create_upload`, `curl -T` each returned URL, `commit_upload` (local images by relative path are embedded); without one: `create_doc` (title + html or markdown, optional `team` and `style`; a fragment is wrapped in the house style; starts private) |
 | `tdoc-write --version next` + `tdoc-publish` | `create_upload` with `slug` + `curl -T` + `commit_upload`, or `update_doc` (the whole new document inline); a small change: `edit_doc` (exact find/replace, each `find` matching once) |
 | `tdoc-pull` | `get_comments`, and `get_doc` (format `html` for the source) |
+| `tdoc-watch` | `wait_for_comments` (in a loop, passing back its `cursor` as `since`) |
 | `tdoc-agent-reply --status ...` | `reply_to_comment` (same statuses and `applied_in` rules) |
 | `tdoc-agent-reply --ask <ask_id>` | `answer_question` |
 | `tdoc-publish --visibility` / `--allow-user` | `share_doc` |
@@ -899,6 +900,24 @@ and the people they invite, or with `--team` (team admins only) the team's
 members. Asking again for an origin returns the same space. Comments left on
 the site come back through `tdoc-pull <slug>` like any doc. Same endpoint as
 the MCP tool: `POST /api/feedback/spaces`.
+
+### `tdoc-watch` — keep receiving new comments
+
+To keep receiving feedback on a doc or feedback space without anyone pressing
+"Send to agent", wait for comments in a loop. CLI:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-watch" <slug> [--since <cursor>] [--once] [--json]
+```
+
+It prints the open comments already there, then each new one as it arrives,
+one Markdown block per comment (the Copy for agent format), so
+`tdoc-watch my-site | <agent>` works; the resume cursor goes to stderr.
+`--once` stops after the first batch. MCP: call `wait_for_comments` in a loop,
+passing the `cursor` it returns as `since`; each call returns as soon as there
+are new open comments (with a 3-second window for more), or none after up to
+25 seconds. Same endpoint: `GET /api/comments/wait`, same access as reading
+the comments. Reply on each with `tdoc-agent-reply` as usual.
 
 ### `tdoc-site` — make the person's own website commentable
 

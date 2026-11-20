@@ -113,6 +113,7 @@ const OFFLINE = [
   'site-space.test.js',         // SDK: a site's own comment space, origins + invited/public
   'feedback-space-mcp.test.js', // create_feedback_space: agent-made site space, team-admin rule, dedupe; site binding vs Share race
   'avatar-route.test.js',      // /avatar: widget faces from the tdoc origin; allowlist, no open proxy, 404 fallback, CORP; widget URLs
+  'wait-for-comments.test.js', // wait_for_comments / GET /api/comments/wait / tdoc-watch: read gate as get_comments, returns on a new comment, timeout cursor, batching, no dupes or misses
   'cli-mcp-parity.test.js',     // AGENTS.md: every MCP tool maps to an HTTP route and a CLI command (or a stated exception)
 
   'pull-acks-handoff.test.js',  // agent pulling comments marks only ITS handoffs received

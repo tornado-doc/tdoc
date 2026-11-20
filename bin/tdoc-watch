@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+// tdoc-watch — keep receiving new comments on a doc or feedback space, as they
+// are left, without anyone pressing "Send to agent".
+//
+// Prints the open comments already there, then each new one as it arrives,
+// one Markdown block per comment (the Copy for agent format), so
+// `tdoc-watch my-site | agent` works. Loops GET /api/comments/wait, the same
+// endpoint as the MCP tool wait_for_comments; the cursor to resume from goes
+// to stderr after each batch. Uses the hosted Bearer in ~/.tdoc/published.json.
+//
+// Usage:
+//   tdoc-watch <slug|doc url> [--since <cursor>] [--once] [--json]
+//     --since <cursor>  only comments after this cursor (from a previous run)
+//     --once            stop after the first batch (or the first empty wait)
+//     --json            one JSON line per comment instead of Markdown
+//   tdoc-watch --help
+'use strict';
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+function usage(out = process.stdout) {
+  const src = fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 16);
+  out.write(src.map((l) => l.replace(/^\/\/ ?/, '')).join('\n') + '\n');
+}
+
+const args = process.argv.slice(2);
+let slugArg = '';
+let since = '';
+let once = false;
+let asJson = false;
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === '-h' || a === '--help') { usage(); process.exit(0); }
+  else if (a === '--since') { since = args[++i] || ''; if (!/^\d+$/.test(since)) { console.error('--since needs the cursor a previous run printed'); process.exit(2); } }
+  else if (a.startsWith('--since=')) { since = a.slice(8); if (!/^\d+$/.test(since)) { console.error('--since needs the cursor a previous run printed'); process.exit(2); } }
+  else if (a === '--once') once = true;
+  else if (a === '--json') asJson = true;
+  else if (!a.startsWith('-') && !slugArg) slugArg = a;
+  else { console.error(`unknown arg: ${a}`); usage(process.stderr); process.exit(2); }
+}
+if (!slugArg) { usage(process.stderr); process.exit(2); }
+const m = slugArg.match(/\/d\/([a-z0-9][a-z0-9-]*)/) || slugArg.match(/^([a-z0-9][a-z0-9-]*)$/);
+if (!m) { console.error(`[tdoc] not a slug or doc URL: ${slugArg}`); process.exit(2); }
+const slug = m[1];
+
+let config = {};
+try { config = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.tdoc', 'published.json'), 'utf8')); } catch {}
+const token = config.upload_token;
+const base = String(config.base || '').replace(/\/+$/, '');
+if (!token || !base) {
+  console.error("[tdoc] not signed in to hosted tdoc — run 'tdoc-publish --signin-only' first.");
+  process.exit(1);
+}
+
+// What the server says is shown, never interpreted: control characters
+// (terminal escapes) are dropped first.
+const clean = (v) => String(v == null ? '' : v).replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '');
+const scrub = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? v.map(scrub)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, scrub(x)])) : v);
+
+async function formatter() {
+  // The Copy for agent formatter (#1088), one for every surface: a pure ES
+  // module, loaded from source so this works on Node 18 without a build.
+  const file = path.join(__dirname, '..', 'shell', 'src', 'comments', 'core', 'agent-markdown.js');
+  const src = fs.readFileSync(file, 'utf8');
+  return import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+(async () => {
+  const md = asJson ? null : await formatter();
+  let failures = 0;
+  let stop = false;
+  process.on('SIGINT', () => { stop = true; process.exit(0); });
+  process.stdout.on('error', () => process.exit(0)); // the reader went away
+  while (!stop) {
+    const q = new URLSearchParams({ slug, timeout: '25' });
+    if (since) q.set('since', since);
+    let res, body = null;
+    try {
+      res = await fetch(`${base}/api/comments/wait?${q}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(45_000),
+      });
+      try { body = await res.json(); } catch {}
+    } catch (e) {
+      // A dropped connection: back off and wait again from the same cursor.
+      failures += 1;
+      if (failures > 5) { console.error(`[tdoc] no response from ${base}: ${clean(e && e.message)}`); process.exit(1); }
+      await sleep(Math.min(30_000, 1000 * 2 ** failures));
+      continue;
+    }
+    if (!res.ok || !body || !Array.isArray(body.comments)) {
+      const error = clean(body && body.error);
+      if (res.status >= 500 && failures < 5) { failures += 1; await sleep(1000 * 2 ** failures); continue; }
+      if (error === 'sign_in_required' || error === 'unauthorized' || res.status === 401) console.error("[tdoc] the saved token was refused — run 'tdoc-publish --signin-only' again.");
+      else if (res.status === 403) console.error(`[tdoc] this account cannot read the comments on ${slug}${body && body.message ? `: ${clean(body.message)}` : '.'}`);
+      else if (res.status === 404) console.error(`[tdoc] no doc or feedback space ${slug} (or it is in Trash).`);
+      else console.error(`[tdoc] ${clean(body && body.message) || error || `HTTP ${res.status}`}`);
+      process.exit(1);
+    }
+    failures = 0;
+    since = /^\d+$/.test(String(body.cursor)) ? String(body.cursor) : since;
+    const comments = scrub(body.comments);
+    for (const c of comments) {
+      if (asJson) { process.stdout.write(`${JSON.stringify({ slug, ...c })}\n`); continue; }
+      // One block per comment, exactly as Copy for agent writes one thread.
+      process.stdout.write(`${md.commentsMarkdown([c], {
+        title: slug, pageUrl: `${base}/d/${slug}`, scope: 'new',
+        linkFor: (x) => `${base}/d/${encodeURIComponent(slug)}?comment=${encodeURIComponent(x.id)}`,
+      })}\n`);
+    }
+    if (comments.length) console.error(`[tdoc] ${comments.length} comment${comments.length === 1 ? '' : 's'}; resume with --since ${since}`);
+    if (once && (comments.length || body.timed_out)) break;
+  }
+})().catch((e) => { console.error(`[tdoc] ${clean(e && e.message)}`); process.exit(1); });

@@ -31,6 +31,7 @@ const PARITY = {
   get_doc: { http: [], cli: 'tdoc-pull', why: 'reads the public document routes (/d/<slug>/...)' },
   list_docs: { http: ['/api/me'], cli: 'tdoc-me' },
   get_comments: { http: ['/api/comments'], cli: 'tdoc-pull' },
+  wait_for_comments: { http: ['/api/comments/wait'], cli: 'tdoc-watch', strict: true },
   reply_to_comment: { http: ['/api/agent/reply'], cli: 'tdoc-agent-reply' },
   resolve_comment: { http: ['/api/comments', '/api/notify/resolve'], cli: 'tdoc-agent-reply' },
   answer_question: { http: ['/api/agent/ask-reply'], cli: 'tdoc-agent-reply' },
