@@ -553,12 +553,16 @@ function anchorTooLarge(anchor) {
 // integers, and the file only when it is a path (cleanSourcePath).
 const REACT_NAME_RE = /^[A-Z][A-Za-z0-9_$.]{2,59}$/;
 // A source path, or '' (the rules of react-source.js cleanSourceFile, here
-// too so a direct API post is held to them): protocol and host, query,
-// drive letter and home folder (/Users/<name>, /home/<name>,
-// /var/home/<name>, /mnt/c/Users/<name>, /root, ~) dropped; then only
-// [A-Za-z0-9._@+-/], no ".." segment, at most 200 characters. No spaces,
-// brackets, backticks or "·": it cannot pose as another listing field.
-const SOURCE_PATH_RE = /^[A-Za-z0-9._@+\-/]{1,200}$/;
+// too so a direct API post is held to them; test/react-source.test.js runs
+// one table through both): protocol and host, query, drive letter, Vite's
+// /@fs and the home folder (/Users/<name>, /home/<name>, /var/home/<name>,
+// /mnt/c/Users/<name>, /root, ~) dropped; then only ASCII letters, digits,
+// . _ @ + - / and the [ ] ( ) $ of route files (app/[slug]/page.tsx,
+// app/(marketing)/page.tsx, routes/posts.$postId.tsx); no ".." segment; at
+// most 200 characters. Spaces, quotes, backticks, "·" and non-ASCII are
+// refused on purpose, so it cannot pose as another listing field; the
+// listing line percent-encodes [ ] (productAnchorLine).
+const SOURCE_PATH_RE = /^[A-Za-z0-9._@+\-/[\]()$]{1,200}$/;
 function cleanSourcePath(value) {
   if (typeof value !== 'string') return '';
   let file = value.trim().replace(/\\/g, '/');
@@ -568,6 +572,7 @@ function cleanSourcePath(value) {
     .replace(/^(?:webpack-internal|webpack|vite|file):/i, '')
     .replace(/[?#].*$/, '')
     .replace(/^\/?[A-Za-z]:(?=\/)/, '')
+    .replace(/^\/?@fs(?=\/)/, '')
     .replace(/^~(?=\/|$)/, '')
     .replace(/^\/(?:mnt\/[A-Za-z]\/)?(?:Users|home|var\/home)\/[^/]+(?=\/|$)/i, '')
     .replace(/^\/root(?=\/|$)/, '')
@@ -7763,7 +7768,8 @@ function productAnchorLine(where) {
   const doc = where.in_document;
   const inDoc = doc ? ` · in the document (author content): ${doc.quote ? `“${oneLine(doc.quote, 80)}”` : oneLine(doc.selector || doc.tag, 120)}` : '';
   const r = where.react;
-  const at = r && r.file ? `${oneLine(r.file, 200)}${r.line ? `:${r.line}` : ''}` : '';
+  // [ ] percent-encoded: the path reads right and cannot close the field.
+  const at = r && r.file ? `${oneLine(r.file.replace(/\[/g, '%5B').replace(/\]/g, '%5D'), 600)}${r.line ? `:${r.line}` : ''}` : '';
   const react = r ? ` · component ${r.components.length ? oneLine(r.components.join(' › '), 300) : '?'}${at ? ` (${at})` : ''}` : '';
   return ` [page ${oneLine(path, 300)}${where.selector ? ` · ${oneLine(where.selector, 120)}` : ''}${area}${react}${inDoc}]`;
 }

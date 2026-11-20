@@ -47,14 +47,19 @@ export function cleanComponentName(value) {
 
 // A source path, or '' when it is not one. Read off the site's page (an
 // attribute any script can set), so it must look like a path and nothing
-// else: [A-Za-z0-9._@+-/] only (no spaces, quotes, backticks, brackets or
-// "·", so it cannot pose as another field or line for an agent), no ".."
-// segment, at most MAX_FILE characters (the end kept, from a "/"). The
-// protocol and host go first (file:///, webpack:///, http://localhost:5173/),
-// then the query, a drive letter, and the person's home folder (/Users/<name>,
+// else: ASCII letters, digits and . _ @ + - / plus the [ ] ( ) $ of route
+// files (Next.js app/[slug]/page.tsx, app/(marketing)/page.tsx, Remix
+// routes/posts.$postId.tsx); no ".." segment; at most MAX_FILE characters
+// (the end kept, from a "/"). Spaces, quotes, backticks, "·" and any
+// non-ASCII character are refused on purpose: with them a path could read
+// as another field or line to an agent (a path with a space is lost, by
+// design). Where a listing frames fields in brackets, the shower encodes
+// [ ] (worker productAnchorLine). The protocol and host go first (file:///,
+// webpack:///, http://localhost:5173/), then the query, a drive letter,
+// Vite's /@fs prefix, and the person's home folder (/Users/<name>,
 // /home/<name>, /var/home/<name>, /mnt/c/Users/<name>, /root, ~).
 // worker.js cleanSourcePath holds the same rules for the server.
-const PATH_RE = /^[A-Za-z0-9._@+\-/]{1,200}$/;
+const PATH_RE = /^[A-Za-z0-9._@+\-/[\]()$]{1,200}$/;
 export function cleanSourceFile(value) {
   if (typeof value !== 'string') return '';
   let file = value.trim().replace(/\\/g, '/');
@@ -64,6 +69,7 @@ export function cleanSourceFile(value) {
     .replace(/^(?:webpack-internal|webpack|vite|file):/i, '')
     .replace(/[?#].*$/, '')
     .replace(/^\/?[A-Za-z]:(?=\/)/, '')
+    .replace(/^\/?@fs(?=\/)/, '')
     .replace(/^~(?=\/|$)/, '')
     .replace(/^\/(?:mnt\/[A-Za-z]\/)?(?:Users|home|var\/home)\/[^/]+(?=\/|$)/i, '')
     .replace(/^\/root(?=\/|$)/, '')

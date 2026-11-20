@@ -133,7 +133,8 @@ function elementLine(anchor) {
 // "App › Pricing › PlanCard" and `src/Pricing.jsx:42:7`, from anchor.react
 // (the rules of selection/anchors/react-source.js cleanReactSource).
 const REACT_NAME = /^[A-Z][A-Za-z0-9_$.]{2,59}$/;
-const REACT_PATH = /^[A-Za-z0-9._@+\-/]{1,200}$/;
+// ASCII path characters and the [ ] ( ) $ of route files; no spaces.
+const REACT_PATH = /^[A-Za-z0-9._@+\-/[\]()$]{1,200}$/;
 const smallInt = (n) => (Number.isInteger(n) && n >= 1 && n <= 10000000 ? n : null);
 function reactLines(anchor) {
   const react = anchor && anchor.react;
