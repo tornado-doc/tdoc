@@ -83,13 +83,25 @@ export function commentShortcutFor(event) {
   const key = String(event.key || '');
   if (key.length !== 1) return null;
   const inner = (typeof event.composedPath === 'function' && event.composedPath()[0]) || event.target;
-  if (isTypingTarget(inner)) return null;
+  if (isTypingTarget(inner) || isOpaqueHost(inner)) return null;
   const active = typeof document !== 'undefined' ? deepActiveElement(document) : null;
-  if (active && active !== inner && isTypingTarget(active)) return null;
+  if (active && active !== inner && (isTypingTarget(active) || isOpaqueHost(active))) return null;
   const lower = key.toLowerCase();
   if (lower === 'c') return 'copy';
   if (lower === 'h') return 'markers';
   return null;
+}
+
+// A custom element (a dash in its name) with no open shadow root: its
+// shadow root is closed, so the key's real target (maybe a field in a host
+// app's web component) cannot be seen. Not ours to take. A light-DOM custom
+// element (no shadow root at all) is treated the same: it fails safe, the
+// key stays the page's.
+export function isOpaqueHost(target) {
+  const el = target && target.nodeType === 1 ? target : null;
+  if (!el) return false;
+  const name = String(el.localName || el.tagName || '').toLowerCase();
+  return name.includes('-') && !el.shadowRoot;
 }
 
 function deepActiveElement(doc) {

@@ -1447,7 +1447,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await composer.locator('button.tdoc-composer-agent').click();
         assert((await composer.locator('textarea').inputValue()).includes('Helper'), 'the feedback composer did not insert the shared agent tag');
         assert(await composer.locator('.tdoc-agent-pill').isVisible(), 'the agent tag did not render as a pill');
-        await composer.getByRole('button', { name: 'Comment', exact: true }).click();
+        await composer.getByRole('button', { name: 'Post', exact: true }).click();
         for (let i = 0; i < 20 && !handoffPayload; i++) await host.waitForTimeout(100);
         assert(handoffPayload?.recipient?.agent_name === 'Helper' && handoffPayload.comment_ids.length === 1,
           `selected agent was not sent with the comment: ${JSON.stringify(handoffPayload)}`);

@@ -1,7 +1,8 @@
-// Copy for agent and the comment keys (flag copyForAgent), on every comment
-// surface: the doc page (side list on desktop, drawer on a phone), the
-// feedback widget on a host page, and the feedback space page.
-//   - flag off: nothing new (no ⋯ on the list, no row in a thread's ⋯, C does nothing)
+// Copy for agent and the comment keys, on every comment surface, for
+// everyone who can see the comments (no flag since 2026-11-20): the doc page
+// (side list on desktop, drawer on a phone), the feedback widget on a host
+// page, and the feedback space page.
+//   - a signed-out reader of a shared doc has it too (not owner-only)
 //   - a thread's ⋯ › Copy for agent: that thread as Markdown, with its tdoc link
 //   - the list's ⋯ › Copy N open for agent: every open thread, and the toast
 //   - C copies the selected thread, else every open one; never while typing
@@ -117,18 +118,18 @@ async function settle(locator) {
   const chromium = await pw.chromium.launch({ headless: true });
 
   // The clipboard, read back: writeText records what was copied.
-  const newPage = async (width, { flag = true, widget = false } = {}) => {
+  // No flag is pinned: Copy for agent is on for everyone (graduated 2026-11-20).
+  const newPage = async (width, { signedIn = true, widget = false } = {}) => {
     const phone = width < 700;
     const ctx = await chromium.newContext(phone ? { viewport: { width, height: 844 }, hasTouch: true, isMobile: true } : { viewport: { width, height: 800 } });
-    await ctx.addCookies([{ name: 'tdoc_sid', value: sid, url: base }]);
+    if (signedIn) await ctx.addCookies([{ name: 'tdoc_sid', value: sid, url: base }]);
     await ctx.route(/api\.github\.com/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' }));
-    await ctx.addInitScript(([on]) => {
-      window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), copyForAgent: on };
+    await ctx.addInitScript(() => {
       window.__copied = [];
       try {
         Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text) => { window.__copied.push(text); } } });
       } catch {}
-    }, [flag]);
+    });
     if (widget) await ctx.addInitScript(([key, value]) => { localStorage.setItem(key, value); }, [`tdoc-feedback:${base}`, JSON.stringify(space)]);
     const page = await ctx.newPage();
     page.errors = [];
@@ -160,16 +161,17 @@ async function settle(locator) {
   };
 
   try {
-    await t('flag off: no list ⋯, no Copy for agent in a thread\'s ⋯, C copies nothing (doc page)', async () => {
-      const { ctx, page, list } = await openDoc(1280, { flag: false });
-      assert.equal(await list.locator('.tdoc-comment-list-more').count(), 0);
+    await t('on for everyone: a signed-out reader of a link-shared doc gets the list ⋯, Copy for agent in a thread\'s ⋯, and C', async () => {
+      const shared = await call('/api/doc/access', { method: 'PATCH', cookie, body: { slug, access: { visibility: 'unlisted' } } });
+      assert.equal(shared.status, 200, JSON.stringify(shared.body));
+      const { ctx, page, list } = await openDoc(1280, { signedIn: false });
+      assert.equal(await list.locator('.tdoc-comment-list-more').count(), 1);
       await list.locator('[data-comment-id] .tdoc-cc-icon[aria-label="More actions"]').first().click();
       await page.locator('.ui-menu-popup').waitFor();
-      assert.equal(await page.locator('.tdoc-copy-for-agent').count(), 0);
-      await page.keyboard.press('Escape');
-      await page.locator('body').click({ position: { x: 5, y: 400 } }).catch(() => {});
-      await page.keyboard.press('c');
-      assert.deepEqual(await copied(page), []);
+      assert.equal(await page.locator('.tdoc-copy-for-agent').count(), 1);
+      await page.locator('.tdoc-copy-for-agent').click();
+      await waitCopies(page, 1);
+      assert.match(await lastCopied(page), /^# 1 comment on Pricing plan/);
       assert.deepEqual(page.errors, []);
       await ctx.close();
     });
@@ -293,7 +295,7 @@ async function settle(locator) {
       });
     }
 
-    await t('widget desktop: C copies, not from the search box or the composer; H hides the pins; Esc closes the list; flag off: nothing', async () => {
+    await t('widget desktop: C copies, not from the search box or the composer; H hides the pins; Esc closes the list', async () => {
       const { ctx, page, list } = await openWidget(1280);
       await page.locator('#tdoc-feedback-root .tdoc-pin').first().waitFor();
       await page.locator('h1').click();
@@ -332,13 +334,6 @@ async function settle(locator) {
       assert.equal((await copied(page)).length, before, 'C copied with the comment layer closed (the host page\'s key)');
       assert.deepEqual(page.errors, []);
       await ctx.close();
-      const off = await openWidget(1280, { flag: false });
-      assert.equal(await off.list.locator('.tdoc-comment-list-more').count(), 0);
-      await off.page.locator('h1').click();
-      await off.page.keyboard.press('c');
-      await off.page.waitForTimeout(200);
-      assert.deepEqual(await copied(off.page), []);
-      await off.ctx.close();
     });
 
     for (const width of [1280, 390]) {

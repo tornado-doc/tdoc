@@ -317,6 +317,8 @@ const SAME = { Origin: 'https://tdoc.dev' };
     try {
       const del = await run('tdoc-delete', ['cli-doc', '--published-only', '--forever']);
       assert(del.status === 0 && /Deleted cli-doc for good/.test(del.stdout), `--forever: ${del.status} ${del.stdout} ${del.stderr}`);
+      // The Trash step's 30-day retention is not what --forever does: not printed.
+      assert(!/retention_days|purge_at|30 days/.test(del.stdout + del.stderr), `--forever printed the Trash retention: ${del.stdout}`);
       assert(!env.META.map.has('meta:cli-doc'), 'not erased');
       assert((await publish(a, 'cli-doc')).status === 200, 'the slug did not publish again');
       const folder = await run('tdoc-folder', ['delete', 'Pile']);

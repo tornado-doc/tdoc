@@ -50,7 +50,7 @@ export function RefreshButton({ onRefresh, refreshing = false }) {
   );
 }
 
-// The list's ⋯ (flag copyForAgent, where the surface provides it): copy
+// The list's ⋯ (where the surface provides it): copy
 // every open thread for an agent, hide / show the markers on the page, and
 // the keys for both (keyboard.js). One menu rather than a button per action.
 export function CommentListMenu({ area }) {

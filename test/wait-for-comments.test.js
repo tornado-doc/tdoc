@@ -229,9 +229,10 @@ const ORIGIN = 'https://tdoc.dev';
     const base = `http://127.0.0.1:${server.address().port}`;
     fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base, upload_token: julie.token }));
     // As SKILL.md documents it (`bash "$SKILL_DIR/bin/tdoc-watch"`), and directly.
-    const run = (args, viaBash = false) => new Promise((resolve) => {
+    const run = (args, viaBash = false, extraEnv = {}) => new Promise((resolve) => {
       const bin = path.join(__dirname, '..', 'bin', 'tdoc-watch');
-      const child = viaBash ? spawn('bash', [bin, ...args], { env: { ...process.env, HOME: home } }) : spawn(bin, args, { env: { ...process.env, HOME: home } });
+      const env = { ...process.env, HOME: home, ...extraEnv };
+      const child = viaBash ? spawn('bash', [bin, ...args], { env }) : spawn(bin, args, { env });
       let stdout = '', stderr = '';
       child.stdout.on('data', (d) => { stdout += d; });
       child.stderr.on('data', (d) => { stderr += d; });
@@ -252,6 +253,11 @@ const ORIGIN = 'https://tdoc.dev';
       const json = await run([SLUG, '--since', String(Number(cursor) - 1), '--once', '--json']);
       const lines = json.stdout.trim().split('\n').map((l) => JSON.parse(l));
       assert(lines.length === 1 && lines[0].id === id && lines[0].slug === SLUG, json.stdout);
+      // Nothing new: --once says so (stderr) after a short waiting hint,
+      // instead of printing nothing for the whole wait.
+      const quiet = await run([SLUG, '--since', cursor, '--once'], false, { TDOC_WATCH_WAIT_SECONDS: '3' });
+      assert(quiet.status === 0 && !quiet.stdout, `${quiet.status} ${quiet.stdout}`);
+      assert(/no new comments on /.test(quiet.stderr) && /waiting up to 3 s/.test(quiet.stderr), quiet.stderr);
       const denied = await (async () => {
         fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base, upload_token: bob.token }));
         return run([SLUG, '--once']);

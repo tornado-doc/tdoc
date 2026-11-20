@@ -126,16 +126,6 @@ export const FLAGS = Object.freeze({
   // undone by Restore in the version history. The flag is the off switch
   // until it settles; remove it by graduate_by.
   convertToSheet: Object.freeze({ label: 'Convert a doc to a sheet (⋯ menu)', owner: 'julie', added: '2026-11-17', default: true, graduate_by: '2026-11-24' }),
-  // Copy for agent (agentation-style, zero setup): a thread's ⋯ › Copy for
-  // agent and the comment list's ⋯ › Copy N open for agent put the threads
-  // on the clipboard as Markdown an agent can act on (page, element,
-  // selector, dialog / tab state, area, replies, id, tdoc link:
-  // comments/core/agent-markdown.js). While the list or a thread is open,
-  // and nobody is typing: C copies (the selected thread, else all open), H
-  // hides / shows the markers, Esc closes. Every comment surface (doc page,
-  // slides, sheets, feedback widget, feedback space page). The widget reads
-  // it like feedbackAreaSelect (the session's dev flags).
-  copyForAgent: Object.freeze({ label: 'Copy comments for an agent (C, H keys)', owner: 'julie', added: '2026-11-19', default: false, preview: true, graduate_by: '2026-11-26' }),
   // Edit as Markdown: while a prose doc is being edited (Edit mode, or the
   // modeless page), a "Markdown" switch shows the doc as Markdown source in
   // place of the page and back; the page follows what is typed, so Save,
@@ -146,6 +136,16 @@ export const FLAGS = Object.freeze({
   // The choice is remembered in this browser (document/markdown-edit.jsx,
   // markdown-source.js).
   markdownEditMode: Object.freeze({ label: 'Edit as Markdown (switch while editing)', owner: 'julie', added: '2026-11-19', default: false, preview: true, graduate_by: '2026-11-26' }),
+  // Feedback widget on a site built with React: a comment's element anchor
+  // also records the React component chain (App › Pricing › PlanCard) and,
+  // in a dev build, the source file and line (fiber _debugSource, or the
+  // source attributes some bundler plugins add), as `anchor.react`
+  // (comments/selection/anchors/react-source.js). The picker's hover outline
+  // shows it as a small hint; get_comments (`where.react`) and Copy for agent
+  // pass it on. Best effort, never throws, nothing read on a page without
+  // React. The widget reads it like feedbackAreaSelect (the session's dev
+  // flags, worker FEEDBACK_WIDGET_DEV_FLAGS).
+  reactSourceCapture: Object.freeze({ label: 'Feedback: React component and source on comments', owner: 'julie', added: '2026-11-20', default: false, preview: true, graduate_by: '2026-11-27' }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

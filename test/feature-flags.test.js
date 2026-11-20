@@ -49,6 +49,14 @@ const assert = require('assert/strict');
     }
   });
 
+  t('copyForAgent is graduated and removed: no flag, no checks on any comment surface', () => {
+    const fs = require('fs');
+    assert.equal(Object.prototype.hasOwnProperty.call(FLAGS, 'copyForAgent'), false);
+    for (const file of ['../shell/src/document-shell.jsx', '../shell/src/feedback-space.jsx', '../feedback/src/main.jsx', '../worker/worker.js']) {
+      assert.ok(!fs.readFileSync(require.resolve(file), 'utf8').includes("'copyForAgent'"), `${file} no longer reads copyForAgent`);
+    }
+  });
+
   t('unknown names, and inherited keys, are off even in dev mode', () => {
     assert.equal(isFeatureOn('noSuchFlag', { on: true }), false);
     assert.equal(isFeatureOn('toString', { on: true }), false);

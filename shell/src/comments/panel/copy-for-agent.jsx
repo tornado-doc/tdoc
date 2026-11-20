@@ -4,7 +4,7 @@ import { isListedThread, isResolvedThread } from '../core/comment-query.js';
 import { copyText } from '../../document/model.js';
 import { useCommentShortcuts } from './keyboard.js';
 
-// "Copy for agent" (flag copyForAgent), the same on every comment surface:
+// "Copy for agent", the same on every comment surface:
 // a thread's ⋯ menu (CommentCard) copies that thread, the list's ⋯ menu
 // (CommentPanel) copies every open thread and hides / shows the markers,
 // and the keys C and H do the same while the list or a thread is open

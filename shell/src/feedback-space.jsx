@@ -13,7 +13,6 @@ import { askOwnAgent, threadAskPick, useMyAgent } from './document/my-agent.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { CommentPanel } from './comments/panel/comment-panel.jsx';
 import { CopyForAgentContext, useCopyForAgent } from './comments/panel/copy-for-agent.jsx';
-import { isFeatureOn } from './feature-flags.js';
 import { useCommentArea, useCommentListPrefs } from './comments/core/comment-area.js';
 import { groupBy } from './comments/core/comment-query.js';
 import { useCommentFeed } from './comments/core/use-comment-feed.js';
@@ -114,12 +113,12 @@ export function FeedbackSpace({ boot }) {
     handoffViewer: viewerKeys, isOwner: Boolean(isOwner), syncSeen: Boolean(identity),
   });
 
-  // Copy for agent (flag copyForAgent): the list's ⋯ and each thread's ⋯;
+  // Copy for agent: the list's ⋯ and each thread's ⋯;
   // C copies the selected thread or every open one. The list is this page,
   // so the key is live whenever nobody is typing. No markers here: H is the
   // widget's and the doc page's.
   const copyForAgent = useCopyForAgent({
-    enabled: isFeatureOn('copyForAgent'),
+    enabled: true,
     area,
     selectedId: openId,
     title: `${title} (feedback on ${host})`,

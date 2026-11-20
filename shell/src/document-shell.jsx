@@ -40,6 +40,7 @@ import {
   DocumentPrimaryAction,
   DocumentSendAgentAction,
   LandingActions,
+  LandingFeedbackMenuItem,
 } from './document/document-toolbar.jsx';
 import {
   EditorToolbar,
@@ -2244,14 +2245,14 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   useDoubleTapOption(() => startPick(), {
     enabled: !config.isLanding && Boolean(config.canComment || config.signInToComment),
   });
-  // Copy for agent (flag copyForAgent), as on every comment surface: ⋯ on a
+  // Copy for agent, as on every comment surface: ⋯ on a
   // thread and on the list; C (the open thread, else all open) and H (hide
   // the pins and the words' highlight) while the list, the phone drawer or
   // a thread is open (comments/panel/copy-for-agent.jsx). Doc, slides and
   // sheets alike: they share this shell.
   const [markersHidden, setMarkersHidden] = useState(false);
   const copyForAgent = useCopyForAgent({
-    enabled: !config.isLanding && isFeatureOn('copyForAgent'),
+    enabled: !config.isLanding,
     area: commentArea,
     selectedId: openCommentId,
     title: title || config.title || config.slug,
@@ -2261,6 +2262,13 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     markers: { hidden: markersHidden, toggle: () => setMarkersHidden((h) => !h) },
     keysEnabled: Boolean(sidePanelOpen || openCommentId || openClusterKey || (narrow && drawerOpen)) && !composer && !reanchorId,
   });
+  // The landing's phone layout moves the comment button into the top bar
+  // (chrome.css [data-tdoc-landing]): its CTAs pass under the bottom corner.
+  useEffect(() => {
+    if (!config.isLanding) return undefined;
+    document.body.setAttribute('data-tdoc-landing', '');
+    return () => document.body.removeAttribute('data-tdoc-landing');
+  }, [config.isLanding]);
   const marksHidden = Boolean(copyForAgent && markersHidden);
   const marksHiddenRef = useRef(marksHidden);
   marksHiddenRef.current = marksHidden;
@@ -2494,6 +2502,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       onSubmit={postComment}
       onClose={closeComposer}
       onCopyToast={showToast}
+      signInToPost={!config.identity && Boolean(config.signInToComment)}
     />
   ) : null;
   return (
@@ -2589,6 +2598,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
             />
           </>
         )}
+        mobileOverflowActions={config.isLanding ? <LandingFeedbackMenuItem /> : null}
         overflowActions={config.isLanding ? null : (
           <DocumentOverflowActions
             config={config}
