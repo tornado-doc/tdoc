@@ -105,6 +105,10 @@
    same weight (the SDK was a grey box under the bookmark). The margin keeps
    a jumped-to heading clear of the top bar (the homepage links to #sdk). */
 .tdoc-feedback-page .fb-lead { font-size: 1.05rem; }
+/* Try it on this page: the widget's demo, under the lead. */
+.tdoc-feedback-page .fb-try { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .85rem; margin: 1.25rem 0 0; scroll-margin-top: 4.5rem; }
+.tdoc-feedback-page .fb-try .muted { font-size: .9rem; }
+.tdoc-feedback-page .fb-choices { scroll-margin-top: 4.5rem; }
 .tdoc-feedback-page .fb-choices { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin: 1.5rem 0 .6rem; }
 .tdoc-feedback-page .fb-main a.fb-choice { display: grid; grid-template-columns: auto 1fr; column-gap: .7rem; row-gap: .1rem;
   align-items: center; padding: .9rem 1rem; border: 1px solid var(--fb-line); border-radius: 10px; background: #fff;

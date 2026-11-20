@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
-import { Bookmark, CodeXml, MessageSquarePlus } from 'lucide-react';
+import { Bookmark, CodeXml, MessageSquarePlus, MousePointerClick } from 'lucide-react';
+import { AppButton } from './ui/button.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AppSelect } from './ui/select.jsx';
 import './docs-hub.css';
@@ -231,6 +232,21 @@ function useOwnSiteSpaces(identity) {
   return spaces;
 }
 
+// Try it on this page: the real widget (feedback.js from this origin) in its
+// demo mode, which feedback/src/demo.js allows only on this page of tdoc's
+// own origin. No account, nothing posted: comments stay in this tab.
+export function startFeedbackDemo() {
+  if (window.tdocFeedback) { window.tdocFeedback.comment(); return; }
+  if (document.getElementById('tdoc-feedback-demo-script')) return;
+  const script = document.createElement('script');
+  script.id = 'tdoc-feedback-demo-script';
+  script.src = `${location.origin}/feedback.js`;
+  script.async = true;
+  script.setAttribute('data-tdoc-demo', '1');
+  script.setAttribute('data-tdoc-open', '1');
+  document.documentElement.appendChild(script);
+}
+
 const hostOf = (origin) => { try { return new URL(origin).host; } catch { return String(origin || ''); } };
 
 export function FeedbackInstall({ boot }) {
@@ -243,11 +259,13 @@ export function FeedbackInstall({ boot }) {
   const [picked, setPicked] = useState('');
   const space = spaces.find((s) => s.slug === picked) || spaces[0] || null;
   // /feedback#sdk (the homepage links there): the page renders after load,
-  // so the browser's own jump to the fragment finds nothing.
+  // so the browser's own jump to the fragment finds nothing. #try (the
+  // homepage's Any web app) starts the demo too.
   useEffect(() => {
     const id = location.hash.slice(1);
     const el = id && document.getElementById(id);
     if (el) el.scrollIntoView();
+    if (id === 'try' && el) startFeedbackDemo();
   }, []);
 
   return (
@@ -256,8 +274,12 @@ export function FeedbackInstall({ boot }) {
       <main className="fb-main">
         <h1>Comments on any web app</h1>
         <p className="fb-lead">Click anything on a page, say what is wrong, and hand it to a person or an agent.</p>
+        <div className="fb-try" id="try">
+          <AppButton variant="primary" size="m" id="try-demo" onClick={startFeedbackDemo}><MousePointerClick size={16} aria-hidden="true" />Try it on this page</AppButton>
+          <span className="muted">No account. What you write stays in this tab.</span>
+        </div>
 
-        <nav className="fb-choices" aria-label="Two ways in">
+        <nav className="fb-choices" id="add" aria-label="Two ways in">
           <a className="fb-choice" href="#bookmark" id="choose-bookmark">
             <span className="fb-choice-icon"><Bookmark aria-hidden="true" /></span>
             <span className="fb-choice-name">Bookmark</span>

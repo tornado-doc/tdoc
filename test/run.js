@@ -47,6 +47,7 @@ const OFFLINE = [
   'marketplaces.test.js',     // repo marketplaces (.claude-plugin, .agents/plugins) parse and point at real plugin folders
   'plugins.test.js',          // plugins/: Claude, Codex/ChatGPT, Cursor, Gemini, VS Code packages for the remote MCP server
   'remote-mcp.test.js',       // /mcp + OAuth 2.1: PKCE, redirect URIs, consent CSRF, token mapping, refresh/revoke, tools and refusals, rate limit
+  'feedback-demo.test.js',    // Try it on this page: demo mode only on tdoc's own /feedback (or landing), script from that origin; no URL switch; answers stay in the tab
   'feedback.test.js',         // #564 product feedback: token door, space, bookmarklet + one-line entry
   'feedback-invites.test.js', // share from the widget: signed expiring invites, owner-only, email pending, revoke, Join / Keep my own, switcher, landing page
   'comment-history.test.js',  // event-log fold + cross-version pull
@@ -341,6 +342,7 @@ const BROWSER = [
   'feedback-share-ui.test.js', // feedback space Share = the doc Share dialog; owner moves it to a team; site mode offers the team first; desktop + phone
   'feedback-invites-ui.test.js', // share from the widget: copy link + invite by name; landing page; Join / Keep my own; switcher; SDK Join; Reconnect without a popup; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
+  'feedback-try-demo-ui.test.js', // /feedback Try it on this page: the real widget, no account; pick, post in the tab, pin + thread, C copies Markdown, Add to your site; zero comment API calls, no popup; #try starts it; desktop + phone
   'feedback-install-ui.test.js', // /feedback: Bookmark / SDK chooser jumps to its section, SDK as a peer section (site picture, 3 steps), Copy prompt + Copy line, signed-in owner sees their real space id; desktop + phone
 ];
 
