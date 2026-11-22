@@ -1747,3 +1747,21 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
 .tdoc-bar .tdoc-comments-toggle[aria-pressed="true"] { color: var(--td-accent, #1652f0); background: var(--td-accent-wash, rgba(22,82,240,.06)); }
 .tdoc-sheet .tdoc-sheet-handle { display: block; }
 .tdoc-sheet:focus, .tdoc-sheet:focus-visible { outline: none; }
+
+/* Doc bar layout B (flag docTopbarB): the title opens the document's menu;
+   the right side is Ask AI · Comments · Share · avatar, with no ⋯. */
+.ui-menu-item .tdoc-menu-hint { margin-left: auto; padding-left: 16px; color: var(--td-muted, #6b6a66); font-size: 12px; font-weight: 400; }
+.tdoc-menu-note { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font: 13px system-ui, -apple-system, sans-serif; color: var(--td-muted, #6b6a66); }
+.tdoc-bar .doc-title-menu { display: inline-flex; align-items: center; gap: 4px; appearance: none; border: 0; background: none; padding: 4px 6px; margin: 0 -2px 0 -6px; border-radius: 6px;
+  font: 600 14px system-ui, -apple-system, sans-serif; color: var(--td-ink, #1a1a1a); cursor: pointer; min-width: 0; }
+.tdoc-bar .doc-title-menu .doc-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-bar .doc-title-menu svg { flex: none; color: var(--td-muted, #6b6a66); }
+.tdoc-bar .doc-title-menu:hover, .tdoc-bar .doc-title-menu[aria-expanded="true"] { background: var(--td-surface-2, #f7f7f5); }
+.tdoc-bar[data-bar-layout="b"] .tdoc-bar-left .tdoc-edited { margin-left: 2px; }
+@media (max-width: 700px) {
+  .tdoc-bar .doc-title-menu { justify-content: flex-start; font-size: 13px; }
+  /* No ⋯ in B: the avatar (or Sign in) and Publish stay at every width. */
+  .tdoc-bar[data-bar-layout="b"] .tdoc-account-trigger { display: inline-flex; }
+  .tdoc-bar[data-bar-layout="b"] .tdoc-chip.tdoc-account-trigger:not(.signin) { min-width: 44px; min-height: 44px; justify-content: center; border: 0; background: none; }
+  .tdoc-bar[data-bar-layout="b"] #tdoc-publish-btn { display: inline-flex; }
+}
