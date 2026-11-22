@@ -41,6 +41,7 @@ import {
   DocumentSendAgentAction,
   LandingActions,
   LandingFeedbackMenuItem,
+  editedAgo,
 } from './document/document-toolbar.jsx';
 import {
   EditorToolbar,
@@ -1610,6 +1611,10 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // Phones get one entry: the comment button's drawer carries an Ask AI tab,
   // and the top bar keeps only Share and ⋯ (flag: unifiedEntry).
   const [unifiedEntryFlag] = useState(() => isFeatureOn('unifiedEntry'));
+  // Doc bar layout B (flag docTopbarB): the title opens the document's menu,
+  // the right side is Ask AI · Comments · Share · avatar. Not the landing.
+  const [topbarBFlag] = useState(() => isFeatureOn('docTopbarB'));
+  const barB = topbarBFlag && !config.isLanding;
   const unifiedEntry = narrow && (askAiPanelEnabled || signedOutAsk) && unifiedEntryFlag;
   const [drawerTab, setDrawerTab] = useState('comments');
   const myAgent = useMyAgent(config.slug, myAgentEnabled && Boolean(config.identity));
@@ -2602,6 +2607,49 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     agentName: bulkTarget ? notifyAgentLabel(bulkTarget) : null,
     onSend: () => openDocNotify(handoffBuckets.ready.map((c) => c.id)),
   } : null;
+  // The document's actions: ⋯ in the current bar, the title's menu in layout
+  // B (with B's extra rows, see DocumentOverflowActions).
+  const documentActions = (extra = {}) => (
+    <DocumentOverflowActions
+      config={config}
+      onPublish={() => setDialog({ type: 'publish' })}
+      onShare={() => setDialog({ type: 'share' })}
+      onCopyMarkdown={copyMarkdown}
+      onDuplicate={duplicate}
+      onDownload={download}
+      onPrint={printPdf}
+      onDownloadAs={downloadAs}
+      docShape={docShape}
+      onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
+      onDelete={() => setDialog({ type: 'delete' })}
+      onHistory={historyEnabled ? () => changeHistory(true) : null}
+      onWhatChanged={openWhatChanged}
+      mode={editor.modeless ? null : { modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
+      onAllowEmbeds={embedsHeld ? () => setDialog({ type: 'allow-embeds' }) : null}
+      onConvertToSheet={canConvertToSheet ? () => setDialog({ type: 'convert-sheet' }) : null}
+      {...extra}
+    />
+  );
+  // "Edited …" (· See what changed): on the right in the current bar, after
+  // the title and star in layout B.
+  const editedChip = (
+    <DocumentEdited
+      config={config}
+      onHistory={historyEnabled ? () => changeHistory(!historyOpen) : null}
+      historyOpen={historyOpen}
+      onWhatChanged={openWhatChanged}
+      fresh={changesFresh && !changesSeen}
+      disabled={editor.mode === 'edit' && editor.dirty && !editor.modeless}
+    />
+  );
+  // Light / dark for a signed-out reader in layout B: the title menu holds
+  // it (TopBar keeps it in ⋯, which B does not have).
+  const toggleThemeHere = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    writeStored('tdoc-theme', next);
+    setTheme(next);
+    bridge.send({ type: 'tdoc:theme', theme: next });
+  };
   const askAiAction = (askAiPanelEnabled || signedOutAsk) && !unifiedEntry ? (
     <DocumentSendAgentAction
       counts={Object.fromEntries(Object.entries(handoffBuckets).map(([state, list]) => [state, list.length]))}
@@ -2698,16 +2746,9 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           <LandingActions stars={config.stars} />
         </> : (
           !comparing && <>
-            <DocumentEdited
-              config={config}
-              onHistory={historyEnabled ? () => changeHistory(!historyOpen) : null}
-              historyOpen={historyOpen}
-              onWhatChanged={openWhatChanged}
-              fresh={changesFresh && !changesSeen}
-              disabled={editor.mode === 'edit' && editor.dirty && !editor.modeless}
-            />
-            {editor.modeless ? <EditorSaveStatus status={editor.saveStatus} /> : null}
-            {editor.modeless ? <MarkdownSwitch markdown={markdown} /> : null}
+            {barB ? null : editedChip}
+            {editor.modeless && !barB ? <EditorSaveStatus status={editor.saveStatus} /> : null}
+            {editor.modeless && !barB ? <MarkdownSwitch markdown={markdown} /> : null}
             {askAiAction}
             {!narrow && sidePanelAvailable ? (
               // One Comment button, its open count on it: it opens and closes
@@ -2731,7 +2772,9 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
                   {filterCount ? <span className="tdoc-comments-toggle-count">{filterCount}</span> : null}
                   {commentFilter !== DEFAULT_FILTER ? <span className="tdoc-comments-toggle-dot" aria-hidden="true" /> : null}
                 </AppButton>
-                {comments.comments.length ? (
+                {/* Layout B: no chevron. The filter (and Mark all as read)
+                    is the comment list's own filter row. */}
+                {barB ? null : comments.comments.length ? (
                   <CommentFilterMenu area={commentArea} prefs={listPrefs} onChange={setCommentFilter}
                     unreadCount={sidePanelOpen ? 0 : unreadAgentReplies} onMarkAllRead={markAllAgentRepliesRead} />
                 ) : null}
@@ -2739,7 +2782,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
             ) : null}
             {/* Only the "Read only" note is left in the bar: a doc that takes
                 no comments and no edits has no mode to switch to. */}
-            {modeOptions.length < 2 ? (
+            {modeOptions.length < 2 && !barB ? (
               <DocumentModeControl
                 mode={editor.mode}
                 canComment={config.canComment}
@@ -2756,26 +2799,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           </>
         )}
         mobileOverflowActions={config.isLanding ? <LandingFeedbackMenuItem /> : null}
-        overflowActions={config.isLanding ? null : (
-          <DocumentOverflowActions
-            config={config}
-            onPublish={() => setDialog({ type: 'publish' })}
-            onShare={() => setDialog({ type: 'share' })}
-            onCopyMarkdown={copyMarkdown}
-            onDuplicate={duplicate}
-            onDownload={download}
-            onPrint={printPdf}
-            onDownloadAs={downloadAs}
-            docShape={docShape}
-            onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
-            onDelete={() => setDialog({ type: 'delete' })}
-            onHistory={historyEnabled ? () => changeHistory(true) : null}
-            onWhatChanged={openWhatChanged}
-            mode={editor.modeless ? null : { modes: modeOptions, value: editor.mode, onChange: (value) => editor.changeMode(value) }}
-            onAllowEmbeds={embedsHeld ? () => setDialog({ type: 'allow-embeds' }) : null}
-            onConvertToSheet={canConvertToSheet ? () => setDialog({ type: 'convert-sheet' }) : null}
-          />
-        )}
+        barLayout={barB ? 'b' : null}
+        overflowActions={config.isLanding || barB ? null : documentActions()}
         onThemeChange={(nextTheme) => {
           setTheme(nextTheme);
           bridge.send({ type: 'tdoc:theme', theme: nextTheme });
@@ -2808,6 +2833,18 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           onRename={renameDoc}
           starred={starred}
           onToggleStar={toggleStar}
+          titleMenu={barB ? ({ rename }) => documentActions({
+            onRename: rename,
+            edited: config.mode === 'local' ? '' : editedAgo((config.versions || []).find((v) => Number(v.n) === Number(config.version))?.created),
+            readOnly: modeOptions.length < 2 && !config.canComment && !config.signInToComment,
+            markdown: editor.modeless ? markdown : null,
+            theme: supportsTheme && !config.identity ? { dark: theme === 'dark', onToggle: toggleThemeHere } : null,
+            shareRow: false,
+          }) : null}
+          after={barB && !comparing ? <>
+            {editedChip}
+            {editor.modeless ? <EditorSaveStatus status={editor.saveStatus} /> : null}
+          </> : null}
         />
       </TopBar>
       {teamGuestsEnabled && config.teamManage?.guest ? <div className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>

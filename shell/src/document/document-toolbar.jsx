@@ -4,7 +4,12 @@ import { Popover } from '@base-ui/react/popover';
 import { Drawer } from '@base-ui/react/drawer';
 import {
   Check,
+  ChevronDown,
   ChevronRight,
+  Eye,
+  Moon,
+  Pencil,
+  Sun,
   Copy,
   CopyPlus,
   Download,
@@ -105,13 +110,70 @@ export function editedAgo(iso, now = Date.now()) {
 // My docs (POST /api/star), so a doc starred here is under My docs › Starred.
 // Only a signed-in viewer gets one (the server boots config.viewerStar for
 // them alone), so a logged-out reader sees just the title.
-export function DocumentBreadcrumbs({ config, title, onRename, starred = false, onToggleStar = null }) {
+//
+// Doc bar layout B (flag docTopbarB): `titleMenu({ rename })` returns the
+// rows of the document's menu, and the title opens it; `after` follows the
+// star ("Edited …", the save status).
+export function DocumentBreadcrumbs({ config, title, onRename, starred = false, onToggleStar = null, titleMenu = null, after = null }) {
   if (config.isLanding) return null;
   return (
     <>
-      <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />
+      {titleMenu
+        ? <DocumentTitleMenu title={title} canRename={Boolean(config.isOwner)} onRename={onRename}>{titleMenu}</DocumentTitleMenu>
+        : <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />}
       {config.viewerStar && onToggleStar ? <DocumentStar starred={starred} onToggle={onToggleStar} /> : null}
+      {after}
     </>
+  );
+}
+
+// Layout B: the title is the document's menu, the Google Docs / Notion place
+// for "this document" (what ⋯ held, plus Rename). Rename heads it for the
+// owner and turns the title into the same in-place field as before.
+export function DocumentTitleMenu({ title, canRename, onRename, children }) {
+  const [editing, setEditing] = useState(false);
+  // Rename hands focus to the field: the closing menu must not take it back
+  // to the title (the field would blur, and a blur commits).
+  const renaming = useRef(false);
+  if (editing) {
+    return <EditingTitle title={title} onDone={(next) => { renaming.current = false; setEditing(false); if (next) onRename(next); }} />;
+  }
+  return (
+    <AppMenu
+      align="start"
+      finalFocus={() => !renaming.current}
+      popupClassName="tdoc-title-menu"
+      trigger={(
+        <button id="tdoc-title-menu-btn" type="button" className="doc-title doc-title-menu" aria-label={`${title || 'Untitled'}: document menu`} title="Document menu">
+          <span className="doc-title-text">{title || 'Untitled'}</span>
+          <ChevronDown size={14} aria-hidden="true" />
+        </button>
+      )}
+    >
+      {children({ rename: canRename ? () => { renaming.current = true; requestAnimationFrame(() => setEditing(true)); } : null })}
+    </AppMenu>
+  );
+}
+
+function EditingTitle({ title, onDone }) {
+  const [draft, setDraft] = useState(title);
+  const input = useRef(null);
+  useEffect(() => { input.current?.focus(); input.current?.select(); }, []);
+  const commit = () => { const next = draft.trim(); onDone(next && next !== title ? next : null); };
+  return (
+    <input
+      ref={input}
+      className="doc-title doc-title-input"
+      aria-label="Document title"
+      maxLength="120"
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') { event.preventDefault(); commit(); }
+        if (event.key === 'Escape') onDone(null);
+      }}
+    />
   );
 }
 
@@ -324,9 +386,44 @@ export function DocumentOverflowActions({
   // "Convert to Sheet": for an editor of a doc that holds a sheet table and
   // is not a sheet doc yet (flag convertToSheet); null hides it.
   onConvertToSheet = null,
+  // Layout B's title menu (flag docTopbarB), which is all the document
+  // actions there are once the bar has no ⋯:
+  //   onRename   "Rename" heads it (the owner)
+  //   edited     "Edited 3m ago": the hint on Version history / See what
+  //              changed, or a label on its own for a reader with neither
+  //   readOnly   "Read only" under Mode: the note that sat in the bar
+  //   markdown   the modeless page's Markdown switch (useMarkdownEdit), as a
+  //              checkbox row
+  //   theme      { dark, onToggle }: light / dark for a signed-out reader,
+  //              who has no account menu to hold it
+  //   shareRow   false: Share / Publish stay in the bar at every width
+  onRename = null,
+  edited = '',
+  readOnly = false,
+  markdown = null,
+  theme = null,
+  shareRow = true,
 }) {
+  const editedHint = edited ? <span className="tdoc-menu-hint">{edited.replace(/^Edited /, '')}</span> : null;
   return (
     <>
+      {onRename ? (
+        <>
+          <AppMenuItem className="tdoc-action-menu-item" data-action="rename" onClick={onRename}>
+            <Pencil size={15} /> Rename
+          </AppMenuItem>
+          <AppMenuSeparator />
+        </>
+      ) : null}
+      {readOnly ? (
+        <>
+          <div className="tdoc-menu-label">Mode</div>
+          <div className="tdoc-menu-note" data-action="read-only" title="Commenting is disabled by the author">
+            <Eye size={15} /> Read only · commenting is off
+          </div>
+          <AppMenuSeparator />
+        </>
+      ) : null}
       {mode && mode.modes.length > 1 ? (
         <>
           <div className="tdoc-menu-label">Mode</div>
@@ -350,15 +447,32 @@ export function DocumentOverflowActions({
           <AppMenuSeparator />
         </>
       ) : null}
+      {markdown?.available ? (
+        <>
+          <AppMenuItem
+            className="tdoc-action-menu-item tdoc-mode-item"
+            role="menuitemcheckbox"
+            aria-checked={Boolean(markdown.on)}
+            data-action="markdown"
+            disabled={Boolean(markdown.blocked) || Boolean(markdown.loading)}
+            title={markdown.blocked || (markdown.on ? 'Back to the formatted page' : 'Edit this doc as Markdown')}
+            onClick={() => markdown.toggle(!markdown.on)}
+          >
+            <FileCode size={15} /> <span>Edit as Markdown</span>
+            {markdown.on ? <Check className="tdoc-mode-check" size={14} /> : null}
+          </AppMenuItem>
+          <AppMenuSeparator />
+        </>
+      ) : null}
       {onHistory ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="history" onClick={onHistory}>
-          <History size={15} /> Version history
+          <History size={15} /> Version history{editedHint}
         </AppMenuItem>
       ) : onWhatChanged ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="what-changed" onClick={onWhatChanged}>
-          <History size={15} /> See what changed
+          <History size={15} /> See what changed{editedHint}
         </AppMenuItem>
-      ) : null}
+      ) : edited ? <div className="tdoc-menu-label" data-action="edited">{edited}</div> : null}
       {onAllowEmbeds ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="allow-embeds" onClick={onAllowEmbeds}>
           <Table2 size={15} /> Allow sheet embeds on this page
@@ -369,7 +483,7 @@ export function DocumentOverflowActions({
           <Sheet size={15} /> Convert to Sheet
         </AppMenuItem>
       ) : null}
-      {config.mode === 'local' ? (
+      {!shareRow ? null : config.mode === 'local' ? (
         <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="publish" onClick={onPublish}>
           <Upload size={15} /> Publish
         </AppMenuItem>
@@ -444,6 +558,14 @@ export function DocumentOverflowActions({
         <AppMenuItem className="tdoc-action-menu-item" data-action="delete" tone="danger" onClick={onDelete}>
           <Trash2 size={15} /> Delete doc…
         </AppMenuItem>
+      ) : null}
+      {theme ? (
+        <>
+          <AppMenuSeparator />
+          <AppMenuItem className="tdoc-action-menu-item" data-action="theme" onClick={theme.onToggle}>
+            {theme.dark ? <Sun size={15} /> : <Moon size={15} />} {theme.dark ? 'Light mode' : 'Dark mode'}
+          </AppMenuItem>
+        </>
       ) : null}
     </>
   );

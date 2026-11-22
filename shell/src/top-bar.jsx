@@ -61,6 +61,12 @@ export function TopBar({
   onSpace = null,
   onNewTeam = null,
   onboardingTest = null,
+  // Doc bar layout B (flag docTopbarB): 'b' or null. The document's menu is
+  // on its title (the page passes it as children), so the bar has no ⋯; the
+  // space chip goes too (Switch space is a row of the account menu), and the
+  // avatar (or Sign in) shows at every width, carrying what the phone's ⋯
+  // held for the account.
+  barLayout = null,
 }) {
   const [localTheme, setLocalTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
@@ -172,9 +178,10 @@ export function TopBar({
   // has something in it there.
   const themeInMore = supportsTheme && !identity;
   const moreOnDesktop = Boolean(overflowActions) || themeInMore;
+  const layoutB = barLayout === 'b';
 
   return (
-    <header className="tdoc-bar">
+    <header className="tdoc-bar" data-bar-layout={barLayout || undefined}>
       <div className="tdoc-bar-left">
         <a
           className="tdoc-bar-mark"
@@ -189,7 +196,7 @@ export function TopBar({
       </div>
       <div className="tdoc-bar-right">
         <div className="tdoc-bar-actions">{actions}</div>
-        <AppMenu trigger={(
+        {layoutB ? null : <AppMenu trigger={(
           <button
             id="tdoc-more-btn"
             type="button"
@@ -286,8 +293,8 @@ export function TopBar({
               <LogIn size={15} /> Sign in
             </AppMenuItem>
           ) : null}
-        </AppMenu>
-        {identity ? <WorkspaceSwitcher space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} /> : null}
+        </AppMenu>}
+        {identity && !layoutB ? <WorkspaceSwitcher space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} /> : null}
         {identity ? (
           <AppMenu trigger={(
             <button className="tdoc-chip tdoc-account-trigger" type="button" aria-label={`Account: ${identity.name || identity.login}`} title={identity.name || identity.login}>
@@ -300,6 +307,20 @@ export function TopBar({
               Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
             </AppMenuItem>
             <AppMenuLinkItem href="/me">My docs</AppMenuLinkItem>
+            {layoutB ? (
+              <AppSubmenu
+                className="tdoc-space-submenu-trigger"
+                trigger={(
+                  <>
+                    <span>Switch space</span>
+                    {space !== null ? <span className="tdoc-space-submenu-current">{spaceLabel(space, spaceTeams, currentTeam)}</span> : null}
+                    <ChevronRight className="tdoc-submenu-chevron" size={14} />
+                  </>
+                )}
+              >
+                <SpaceMenuItems space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} />
+              </AppSubmenu>
+            ) : null}
             {publicProfileHref ? (
               <AppMenuLinkItem href={publicProfileHref}>{publicProfileLabel}</AppMenuLinkItem>
             ) : activeProfile || onClaimProfile ? (

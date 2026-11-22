@@ -12,13 +12,17 @@ export function AppMenu({
   onOpenChange,
   popupClassName = '',
   positionerClassName = '',
+  // Where focus goes when the menu closes (base-ui Menu.Popup finalFocus):
+  // by default back to the trigger. A row that hands focus elsewhere (the
+  // title menu's Rename, to its field) passes a function returning false.
+  finalFocus = undefined,
 }) {
   return (
     <Menu.Root open={open} onOpenChange={onOpenChange}>
       <Menu.Trigger render={trigger} />
       <Menu.Portal container={usePortalContainer()}>
         <Menu.Positioner align={align} sideOffset={sideOffset} className={`ui-menu-positioner ${positionerClassName}`.trim()}>
-          <Menu.Popup className={`ui-menu-popup ${popupClassName}`.trim()}>{children}</Menu.Popup>
+          <Menu.Popup className={`ui-menu-popup ${popupClassName}`.trim()} finalFocus={finalFocus}>{children}</Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.Root>

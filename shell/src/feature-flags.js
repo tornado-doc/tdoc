@@ -158,6 +158,14 @@ export const FLAGS = Object.freeze({
   // blockIdsWriteAllowed). graduate_by 2026-12-11 (not added + 7): the
   // review asked for time to measure it on dev-mode docs first.
   stableBlockIds: Object.freeze({ label: 'Comments follow their block across versions', owner: 'julie', added: '2026-11-20', default: false, preview: true, graduate_by: '2026-12-11' }),
+  // Doc bar layout B (founder feedback 2026-11-17: "too many icons and
+  // buttons at the top right of a doc"; design: tdoc.dev/d/doc-topbar-redesign).
+  // The title opens the document's menu (Rename, Mode, Version history /
+  // See what changed, Download & copy, Duplicate, Convert to Sheet, Move,
+  // Delete); the right side is people only: Ask AI · Comments · Share ·
+  // avatar. No ⋯; the space switcher is a row of the account menu; the
+  // comment filter is the list's own. Doc, slides and sheets alike.
+  docTopbarB: Object.freeze({ label: 'Doc bar B (title menu left, people right)', owner: 'julie', added: '2026-11-21', default: false, graduate_by: '2026-11-28' }),
   reactSourceCapture: Object.freeze({ label: 'Feedback: React component and source on comments', owner: 'julie', added: '2026-11-20', default: false, preview: true, graduate_by: '2026-11-27' }),
 });
 
