@@ -145,8 +145,11 @@ async function startServer(worker, env) {
     };
     const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${label}-${name}.png`) }); };
     // The account menu: the avatar chip on a desktop, ⋯ -> My account on a phone.
+    // A doc page in dev mode has doc bar B (docTopbarB): no ⋯, the avatar at
+    // every width.
     const openAccountMenu = async (page) => {
-      if (!phone) await page.locator('.tdoc-account-trigger').click();
+      await page.locator('#tdoc-more-btn, .tdoc-bar[data-bar-layout="b"]').first().waitFor({ state: 'attached' });
+      if (!phone || await page.locator('.tdoc-bar[data-bar-layout="b"]').count()) await page.locator('.tdoc-account-trigger').click();
       else {
         await page.locator('#tdoc-more-btn').click();
         await page.getByRole('menuitem', { name: 'My account' }).click();

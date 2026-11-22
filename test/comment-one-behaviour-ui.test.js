@@ -152,6 +152,9 @@ async function startServer(worker, env) {
     const contextFor = async (who) => {
       const ctx = await browser.newContext(phone ? { viewport: { width, height: 844 }, hasTouch: true } : { viewport: { width, height: 800 } });
       if (who) await ctx.addCookies([{ name: 'tdoc_sid', value: who.sid, url: base }]);
+      // These accounts are in dev mode; the doc page cases are about the
+      // current bar (the Comment button's filter chevron), not doc bar B.
+      await ctx.addInitScript(() => { window.__TDOC_FLAGS__ = { docTopbarB: false, ...(window.__TDOC_FLAGS__ || {}) }; });
       await ctx.route(/api\.github\.com/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' }));
       return ctx;
     };
