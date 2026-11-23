@@ -16,16 +16,26 @@ name: PR preview
 # KV id is discovered at runtime (namespace title tdoc-preview-META).
 # R2 bucket tdoc-preview-docs is created if missing.
 
+#
+# Opt-in: a PR gets a preview only while it carries the `preview` label.
+# Adding the label deploys; later pushes redeploy while it stays on. PRs
+# without it skip the job (not a required check, so merging is unaffected).
+# The fixed stable-preview refresh is a workflow_dispatch of the copy of this
+# file on ops/refresh-stable-preview-20261023 and does not use this trigger.
+
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
   pull-requests: write
 
 concurrency:
-  group: preview-${{ github.event.pull_request.number }}
+  # One preview per PR; a newer push cancels the superseded deploy. A
+  # `labeled` event for some other label gets its own group, so tagging a PR
+  # never cancels a preview that is mid-deploy.
+  group: preview-${{ github.event.pull_request.number }}${{ github.event.action == 'labeled' && github.event.label.name != 'preview' && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -33,7 +43,9 @@ jobs:
     name: publish PR preview
     if: >
       github.repository == 'tornado-doc/tdoc' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'preview') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'preview')
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
