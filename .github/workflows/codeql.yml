@@ -16,6 +16,31 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # PRs that touch only docs, landing pages or images have no JavaScript
+    # for CodeQL to analyze. Push to main and the weekly schedule still scan
+    # everything. (codeql is not a required check, so a skipped PR run does
+    # not block merging.)
+    paths:
+      - '**/*.js'
+      - '**/*.jsx'
+      - '**/*.mjs'
+      - '**/*.cjs'
+      - '**/*.ts'
+      - '**/*.tsx'
+      - 'server/**'
+      - 'shared/**'
+      - 'shell/**'
+      - 'worker/**'
+      - 'vercel/**'
+      - 'packages/**'
+      - 'feedback/**'
+      - 'tools/**'
+      - 'scripts/**'
+      - 'bin/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/**'
+      - '.github/codeql/**'
   schedule:
     # Weekly, so a sink that lands without a PR (or a new CodeQL query) still
     # gets caught. Monday 07:00 UTC.
@@ -23,6 +48,12 @@ on:
 
 permissions:
   contents: read
+
+# Cancel a PR's superseded scan when a new push arrives. Push and schedule
+# runs get a per-commit group and are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze:
