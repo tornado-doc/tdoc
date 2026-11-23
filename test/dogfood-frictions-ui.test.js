@@ -4,8 +4,10 @@
 //     :hover on touch made its words ink on the ink pill)
 //   - landing: a top-bar way to /feedback ("Feedback for your site": the bar
 //     on desktop, ⋯ on a phone)
-//   - landing, phone: the comment button sits in the top bar, never over a
-//     CTA (Make your doc, Add to your site, ...)
+//   - landing (and the other site pages), phone: no comment button at all,
+//     as on desktop (Julie, 2026-11-22: "Landing page 的左上角怎么还有一个
+//     comment icon?"); Ask AI is in the bar, as on desktop. A normal doc on a
+//     phone keeps its comment button.
 //   - widget, signed out: the composer says Post signs in and keeps the
 //     words; Post opens one tdoc window and the stale "Not connected"
 //     notice goes; no @agent for someone who cannot use it; the send button
@@ -24,7 +26,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
-const { loadWorker, makeEnv } = require('./helpers/worker-harness');
+const { loadWorker, makeEnv, putSession } = require('./helpers/worker-harness');
 const { loadRuntimeAssets } = require('../server/runtime-assets');
 
 const pw = requirePlaywrightOrSkip('dogfood-frictions-ui.test.js');
@@ -113,6 +115,19 @@ const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p
     } }),
   }), env, {});
   assert.equal(up.status, 200, await up.text());
+  // The same page as a site page (/pricing) and as a normal doc, to tell the
+  // two apart on a phone.
+  for (const slug of ['tdoc-pricing', 'plain-doc']) {
+    const r = await worker.fetch(new Request(`${TDOC}/api/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, version: 1, html, meta: {
+        slug, title: meta.title, created: meta.created, versions: [{ n: 1, created: meta.created }],
+        access: { visibility: 'public', history_visibility: 'owner', commenting: 'signed_in', allowed_users: [] },
+      } }),
+    }), env, {});
+    assert.equal(r.status, 200, await r.text());
+  }
   const { server, base } = await startServer(worker, env);
   const browser = await pw.chromium.launch({ headless: true });
   const DESK = { viewport: { width: 1440, height: 900 } };
@@ -120,12 +135,13 @@ const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${String(error.stack || error.message).split('\n').slice(0, 10).join('\n    ')}`); } };
   const shot = async (page, name) => { if (SHOTS) { await page.waitForTimeout(250); await page.screenshot({ path: path.join(SHOTS, `${name}.png`) }); } };
-  const openLanding = async (opts) => {
+  const openLanding = async (opts, at = '/', cookie = '') => {
     const ctx = await browser.newContext(opts);
+    if (cookie) { const [name, value] = cookie.split('='); await ctx.addCookies([{ name, value, url: base }]); }
     const page = await ctx.newPage();
     page.errors = [];
     page.on('pageerror', (e) => page.errors.push(e.message));
-    await page.goto(`${base}/`);
+    await page.goto(`${base}${at}`);
     await page.frameLocator('iframe').locator('.hd-show').waitFor({ timeout: 15000 });
     const frame = page.frames().find((x) => x.url().includes('/frame'));
     return { ctx, page, frame };
@@ -144,46 +160,46 @@ const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p
       await ctx.close();
     });
 
-    await t('landing phone: the link is in ⋯, not the bar; the comment button is in the top bar, over no CTA', async () => {
-      const { ctx, page, frame } = await openLanding(PHONE);
+    await t('landing phone: the link is in ⋯, not the bar; no comment button; Ask AI in the bar, as on desktop', async () => {
+      const { ctx, page } = await openLanding(PHONE);
       assert.equal(await page.locator('.tdoc-bar .tdoc-landing-feedback-link').isVisible(), false, 'words in the phone bar');
-      const fab = page.locator('.tdoc-fab');
-      await fab.waitFor();
-      const bar = await page.locator('.tdoc-bar').boundingBox();
-      const frameBox = await page.locator('iframe').first().boundingBox();
-      // Every CTA in the page, brought to the bottom of the screen in turn
-      // (where the button used to sit): never under the button.
-      const ctas = await frame.evaluate(() => [...document.querySelectorAll('a.btn, .hd-go')].length);
-      assert.ok(ctas >= 4, `only ${ctas} CTAs found`);
-      for (let i = 0; i < ctas; i++) {
-        const r = await frame.evaluate((n) => {
-          const el = [...document.querySelectorAll('a.btn, .hd-go')][n];
-          window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - window.innerHeight + el.getBoundingClientRect().height + 8);
-          const b = el.getBoundingClientRect();
-          return { top: b.top, bottom: b.bottom, left: b.left, right: b.right, w: b.width, text: el.textContent.trim() };
-        }, i);
-        if (!r.w) continue;
-        await page.waitForTimeout(50);
-        const f = await fab.boundingBox();
-        const top = frameBox.y + r.top, bottom = frameBox.y + r.bottom, left = frameBox.x + r.left, right = frameBox.x + r.right;
-        const overlaps = f.x < right && f.x + f.width > left && f.y < bottom && f.y + f.height > top;
-        assert.ok(!overlaps, `the comment button covers "${r.text}"`);
-      }
-      const f = await fab.boundingBox();
-      assert.ok(f.y >= bar.y && f.y + f.height <= bar.y + bar.height + 0.5, `the button is not in the top bar: ${JSON.stringify(f)}`);
-      await frame.evaluate(() => { const go = document.querySelector('.hd-go'); window.scrollTo(0, go.getBoundingClientRect().top + window.scrollY - window.innerHeight + 140); });
-      await shot(page, 'landing-phone-cta');
+      const ask = page.locator('.tdoc-bar').getByRole('button', { name: /Ask AI/ });
+      await ask.waitFor();
+      assert.equal(await page.locator('.tdoc-fab').count(), 0, 'a comment button on the landing');
+      assert.equal(await page.getByRole('button', { name: 'Open comments' }).count(), 0, '"Open comments" on the landing');
+      await shot(page, 'landing-phone-bar');
       await page.locator('#tdoc-more-btn').click();
       const item = page.locator('.tdoc-landing-feedback-item');
       await item.waitFor();
       assert.equal((await item.innerText()).trim(), 'Feedback for your site');
       assert.equal(await item.getAttribute('href'), '/feedback');
       await shot(page, 'landing-phone-more');
-      // The button still opens the comments.
       await page.keyboard.press('Escape');
-      await fab.click();
-      await page.locator('#tdoc-comment-layer').waitFor({ timeout: 5000 });
+      // Ask AI opens the Ask AI panel, as the desktop bar's does.
+      await ask.click();
+      await page.getByPlaceholder(/Ask about this document/).first().waitFor({ timeout: 5000 });
+      await shot(page, 'landing-phone-ask');
       assert.deepEqual(page.errors, []);
+      await ctx.close();
+    });
+
+    await t('phone: no comment button on the landing signed in or on /pricing; a normal doc keeps it', async () => {
+      const cookie = await putSession(env, 'alice');
+      for (const [at, signedIn] of [['/', true], ['/pricing', false]]) {
+        const { ctx, page } = await openLanding(PHONE, at, signedIn ? cookie : '');
+        await page.locator('.tdoc-bar').getByRole('button', { name: /Ask AI/ }).waitFor();
+        assert.equal(await page.locator('.tdoc-fab').count(), 0, `a comment button on ${at}${signedIn ? ' (signed in)' : ''}`);
+        assert.deepEqual(page.errors, []);
+        await ctx.close();
+      }
+      const ctx = await browser.newContext(PHONE);
+      const page = await ctx.newPage();
+      await page.goto(`${base}/d/plain-doc`);
+      const fab = page.locator('.tdoc-fab');
+      await fab.waitFor({ timeout: 15000 });
+      assert.ok(await fab.isVisible(), 'no comment button on a normal doc');
+      assert.match(await fab.getAttribute('aria-label'), /comments/);
+      await shot(page, 'doc-phone-fab');
       await ctx.close();
     });
 
@@ -320,19 +336,23 @@ const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p
       await ctx.close();
     });
 
-    await t('landing phone 320px: the comment button in the bar covers none of the bar\'s own items', async () => {
+    await t('landing phone 320px: the bar\'s items fit, none over another; no comment button', async () => {
       const { ctx, page } = await openLanding({ ...PHONE, viewport: { width: 320, height: 640 } });
-      const fab = await page.locator('.tdoc-fab').boundingBox();
+      assert.equal(await page.locator('.tdoc-fab').count(), 0, 'a comment button on the landing');
       const items = await page.locator('.tdoc-bar a:visible, .tdoc-bar button:visible').evaluateAll((els) => els.map((el) => {
         const r = el.getBoundingClientRect();
         return { x: r.x, y: r.y, w: r.width, h: r.height, what: el.className || el.tagName };
       }).filter((r) => r.w && r.h));
-      assert.ok(items.length >= 2, JSON.stringify(items));
-      for (const r of items) {
-        const overlaps = fab.x < r.x + r.w && fab.x + fab.width > r.x && fab.y < r.y + r.h && fab.y + fab.height > r.y;
-        assert.ok(!overlaps, `the comment button covers ${r.what}`);
+      assert.ok(items.length >= 3, JSON.stringify(items));
+      for (const a of items) {
+        assert.ok(a.x + a.w <= 320, `${a.what} off screen`);
+        for (const b of items) {
+          if (a === b) continue;
+          const overlaps = a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+          const nested = (a.x >= b.x && a.x + a.w <= b.x + b.w && a.y >= b.y && a.y + a.h <= b.y + b.h) || (b.x >= a.x && b.x + b.w <= a.x + a.w && b.y >= a.y && b.y + b.h <= a.y + a.h);
+          assert.ok(!overlaps || nested, `${a.what} covers ${b.what}`);
+        }
       }
-      assert.ok(fab.x + fab.width <= 320, 'off screen');
       await shot(page, 'landing-phone-320');
       await ctx.close();
     });

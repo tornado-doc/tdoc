@@ -925,12 +925,6 @@
   body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   body.tdoc-narrow .tdoc-fab.is-hidden { display: none; }
   body.tdoc-narrow[data-tdoc-suggest-bar] .tdoc-fab { bottom: calc(var(--tdoc-suggest-bar-h, 110px) + 12px); }
-  /* The landing on a phone: its full-width CTAs (Make your doc, Add to your
-     site, ...) scroll under the bottom corner, so the comment button sits in
-     the top bar instead, after the logo (its 44px phone target), where nothing of the page goes (after
-     the suggest-bar rule, which would pull it back down).
-     Same button, smaller; only its place changes (AGENTS.md). */
-  body.tdoc-narrow[data-tdoc-landing] .tdoc-fab { top: 8px; bottom: auto; left: 60px; right: auto; padding: 0 12px; height: 32px; z-index: 1000000; box-shadow: none; }
   body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid var(--td-ground, #fff); border-radius: 50%; background: var(--td-accent, #1652f0); box-sizing: border-box; }
   body.tdoc-narrow .tdoc-drawer-tabs { display: flex; flex: none; justify-content: center; margin: 0 0 10px; }
   body.tdoc-narrow .tdoc-drawer-list, body.tdoc-narrow .tdoc-drawer-ask { flex: 1; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
