@@ -239,6 +239,7 @@ export function MobileCommentDrawer({
   canSendToAgent = false,
   agentSetupHref = null,
   onOpenChange,
+  fab = true,
   hideFab = false,
   onStartComment = null,
   onAskAi = null,
@@ -290,14 +291,14 @@ export function MobileCommentDrawer({
       id="tdoc-comment-layer"
       open={open}
       onOpenChange={onOpenChange}
-      trigger={(
+      trigger={fab ? (
         <SheetTrigger className={`tdoc-fab${hideFab ? ' is-hidden' : ''}`} aria-label={openCount ? `${openCount} open comments${unread ? ', new agent reply' : ''}` : 'Open comments'}>
           <CommentIcon size={16} />
           {askAi ? <AskIcon className="tdoc-fab-ai" size={11} /> : null}
           {openCount > 0 ? <span id="tdoc-fab-count">{openCount}</span> : null}
           {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
         </SheetTrigger>
-      )}
+      ) : null}
       tabs={askAi ? {
         value: tab,
         onChange: onTab,

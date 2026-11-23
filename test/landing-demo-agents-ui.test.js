@@ -5,8 +5,8 @@
 //     the @ list offers Claude (demo) and tdoc AI;
 //   - posting a comment that names it runs the real handoff status line:
 //     Delivered to Claude (demo) → Claude (demo) is on it → its reply;
-//   - Ask AI (the bar on desktop, the drawer's Ask AI tab on a phone) gives
-//     the demo answer, and its Send to agent hands a ready comment to Claude
+//   - Ask AI (the bar's Ask AI, desktop and phone alike: the landing has no
+//     comment button on a phone, Julie 2026-11-22) gives the demo answer, and its Send to agent hands a ready comment to Claude
 //     (demo), which replies;
 //   - the scripted Edit (flag demoEditRewrite, demo-agent.js DEMO_REWRITES):
 //     Edit opens with a fixed request (read-only: the visitor can't change
@@ -375,12 +375,10 @@ async function touchSelect(page, phrase) {
         const { context, page, shot, noWrites } = await open(`keep-${width}-${engine}`, opts, REWRITE_ON, engine);
         let panel;
         if (phone) {
-          await page.locator('.tdoc-fab').click();
-          panel = page.locator('#tdoc-comment-layer .tdoc-ask-panel');
-          for (let i = 0; i < 3; i++) {
-            await page.locator('.tdoc-drawer-tabs').getByText('Ask AI').click();
-            try { await panel.getByRole('button', { name: /^Mode:/ }).waitFor({ timeout: 4000 }); break; } catch (e) { if (i === 2) throw e; }
-          }
+          if (await page.locator('.tdoc-fab').count()) throw new Error('a comment button on the landing');
+          await page.locator('#tdoc-send-agent-btn').click();
+          panel = page.locator('.tdoc-ask-mobile-drawer .tdoc-ask-panel');
+          await panel.getByRole('button', { name: /^Mode:/ }).waitFor({ timeout: 4000 });
         } else {
           await page.locator('#tdoc-send-agent-btn').click();
           panel = page.locator('.tdoc-ask-panel');
@@ -446,20 +444,19 @@ async function touchSelect(page, phrase) {
       return p;
     };
     const drawerClosed = async (page, name) => {
-      const layer = page.locator('#tdoc-comment-layer');
-      if (await layer.count() && await layer.isVisible()) {
-        const b = await layer.boundingBox();
-        if (b && b.y < page.viewportSize().height - 2) throw new Error(`${name}: the drawer is still open (top ${b.y})`);
+      for (const layer of [page.locator('#tdoc-comment-layer'), page.locator('.tdoc-ask-mobile-drawer')]) {
+        if (await layer.count() && await layer.first().isVisible()) {
+          const b = await layer.first().boundingBox();
+          if (b && b.y < page.viewportSize().height - 2) throw new Error(`${name}: the drawer is still open (top ${b.y})`);
+        }
       }
     };
+    // The landing on a phone: Ask AI is the bar's (no comment button there).
     const phoneEdit = async (page) => {
-      await page.locator('.tdoc-fab').click();
-      const panel = page.locator('#tdoc-comment-layer .tdoc-ask-panel');
-      // WebKit can take the tab tap while the drawer is still sliding in.
-      for (let i = 0; i < 3; i++) {
-        await page.locator('.tdoc-drawer-tabs').getByText('Ask AI').click();
-        try { await panel.getByRole('button', { name: /^Mode:/ }).waitFor({ timeout: 4000 }); break; } catch (e) { if (i === 2) throw e; }
-      }
+      if (await page.locator('.tdoc-fab').count()) throw new Error('a comment button on the landing');
+      await page.locator('#tdoc-send-agent-btn').click();
+      const panel = page.locator('.tdoc-ask-mobile-drawer .tdoc-ask-panel');
+      await panel.getByRole('button', { name: /^Mode:/ }).waitFor({ timeout: 4000 });
       return { panel, box: await pickEdit(page, panel) };
     };
     for (const engine of ['chromium', 'webkit']) for (const width of [430, 390]) {
@@ -505,10 +502,10 @@ async function touchSelect(page, phrase) {
         // Undo: the paragraph back, the drawer's Edit as before Send.
         await slimBar(page).getByRole('button', { name: 'Undo' }).click();
         await slimBar(page).waitFor({ state: 'detached' });
-        const again = page.locator('#tdoc-comment-layer .tdoc-ask-panel').getByRole('textbox', { name: 'What should the agent change?' });
+        const again = page.locator('.tdoc-ask-mobile-drawer .tdoc-ask-panel').getByRole('textbox', { name: 'What should the agent change?' });
         await again.waitFor();
         if ((await again.inputValue()) !== script.prompt) throw new Error('Undo did not bring the request back');
-        if (await page.locator('#tdoc-comment-layer .tdoc-ask-panel').getByRole('button', { name: 'Send to Claude (demo)' }).first().isDisabled()) throw new Error('after Undo, Send is off');
+        if (await page.locator('.tdoc-ask-mobile-drawer .tdoc-ask-panel').getByRole('button', { name: 'Send to Claude (demo)' }).first().isDisabled()) throw new Error('after Undo, Send is off');
         let back = await paragraph(page);
         for (let i = 0; i < 20 && back.step; i++) { await page.waitForTimeout(50); back = await paragraph(page); }
         if (back.text !== script.before.replace(/\s+/g, ' ') || back.step) throw new Error(`after Undo: ${JSON.stringify(back)}`);
@@ -614,7 +611,7 @@ async function touchSelect(page, phrase) {
       await context.close();
     });
 
-    await t('phone 390: the same @agent and handoff, and the drawer\'s Ask AI tab gives the demo answer', async () => {
+    await t('phone 390: the same @agent and handoff (a tap on its words opens it), and the bar\'s Ask AI gives the demo answer', async () => {
       const PHONE = { ...devices['iPhone 13'], defaultBrowserType: undefined, viewport: { width: 390, height: 844 } };
       const { context, page, shot, noWrites } = await open('phone', PHONE);
       await touchSelect(page, 'Humans and agents collaborate');
@@ -627,14 +624,21 @@ async function touchSelect(page, phrase) {
       await shot('phone-composer-agent.png');
       await pop.getByRole('button', { name: 'Post', exact: true }).click();
       await pop.waitFor({ state: 'detached' });
-      await page.locator('.tdoc-fab').click();
+      // No comment button on the landing: a tap on the commented words opens
+      // the comment, as on desktop.
+      if (await page.locator('.tdoc-fab').count()) throw new Error('a comment button on the landing');
+      await page.waitForTimeout(300);
+      const words = await phraseBox(page, 'Humans and agents');
+      await page.touchscreen.tap((words.x1 + words.x2) / 2, words.y1);
       const card = page.locator('#tdoc-comment-layer [data-comment-id]').filter({ hasText: 'Shorter headline please' }).first();
       await card.waitFor();
       await handoffRuns(page, card);
       await shot('phone-handoff-replied.png');
-      // The drawer's Ask AI tab.
-      await page.locator('.tdoc-drawer-tabs').getByText('Ask AI').click();
-      const panel = page.locator('.tdoc-ask-panel');
+      // The bar's Ask AI, as on desktop.
+      await page.keyboard.press('Escape');
+      await page.locator('#tdoc-comment-layer').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+      await page.locator('#tdoc-send-agent-btn').click();
+      const panel = page.locator('.tdoc-ask-mobile-drawer .tdoc-ask-panel');
       await panel.locator('textarea').fill('What does tdoc do?');
       await panel.locator('button[type=submit]').click();
       await panel.locator('.tdoc-ask-answer').getByText(/^Demo answer:/).waitFor({ timeout: 5000 });

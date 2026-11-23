@@ -931,10 +931,13 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     setDemoRewriteState('running');
     setAgentActivityOpen(true);
     const play = () => bridge.send({ type: 'tdoc:demoRewrite', id, before: demoRewrite.before, after: demoRewrite.after, view: demoBand() });
-    if (unifiedEntry) {
-      // The drawer slides away (.2s) and the slim bar is in place before
-      // the paragraph is measured against it.
+    if (narrow) {
+      // The drawer (the comment drawer's Ask AI tab, or the bar's Ask AI
+      // drawer on the site pages, which have no comment button) slides away
+      // (.2s) and the slim bar is in place before the paragraph is measured
+      // against it.
       setDrawerOpen(false);
+      setHandoffDetailsOpen(false);
       setDemoBar(true);
       setTimeout(play, 260);
     } else play();
@@ -963,8 +966,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     setDemoRewriteResets((n) => n + 1);
     if (demoBar) {
       setDemoBar(false);
-      setDrawerTab('ask');
-      setDrawerOpen(true);
+      if (unifiedEntry) { setDrawerTab('ask'); setDrawerOpen(true); } else setHandoffDetailsOpen(true);
     }
   };
 
@@ -1615,7 +1617,10 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // the right side is Ask AI · Comments · Share · avatar. Not the landing.
   const [topbarBFlag] = useState(() => isFeatureOn('docTopbarB'));
   const barB = topbarBFlag && !config.isLanding;
-  const unifiedEntry = narrow && (askAiPanelEnabled || signedOutAsk) && unifiedEntryFlag;
+  // Not the landing (and the other site pages: /pricing, /start, ...): a
+  // marketing page has no comments for a visitor, so a phone gets no comment
+  // button there; Ask AI stays in the bar, as on desktop (Julie, 2026-11-22).
+  const unifiedEntry = narrow && !config.isLanding && (askAiPanelEnabled || signedOutAsk) && unifiedEntryFlag;
   const [drawerTab, setDrawerTab] = useState('comments');
   const myAgent = useMyAgent(config.slug, myAgentEnabled && Boolean(config.identity));
   // The composer's @ list: agents that may edit this doc, then those that
@@ -2418,13 +2423,6 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     markers: { hidden: markersHidden, toggle: () => setMarkersHidden((h) => !h) },
     keysEnabled: Boolean(sidePanelOpen || openCommentId || openClusterKey || (narrow && drawerOpen)) && !composer && !reanchorId,
   });
-  // The landing's phone layout moves the comment button into the top bar
-  // (chrome.css [data-tdoc-landing]): its CTAs pass under the bottom corner.
-  useEffect(() => {
-    if (!config.isLanding) return undefined;
-    document.body.setAttribute('data-tdoc-landing', '');
-    return () => document.body.removeAttribute('data-tdoc-landing');
-  }, [config.isLanding]);
   const marksHidden = Boolean(copyForAgent && markersHidden);
   const marksHiddenRef = useRef(marksHidden);
   marksHiddenRef.current = marksHidden;
@@ -2978,7 +2976,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           onOpenComment={(id) => { setOpenCommentId(id); setDrawerTab('comments'); setDrawerOpen(true); }}
           onOpenCluster={() => { setOpenCommentId(null); setDrawerTab('comments'); setDrawerOpen(true); }}
         /> : null}
-        {demoBar && !drawerOpen ? <DemoRewriteBar state={demoRewriteState} agent={DEMO_AGENT.handle} onUndo={undoDemoRewrite} /> : null}
+        {demoBar && !drawerOpen && !handoffDetailsOpen ? <DemoRewriteBar state={demoRewriteState} agent={DEMO_AGENT.handle} onUndo={undoDemoRewrite} /> : null}
         <MobileCommentDrawer
           area={commentArea}
           prefs={listPrefs}
@@ -3002,6 +3000,10 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
           canSendToAgent={canSendToAgent}
           agentSetupHref={sendToAgentSetupHref}
           onOpenChange={(open) => { setDrawerOpen(open); if (open) setHandoffDetailsOpen(false); }}
+          // The site pages (landing, /pricing, ...) have no comment button on a
+          // phone, as on desktop: no comments for a visitor there. A tapped
+          // demo highlight still opens the drawer.
+          fab={!config.isLanding}
           hideFab={handoffDetailsOpen || editor.mode === 'read' || demoBar}
           askAi={unifiedEntry ? askAiPanel(drawerOpen && drawerTab === 'ask') : null}
           tab={drawerTab}
