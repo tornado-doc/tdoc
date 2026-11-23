@@ -13,6 +13,13 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR supersedes the run for the previous head: cancel it.
+# Pushes to main get a per-commit group and are never cancelled, so every
+# main commit keeps its own test result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   offline:
     name: offline test suite
