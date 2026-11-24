@@ -87,6 +87,16 @@
 .tm-comment-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--td-muted); font-size: 12px; }
 .tm-comment-pagination > div { display: flex; align-items: center; gap: 10px; }
 
+/* commentsSitesTabs: where a comment came from, a doc or a site (its host
+   and the page), and for a site the element that was clicked. */
+.tm-comment-line b.tm-comment-src { display: inline-flex; align-items: baseline; gap: 4px; }
+.tm-comment-src > svg { flex: none; align-self: center; color: var(--td-muted); }
+.tm-comment-src-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tm-comment-src-path { flex: none; color: var(--td-muted); font-weight: 400; }
+.tm-comment-anchor code { padding: 1px 5px; border-radius: 4px; background: var(--td-surface-2); color: var(--td-ink); font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tm-comment-from { display: grid; gap: 5px; }
+.tm-comment-from .tdoc-seg { justify-self: start; }
+
 @media (max-width: 700px) {
   .tm-comment-row { grid-template-columns: 32px minmax(0, 1fr); padding: 11px 10px; }
   .tm-comment-time { grid-column: 2; }

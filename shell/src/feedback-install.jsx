@@ -4,6 +4,7 @@ import { Bookmark, CodeXml, MessageSquarePlus, MousePointerClick } from 'lucide-
 import { AppButton } from './ui/button.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AppSelect } from './ui/select.jsx';
+import { isFeatureOn } from './feature-flags.js';
 import './docs-hub.css';
 import './feedback-pages.css';
 
@@ -192,9 +193,9 @@ export const feedbackSdkLine = (scriptSrc, space) => `<script src="${scriptSrc}"
 // The SDK's picture, drawn like the bookmark's browser window: someone's
 // own site with the widget's resting button in its corner (the same round
 // white button and icon feedback.js draws) and one comment pinned on it.
-export function SiteDemo({ omnibox = 'app.example.com' }) {
+export function SiteDemo({ omnibox = 'app.example.com', animated = false }) {
   return (
-    <div className="demo site-demo" aria-hidden="true">
+    <div className={`demo site-demo${animated ? ' is-animated' : ''}`} aria-hidden="true">
       <div className="demo-titlebar">
         <div className="demo-dots"><i className="r" /><i className="y" /><i className="g" /></div>
         <div className="demo-omnibox">{omnibox}</div>
@@ -205,10 +206,64 @@ export function SiteDemo({ omnibox = 'app.example.com' }) {
           <i className="h" /><i className="l" /><i className="l short" />
           <span className="site-demo-target">Start free trial<span className="site-demo-pin">1</span></span>
         </div>
-        <div className="site-demo-note"><b>Ana</b> This button is hard to find on a phone</div>
+        <div className="site-demo-note">
+          <b>Ana</b> This button is hard to find on a phone
+          {/* commentsSitesTabs: the loop ends with the agent's fix. */}
+          {animated ? <span className="site-demo-fix">✓ Agent: made it blue and moved it up</span> : null}
+        </div>
         <span className="site-demo-fab"><MessageSquarePlus aria-hidden="true" /></span>
       </div>
     </div>
+  );
+}
+
+// The loop the animated demo plays, named under it: each step lights up in
+// turn with the picture.
+export function SiteDemoSteps() {
+  return (
+    <p className="site-demo-steps" aria-hidden="true"><span>1 Select</span><span>2 Comment</span><span>3 Agent fixes</span></p>
+  );
+}
+
+// The SDK's two ways in, the same block on /feedback and on an empty Sites
+// tab (commentsSitesTabs): ask your agent, or paste the one line. `space`
+// fills in the line's space id; with more than one, `onPick` chooses it.
+// `arrive` adds the third step /feedback ends on.
+export function SdkSteps({ scriptSrc, space = null, spaces = [], onPick = null, arrive = true }) {
+  return (
+    <ol className="fb-steps">
+      <li className="fb-step" id="sdk-ask">
+        <h3>Ask your agent</h3>
+        <div className="fb-prompt">
+          <q>{FEEDBACK_SDK_PROMPT}</q>
+          <CopyPromptButton text={FEEDBACK_SDK_PROMPT} label="Copy prompt" variant="primary" size="m" />
+        </div>
+        <p className="muted">With tdoc connected, it makes your site’s feedback space and adds the line.</p>
+      </li>
+      <li className="fb-step" id="sdk-paste">
+        <h3>Or paste one line before <code>&lt;/head&gt;</code></h3>
+        {spaces.length > 1 && onPick ? (
+          <div className="fb-space-pick">
+            <AppSelect
+              ariaLabel="Feedback space"
+              value={space.slug}
+              onChange={onPick}
+              options={spaces.map((s) => ({ value: s.slug, label: s.site.origins.map(hostOf).join(', ') }))}
+            />
+          </div>
+        ) : null}
+        <CodeCopy code={feedbackSdkLine(scriptSrc, space && space.slug)} />
+        {space
+          ? <p className="muted" id="sdk-space-note">Your space for {space.site.origins.map(hostOf).join(', ')}.</p>
+          : <p className="muted" id="sdk-space-note">Your agent fills in <code>{FEEDBACK_SDK_PLACEHOLDER}</code> in step 1.</p>}
+      </li>
+      {arrive ? (
+        <li className="fb-step" id="sdk-arrive">
+          <h3>Comments arrive in your feedback space</h3>
+          <p className="muted">Hand them to your agent from there. Private by default: everyone on the site sees the button, but only you and the people you invite (or your team) can comment, signed in to tdoc. Open it wider in Share.</p>
+        </li>
+      ) : null}
+    </ol>
   );
 }
 
@@ -266,6 +321,7 @@ export function FeedbackInstall({ boot }) {
   const [picked, setPicked] = useState('');
   const space = spaces.find((s) => s.slug === picked) || spaces[0] || null;
   const [tryBlocked, setTryBlocked] = useState(false);
+  const [sitesTabs] = useState(() => isFeatureOn('commentsSitesTabs'));
   const tryIt = useCallback(() => setTryBlocked(!startFeedbackDemo()), []);
   // /feedback#sdk (the homepage links there): the page renders after load,
   // so the browser's own jump to the fragment finds nothing. #try (the
@@ -322,41 +378,14 @@ export function FeedbackInstall({ boot }) {
         <section className="fb-path script-path" id="sdk">
           <h2>SDK</h2>
           <p className="fb-path-sub muted">Feedback built into your own product.</p>
-          <SiteDemo omnibox={space ? hostOf(space.site.origins[0]) : 'app.example.com'} />
-          <ol className="fb-steps">
-            <li className="fb-step" id="sdk-ask">
-              <h3>Ask your agent</h3>
-              <div className="fb-prompt">
-                <q>{FEEDBACK_SDK_PROMPT}</q>
-                <CopyPromptButton text={FEEDBACK_SDK_PROMPT} label="Copy prompt" variant="primary" size="m" />
-              </div>
-              <p className="muted">With tdoc connected, it makes your site’s feedback space and adds the line.</p>
-            </li>
-            <li className="fb-step" id="sdk-paste">
-              <h3>Or paste one line before <code>&lt;/head&gt;</code></h3>
-              {spaces.length > 1 ? (
-                <div className="fb-space-pick">
-                  <AppSelect
-                    ariaLabel="Feedback space"
-                    value={space.slug}
-                    onChange={setPicked}
-                    options={spaces.map((s) => ({ value: s.slug, label: s.site.origins.map(hostOf).join(', ') }))}
-                  />
-                </div>
-              ) : null}
-              <CodeCopy code={feedbackSdkLine(scriptSrc, space && space.slug)} />
-              {space
-                ? <p className="muted" id="sdk-space-note">Your space for {space.site.origins.map(hostOf).join(', ')}.</p>
-                : <p className="muted" id="sdk-space-note">Your agent fills in <code>{FEEDBACK_SDK_PLACEHOLDER}</code> in step 1.</p>}
-            </li>
-            <li className="fb-step" id="sdk-arrive">
-              <h3>Comments arrive in your feedback space</h3>
-              <p className="muted">Hand them to your agent from there. Private by default: everyone on the site sees the button, but only you and the people you invite (or your team) can comment, signed in to tdoc. Open it wider in Share.</p>
-            </li>
-          </ol>
+          <SiteDemo omnibox={space ? hostOf(space.site.origins[0]) : 'app.example.com'} animated={sitesTabs} />
+          {sitesTabs ? <SiteDemoSteps /> : null}
+          <SdkSteps scriptSrc={scriptSrc} space={space} spaces={spaces} onPick={setPicked} />
           <p className="fb-more muted">
             <a href={FEEDBACK_SDK_GUIDE} target="_blank" rel="noopener">npm, React and CSP guide →</a>
-            <span>Already using the bookmark there? Turn that space into the site’s own in <a href="/me?view=comments">My docs → Comments</a>.</span>
+            {sitesTabs
+              ? <span>Already using the bookmark there? Turn that space into the site’s own in <a href="/me?view=sites">My docs → Sites</a>.</span>
+              : <span>Already using the bookmark there? Turn that space into the site’s own in <a href="/me?view=comments">My docs → Comments</a>.</span>}
           </p>
         </section>
       </main>

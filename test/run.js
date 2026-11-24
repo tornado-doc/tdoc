@@ -52,6 +52,7 @@ const OFFLINE = [
   'remote-mcp.test.js',       // /mcp + OAuth 2.1: PKCE, redirect URIs, consent CSRF, token mapping, refresh/revoke, tools and refusals, rate limit
   'feedback-demo.test.js',    // Try it on this page: demo mode only on tdoc's own /feedback, script from that origin; answers stay in the tab
   'feedback.test.js',         // #564 product feedback: token door, space, bookmarklet + one-line entry
+  'comments-sites.test.js',   // commentsSitesTabs: /api/me/comments lists own docs' and own/joined sites' comments with their source; a stranger, non-member, feedback or scoped token gets nothing
   'feedback-invites.test.js', // share from the widget: signed expiring invites, owner-only, email pending, revoke, Join / Keep my own, switcher, landing page
   'comment-history.test.js',  // event-log fold + cross-version pull
   'comment-dedupe.test.js',   // the same words twice within seconds is one comment
@@ -330,6 +331,7 @@ const BROWSER = [
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
   'share-access-ui.test.js', // Share panel: specific people / anyone with the link / public, sign-in switch, desktop + phone
   'team-comments-ui.test.js', // team-wide comments: filters, exact deep links, bounded pagination, phone layout
+  'comments-sites-ui.test.js', // commentsSitesTabs: one Comments list (docs + sites, From filter), Sites tab (Settings inline, test sites folded), empty discovery block, phone, flag off unchanged
   'team-backup-ui.test.js', // customer-owned backup setup, health, resync/off, phone layout
   'delete-account-ui.test.js', // Settings → Delete account: danger card, type-to-confirm, blockers with links, server refusal in place, desktop + phone
   'display-name-ui.test.js', // Settings → Profile → Name: field, Save gating, menu follows, refusal in place, empty goes back to the sign-in name, desktop + phone

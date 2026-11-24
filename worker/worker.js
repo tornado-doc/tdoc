@@ -7646,7 +7646,9 @@ async function feedbackSpaceCounts(env, slug) {
   return { open, replied };
 }
 
-async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
+// `site: false`: the caller only asks whether each space is the person's
+// (My docs' comment feed), so the site binding is not read.
+async function feedbackSpacesFor(env, session, rows, toPublic, withCounts, { site: withSite = true } = {}) {
   if (!session) return [];
   const out = await Promise.all(rows.map(async (row) => {
     const origin = feedbackOrigin(row.meta && row.meta.feedback && row.meta.feedback.origin);
@@ -7658,7 +7660,7 @@ async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
     }
     if (!owned && !joined) return null;
     if (!docReadableBy(env, session, row.meta)) return null;
-    const site = owned ? await loadSiteBinding(env, row.slug, row.meta) : null;
+    const site = owned && withSite ? await loadSiteBinding(env, row.slug, row.meta) : null;
     const item = { ...toPublic(row), origin, mine: owned, ...(site ? { site } : {}) };
     if (withCounts) Object.assign(item, await feedbackSpaceCounts(env, row.slug));
     return item;
@@ -7684,10 +7686,11 @@ function teamCommentAuthor(author, { agentVerdict = false } = {}) {
     : (typeof a.kind === 'string' && a.kind && a.kind !== 'human' ? a.kind : 'human');
   // An agent also carries what its face reads (agentFaceAuthor): the
   // program's mark, as on the reply in the thread.
-  const face = kind === 'agent' ? agentFaceAuthor({ ...a, kind }) : null;
+  // (Its name is the row's own, feedName: not scanned a second time.)
+  const face = kind === 'agent' ? agentFaceAuthor({ ...a, kind, name: '' }) : null;
   return {
     key: normalizeActorKey(login) || login,
-    name: String(a.name || (email ? email.split('@')[0] : login) || 'Someone').slice(0, 100),
+    name: feedName(a.name || (email ? email.split('@')[0] : login)),
     avatar_url: typeof a.avatar_url === 'string' ? a.avatar_url : '',
     kind,
     ...(face ? { login: face.login, ...['handle', 'provider', 'cli', 'owner', 'team_agent', 'tdoc_ai'].reduce((o, k) => (face[k] ? { ...o, [k]: face[k] } : o), {}) } : {}),
@@ -7783,9 +7786,48 @@ function productAnchorLine(where) {
   return ` [page ${oneLine(path, 300)}${where.selector ? ` · ${oneLine(where.selector, 120)}` : ''}${area}${react}${inDoc}]`;
 }
 
+// A comment left on a site (a feedback space): which page, and the element
+// clicked there, in a few words ("button "Start free trial"", "img.hero").
+// The page is the path only: the host is the space's, said once per row.
+function siteCommentWhere(anchor) {
+  if (!anchor || typeof anchor !== 'object' || anchor.kind !== 'product') return { page: '', element: '' };
+  let page = '';
+  try { const u = new URL(String(anchor.url || '')); page = `${u.pathname}${u.search}`.slice(0, 300); } catch {}
+  const tag = typeof anchor.tag === 'string' ? anchor.tag.trim().toLowerCase().slice(0, 40) : '';
+  const text = typeof anchor.text === 'string' ? anchor.text.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+  const selector = typeof anchor.selector === 'string' ? anchor.selector.replace(/\s+/g, ' ').trim().slice(0, 120) : '';
+  const element = text ? `${tag ? `${tag} ` : ''}"${text}"` : (selector || tag);
+  return { page, element };
+}
+
+// A name as a feed row carries it: at most 100 characters. A longer one also
+// ends at its first @, so neither the cut nor what is left unscanned holds an
+// address, and what is scanned (redactCommentEmails) is short.
+function feedName(raw) {
+  const name = String(raw || '');
+  if (name.length <= 100) return name || 'Someone';
+  const at = name.indexOf('@');
+  return (at < 0 ? name : name.slice(0, at)).slice(0, 100).trim() || 'Someone';
+}
+
+// A feed row's sizes, applied to what leaves (after redaction, so that a
+// rule reads whole words).
+function cutCommentRows(rows) {
+  return rows.map((row) => ({
+    ...row,
+    text: String(row.text || '').slice(0, 2000),
+    author: { ...row.author, name: feedName(row.author && row.author.name) },
+  }));
+}
+
+// Whole text: every caller redacts, then cutCommentRows.
 function teamCommentRows(slug, meta, list) {
   ensureMigrated(list);
   const title = String((meta && meta.title) || slug);
+  // A feedback space's comments are a site's: the row says which site.
+  const siteOrigin = meta && meta.created_from === 'feedback' ? feedbackOrigin(meta.feedback && meta.feedback.origin) : null;
+  let siteHost = '';
+  try { siteHost = siteOrigin ? new URL(siteOrigin).host : ''; } catch {}
   const rows = [];
   for (const thread of historyList(list)) {
     if (!thread || thread.deleted) continue;
@@ -7799,13 +7841,14 @@ function teamCommentRows(slug, meta, list) {
       anchor,
       resolved,
       reply_count: replies.length,
+      ...(siteOrigin ? { source: 'site', site: { origin: siteOrigin, host: siteHost, ...siteCommentWhere(thread.anchor) } } : { source: 'doc' }),
     };
     rows.push({
       ...base,
       id: thread.id,
       kind: 'comment',
       version: Math.max(1, Number(thread.created_in || thread.version) || 1),
-      text: String(thread.text || '').slice(0, 2000),
+      text: String(thread.text || ''),
       created: thread.created || '',
       author: teamCommentAuthor(thread.author),
     });
@@ -7816,7 +7859,7 @@ function teamCommentRows(slug, meta, list) {
         parent_id: reply.parent_id || thread.id,
         kind: 'reply',
         version: Math.max(1, Number(reply.created_in || reply.version || thread.created_in || thread.version) || 1),
-        text: String(reply.text || '').slice(0, 2000),
+        text: String(reply.text || ''),
         created: reply.created || '',
         author: teamCommentAuthor(reply.author, { agentVerdict: reply.agent_status != null }),
       });
@@ -7842,6 +7885,61 @@ async function teamCommentsPage(env, session, teamId, offset = 0) {
   const items = chunks.flat().sort((a, b) => String(b.created).localeCompare(String(a.created)));
   const next = start + page.length < slugs.length ? start + page.length : null;
   return { team: { id: team.id, name: team.name }, items, next, docs_scanned: page.length, docs_total: slugs.length };
+}
+
+// My docs' Comments: the comments on the person's own My docs docs and on
+// the sites (feedback spaces) they own or joined that are not a team's (a
+// team's are on that team's Comments). Read like the team feed: candidate
+// slugs from the person's own index facet and join keys (two list calls),
+// then bounded pages of documents, each checked on its full record. The
+// same rules as /api/me/feedback and My docs: nothing here the person
+// could not already open.
+async function personalCommentSlugs(env, session, origin) {
+  const accountIds = sessionAccountIds(session);
+  const login = sessionLogin(session);
+  const actorKeys = [actorKey(session), ...((session && session.linked_actor_keys) || [])].filter(Boolean).map(String);
+  let owned = [];
+  if (hostedRegistrationEnabled(env, origin) && (session.account_id || login)) {
+    const facet = session.account_id ? `p:${session.account_id}` : `l:${login}`;
+    owned = await docIndexSlugs(env, facet, personalDocMatcher({ accountIds, login, actorKeys }));
+    // The deploy operator (TDOC_OWNER) also owns the docs that name no
+    // owner, as in indexData's facets.
+    if (isOwnerSession(env, session)) owned = [...owned, ...(await docIndexSlugs(env, 'n', ownerlessDocMatcher))];
+  } else {
+    // A self-hosted worker: every doc is the operator's, one catalog read.
+    const data = await indexData(env, session, origin);
+    owned = [...(data.docs || []), ...(data.feedback || [])].map((row) => row.slug);
+  }
+  const joined = await joinedFeedbackSpaceSlugs(env, session).catch(() => []);
+  return [...new Set([...owned, ...joined])].filter(isValidSlug).sort();
+}
+
+async function personalCommentsPage(env, session, origin, offset = 0) {
+  const slugs = await personalCommentSlugs(env, session, origin);
+  const start = Math.max(0, Number(offset) || 0);
+  const page = slugs.slice(start, start + TEAM_COMMENT_DOC_PAGE);
+  const myTeams = new Set((session && session.team_ids) || []);
+  const chunks = await Promise.all(page.map(async (slug) => {
+    const meta = await loadDocMeta(env, slug);
+    if (!meta) return null;
+    if (meta.created_from === 'feedback') {
+      // A team's site is listed with that team, not here.
+      if (meta.workspace_id && myTeams.has(meta.workspace_id)) return null;
+      // Owned or joined, and readable: the rule of the Sites list itself.
+      const ok = await feedbackSpacesFor(env, session, [{ slug, meta }], (row) => ({ slug: row.slug }), false, { site: false });
+      if (!ok.length) return null;
+    } else if (meta.workspace_id || !isDocOwnerSession(env, session, meta) || !docReadableBy(env, session, meta)) {
+      return null;
+    }
+    let rows = [];
+    try { rows = teamCommentRows(slug, meta, await readComments(env, slug)); } catch { return null; }
+    return rows.length ? { rows, privacy: await emailPrivacyFor(env, session, slug, meta) } : null;
+  }));
+  // Redacted per doc, as on the doc page; the reads that takes are the
+  // page's, once (redactCommentRowsByDoc).
+  const items = cutCommentRows((await redactCommentRowsByDoc(env, chunks.filter(Boolean))).flat()).sort((a, b) => String(b.created).localeCompare(String(a.created)));
+  const next = start + page.length < slugs.length ? start + page.length : null;
+  return { items, next, docs_scanned: page.length, docs_total: slugs.length };
 }
 
 // ─────────────────── customer-owned team backup mirrors ───────────────────
@@ -11935,6 +12033,9 @@ const IDENTITY_KEY_PIN = 'account-identity-key';
 const IDENTITY_SECRET_NAMES = ['TDOC_EMAIL_ALIAS_SECRET', 'TDOC_DATA_MIRROR_KEY', 'TDOC_UPLOAD_TOKEN', 'GITHUB_CLIENT_SECRET'];
 const IDENTITY_FALLBACK_SECRET = 'tdoc-deleted-identity';
 const IDENTITY_KEY_CACHE = new WeakMap();
+// The KV namespaces whose pin this isolate has read or written, ever: the
+// cache above forgets (a later null read replaces it), a pin never goes away.
+const IDENTITY_KEY_SEEN = new WeakSet();
 class IdentityKeyChanged extends Error {}
 async function identityKeyId(secret) {
   const mac = await hmacBytes(`tdoc-identity-kid\0${secret}`, 'kid');
@@ -11954,6 +12055,7 @@ async function identityKey(env, { pin = false } = {}) {
   let rec = null;
   try { rec = JSON.parse(await env.META.get(IDENTITY_KEY_PIN)); } catch {}
   let v = null;
+  if (env && env.META && (rec || pin)) IDENTITY_KEY_SEEN.add(env.META);
   if (rec && typeof rec.kid === 'string') {
     const secret = rec.name ? String(env[rec.name] || '') : IDENTITY_FALLBACK_SECRET;
     if (!secret || await identityKeyId(secret) !== rec.kid) {
@@ -11974,8 +12076,11 @@ async function identityKey(env, { pin = false } = {}) {
 async function identityHash(env, actor, { pin = false } = {}) {
   const key = await identityKey(env, { pin });
   if (!key) return null;
+  return identityHashUnder(key.secret, actor);
+}
+async function identityHashUnder(secret, actor) {
   const norm = normalizeActorKey(actor) || String(actor || '').trim().toLowerCase();
-  const mac = await hmacBytes(`tdoc-deleted-identity-v1\0${key.secret}`, norm);
+  const mac = await hmacBytes(`tdoc-deleted-identity-v1\0${secret}`, norm);
   return [...mac].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 function identityTombKey(hash) { return `account-deleted-identity:${hash}`; }
@@ -14950,6 +15055,69 @@ async function redactCommentEmails(value, privacy) {
       if (privacy.goneCache.get(e)) gone.add(e);
     }));
   }
+  return aliasCommentEmails(value, privacy, present, gone);
+}
+
+// Rows of several docs, each under its own doc's privacy (aliases, who is
+// revealed), with one set of reads for all of them: names resolve once under
+// the one payload's limits, and at most DELETED_CHECK_MAX of the addresses
+// about to be shown are checked. An address past that is not shown.
+const DELETED_CHECK_MAX = 20;
+
+// Is this identity a deleted account's, for deciding to show its address:
+// anything that cannot be read, or does not match the pinned key, is "yes".
+// Reads the pin and the tombstones itself: what deletedIdentity cached may be
+// a failed read. A tombstone it did see still counts.
+async function strictDeletedCheck(env) {
+  let key = null;
+  try {
+    const raw = await env.META.get(IDENTITY_KEY_PIN);
+    // No pin: no account was ever deleted here -- unless this isolate has
+    // seen one (then this read is stale). Asked per address: another request
+    // may be the one to see it.
+    if (raw == null) return async () => IDENTITY_KEY_SEEN.has(env.META);
+    IDENTITY_KEY_SEEN.add(env.META);
+    const rec = JSON.parse(raw);
+    const secret = rec.name ? String(env[rec.name] || '') : IDENTITY_FALLBACK_SECRET;
+    if (secret && typeof rec.kid === 'string' && await identityKeyId(secret) === rec.kid) key = secret;
+  } catch {}
+  if (!key) return async () => true;
+  return async (actor) => {
+    try {
+      const hash = await identityHashUnder(key, actor);
+      const hit = IDENTITY_TOMB_CACHE.get(hash);
+      if (hit && hit.v && hit.v.at) return true;
+      const raw = await env.META.get(identityTombKey(hash));
+      return raw != null && !!JSON.parse(raw).at;
+    } catch { return true; }
+  };
+}
+
+async function redactCommentRowsByDoc(env, docs) {
+  if (!docs.length) return [];
+  const named = await withActorDisplayNames(env, docs.map((doc) => doc.rows));
+  const present = named.map((rows) => [...collectEmails(rows, new Set())]);
+  const shown = new Set();
+  docs.forEach(({ privacy }, i) => {
+    const about = new Set(present[i].filter((e) => privacy.reveal.has(e)));
+    // The reader's own words keep the addresses in them (aliasCommentEmails).
+    for (const row of named[i]) {
+      const login = row.author && row.author.login;
+      if (typeof login === 'string' && privacy.mine.has(login.toLowerCase())) collectEmails(row.text, about, 'text');
+    }
+    for (const e of about) if (!privacy.mine.has(`email:${e}`)) shown.add(e);
+  });
+  const gone = new Set([...shown].slice(DELETED_CHECK_MAX));
+  const checked = [...shown].slice(0, DELETED_CHECK_MAX);
+  if (checked.length) {
+    const isGone = await strictDeletedCheck(env);
+    await Promise.all(checked.map(async (e) => { if (await isGone(`email:${e}`)) gone.add(e); }));
+  }
+  return Promise.all(docs.map(({ privacy }, i) => aliasCommentEmails(named[i], privacy, present[i], gone)));
+}
+
+// The addresses `present` in `value` that this reader may not see, replaced.
+async function aliasCommentEmails(value, privacy, present, gone) {
   const hidden = present.filter((e) => !privacy.reveal.has(e) || gone.has(e));
   if (!hidden.length) return value;
   const alias = new Map();
@@ -29050,6 +29218,14 @@ const tdocHandlers = {
       const spaces = await feedbackSpacesFor(env, s, metas.filter((m) => m.meta).map((m) => ({ ...m, updated: bySlug.get(m.slug).updated })), (row) => bySlug.get(row.slug), true);
       return json(await redactCommentEmails({ ok: true, spaces }, await emailPrivacyFor(env, s, 'me:feedback', null)), { headers: { 'Cache-Control': 'no-store' } });
     }
+    if (p === '/api/me/comments' && method === 'GET') {
+      // The browser's My docs, like /api/me/feedback: a cookie session.
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      // Rows come back redacted per doc (personalCommentsPage).
+      const page = await personalCommentsPage(env, s, url.origin, url.searchParams.get('offset'));
+      return json({ ok: true, ...page }, { headers: { 'Cache-Control': 'private, no-store' } });
+    }
     if (p === '/api/team/comments' && method === 'GET') {
       const s = await getViewerSession(env, req);
       if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -29060,7 +29236,8 @@ const tdocHandlers = {
       // missing team and cannot use this endpoint to enumerate names or ids.
       if (!page) return json({ error: 'not_found' }, { status: 404 });
       const privacy = await emailPrivacyFor(env, s, `team:${teamId}`, { workspace_id: teamId });
-      return json(await redactCommentEmails({ ok: true, ...page }, privacy), { headers: { 'Cache-Control': 'private, no-store' } });
+      const feed = await redactCommentEmails({ ok: true, ...page }, privacy);
+      return json({ ...feed, items: cutCommentRows(feed.items) }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (p === '/api/me' && method === 'GET') {
       const s = await getViewerSession(env, req);

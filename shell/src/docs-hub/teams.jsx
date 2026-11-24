@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bot, DatabaseBackup, MessageSquareText, RefreshCw, ServerCog, SlidersHorizontal, UsersRound } from 'lucide-react';
+import { Bot, DatabaseBackup, FileText, Globe, MessageSquareText, RefreshCw, ServerCog, SlidersHorizontal, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppButton } from '../ui/button.jsx';
 import { AppSelect } from '../ui/select.jsx';
@@ -120,11 +120,34 @@ function CommentAvatar({ author }) {
   );
 }
 
+// A comment's source as its row says it (commentsSitesTabs): a doc's title,
+// or a site's host and the page the comment was left on.
+function commentSourceLabel(item) {
+  return item.source === 'site' && item.site ? item.site.host || item.title || item.slug : item.title || item.slug;
+}
+
 // A browseable team review surface, separate from the bell. The bell answers
 // “what needs my attention”; this answers “what is everyone discussing across
 // this team?” and therefore intentionally includes comments not addressed to
 // the current viewer.
-export function TeamCommentsPane({ team, pageSize = 25 }) {
+export function TeamCommentsPane({ team, pageSize = 25, sources = false, initialDoc = '' }) {
+  return (
+    <CommentsPane
+      scopeKey={`team:${team.id}`}
+      scopeName={team.name}
+      load={(offset) => listTeamComments(team.id, offset)}
+      pageSize={pageSize}
+      sources={sources}
+      initialDoc={initialDoc}
+    />
+  );
+}
+
+// One comment list for a space: a team's (TeamCommentsPane), and with
+// commentsSitesTabs My docs' too. `sources` (the flag) marks each row with
+// where it came from, a doc or a site, and adds From to the filters.
+// `initialDoc` opens it filtered to one doc or site (a Sites row's name).
+export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources = false, initialDoc = '', id = 'pane-team-comments' }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadedDocs, setLoadedDocs] = useState(0);
@@ -134,7 +157,8 @@ export function TeamCommentsPane({ team, pageSize = 25 }) {
   const [replyState, setReplyState] = useState('all');
   const [authorKind, setAuthorKind] = useState('all');
   const [person, setPerson] = useState('');
-  const [doc, setDoc] = useState('');
+  const [doc, setDoc] = useState(initialDoc);
+  const [from, setFrom] = useState('all');
   const [since, setSince] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
@@ -150,7 +174,7 @@ export function TeamCommentsPane({ team, pageSize = 25 }) {
       let offset = 0;
       try {
         do {
-          const page = await listTeamComments(team.id, offset);
+          const page = await load(offset);
           if (cancelled) return;
           setItems((current) => [...current, ...(page.items || [])]);
           setLoadedDocs((n) => n + Number(page.docs_scanned || 0));
@@ -164,22 +188,26 @@ export function TeamCommentsPane({ team, pageSize = 25 }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [team.id]);
+  }, [scopeKey]);
 
+  const isSite = (item) => item.source === 'site';
   const people = new Map();
   const docs = new Map();
   for (const item of items) {
     if (item.author?.key) people.set(item.author.key, item.author.name || item.author.key);
-    if (item.slug) docs.set(item.slug, item.title || item.slug);
+    if (item.slug) docs.set(item.slug, sources ? commentSourceLabel(item) : item.title || item.slug);
   }
+  // A site chosen from Sites before its comments have loaded still names it.
+  if (doc && !docs.has(doc)) docs.set(doc, doc);
   const sinceMs = since ? Date.parse(`${since}T00:00:00`) : 0;
-  const advancedCount = [replyState !== 'all', authorKind !== 'all', !!person, !!doc, !!since].filter(Boolean).length;
+  const advancedCount = [replyState !== 'all', authorKind !== 'all', !!person, !!doc, !!since, sources && from !== 'all'].filter(Boolean).length;
   const clearAdvanced = () => {
     setReplyState('all');
     setAuthorKind('all');
     setPerson('');
     setDoc('');
     setSince('');
+    setFrom('all');
   };
   const shown = items
     .filter((item) => status === 'all' || (status === 'resolved' ? item.resolved : !item.resolved))
@@ -188,6 +216,7 @@ export function TeamCommentsPane({ team, pageSize = 25 }) {
     .filter((item) => authorKind === 'all' || item.author?.kind === authorKind)
     .filter((item) => !person || item.author?.key === person)
     .filter((item) => !doc || item.slug === doc)
+    .filter((item) => !sources || from === 'all' || (from === 'sites' ? isSite(item) : !isSite(item)))
     .filter((item) => !sinceMs || Date.parse(item.created || '') >= sinceMs)
     .sort((a, b) => String(b.created).localeCompare(String(a.created)));
   const safePageSize = Math.max(1, Number(pageSize) || 25);
@@ -196,11 +225,11 @@ export function TeamCommentsPane({ team, pageSize = 25 }) {
   const pageStart = (visiblePage - 1) * safePageSize;
   const pageItems = shown.slice(pageStart, pageStart + safePageSize);
 
-  useEffect(() => { setPage(1); }, [status, replyState, authorKind, person, doc, since, team.id]);
+  useEffect(() => { setPage(1); }, [status, replyState, authorKind, person, doc, since, from, scopeKey]);
 
   return (
-    <section className="pane tm-comments-pane" id="pane-team-comments">
-      <div className="tm-comment-toolbar" aria-label="Filter team comments">
+    <section className="pane tm-comments-pane" id={id}>
+      <div className="tm-comment-toolbar" aria-label={sources ? 'Filter comments' : 'Filter team comments'}>
         <AppSelect
           className="tm-comment-filter"
           ariaLabel="Comment status"
@@ -231,6 +260,21 @@ export function TeamCommentsPane({ team, pageSize = 25 }) {
         )}
       >
         <div className="tm-comment-filter-fields">
+          {sources ? (
+            <div className="field tm-comment-from">
+              <span>From</span>
+              <SegmentedControl
+                ariaLabel="Comments from"
+                value={from}
+                onChange={setFrom}
+                options={[
+                  { value: 'all', label: 'All' },
+                  { value: 'docs', label: 'Docs' },
+                  { value: 'sites', label: 'Sites' },
+                ]}
+              />
+            </div>
+          ) : null}
           <label className="field">
             <span>Replies</span>
             <AppSelect
@@ -270,13 +314,13 @@ export function TeamCommentsPane({ team, pageSize = 25 }) {
             />
           </label>
           <label className="field">
-            <span>Document</span>
+            <span>{sources ? 'Doc or site' : 'Document'}</span>
             <AppSelect
-              ariaLabel="Comment document"
+              ariaLabel={sources ? 'Comment doc or site' : 'Comment document'}
               value={doc}
               onChange={setDoc}
               options={[
-                { value: '', label: 'All docs' },
+                { value: '', label: sources ? 'All docs and sites' : 'All docs' },
                 ...[...docs].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
               ]}
             />
@@ -293,26 +337,36 @@ export function TeamCommentsPane({ team, pageSize = 25 }) {
       {!loading && !error && !shown.length ? (
         <div className="empty">
           <MessageSquareText size={22} aria-hidden="true" />
-          <p>{items.length ? 'No comments match these filters.' : `No comments in ${team.name} yet.`}</p>
+          <p>{items.length ? 'No comments match these filters.' : `No comments in ${scopeName} yet.`}</p>
         </div>
       ) : null}
       <div className="tm-comment-list">
-        {pageItems.map((item) => (
-          <a className={`tm-comment-row${item.resolved ? ' is-resolved' : ''}`} href={commentTarget(item)} key={`${item.slug}:${item.id}`}>
-            <CommentAvatar author={item.author} />
-            <span className="tm-comment-body">
-              <span className="tm-comment-line">
-                <strong>{item.author?.name || 'Someone'}</strong>
-                <span>{item.kind === 'reply' ? 'replied in' : 'commented on'}</span>
-                <b>{item.title || item.slug}</b>
-                <span className={`tm-comment-status${item.resolved ? ' resolved' : ''}`}>{item.resolved ? 'Resolved' : 'Unresolved'}</span>
+        {pageItems.map((item) => {
+          const site = sources && isSite(item) ? item.site : null;
+          return (
+            <a className={`tm-comment-row${item.resolved ? ' is-resolved' : ''}${sources ? (site ? ' is-site' : ' is-doc') : ''}`} href={commentTarget(item)} key={`${item.slug}:${item.id}`}>
+              <CommentAvatar author={item.author} />
+              <span className="tm-comment-body">
+                <span className="tm-comment-line">
+                  <strong>{item.author?.name || 'Someone'}</strong>
+                  <span>{item.kind === 'reply' ? 'replied in' : 'commented on'}</span>
+                  {sources ? (
+                    <b className="tm-comment-src">
+                      {site ? <Globe size={13} aria-label="Site" /> : <FileText size={13} aria-label="Doc" />}
+                      <span className="tm-comment-src-name">{commentSourceLabel(item)}</span>
+                      {site && site.page ? <span className="tm-comment-src-path">{site.page}</span> : null}
+                    </b>
+                  ) : <b>{item.title || item.slug}</b>}
+                  <span className={`tm-comment-status${item.resolved ? ' resolved' : ''}`}>{item.resolved ? 'Resolved' : 'Unresolved'}</span>
+                </span>
+                <span className="tm-comment-text">{item.text}</span>
+                {site ? (site.element ? <span className="tm-comment-anchor">on <code>{site.element}</code></span> : null)
+                  : item.anchor ? <span className="tm-comment-anchor">“{item.anchor}”</span> : null}
               </span>
-              <span className="tm-comment-text">{item.text}</span>
-              {item.anchor ? <span className="tm-comment-anchor">“{item.anchor}”</span> : null}
-            </span>
-            <time className="tm-comment-time" dateTime={item.created}>{commentDate(item.created)}</time>
-          </a>
-        ))}
+              <time className="tm-comment-time" dateTime={item.created}>{commentDate(item.created)}</time>
+            </a>
+          );
+        })}
       </div>
       {shown.length > safePageSize ? (
         <nav className="tm-comment-pagination" aria-label="Comment pages">

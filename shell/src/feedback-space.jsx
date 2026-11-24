@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Send, Share2 } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
+import { isFeatureOn } from './feature-flags.js';
 import { Bookmarklet } from './feedback-install.jsx';
 import { AppButton } from './ui/button.jsx';
 import { ShareDialog } from './document/document-dialogs.jsx';
@@ -36,6 +37,8 @@ export function FeedbackSpace({ boot }) {
   const { slug, version, title, origin, shareUrl, docUrl, bookmarklet, identity, isOwner, canComment, signinUrl } = boot;
   const host = (() => { try { return new URL(origin).host; } catch (_) { return origin; } })();
   const [joined, setJoined] = useState(Boolean(boot.joined));
+  // commentsSitesTabs: the team's sites are on its Sites tab.
+  const [sitesTabs] = useState(() => isFeatureOn('commentsSitesTabs'));
   const [comments, setComments] = useState(null);
   const [mentionable, setMentionable] = useState([]);
   // Open by default; the choice remembered per space, as in the widget.
@@ -210,7 +213,7 @@ export function FeedbackSpace({ boot }) {
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
           Comments left on <a href={origin} target="_blank" rel="noopener noreferrer">{host}</a>
-          {boot.teamManage?.team && !boot.teamManage.guest ? <> · <span className="tdoc-fbspace-team">In <a href={`/me?team=${encodeURIComponent(boot.teamManage.team.id)}&view=comments`}>{boot.teamManage.team.name}</a></span></> : null}
+          {boot.teamManage?.team && !boot.teamManage.guest ? <> · <span className="tdoc-fbspace-team">In <a href={`/me?team=${encodeURIComponent(boot.teamManage.team.id)}&view=${sitesTabs ? 'sites' : 'comments'}`}>{boot.teamManage.team.name}</a></span></> : null}
           {' '}· {area.openCount} open · {area.waitingCount} waiting on you
         </p>
         <div className="tdoc-fbspace-actions">

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, Folder, FolderOpen, Inbox, MessageSquareText, Plus, Presentation, Settings, Sheet, Trash2 } from 'lucide-react';
+import { FileText, Folder, FolderOpen, Globe, Inbox, MessageSquareText, Plus, Presentation, Settings, Sheet, Trash2 } from 'lucide-react';
 import { AppButton } from '../ui/button.jsx';
 import { RowMenu } from './rows.jsx';
 import { DRAG_TYPE } from './doc-cards.jsx';
@@ -91,6 +91,7 @@ export function MyDocsSidebar({
   view,
   onView,
   settingsLabel = 'Settings',
+  sitesCount = null,
 }) {
   const tree = folderTree(folders);
   return (
@@ -152,6 +153,8 @@ export function MyDocsSidebar({
       {/* Views of their own, beside the list views (the chips over the list). */}
       <div className="mda-side-foot" role="tablist" aria-orientation="vertical" aria-label="More views">
         <SideItem asTab icon={MessageSquareText} label="Comments" active={view === 'comments'} onClick={() => onView('comments')} className="mda-view-comments" />
+        {/* commentsSitesTabs: the sites people comment on (test sites not counted). */}
+        {sitesCount != null ? <SideItem asTab icon={Globe} label="Sites" count={sitesCount || null} active={view === 'sites'} onClick={() => onView('sites')} className="mda-view-sites" /> : null}
         <SideItem asTab icon={Trash2} label="Trash" active={view === 'trash'} onClick={() => onView('trash')} className="mda-view-trash" />
         <SideItem asTab icon={Settings} label={settingsLabel} active={view === 'settings'} onClick={() => onView('settings')} className="mda-view-settings" />
       </div>
