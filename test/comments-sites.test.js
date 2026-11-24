@@ -329,12 +329,12 @@ async function seedDoc(env, slug, owner, extra = {}) {
   const ALIAS_SECRET = 'test-alias-secret';
   const hmacHex = (key, text) => require('crypto').createHmac('sha256', key).update(text).digest('hex');
   const tombKey = (email) => `account-deleted-identity:${hmacHex(`tdoc-deleted-identity-v1\0${ALIAS_SECRET}`, `email:${email}`)}`;
-  async function oneDoc({ threads, invited = [], gone = [], team = false }) {
+  async function oneDoc({ threads, invited = [], gone = [], team = false, pinned = true }) {
     const seedMod = await loadWorker();
     const e = makeEnv(seedMod.CommentsStore, { TDOC_EMAIL_ALIAS_SECRET: ALIAS_SECRET });
     const cookie = await sessionFor(e, 'olga');
     const kid = hmacHex(`tdoc-identity-kid\0${ALIAS_SECRET}`, 'kid').slice(0, 16);
-    await e.META.put('account-identity-key', JSON.stringify({ name: 'TDOC_EMAIL_ALIAS_SECRET', kid }));
+    if (pinned) await e.META.put('account-identity-key', JSON.stringify({ name: 'TDOC_EMAIL_ALIAS_SECRET', kid }));
     for (const email of gone) await e.META.put(tombKey(email), JSON.stringify({ at: '2026-11-02T00:00:00.000Z' }));
     let teamId = '';
     if (team) teamId = (await (await seedMod.default.fetch(req('/api/teams', { method: 'POST', cookie, body: { name: 'T' } }), e, { waitUntil() {} })).json()).team.id;
@@ -348,8 +348,8 @@ async function seedDoc(env, slug, owner, extra = {}) {
       }))));
     }
     const get = e.META.get;
-    const kv = { failing: null };
-    e.META.get = function read(k) { if (kv.failing && kv.failing(String(k))) return Promise.reject(new Error('KV is down')); return get.call(this, k); };
+    const kv = { failing: null, missing: null };
+    e.META.get = function read(k) { if (kv.failing && kv.failing(String(k))) return Promise.reject(new Error('KV is down')); if (kv.missing && kv.missing(String(k))) return Promise.resolve(null); return get.call(this, k); };
     const client = (m) => async (path) => {
       const r = await m.default.fetch(req(path, { cookie }), e, { waitUntil() {} });
       return { status: r.status, text: await r.text() };
@@ -396,6 +396,40 @@ async function seedDoc(env, slug, owner, extra = {}) {
       dead.kv.failing = null;
       const after = await poisoned(FEED);
       assert(after.status === 200 && !after.text.includes('@corp.example'), `${what}: another route's failed read shows it`);
+    }
+  });
+
+  await t('a key pin once seen, then read as missing: a deleted account\'s address stays hidden, whatever was read in between', async () => {
+    const A = 'ann@corp.example';
+    const threads = [{ author: { login: `email:${A}`, name: A } }];
+    const PAGE = '/api/comments?slug=one&version=all';
+    const isPin = (k) => k === 'account-identity-key';
+    const later = async (fn) => {
+      const now = Date.now;
+      Date.now = () => now() + 61 * 1000;
+      try { return await fn(); } finally { Date.now = now; }
+    };
+    for (const [what, before] of [
+      ['doc page first', async (ask) => { await ask(PAGE); }],
+      ['feed first', async (ask) => { await ask(FEED); }],
+      ['doc page, then another that found no pin', async (ask, kv) => { await ask(PAGE); kv.missing = isPin; await later(() => ask(PAGE)); }],
+      ['feed, then a doc page that found no pin', async (ask, kv) => { await ask(FEED); kv.missing = isPin; await later(() => ask(PAGE)); }],
+    ]) {
+      const dead = await oneDoc({ invited: [A], gone: [A], threads });
+      const ask = await dead.fresh();
+      await before(ask, dead.kv);
+      dead.kv.missing = isPin;
+      for (const run of [() => ask(FEED), () => later(() => ask(FEED)), () => ask(FEED)]) {
+        const feed = await run();
+        assert(feed.status === 200 && JSON.parse(feed.text).items.length === 1 && !feed.text.includes('@corp.example'), `${what}: ${feed.text}`);
+      }
+    }
+    // Nothing was ever deleted here, so there is no pin: addresses show.
+    for (const first of [[], [PAGE], [FEED]]) {
+      const live = await oneDoc({ invited: [A], threads, pinned: false });
+      const ask = await live.fresh();
+      for (const path of first) await ask(path);
+      assert((await ask(FEED)).text.includes(`email:${A}`), `no pin, after ${first[0] || 'nothing'}: a live address is hidden`);
     }
   });
 

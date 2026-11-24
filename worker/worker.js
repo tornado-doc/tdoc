@@ -12033,6 +12033,9 @@ const IDENTITY_KEY_PIN = 'account-identity-key';
 const IDENTITY_SECRET_NAMES = ['TDOC_EMAIL_ALIAS_SECRET', 'TDOC_DATA_MIRROR_KEY', 'TDOC_UPLOAD_TOKEN', 'GITHUB_CLIENT_SECRET'];
 const IDENTITY_FALLBACK_SECRET = 'tdoc-deleted-identity';
 const IDENTITY_KEY_CACHE = new WeakMap();
+// The KV namespaces whose pin this isolate has read or written, ever: the
+// cache above forgets (a later null read replaces it), a pin never goes away.
+const IDENTITY_KEY_SEEN = new WeakSet();
 class IdentityKeyChanged extends Error {}
 async function identityKeyId(secret) {
   const mac = await hmacBytes(`tdoc-identity-kid\0${secret}`, 'kid');
@@ -12052,6 +12055,7 @@ async function identityKey(env, { pin = false } = {}) {
   let rec = null;
   try { rec = JSON.parse(await env.META.get(IDENTITY_KEY_PIN)); } catch {}
   let v = null;
+  if (env && env.META && (rec || pin)) IDENTITY_KEY_SEEN.add(env.META);
   if (rec && typeof rec.kid === 'string') {
     const secret = rec.name ? String(env[rec.name] || '') : IDENTITY_FALLBACK_SECRET;
     if (!secret || await identityKeyId(secret) !== rec.kid) {
@@ -15068,8 +15072,11 @@ async function strictDeletedCheck(env) {
   let key = null;
   try {
     const raw = await env.META.get(IDENTITY_KEY_PIN);
-    // No pin: no account was ever deleted here.
-    if (raw == null) return async () => false;
+    // No pin: no account was ever deleted here -- unless this isolate has
+    // seen one (then this read is stale). Asked per address: another request
+    // may be the one to see it.
+    if (raw == null) return async () => IDENTITY_KEY_SEEN.has(env.META);
+    IDENTITY_KEY_SEEN.add(env.META);
     const rec = JSON.parse(raw);
     const secret = rec.name ? String(env[rec.name] || '') : IDENTITY_FALLBACK_SECRET;
     if (secret && typeof rec.kid === 'string' && await identityKeyId(secret) === rec.kid) key = secret;
