@@ -41,7 +41,7 @@ import { NeedsYou, needsCards, useNeedsInbox } from './docs-hub/needs-you.jsx';
 import { SettingsPage } from './docs-hub/settings-page.jsx';
 import { docTypeOf } from './docs-hub/row-meta.js';
 import { rememberTrashed } from './recent-trash.js';
-import { SiteEmbedDialog, SitesPane, isTestSite, useFeedbackSpaces } from './docs-hub/sites.jsx';
+import { SiteEmbedDialog, SitesPane, canAddSite, isTestSite, useFeedbackSpaces } from './docs-hub/sites.jsx';
 import {
   CommentsPane,
   LeaveTeamDialog,
@@ -629,6 +629,15 @@ export function DocsHub({ boot }) {
   // drops the filter.
   const [commentsSite, setCommentsSite] = useState('');
   useEffect(() => { if (view !== 'comments') setCommentsSite(''); }, [view]);
+  // One-column layout: the tab bar scrolls sideways on a phone, so the tab
+  // that is on is scrolled into it (its own scroll only, never the page's).
+  const oldTabs = useRef(null);
+  useEffect(() => {
+    const bar = sitesTabs ? oldTabs.current : null;
+    const tab = bar && bar.querySelector('.tab.is-active');
+    if (!tab) return;
+    bar.scrollLeft += tab.getBoundingClientRect().left - bar.getBoundingClientRect().left - (bar.clientWidth - tab.offsetWidth) / 2;
+  }, [sitesTabs, view]);
   const openSiteComments = (space) => { setCommentsSite(space.slug); setView('comments'); };
   // Capture the account-menu destination before useDocsHub normalizes the URL.
   // ?new_team=1 is the top-bar switcher's "New team" from any page.
@@ -698,7 +707,15 @@ export function DocsHub({ boot }) {
   // sites are not counted.
   const mySites = Array.isArray(boot.feedback) ? boot.feedback : [];
   const inMySites = (space) => !space.workspace_id || !teams.some((item) => item.id === space.workspace_id);
-  const sitesCount = (team ? teamFeedback : mySites.filter(inMySites)).filter((space) => !isTestSite(space.origin)).length;
+  const scopeSites = team ? teamFeedback : mySites.filter(inMySites);
+  const sitesCount = scopeSites.filter((space) => !isTestSite(space.origin)).length;
+  // Once there is a site, Sites' header adds another, for whoever may (an
+  // empty tab has its own button).
+  const [addingSite, setAddingSite] = useState(false);
+  useEffect(() => { setAddingSite(false); }, [view, space]);
+  const addSiteButton = sitesTabs && view === 'sites' && scopeSites.length && canAddSite(team) ? (
+    <AppButton variant="quiet" className="sites-add" onClick={() => setAddingSite(true)}>Add a site</AppButton>
+  ) : null;
   const inActiveWorkspace = (doc) => (team ? doc.workspace_id === team.id : !doc.workspace_id);
   const scopedRecent = hub.recent.filter(inActiveWorkspace);
   const scopedStarred = hub.starred.filter(inActiveWorkspace);
@@ -1274,6 +1291,8 @@ export function DocsHub({ boot }) {
       teams={teams}
       inScope={team ? undefined : inMySites}
       onOpenComments={openSiteComments}
+      adding={addingSite}
+      onAddingChange={setAddingSite}
     />
   ) : null;
   const ownViewA = sitesTabsView || (view === 'comments' ? (
@@ -1481,7 +1500,7 @@ export function DocsHub({ boot }) {
                   </AppButton>
                 ) : null}
               </span>
-            ) : null}
+            ) : addSiteButton ? <span className="mda-pbar-tools">{addSiteButton}</span> : null}
           </div>
           {listViewA ? (
             <>
@@ -1528,6 +1547,7 @@ export function DocsHub({ boot }) {
           {headerA(
             <>
               {listViewA && view !== 'needs' ? <CatalogLayoutToggle layout={cardLayout} onLayout={setCardLayout} /> : null}
+              {addSiteButton}
               {newMenuA}
             </>,
           )}
@@ -1575,6 +1595,7 @@ export function DocsHub({ boot }) {
         ) : null}
         <div className="page-hd">
           <h1>{team ? team.name : 'My docs'}</h1>
+          {addSiteButton ? <div className="page-hd-actions">{addSiteButton}</div> : null}
           {['docs', 'recent', 'starred'].includes(view) ? (
             <div className="page-hd-actions">
               <CatalogLayoutToggle layout={layout} onLayout={setLayout} />
@@ -1598,7 +1619,7 @@ export function DocsHub({ boot }) {
             </div>
           ) : null}
         </div>
-        <div className="tabs" role="tablist" aria-label={`${team ? team.name : 'My docs'} views`}>
+        <div className="tabs" ref={oldTabs} role="tablist" aria-label={`${team ? team.name : 'My docs'} views`}>
           {oldTabsFor(sitesTabs).map(([id, label]) => (
             <button key={id} type="button" className={`tab${view === id ? ' is-active' : ''}`} role="tab" aria-selected={view === id} onClick={() => { setTeamFolder(''); setView(id); }}>
               {label}

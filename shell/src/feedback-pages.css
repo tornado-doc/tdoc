@@ -265,7 +265,9 @@
    agent fixes it), here and on an empty Sites tab, with its three steps
    named under it. One 9s cycle; still for reduced motion. */
 .tdoc-feedback-page .site-demo.is-animated { margin-bottom: .6rem; }
-.tdoc-feedback-page .site-demo.is-animated .site-demo-note { top: 4.4rem; }
+/* The note is taller by the agent's line: it stands on the frame's bottom. */
+.tdoc-feedback-page .site-demo.is-animated .site-demo-note { top: auto; bottom: .6rem; }
+@media (max-width: 360px) { .tdoc-feedback-page .site-demo.is-animated .site-demo-page { height: 14.5rem; } }
 .tdoc-feedback-page .site-demo.is-animated .site-demo-target { animation: fb-demo-target 9s infinite; }
 .tdoc-feedback-page .site-demo.is-animated .site-demo-pin { animation: fb-demo-ring 9s infinite; }
 .tdoc-feedback-page .site-demo.is-animated .site-demo-note { animation: fb-demo-note 9s infinite; }

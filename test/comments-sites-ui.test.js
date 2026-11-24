@@ -27,9 +27,10 @@ const { chromium } = requirePlaywrightOrSkip('comments-sites-ui.test.js');
 const SHOTS = process.env.TDOC_UI_SHOTS || '';
 const JULIE = 'c5'.repeat(16);
 const BOB = 'c6'.repeat(16);
+const CAROL = 'c7'.repeat(16);
 
 async function seed(worker, env) {
-  const people = [['julie', JULIE, 'Julie'], ['bob', BOB, 'Bob']];
+  const people = [['julie', JULIE, 'Julie'], ['bob', BOB, 'Bob'], ['carol', CAROL, 'Carol']];
   for (const [login, sid, name] of people) {
     await env.META.put(`hosted-account:${login}`, JSON.stringify({ account_id: `acct-${login}`, github_login: login, created: '2026-01-01T00:00:00.000Z' }));
     await env.META.put(`session:${sid}`, JSON.stringify({ login, account_id: `acct-${login}`, name, avatar_url: '', created: new Date().toISOString() }));
@@ -76,7 +77,10 @@ async function seed(worker, env) {
   const teamSite = await site('https://tdoc.dev', [['The SDK card wraps badly at 375px.', { url: 'https://tdoc.dev/feedback', selector: 'div.fb-card', tag: 'div', text: 'SDK' }]]);
   await call('/api/team/move', { slugs: [teamSite], team: team.id });
   await call('/api/feedback/site', { slug: teamSite, origins: ['https://tdoc.dev'] });
-  return { hustle, bookmark, local, preview, team, teamSite };
+  // Carol is a member (not an admin) of both teams; the second has no sites.
+  const emptyTeam = (await call('/api/teams', { name: 'Empty team' })).team;
+  for (const item of [team, emptyTeam]) await call('/api/team/join', { token: item.invite_url.split('/').pop() }, { sid: CAROL });
+  return { hustle, bookmark, local, preview, team, teamSite, emptyTeam };
 }
 
 async function startServer(worker, env) {
@@ -130,10 +134,10 @@ async function startServer(worker, env) {
   const t = async (name, fn) => {
     try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); }
   };
-  const open = async (pathname, { width = 1440, flag = true, sid = JULIE } = {}) => {
+  const open = async (pathname, { width = 1440, flag = true, sid = JULIE, flags = {} } = {}) => {
     const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: 'reduce' });
     await context.addCookies([{ name: 'tdoc_sid', value: sid, url: base }]);
-    await context.addInitScript((on) => { window.__TDOC_FLAGS__ = { commentsSitesTabs: on }; }, flag);
+    await context.addInitScript((all) => { window.__TDOC_FLAGS__ = all; }, { commentsSitesTabs: flag, ...flags });
     const page = await context.newPage();
     await page.goto(`${base}${pathname}`);
     return { context, page };
@@ -300,6 +304,91 @@ async function startServer(worker, env) {
         await context.close();
       });
     }
+
+    for (const width of [1440, 390]) {
+      const tag = width === 1440 ? 'desktop' : 'phone';
+      await t(`${tag}: an empty team Sites tab: an admin may add a site, a member is told an admin can`, async () => {
+        const q = `/me?team=${encodeURIComponent(ids.emptyTeam.id)}&view=sites`;
+        const admin = await open(q, { width });
+        await admin.page.locator('#sites-intro').getByRole('button', { name: 'Add to your site' }).waitFor();
+        assert.equal(await admin.page.locator('#sites-ask-admin').count(), 0);
+        assert.equal(await admin.page.locator('.sites-add').count(), 0, 'empty: the block has the button, not the header');
+        await noSideScroll(admin.page);
+        await shot(admin.page, `team-sites-empty-${width}`);
+        await admin.context.close();
+        const member = await open(q, { width, sid: CAROL });
+        await member.page.waitForSelector('#sites-ask-admin');
+        assert.equal(await member.page.locator('#sites-ask-admin').textContent(), 'A team admin can add a site.');
+        assert.equal(await member.page.getByRole('button', { name: /Add to your site|Add a site/ }).count(), 0);
+        assert.equal(await member.page.locator('#sdk-ask, #sdk-paste').count(), 0, 'steps a member cannot finish in this team');
+        await noSideScroll(member.page);
+        await shot(member.page, `team-sites-empty-member-${width}`);
+        // What the page says is what the server enforces.
+        const status = await member.page.evaluate(async (team) => (await fetch('/api/feedback/spaces', {
+          method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ origins: ['https://member.example'], team }),
+        })).status, ids.emptyTeam.id);
+        assert.equal(status, 403);
+        await member.context.close();
+      });
+
+      await t(`${tag}: with sites, Add a site is in the header for who may add one`, async () => {
+        for (const q of ['/me?view=sites', `/me?${teamQ}&view=sites`]) {
+          const { context, page } = await open(q, { width });
+          const add = page.getByRole('button', { name: 'Add a site' });
+          await add.waitFor();
+          assert.match(await add.getAttribute('class'), /ui-btn-quiet/);
+          await noSideScroll(page);
+          await add.click();
+          await page.getByLabel('Your site’s address').waitFor();
+          await page.getByRole('button', { name: 'Cancel' }).click();
+          assert.equal(await page.getByLabel('Your site’s address').count(), 0);
+          await context.close();
+        }
+        const member = await open(`/me?${teamQ}&view=sites`, { width, sid: CAROL });
+        await member.page.waitForSelector('#pane-sites .site-row');
+        assert.equal(await member.page.locator('.sites-add, #pane-sites .site-row-btn').count(), 0);
+        await member.context.close();
+        const off = await open('/me?view=comments', { width, flag: false });
+        await off.page.waitForSelector('#pane-feedback .tdoc-fb-row');
+        assert.equal(await off.page.locator('.sites-add').count(), 0);
+        await off.context.close();
+      });
+    }
+
+    await t('the demo bubble stays inside its frame and off the button and pin', async () => {
+      for (const width of [1440, 390, 360, 320]) for (const q of ['/me?view=sites', '/feedback']) {
+        const { context, page } = await open(q, { width, sid: BOB });
+        await page.waitForSelector('.site-demo.is-animated');
+        const m = await page.evaluate(() => {
+          const box = (sel) => document.querySelector(sel).getBoundingClientRect();
+          const [note, frame, pin] = ['.site-demo-note', '.site-demo-page', '.site-demo-pin'].map(box);
+          return { top: note.top - frame.top, bottom: frame.bottom - note.bottom, right: frame.right - note.right, pin: note.left - pin.right };
+        });
+        assert.ok(Object.values(m).every((v) => v >= 0), `${width} ${q} ${JSON.stringify(m)}`);
+        await context.close();
+      }
+    });
+
+    await t('one-column layout on a phone: the tab that is on is scrolled into view, the page is not', async () => {
+      for (const id of ['sites', 'settings']) {
+        const { context, page } = await open(`/me?view=${id}`, { width: 320, flags: { myDocsA: false } });
+        await page.waitForSelector('.tabs .tab.is-active');
+        const m = await page.evaluate(() => {
+          const bar = document.querySelector('.tabs').getBoundingClientRect();
+          const tab = document.querySelector('.tabs .tab.is-active').getBoundingClientRect();
+          return { left: tab.left - bar.left, right: bar.right - tab.right, y: scrollY };
+        });
+        assert.ok(m.left >= -1 && m.right >= -1 && m.y === 0, `${id} ${JSON.stringify(m)}`);
+        await context.close();
+      }
+    });
+
+    await t('a new test site opens its fold and settings', async () => {
+      const { context, page } = await open(`/me?view=sites&site=${ids.local}`, { width: 1440 });
+      await page.locator(`details.sites-tests[open] #site-settings-${ids.local}`).waitFor();
+      await context.close();
+    });
 
     await t('no sites: Add to your site makes the space and opens its settings with the line', async () => {
       const { context, page } = await open('/me?view=sites', { width: 1440, sid: BOB });

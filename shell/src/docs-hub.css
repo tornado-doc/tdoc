@@ -907,6 +907,7 @@
 /* commentsSitesTabs: the Sites tab. One row per site: the name (opens its
    comments) and one button; its settings open under the row. */
 .sites-pane { display: grid; gap: 14px; }
+.site-settings.site-add { margin: 0; }
 .site-row { display: flex; align-items: center; gap: 12px; }
 .site-row-info {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: 0;

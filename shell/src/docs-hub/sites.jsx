@@ -195,13 +195,16 @@ function SiteRow({ space, team, manages, open, onToggle, onAdd, onOpenComments, 
   );
 }
 
-// Nothing here yet: what this is and how to start, the same block as
-// /feedback's SDK part (the demo and the two ways in). Its main button asks
-// for the site's address and makes its space (the endpoint
-// create_feedback_space uses), then opens that site's settings with the
-// line; the second link tries the widget on /feedback first.
-function SitesIntro({ team }) {
-  const [adding, setAdding] = useState(false);
+// Who may add a site here: anybody in their own My docs; in a team, its
+// admins, the rule POST /api/feedback/spaces enforces (sessionTeamAdmin; the
+// role is the server's, teamSummary).
+export function canAddSite(team) {
+  return !team || team.role === 'admin';
+}
+
+// A new site by its address: makes its space (POST /api/feedback/spaces, what
+// create_feedback_space calls) and opens its settings, with the line.
+function AddSiteForm({ team, onCancel, className = '' }) {
   const [address, setAddress] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -224,6 +227,37 @@ function SitesIntro({ team }) {
     }
   };
   return (
+    <div className={`site-settings site-add${className ? ` ${className}` : ''}`} role="region" aria-label="Add your site">
+      <label className="site-settings-label" htmlFor="sites-add-address">Your site’s address</label>
+      <input
+        id="sites-add-address"
+        className="site-settings-origins"
+        type="url"
+        autoFocus
+        value={address}
+        placeholder="https://example.com"
+        onChange={(event) => setAddress(event.target.value)}
+        onKeyDown={(event) => { if (event.key === 'Enter' && address.trim() && !busy) create(); }}
+      />
+      {error ? <p className="site-settings-error" role="status">{error}</p> : null}
+      <div className="site-settings-ft">
+        <span className="site-settings-actions">
+          <AppButton onClick={onCancel}>Cancel</AppButton>
+          <AppButton variant="primary" disabled={busy || !address.trim()} onClick={create}>{busy ? 'Adding…' : 'Get the line'}</AppButton>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Nothing here yet: what this is and how to start, the same block as
+// /feedback's SDK part (the demo and the two ways in). Its main button asks
+// for the site's address (a team member who may not add one is told who
+// can); the second link tries the widget on /feedback first.
+function SitesIntro({ team }) {
+  const [adding, setAdding] = useState(false);
+  const canAdd = canAddSite(team);
+  return (
     <div className="tdoc-feedback-page fb-sites-intro" id="sites-intro">
       <h2>Comments on your own site</h2>
       <p className="fb-sites-lead">
@@ -233,45 +267,29 @@ function SitesIntro({ team }) {
       </p>
       <SiteDemo animated />
       <SiteDemoSteps />
-      <SdkSteps scriptSrc={`${location.origin}/feedback.js`} arrive={false} />
-      {adding ? (
-        <div className="site-settings fb-sites-add" role="region" aria-label="Add your site">
-          <label className="site-settings-label" htmlFor="sites-add-address">Your site’s address</label>
-          <input
-            id="sites-add-address"
-            className="site-settings-origins"
-            type="url"
-            autoFocus
-            value={address}
-            placeholder="https://example.com"
-            onChange={(event) => setAddress(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Enter' && address.trim() && !busy) create(); }}
-          />
-          {error ? <p className="site-settings-error" role="status">{error}</p> : null}
-          <div className="site-settings-ft">
-            <span className="site-settings-actions">
-              <AppButton onClick={() => setAdding(false)}>Cancel</AppButton>
-              <AppButton variant="primary" disabled={busy || !address.trim()} onClick={create}>{busy ? 'Adding…' : 'Get the line'}</AppButton>
-            </span>
+      {canAdd ? <SdkSteps scriptSrc={`${location.origin}/feedback.js`} arrive={false} /> : null}
+      {canAdd && adding ? <AddSiteForm team={team} className="fb-sites-add" onCancel={() => setAdding(false)} /> : (
+        <>
+          {canAdd ? null : <p className="fb-sites-lead" id="sites-ask-admin">A team admin can add a site.</p>}
+          <div className="fb-sites-actions">
+            {canAdd ? <AppButton variant="primary" onClick={() => setAdding(true)}>Add to your site</AppButton> : null}
+            <a className="ui-btn ui-btn-quiet ui-btn-m" href="/feedback#try">Try it on a page first →</a>
           </div>
-        </div>
-      ) : (
-        <div className="fb-sites-actions">
-          <AppButton variant="primary" onClick={() => setAdding(true)}>Add to your site</AppButton>
-          <a className="ui-btn ui-btn-quiet ui-btn-m" href="/feedback#try">Try it on a page first →</a>
-        </div>
+        </>
       )}
     </div>
   );
 }
 
 // `inScope`: which of the person's spaces this tab lists (My docs leaves a
-// team's sites to that team's tab).
-export function SitesPane({ spaces: initial, team = null, teams = [], inScope = () => true, onOpenComments }) {
+// team's sites to that team's tab). `adding`: the header's Add a site is open.
+export function SitesPane({ spaces: initial, team = null, teams = [], inScope = () => true, onOpenComments, adding = false, onAddingChange = () => {} }) {
   const [all, setSpaces] = useFeedbackSpaces(initial, team);
   const spaces = all.filter(inScope);
-  // ?site=<slug>: open with that site's settings (after a move to a team).
-  const [open, setOpen] = useState(() => new URLSearchParams(location.search).get('site') || '');
+  // ?site=<slug>: open with that site's settings (just added, or moved to a
+  // team); a test site's fold opens with it.
+  const [asked] = useState(() => new URLSearchParams(location.search).get('site') || '');
+  const [open, setOpen] = useState(asked);
   const [teamFirst, setTeamFirst] = useState(null);
   // As FeedbackList: a personal space whose owner runs a team is offered
   // the move first (site comments are team work), with one click to stay
@@ -315,9 +333,10 @@ export function SitesPane({ spaces: initial, team = null, teams = [], inScope = 
     <section className="pane sites-pane" id="pane-sites" aria-label="Sites">
       {!spaces.length ? <SitesIntro team={team} /> : (
         <>
+          {adding && canAddSite(team) ? <AddSiteForm team={team} onCancel={() => onAddingChange(false)} /> : null}
           {real.length ? <div className="doc-list sites-list">{real.map((space) => row(space))}</div> : null}
           {tests.length ? (
-            <details className="sites-tests">
+            <details className="sites-tests" open={tests.some((space) => space.slug === asked)}>
               <summary><ChevronRight size={15} aria-hidden="true" />Test sites · {tests.length}</summary>
               <div className="doc-list sites-list">{tests.map((space) => row(space, true))}</div>
             </details>
