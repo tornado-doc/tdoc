@@ -14996,33 +14996,41 @@ const EMAIL_TAG_RE = /(^|[^A-Za-z0-9_@/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
 // the tags in it are parted or wrapped. EMAIL_TAG_RE reads the reader's own.
 const TAG_RUN_RE = /@(?<![A-Za-z0-9@/][_-]*@)\S+/g;
 const TAG_HOST_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+/;
+// What may part a tag from text written against it, and what in that text
+// says it is more of the host instead (a dot before a letter, in any script).
+const TAG_REST_RE = /^[,;:!?)\]}>"'(</\u2018-\u201f\u2026\u3001\u3002\u3008-\u3011\uff01\uff08\uff09\uff0c\uff1a\uff1b\uff1f]/;
+const TAG_HAN_RE = /^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u;
+const TAG_MORE_HOST_RE = /[.\uff0e][)\]}>\uff09]*[\p{L}\p{N}\p{M}]|[\u3002\uff61][A-Za-z0-9]|^[(<\uff08]dot[)>\uff09]/iu;
 // `shows(address)`: may this reader see it? Otherwise its host goes, and what
 // follows the host stays unless it may be more of the host.
 function cutEmailTags(text, shows) {
   return text.replace(TAG_RUN_RE, (run) => {
     const parts = run.slice(1).split('@');
     if (parts.length < 2) return run;
+    const isHost = (x) => { const dot = (x || '').indexOf('.', 1); return dot > 0 && dot < x.length - 1; };
     let out = `@${parts[0]}`;
-    let name = parts[0]; // what a host would belong to; '' just after one
-    let parted = false; // after a host and what parts it from the next tag
+    let name = parts[0]; // what a host would belong to
+    let after = ''; // 'host': just after one; 'parted': and what parts it from the next tag
     for (let i = 1; i < parts.length; i++) {
       const seg = parts[i];
-      const isHost = (x) => { const dot = (x || '').indexOf('.', 1); return dot > 0 && dot < x.length - 1; };
-      // "@lee,@j.kim@host": a dotted name, after a comma and before its host.
-      const dotted = /[^\p{L}\p{N}\p{M}\p{C}_+.-]$/u.test(name) && /[\p{L}\p{N}]$/u.test(seg) && isHost(parts[i + 1]);
-      if (parted || !isHost(seg) || dotted) {
+      // "@name@@host": still that name's, and "@name@host@@host" that host's.
+      if (!seg && (after === 'host' || (!after && /[\p{L}\p{N}\p{M}_+.-]$/u.test(name)))) { out += '@'; continue; }
+      const again = after === 'host' && isHost(seg); // a host right after another
+      // "@lee,@j.kim@host": "lee," has no host, j.kim does -- or j.kim is the
+      // host: shown only to who may see the address.
+      const dotted = !after && /[^\p{L}\p{N}\p{M}\p{C}_+.-]$/u.test(name) && isHost(seg) && isHost(parts[i + 1]) && shows(`${seg}@${parts[i + 1]}`);
+      if (!again && (after || !name || !isHost(seg) || dotted)) {
         out += `@${seg}`;
         name = seg;
-        parted = false;
+        after = '';
         continue;
       }
-      if (!name) continue; // a host right after another
-      if (shows(`${name}@${seg}`)) { out += `@${seg}`; name = ''; continue; }
+      if (!again && shows(`${name}@${seg}`)) { out += `@${seg}`; name = ''; after = 'host'; continue; }
       const rest = afterTagHost(seg);
       out += rest;
       const word = /[A-Za-z0-9_+.-]$/.test(rest);
       name = word ? rest : '';
-      parted = !!rest && !word;
+      after = word ? '' : rest ? 'parted' : 'host';
     }
     return out;
   });
@@ -15030,10 +15038,8 @@ function cutEmailTags(text, shows) {
 function afterTagHost(seg) {
   const host = seg.match(TAG_HOST_RE);
   const rest = host ? seg.slice(host[0].length) : '';
-  if (host && (!rest
-    || /^[^\p{L}\p{N}\p{M}\p{C}_.-]/u.test(rest)
-    || /^[.-]+(?:$|[^\p{L}\p{N}\p{M}\p{C}_.-])/u.test(rest)
-    || (/^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u.test(rest) && !/^[\p{L}\p{N}\p{M}-]*\.[\p{L}\p{N}]/u.test(rest)))) return rest;
+  if (host && !/[\p{L}\p{N}\p{M}\p{C}]/u.test(rest)) return rest;
+  if (host && (TAG_REST_RE.test(rest) || TAG_HAN_RE.test(rest)) && !/\p{C}/u.test(rest) && !TAG_MORE_HOST_RE.test(rest)) return rest;
   // Not told apart from the host: only the punctuation it ends with stays.
   let end = seg.length;
   while (end > 0 && /[^\p{L}\p{N}\p{M}\p{C}_-]/u.test(seg[end - 1])) end -= 1;

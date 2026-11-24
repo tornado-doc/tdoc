@@ -115,7 +115,7 @@ const DAVE = 'dave.reader@example.org';
     ['ask @ann@one.example and @bob@two.example', 'ask @ann and @bob'],
     ['ask @ann@one.example,@bob@two.example;@cat@three.example now', 'ask @ann,@bob;@cat now'],
     ['ask @ann@one.example/@bob@two.example', 'ask @ann/@bob'],
-    ['ask @ann@one.example_@bob@two.example-@cat@three.example', 'ask @ann@bob-@cat'],
+    ['ask @ann@one.example_@bob@two.example-@cat@three.example', 'ask @ann_@bob-@cat'],
     ['ask @ann@one.example, please.', 'ask @ann, please.'],
     ['is it @ann@one.example? (@bob@two.example)', 'is it @ann? (@bob)'],
     ['"@ann@one.example" -@bob@two.example <@cat@three.example>', '"@ann" -@bob <@cat>'],
@@ -123,12 +123,39 @@ const DAVE = 'dave.reader@example.org';
     ['请@ann@one.example看一下（@bob@two.example）', '请@ann看一下（@bob）'],
     ['@ann@one.example和@bob@two.example说', '@ann和@bob说'],
     ['@lee,@ann@one.example', '@lee,@ann'],
-    ['@lee,@ann.kim@one.example,@bob@two.example', '@lee,@ann.kim,@bob'],
+    ['@lee,@ann.kim@one.example,@bob@two.example', '@lee,,@bob'],
     ['@j.lee/@ann@one.example', '@j.lee/@ann'],
     ['@ann@one.bücher.example, ok', '@ann, ok'],
     ['@ann@one.例子, ok', '@ann, ok'],
+    // What is written against a host, and may be more of it.
+    ['@ann@mail.paral\u00b7lel.cat ok', '@ann ok'],
+    ['@ann@mail.one\u2011x.example ok', '@ann ok'],
+    ['@ann@mail.one.xn\u2014p1ai ok', '@ann ok'],
+    ['@ann@mail.one[.]example ok', '@ann ok'],
+    ['@ann@mail.one(.)example ok', '@ann ok'],
+    ['@ann@mail.one(dot)example ok', '@ann ok'],
+    ['@ann@mail.one.co\uff0euk ok', '@ann ok'],
+    ['@ann@mail.one\u3002com ok', '@ann ok'],
+    ['@ann@mail.one/x\uff0eexample ok', '@ann ok'],
+    ['@ann@a.one\u65e5\u30fb\u672c.example ok', '@ann ok'],
+    ['@ann@a.one\u65e5\u672c.example ok', '@ann ok'],
+    ['@ann@mail.one\u2764.ws ok', '@ann ok'],
+    ['@ann@mail.one.ex\u200bample ok', '@ann ok'],
+    ['@ann@mail.one\u200b.example ok', '@ann ok'],
+    ['@ann@mail.one,\u00adexample ok', '@ann ok'],
+    ['@ann@mail.one.e\u0301x.example ok', '@ann ok'],
+    ['@ann@one.example, see foo.bar', '@ann, see foo.bar'],
+    ['@ann@one.example\u3002\u8bf7\u770b', '@ann\u3002\u8bf7\u770b'],
+    ['@@ann@one.example ok', '@@ann ok'],
+    ['@ann@@one.example ok', '@ann@ ok'],
+    ['@ann@one.example@two.example ok', '@ann ok'],
+    ['@ann@one.example,@@lee.kim ok', '@ann,@@lee.kim ok'],
     // Not tags: as they are.
+    ['SELECT @@global.sql_mode', 'SELECT @@global.sql_mode'],
+    ['@@config.load and @@cache.fetch(k)', '@@config.load and @@cache.fetch(k)'],
+    ['@lee,@@global.sql_mode', '@lee,@@global.sql_mode'],
     ['write to ann@mail.example', 'write to ann@mail.example'],
+    ['w-@ann@mail.example', 'w-@ann@mail.example'],
     ['@lee, @j-lee and @kim', '@lee, @j-lee and @kim'],
     ['see https://unpkg.com/@scope/pkg@1.2.3/x.js', 'see https://unpkg.com/@scope/pkg@1.2.3/x.js'],
   ];
@@ -153,10 +180,10 @@ const DAVE = 'dave.reader@example.org';
       }
       for (const path of ['/d/tags', '/d/tags/v/1/export?download=0', '/d/tags/v/1/fork']) {
         const r = await call(path, o);
-        assert(r.status === 200 && !/(one|two|three)\./.test(r.text), `${who} ${path}: ${(r.text.match(/.{30}(one|two|three)\..{10}/) || [r.status])[0]}`);
+        assert(r.status === 200 && !/(one|two|three)\.|lel\.cat|p1ai|\.ws\b/.test(r.text), `${who} ${path}: ${(r.text.match(/.{30}((one|two|three)\.|lel\.cat|p1ai|\.ws\b).{0,10}/) || [r.status])[0]}`);
       }
       const md = await call('/d/tags', { ...o, headers: { Accept: 'text/markdown' } });
-      assert(md.status === 200 && !/(one|two|three)\./.test(md.text), `${who} markdown`);
+      assert(md.status === 200 && !/(one|two|three)\.|lel\.cat|p1ai|\.ws\b/.test(md.text), `${who} markdown`);
     }
     // The author's own words are whole, and saving an edit of them keeps them so.
     const own = textsOf((await call('/api/comments?slug=tags', { cookie: carol })).body);
@@ -186,7 +213,23 @@ const DAVE = 'dave.reader@example.org';
     }
   });
 
-  await t('mention tags: the owner sees the ones they invited, and long text is read quickly', async () => {
+  await t('mention tags after another: a deleted account\'s is not shown to the owner who invited it', async () => {
+    const hmac = (key, text) => require('crypto').createHmac('sha256', key).update(text).digest('hex');
+    const gone = 'gone@invited.example';
+    const live = 'live@invited.example';
+    await env.META.put('account-identity-key', JSON.stringify({ name: 'TDOC_EMAIL_ALIAS_SECRET', kid: hmac('tdoc-identity-kid\0test-alias-secret', 'kid').slice(0, 16) }));
+    await env.META.put(`account-deleted-identity:${hmac('tdoc-deleted-identity-v1\0test-alias-secret', `email:${gone}`)}`, JSON.stringify({ at: '2026-11-02T00:00:00.000Z' }));
+    const fresh = (await loadWorker()).default;
+    await seed('gone-tags', { visibility: 'public', allowed_users: [gone, live] });
+    await env.META.put('comments:gone-tags', JSON.stringify([`ask @pal@one.example,@${gone} or @pal@one.example,@${live} ok`].map((text, i) => ({ id: `g${i}`, text, created, version: 1, author: { login: 'quinn', name: 'quinn' } }))));
+    for (const path of ['/api/comments?slug=gone-tags', '/api/me/comments?offset=0']) {
+      const r = await fresh.fetch(req(path, { cookie: alice.cookie }), env, { waitUntil() {} });
+      const text = await r.text();
+      assert(r.status === 200 && text.includes(`ask @pal,@gone or @pal,@${live} ok`) && !text.includes(gone), `${path}: ${r.status} ${text.slice(0, 300)}`);
+    }
+  });
+
+  await t('mention tags: an invited address is shown to the owner where nothing is written against its end, and long text is read quickly', async () => {
     await seed('long-tags', { visibility: 'public', allowed_users: [CAROL] });
     const long = ['@a@b.example,'.repeat(8000), '@'.repeat(60000), 'a@'.repeat(60000), `@a@${'.'.repeat(60000)} `, `@a@${'b.'.repeat(60000)}`, `@a@b.example${'-'.repeat(60000)}`, `${'_'.repeat(60000)}@a@b.example`, `@a@b.example${'好'.repeat(60000)}`];
     await env.META.put('comments:long-tags', JSON.stringify([`see @lee,@${CAROL} ok`, ...long].map((text, i) => ({ id: `l${i}`, text, created, version: 1, author: { login: 'quinn', name: 'quinn' } }))));
@@ -195,7 +238,7 @@ const DAVE = 'dave.reader@example.org';
     const ms = Number(process.hrtime.bigint() - started) / 1e6;
     assert(r.status === 200 && r.body[0].text === `see @lee,@${CAROL} ok`, `invited: ${r.status} ${r.body && r.body[0].text}`);
     assert(!r.body[1].text.includes('example') && ms < 3000, `${Math.round(ms)} ms`);
-    assert((await call('/api/comments?slug=long-tags')).body[0].text === 'see @lee,@carol.writer ok', 'another reader');
+    assert((await call('/api/comments?slug=long-tags')).body[0].text === 'see @lee, ok', 'another reader');
   });
 
   await t('with no secret configured there is no alias to match: every hidden address is the same placeholder', async () => {
