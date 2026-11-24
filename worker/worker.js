@@ -7689,7 +7689,7 @@ function teamCommentAuthor(author, { agentVerdict = false } = {}) {
   const face = kind === 'agent' ? agentFaceAuthor({ ...a, kind }) : null;
   return {
     key: normalizeActorKey(login) || login,
-    name: String(a.name || (email ? email.split('@')[0] : login) || 'Someone').slice(0, 100),
+    name: String(a.name || (email ? email.split('@')[0] : login) || 'Someone'),
     avatar_url: typeof a.avatar_url === 'string' ? a.avatar_url : '',
     kind,
     ...(face ? { login: face.login, ...['handle', 'provider', 'cli', 'owner', 'team_agent', 'tdoc_ai'].reduce((o, k) => (face[k] ? { ...o, [k]: face[k] } : o), {}) } : {}),
@@ -7799,6 +7799,17 @@ function siteCommentWhere(anchor) {
   return { page, element };
 }
 
+// A feed row's sizes, applied to what leaves (after redaction, so that a
+// rule reads whole words).
+function cutCommentRows(rows) {
+  return rows.map((row) => ({
+    ...row,
+    text: String(row.text || '').slice(0, 2000),
+    author: { ...row.author, name: String((row.author && row.author.name) || 'Someone').slice(0, 100) },
+  }));
+}
+
+// Whole text and names: every caller redacts, then cutCommentRows.
 function teamCommentRows(slug, meta, list) {
   ensureMigrated(list);
   const title = String((meta && meta.title) || slug);
@@ -7826,7 +7837,7 @@ function teamCommentRows(slug, meta, list) {
       id: thread.id,
       kind: 'comment',
       version: Math.max(1, Number(thread.created_in || thread.version) || 1),
-      text: String(thread.text || '').slice(0, 2000),
+      text: String(thread.text || ''),
       created: thread.created || '',
       author: teamCommentAuthor(thread.author),
     });
@@ -7837,7 +7848,7 @@ function teamCommentRows(slug, meta, list) {
         parent_id: reply.parent_id || thread.id,
         kind: 'reply',
         version: Math.max(1, Number(reply.created_in || reply.version || thread.created_in || thread.version) || 1),
-        text: String(reply.text || '').slice(0, 2000),
+        text: String(reply.text || ''),
         created: reply.created || '',
         author: teamCommentAuthor(reply.author, { agentVerdict: reply.agent_status != null }),
       });
@@ -7899,24 +7910,23 @@ async function personalCommentsPage(env, session, origin, offset = 0) {
   const myTeams = new Set((session && session.team_ids) || []);
   const chunks = await Promise.all(page.map(async (slug) => {
     const meta = await loadDocMeta(env, slug);
-    if (!meta) return [];
+    if (!meta) return null;
     if (meta.created_from === 'feedback') {
       // A team's site is listed with that team, not here.
-      if (meta.workspace_id && myTeams.has(meta.workspace_id)) return [];
+      if (meta.workspace_id && myTeams.has(meta.workspace_id)) return null;
       // Owned or joined, and readable: the rule of the Sites list itself.
       const ok = await feedbackSpacesFor(env, session, [{ slug, meta }], (row) => ({ slug: row.slug }), false, { site: false });
-      if (!ok.length) return [];
+      if (!ok.length) return null;
     } else if (meta.workspace_id || !isDocOwnerSession(env, session, meta) || !docReadableBy(env, session, meta)) {
-      return [];
+      return null;
     }
     let rows = [];
-    try { rows = teamCommentRows(slug, meta, await readComments(env, slug)); } catch { return []; }
-    // Addresses are redacted per doc, as on the doc page: a hidden
-    // commenter's alias is that doc's, and the people this person invited
-    // to it by address show as they do there.
-    return redactCommentEmails(rows, await emailPrivacyFor(env, session, slug, meta));
+    try { rows = teamCommentRows(slug, meta, await readComments(env, slug)); } catch { return null; }
+    return rows.length ? { rows, privacy: await emailPrivacyFor(env, session, slug, meta) } : null;
   }));
-  const items = chunks.flat().sort((a, b) => String(b.created).localeCompare(String(a.created)));
+  // Redacted per doc, as on the doc page; the reads that takes are the
+  // page's, once (redactCommentRowsByDoc).
+  const items = cutCommentRows((await redactCommentRowsByDoc(env, chunks.filter(Boolean))).flat()).sort((a, b) => String(b.created).localeCompare(String(a.created)));
   const next = start + page.length < slugs.length ? start + page.length : null;
   return { items, next, docs_scanned: page.length, docs_total: slugs.length };
 }
@@ -15027,6 +15037,31 @@ async function redactCommentEmails(value, privacy) {
       if (privacy.goneCache.get(e)) gone.add(e);
     }));
   }
+  return aliasCommentEmails(value, privacy, present, gone);
+}
+
+// Rows of several docs, each under its own doc's privacy (aliases, who is
+// revealed), with one set of reads for all of them: names resolve once under
+// the one payload's limits, and at most DELETED_CHECK_MAX of the addresses
+// about to be shown are checked. An address past that is not shown.
+const DELETED_CHECK_MAX = 20;
+async function redactCommentRowsByDoc(env, docs) {
+  if (!docs.length) return [];
+  const named = await withActorDisplayNames(env, docs.map((doc) => doc.rows));
+  const present = named.map((rows) => [...collectEmails(rows, new Set())]);
+  const shown = new Set();
+  docs.forEach(({ privacy }, i) => {
+    for (const e of present[i]) if (privacy.reveal.has(e) && !privacy.mine.has(`email:${e}`)) shown.add(e);
+  });
+  const gone = new Set([...shown].slice(DELETED_CHECK_MAX));
+  await Promise.all([...shown].slice(0, DELETED_CHECK_MAX).map(async (e) => {
+    if (await deletedIdentity(env, `email:${e}`)) gone.add(e);
+  }));
+  return Promise.all(docs.map(({ privacy }, i) => aliasCommentEmails(named[i], privacy, present[i], gone)));
+}
+
+// The addresses `present` in `value` that this reader may not see, replaced.
+async function aliasCommentEmails(value, privacy, present, gone) {
   const hidden = present.filter((e) => !privacy.reveal.has(e) || gone.has(e));
   if (!hidden.length) return value;
   const alias = new Map();
@@ -29145,7 +29180,8 @@ const tdocHandlers = {
       // missing team and cannot use this endpoint to enumerate names or ids.
       if (!page) return json({ error: 'not_found' }, { status: 404 });
       const privacy = await emailPrivacyFor(env, s, `team:${teamId}`, { workspace_id: teamId });
-      return json(await redactCommentEmails({ ok: true, ...page }, privacy), { headers: { 'Cache-Control': 'private, no-store' } });
+      const feed = await redactCommentEmails({ ok: true, ...page }, privacy);
+      return json({ ...feed, items: cutCommentRows(feed.items) }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (p === '/api/me' && method === 'GET') {
       const s = await getViewerSession(env, req);

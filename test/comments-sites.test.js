@@ -203,6 +203,127 @@ async function seedDoc(env, slug, owner, extra = {}) {
     assert(r.status === 401 || r.status === 403, `scoped token ${r.status}`);
   });
 
+  // A page of the feed at its largest: 12 docs, 120 commenters each, all
+  // different. `invited`: how many of each doc's email commenters its owner
+  // invited. Warmed through one worker instance (the comment stores migrate
+  // their KV rows), then read through a fresh one, whose caches are cold.
+  async function bigFeed({ invited = 0 } = {}) {
+    const warm = await loadWorker();
+    const big = makeEnv(warm.CommentsStore, { TDOC_EMAIL_ALIAS_SECRET: 'test-alias-secret' });
+    const cookie = await sessionFor(big, 'olga');
+    // As on a deployment where some account was deleted once: addresses are
+    // checked against its tombstones (the key pin, worker identityKey).
+    const kid = require('crypto').createHmac('sha256', 'tdoc-identity-kid\0test-alias-secret').update('kid').digest('hex').slice(0, 16);
+    await big.META.put('account-identity-key', JSON.stringify({ name: 'TDOC_EMAIL_ALIAS_SECRET', kid }));
+    for (let d = 0; d < 12; d++) {
+      const slug = `big-${String(d).padStart(2, '0')}`;
+      const email = (i) => `p${d}x${i}@people.example`;
+      await seedDoc(big, slug, 'olga', {
+        access: { visibility: 'private', commenting: 'signed_in', history_visibility: 'owner', allowed_users: Array.from({ length: invited }, (_, i) => email(i * 3)) },
+      });
+      await big.META.put(`comments:${slug}`, JSON.stringify(Array.from({ length: 120 }, (_, i) => {
+        const account = `acct-p${d}x${i}`;
+        const author = i % 3 === 0 ? { login: `email:${email(i)}`, name: email(i), account_id: account }
+          : i % 3 === 1 ? { login: `h${d}x${i}`, name: `h${d}x${i}`, account_id: account }
+            : { login: `h${d}x${i}`, name: `h${d}x${i}` };
+        return { id: `c${d}x${i}`, text: `note ${i}`, created: '2026-11-01T00:00:00.000Z', version: 1, author };
+      })));
+    }
+    const read = async (m) => {
+      const r = await m.default.fetch(req('/api/me/comments?offset=0', { cookie }), big, { waitUntil() {} });
+      return { status: r.status, body: await r.json() };
+    };
+    assert((await read(warm)).body.items.length === 1440, 'the big page did not seed');
+    const cold = await loadWorker();
+    return { big, read: () => read(cold), cookie };
+  }
+  const countKv = async (kv, fn) => {
+    const n = { total: 0 };
+    const own = {};
+    for (const op of ['get', 'getWithMetadata', 'put', 'delete', 'list']) {
+      own[op] = kv[op];
+      kv[op] = function counted(...args) { n.total += 1; n[op] = (n[op] || 0) + 1; return own[op].apply(this, args); };
+    }
+    try { return { out: await fn(), n }; } finally { Object.assign(kv, own); }
+  };
+
+  await t('a full page of the feed costs one page of lookups, not one per doc', async () => {
+    const { big, read } = await bigFeed();
+    const { out, n } = await countKv(big.META, read);
+    assert(out.status === 200 && out.body.items.length === 1440, `${out.status} ${out.body.items && out.body.items.length}`);
+    console.log(`    KV operations: ${n.total} ${JSON.stringify(n)}`);
+    assert(n.total <= 240, `KV operations ${n.total}`);
+    assert(!JSON.stringify(out.body).includes('@people.example'), 'a hidden address');
+    const keys = out.body.items.map((item) => item.author.key).filter((k) => k.startsWith('email-alias:'));
+    assert(keys.length === 480 && new Set(keys).size === 480, `aliases ${keys.length}`);
+  });
+
+  await t('past the page\'s lookup limit an invited address is aliased, not shown; a deleted account\'s never is', async () => {
+    const { big, read, cookie } = await bigFeed({ invited: 10 });
+    const { out, n } = await countKv(big.META, read);
+    console.log(`    KV operations: ${n.total}`);
+    assert(n.total <= 260, `KV operations ${n.total}`);
+    const shown = new Set(JSON.stringify(out.body).match(/p\d+x\d+@people\.example/g) || []);
+    assert(shown.size === 20, `addresses shown ${shown.size}`);
+    for (const item of out.body.items) {
+      const m = item.author.key.match(/^email:(.+)$/);
+      if (m) assert(shown.has(m[1]), item.author.key);
+    }
+    // Those same people's accounts are deleted: gone from the page.
+    for (const email of shown) {
+      const hash = require('crypto').createHmac('sha256', 'tdoc-deleted-identity-v1\0test-alias-secret').update(`email:${email}`).digest('hex');
+      await big.META.put(`account-deleted-identity:${hash}`, JSON.stringify({ at: '2026-11-02T00:00:00.000Z' }));
+    }
+    const after = await (await loadWorker()).default.fetch(req('/api/me/comments?offset=0', { cookie }), big, { waitUntil() {} });
+    assert(after.status === 200 && !(await after.text()).includes('@people.example'), 'a deleted account\'s address is shown');
+  });
+
+  await t('long comments: both feeds show what the doc page shows, for the owner, a joined viewer and a team member', async () => {
+    const m = await loadWorker();
+    const e = makeEnv(m.CommentsStore, { TDOC_EMAIL_ALIAS_SECRET: 'test-alias-secret' });
+    const ask = async (path, opts = {}) => {
+      const r = await m.default.fetch(req(path, opts), e, { waitUntil() {} });
+      return { status: r.status, body: await r.json().catch(() => null) };
+    };
+    const [olga, pete, mia] = [await sessionFor(e, 'olga'), await sessionFor(e, 'pete'), await sessionFor(e, 'mia')];
+    const ADDRESS = 'zed@longdomain.example';
+    // The address straddles the 2000th character at every cut inside it.
+    const texts = Array.from({ length: ADDRESS.length + 2 }, (_, i) => `${'x'.repeat(2000 - 2 - i)} @${ADDRESS} end`);
+    const made = (await ask('/api/teams', { method: 'POST', cookie: olga, body: { name: 'T' } })).body.team;
+    await ask('/api/team/join', { method: 'POST', cookie: mia, body: { token: made.invite_url.split('/').pop() } });
+    const rows = (slug) => JSON.stringify(texts.map((text, i) => ({
+      id: `${slug}-${i}`, text, created: '2026-11-01T00:00:00.000Z', version: 1,
+      author: { login: 'quinn', name: i ? 'quinn' : `${'n'.repeat(92)}@longdomain.example` },
+      replies: [{ id: `${slug}-r${i}`, text, created: '2026-11-01T00:00:00.000Z', author: { login: 'quinn', name: 'quinn' } }],
+    })));
+    await seedDoc(e, 'mine', 'olga');
+    const space = (await ask('/api/feedback/connect', { method: 'POST', cookie: olga, body: { origin: 'https://shop.example' } })).body.slug;
+    await ask('/api/doc/access', { method: 'PATCH', cookie: olga, body: { slug: space, access: { visibility: 'private', commenting: 'signed_in', allowed_users: ['pete'] } } });
+    const joined = await ask('/api/feedback/connect', { method: 'POST', cookie: pete, body: { origin: 'https://shop.example', slug: space } });
+    assert(joined.status === 200 && joined.body.slug === space, `pete joins ${joined.status} ${JSON.stringify(joined.body)}`);
+    await seedDoc(e, 'team-doc', 'olga', { workspace_id: made.id, access: { visibility: 'private', team: true, commenting: 'signed_in', allowed_users: [] } });
+    for (const slug of ['mine', space, 'team-doc']) await e.META.put(`comments:${slug}`, rows(slug));
+    const feeds = [
+      ['owner, My docs', '/api/me/comments?offset=0', olga, ['mine', space]],
+      ['joined viewer, My docs', '/api/me/comments?offset=0', pete, [space]],
+      ['team member, team feed', `/api/team/comments?id=${made.id}`, mia, ['team-doc']],
+      ['team admin, team feed', `/api/team/comments?id=${made.id}`, olga, ['team-doc']],
+    ];
+    for (const [who, path, cookie, slugs] of feeds) {
+      const { status, body } = await ask(path, { cookie });
+      assert(status === 200, `${who} ${status}`);
+      for (const slug of slugs) {
+        const got = body.items.filter((item) => item.slug === slug);
+        assert(got.length === texts.length * 2, `${who} ${slug}: ${got.length} rows`);
+        assert(got.every((item) => item.text.length <= 2000 && item.author.name.length <= 100), `${who}: not cut`);
+        assert(!/@longd/.test(JSON.stringify(got)) && !/@zed@/.test(JSON.stringify(got)), `${who} ${slug}: part of an address`);
+        assert(got.some((item) => / @zed end$/.test(item.text)), `${who} ${slug}: the local part as on the doc page`);
+        const page = await ask(`/api/comments?slug=${slug}&version=all`, { cookie });
+        for (const thread of page.body) assert(got.find((item) => item.id === thread.id).text === thread.text.slice(0, 2000), `${who} ${slug}: differs from the doc page`);
+      }
+    }
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
 })().catch((e) => { console.error(e); process.exit(1); });
