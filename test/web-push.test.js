@@ -144,6 +144,27 @@ async function seedDoc(env, slug, owner) {
     assert(mentions.includes('mention'), `pushes: ${JSON.stringify(mentions)}`);
   });
 
+  await t('a pushed comment reads as the doc page does for that person, and so does its author', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_EMAIL_ALIAS_SECRET: 'x' });
+    const meta = (slug, allowed) => env.META.put(`meta:${slug}`, JSON.stringify({ slug, title: slug, hosted: { github_login: 'alice' }, versions: [{ n: 1, created: '2026-10-19T00:00:00Z' }], access: { visibility: 'public', commenting: 'signed_in', allowed_users: allowed } }));
+    await meta('tags', ['carol@invited.example']);
+    await env.META.put(`session:${'d'.repeat(32)}`, JSON.stringify({ email: 'dave@hidden.example', name: 'dave', created: '2026-01-01T00:00:00Z' }));
+    const pushed = {};
+    for (const login of ['alice', 'eve']) {
+      const browser = await fakeBrowser(`https://fcm.googleapis.com/fcm/send/${login}`);
+      await worker.fetch(req('/api/push/subscribe', { method: 'POST', cookie: await putSession(env, login), body: { subscription: browser.subscription } }), env, {});
+      pushed[login] = { browser };
+    }
+    const cap = capturePushes();
+    try {
+      await worker.fetch(req('/api/comments', { method: 'POST', cookie: `tdoc_sid=${'d'.repeat(32)}`, body: { slug: 'tags', version: 1, text: '@eve ask @carol@invited.example, or @bob@other.example', anchor: null } }), env, {});
+    } finally { cap.restore(); }
+    for (const p of cap.sent) { const who = pushed[p.url.split('/').pop()]; who.item = (await who.browser.open(p.body)).item; }
+    assert(pushed.eve.item.preview === '@eve ask @carol, or @bob', JSON.stringify(pushed.eve.item));
+    assert(pushed.alice.item.preview === '@eve ask @carol@invited.example, or @bob', JSON.stringify(pushed.alice.item));
+    for (const { item } of Object.values(pushed)) assert(item.actor.name === 'dave' && !JSON.stringify(item).includes('hidden.example'), JSON.stringify(item.actor));
+  });
+
   await t('a browser the push service says is gone is forgotten', async () => {
     const env = makeEnv(mod.CommentsStore);
     await seedDoc(env, 'gone', 'alice');
