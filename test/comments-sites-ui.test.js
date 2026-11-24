@@ -384,6 +384,16 @@ async function startServer(worker, env) {
       }
     });
 
+    await t('Add a site still opens its form when the list then comes back empty', async () => {
+      const { context, page } = await open('/me?view=docs', { width: 1440 });
+      await page.route('**/api/me/feedback', (route) => route.fulfill({ json: { ok: true, spaces: [] } }));
+      await page.goto(`${base}/me?view=sites`);
+      await page.waitForSelector('#sites-intro');
+      await page.getByRole('button', { name: 'Add a site' }).click();
+      await page.getByLabel('Your site’s address').waitFor();
+      await context.close();
+    });
+
     await t('a new test site opens its fold and settings', async () => {
       const { context, page } = await open(`/me?view=sites&site=${ids.local}`, { width: 1440 });
       await page.locator(`details.sites-tests[open] #site-settings-${ids.local}`).waitFor();

@@ -324,6 +324,109 @@ async function seedDoc(env, slug, owner, extra = {}) {
     }
   });
 
+  // One doc of Olga's, its thread rows as given, read through a worker of its
+  // own (cold caches) with KV reads that can be made to fail.
+  const ALIAS_SECRET = 'test-alias-secret';
+  const hmacHex = (key, text) => require('crypto').createHmac('sha256', key).update(text).digest('hex');
+  const tombKey = (email) => `account-deleted-identity:${hmacHex(`tdoc-deleted-identity-v1\0${ALIAS_SECRET}`, `email:${email}`)}`;
+  async function oneDoc({ threads, invited = [], gone = [], team = false }) {
+    const seedMod = await loadWorker();
+    const e = makeEnv(seedMod.CommentsStore, { TDOC_EMAIL_ALIAS_SECRET: ALIAS_SECRET });
+    const cookie = await sessionFor(e, 'olga');
+    const kid = hmacHex(`tdoc-identity-kid\0${ALIAS_SECRET}`, 'kid').slice(0, 16);
+    await e.META.put('account-identity-key', JSON.stringify({ name: 'TDOC_EMAIL_ALIAS_SECRET', kid }));
+    for (const email of gone) await e.META.put(tombKey(email), JSON.stringify({ at: '2026-11-02T00:00:00.000Z' }));
+    let teamId = '';
+    if (team) teamId = (await (await seedMod.default.fetch(req('/api/teams', { method: 'POST', cookie, body: { name: 'T' } }), e, { waitUntil() {} })).json()).team.id;
+    await seedDoc(e, 'one', 'olga', { access: { visibility: 'private', commenting: 'signed_in', allowed_users: invited } });
+    if (team) await seedDoc(e, 'team-one', 'olga', { workspace_id: teamId, access: { visibility: 'private', team: true, commenting: 'signed_in', allowed_users: invited } });
+    const created = '2026-11-01T00:00:00.000Z';
+    for (const slug of team ? ['one', 'team-one'] : ['one']) {
+      await e.META.put(`comments:${slug}`, JSON.stringify(threads.map((x, i) => ({
+        id: `t${i}`, created, version: 1, text: 'note', ...x,
+        replies: (x.replies || []).map((y, j) => ({ id: `t${i}r${j}`, created, ...y })),
+      }))));
+    }
+    const get = e.META.get;
+    const kv = { failing: null };
+    e.META.get = function read(k) { if (kv.failing && kv.failing(String(k))) return Promise.reject(new Error('KV is down')); return get.call(this, k); };
+    const client = (m) => async (path) => {
+      const r = await m.default.fetch(req(path, { cookie }), e, { waitUntil() {} });
+      return { status: r.status, text: await r.text() };
+    };
+    return { client, kv, teamId, fresh: async () => client(await loadWorker()) };
+  }
+  const FEED = '/api/me/comments?offset=0';
+
+  await t('the reader\'s own words: a deleted account\'s address does not show, as on the doc page; past the lookup limit none does', async () => {
+    const own = { login: 'olga', name: 'olga' };
+    const reply = (text) => ({ author: own, agent_status: 'applied', text });
+    const one = await oneDoc({ gone: ['gone3@corp.example'], threads: [{ author: own, replies: [reply('ask @gone3@corp.example or @live@corp.example now')] }] });
+    const ask = await one.fresh();
+    const feed = await ask(FEED);
+    assert(feed.status === 200 && JSON.parse(feed.text).items.length === 2, `feed ${feed.status} ${feed.text.slice(0, 200)}`);
+    assert(/ask @gone3 or @live@corp\.example now/.test(feed.text), `own words ${feed.text}`);
+    const page = await ask('/api/comments?slug=one&version=all');
+    assert(/ask @gone3 or @live@corp\.example now/.test(page.text), `doc page ${page.text}`);
+    const many = Array.from({ length: 30 }, (_, i) => `live${i}@corp.example`);
+    const big = await oneDoc({ threads: [{ author: own, replies: [reply(many.map((m) => `@${m}`).join(' '))] }] });
+    const shown = new Set((await (await big.fresh())(FEED)).text.match(/live\d+@corp\.example/g) || []);
+    assert(shown.size === 20, `own addresses shown ${shown.size}`);
+  });
+
+  await t('an address whose deletion check cannot be read is hidden, the failure is not remembered, and another route\'s failed read changes nothing', async () => {
+    const A = 'ann@corp.example';
+    const threads = [{ author: { login: `email:${A}`, name: A } }];
+    const isTomb = (k) => k.startsWith('account-deleted-identity:');
+    const isPin = (k) => k === 'account-identity-key';
+    for (const [what, failing] of [['tombstone', isTomb], ['key pin', isPin]]) {
+      const live = await oneDoc({ invited: [A], threads });
+      const ask = await live.fresh();
+      live.kv.failing = failing;
+      const down = await ask(FEED);
+      assert(down.status === 200 && !down.text.includes('@corp.example'), `${what} read failed: ${down.text}`);
+      live.kv.failing = null;
+      assert((await ask(FEED)).text.includes(`email:${A}`), `${what}: the failure was remembered`);
+      // The doc page reads (and may remember) the same records another way.
+      const dead = await oneDoc({ invited: [A], gone: [A], threads });
+      const poisoned = await dead.fresh();
+      dead.kv.failing = failing;
+      const page = await poisoned('/api/comments?slug=one&version=all');
+      assert(page.status === 200, `doc page ${page.status}`);
+      dead.kv.failing = null;
+      const after = await poisoned(FEED);
+      assert(after.status === 200 && !after.text.includes('@corp.example'), `${what}: another route's failed read shows it`);
+    }
+  });
+
+  await t('long names: read quickly in both feeds, and no part of an address in them', async () => {
+    const names = [
+      `x@${'.'.repeat(40000)} `,
+      `${'n'.repeat(40000)} zed@shop.example`,
+      `zed@shop.example ${'n'.repeat(40000)}`,
+      `by zed@shop.example ${'n'.repeat(200)}`,
+      ...Array.from({ length: 24 }, (_, i) => `${'n'.repeat(80 + i)}@longdomain.example`),
+      ...Array.from({ length: 24 }, (_, i) => `${'n'.repeat(80 + i)} zed@longdomain.example and more words after it`),
+      `@${'n'.repeat(200)}`,
+    ];
+    const threads = names.flatMap((name) => [{ author: { login: 'quinn', name } }, { author: { login: 'bot', kind: 'agent', name } }]);
+    const one = await oneDoc({ threads, team: true });
+    const ask = await one.fresh();
+    for (const path of [FEED, `/api/team/comments?id=${one.teamId}`]) {
+      const started = process.hrtime.bigint();
+      const feed = await ask(path);
+      const ms = Number(process.hrtime.bigint() - started) / 1e6;
+      const items = JSON.parse(feed.text).items;
+      assert(feed.status === 200 && items.length === threads.length, `${path} ${feed.status} ${items.length}`);
+      console.log(`    ${path.split('?')[0]}: ${Math.round(ms)} ms`);
+      assert(ms < 1000, `${path} took ${Math.round(ms)} ms`);
+      for (const item of items) {
+        assert(item.author.name && item.author.name.length <= 100, `name ${item.author.name.length}`);
+        assert(!/@(shop|longd)/.test(item.author.name) && !/@l/.test(item.author.name), `part of an address: ${item.author.name}`);
+      }
+    }
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
 })().catch((e) => { console.error(e); process.exit(1); });

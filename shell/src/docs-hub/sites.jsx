@@ -254,8 +254,7 @@ function AddSiteForm({ team, onCancel, className = '' }) {
 // /feedback's SDK part (the demo and the two ways in). Its main button asks
 // for the site's address (a team member who may not add one is told who
 // can); the second link tries the widget on /feedback first.
-function SitesIntro({ team }) {
-  const [adding, setAdding] = useState(false);
+function SitesIntro({ team, adding, setAdding }) {
   const canAdd = canAddSite(team);
   return (
     <div className="tdoc-feedback-page fb-sites-intro" id="sites-intro">
@@ -331,7 +330,7 @@ export function SitesPane({ spaces: initial, team = null, teams = [], inScope = 
   );
   return (
     <section className="pane sites-pane" id="pane-sites" aria-label="Sites">
-      {!spaces.length ? <SitesIntro team={team} /> : (
+      {!spaces.length ? <SitesIntro team={team} adding={adding} setAdding={onAddingChange} /> : (
         <>
           {adding && canAddSite(team) ? <AddSiteForm team={team} onCancel={() => onAddingChange(false)} /> : null}
           {real.length ? <div className="doc-list sites-list">{real.map((space) => row(space))}</div> : null}

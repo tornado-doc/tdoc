@@ -7686,10 +7686,11 @@ function teamCommentAuthor(author, { agentVerdict = false } = {}) {
     : (typeof a.kind === 'string' && a.kind && a.kind !== 'human' ? a.kind : 'human');
   // An agent also carries what its face reads (agentFaceAuthor): the
   // program's mark, as on the reply in the thread.
-  const face = kind === 'agent' ? agentFaceAuthor({ ...a, kind }) : null;
+  // (Its name is the row's own, feedName: not scanned a second time.)
+  const face = kind === 'agent' ? agentFaceAuthor({ ...a, kind, name: '' }) : null;
   return {
     key: normalizeActorKey(login) || login,
-    name: String(a.name || (email ? email.split('@')[0] : login) || 'Someone'),
+    name: feedName(a.name || (email ? email.split('@')[0] : login)),
     avatar_url: typeof a.avatar_url === 'string' ? a.avatar_url : '',
     kind,
     ...(face ? { login: face.login, ...['handle', 'provider', 'cli', 'owner', 'team_agent', 'tdoc_ai'].reduce((o, k) => (face[k] ? { ...o, [k]: face[k] } : o), {}) } : {}),
@@ -7799,17 +7800,27 @@ function siteCommentWhere(anchor) {
   return { page, element };
 }
 
+// A name as a feed row carries it: at most 100 characters. A longer one also
+// ends at its first @, so neither the cut nor what is left unscanned holds an
+// address, and what is scanned (redactCommentEmails) is short.
+function feedName(raw) {
+  const name = String(raw || '');
+  if (name.length <= 100) return name || 'Someone';
+  const at = name.indexOf('@');
+  return (at < 0 ? name : name.slice(0, at)).slice(0, 100).trim() || 'Someone';
+}
+
 // A feed row's sizes, applied to what leaves (after redaction, so that a
 // rule reads whole words).
 function cutCommentRows(rows) {
   return rows.map((row) => ({
     ...row,
     text: String(row.text || '').slice(0, 2000),
-    author: { ...row.author, name: String((row.author && row.author.name) || 'Someone').slice(0, 100) },
+    author: { ...row.author, name: feedName(row.author && row.author.name) },
   }));
 }
 
-// Whole text and names: every caller redacts, then cutCommentRows.
+// Whole text: every caller redacts, then cutCommentRows.
 function teamCommentRows(slug, meta, list) {
   ensureMigrated(list);
   const title = String((meta && meta.title) || slug);
@@ -12061,8 +12072,11 @@ async function identityKey(env, { pin = false } = {}) {
 async function identityHash(env, actor, { pin = false } = {}) {
   const key = await identityKey(env, { pin });
   if (!key) return null;
+  return identityHashUnder(key.secret, actor);
+}
+async function identityHashUnder(secret, actor) {
   const norm = normalizeActorKey(actor) || String(actor || '').trim().toLowerCase();
-  const mac = await hmacBytes(`tdoc-deleted-identity-v1\0${key.secret}`, norm);
+  const mac = await hmacBytes(`tdoc-deleted-identity-v1\0${secret}`, norm);
   return [...mac].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 function identityTombKey(hash) { return `account-deleted-identity:${hash}`; }
@@ -15045,18 +15059,53 @@ async function redactCommentEmails(value, privacy) {
 // the one payload's limits, and at most DELETED_CHECK_MAX of the addresses
 // about to be shown are checked. An address past that is not shown.
 const DELETED_CHECK_MAX = 20;
+
+// Is this identity a deleted account's, for deciding to show its address:
+// anything that cannot be read, or does not match the pinned key, is "yes".
+// Reads the pin and the tombstones itself: what deletedIdentity cached may be
+// a failed read. A tombstone it did see still counts.
+async function strictDeletedCheck(env) {
+  let key = null;
+  try {
+    const raw = await env.META.get(IDENTITY_KEY_PIN);
+    // No pin: no account was ever deleted here.
+    if (raw == null) return async () => false;
+    const rec = JSON.parse(raw);
+    const secret = rec.name ? String(env[rec.name] || '') : IDENTITY_FALLBACK_SECRET;
+    if (secret && typeof rec.kid === 'string' && await identityKeyId(secret) === rec.kid) key = secret;
+  } catch {}
+  if (!key) return async () => true;
+  return async (actor) => {
+    try {
+      const hash = await identityHashUnder(key, actor);
+      const hit = IDENTITY_TOMB_CACHE.get(hash);
+      if (hit && hit.v && hit.v.at) return true;
+      const raw = await env.META.get(identityTombKey(hash));
+      return raw != null && !!JSON.parse(raw).at;
+    } catch { return true; }
+  };
+}
+
 async function redactCommentRowsByDoc(env, docs) {
   if (!docs.length) return [];
   const named = await withActorDisplayNames(env, docs.map((doc) => doc.rows));
   const present = named.map((rows) => [...collectEmails(rows, new Set())]);
   const shown = new Set();
   docs.forEach(({ privacy }, i) => {
-    for (const e of present[i]) if (privacy.reveal.has(e) && !privacy.mine.has(`email:${e}`)) shown.add(e);
+    const about = new Set(present[i].filter((e) => privacy.reveal.has(e)));
+    // The reader's own words keep the addresses in them (aliasCommentEmails).
+    for (const row of named[i]) {
+      const login = row.author && row.author.login;
+      if (typeof login === 'string' && privacy.mine.has(login.toLowerCase())) collectEmails(row.text, about, 'text');
+    }
+    for (const e of about) if (!privacy.mine.has(`email:${e}`)) shown.add(e);
   });
   const gone = new Set([...shown].slice(DELETED_CHECK_MAX));
-  await Promise.all([...shown].slice(0, DELETED_CHECK_MAX).map(async (e) => {
-    if (await deletedIdentity(env, `email:${e}`)) gone.add(e);
-  }));
+  const checked = [...shown].slice(0, DELETED_CHECK_MAX);
+  if (checked.length) {
+    const isGone = await strictDeletedCheck(env);
+    await Promise.all(checked.map(async (e) => { if (await isGone(`email:${e}`)) gone.add(e); }));
+  }
   return Promise.all(docs.map(({ privacy }, i) => aliasCommentEmails(named[i], privacy, present[i], gone)));
 }
 
