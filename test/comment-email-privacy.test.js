@@ -110,6 +110,94 @@ const DAVE = 'dave.reader@example.org';
     assert(mentions.body.users.some((u) => u.login === 'alice'), 'mention list lost the GitHub owner');
   });
 
+  // What is typed, and how another reader sees it.
+  const TAGS = [
+    ['ask @ann@one.example and @bob@two.example', 'ask @ann and @bob'],
+    ['ask @ann@one.example,@bob@two.example;@cat@three.example now', 'ask @ann,@bob;@cat now'],
+    ['ask @ann@one.example/@bob@two.example', 'ask @ann/@bob'],
+    ['ask @ann@one.example_@bob@two.example-@cat@three.example', 'ask @ann@bob-@cat'],
+    ['ask @ann@one.example, please.', 'ask @ann, please.'],
+    ['is it @ann@one.example? (@bob@two.example)', 'is it @ann? (@bob)'],
+    ['"@ann@one.example" -@bob@two.example <@cat@three.example>', '"@ann" -@bob <@cat>'],
+    ['问 @ann@one.example，@bob@two.example、@cat@three.example。', '问 @ann，@bob、@cat。'],
+    ['请@ann@one.example看一下（@bob@two.example）', '请@ann看一下（@bob）'],
+    ['@ann@one.example和@bob@two.example说', '@ann和@bob说'],
+    ['@lee,@ann@one.example', '@lee,@ann'],
+    ['@lee,@ann.kim@one.example,@bob@two.example', '@lee,@ann.kim,@bob'],
+    ['@j.lee/@ann@one.example', '@j.lee/@ann'],
+    ['@ann@one.bücher.example, ok', '@ann, ok'],
+    ['@ann@one.例子, ok', '@ann, ok'],
+    // Not tags: as they are.
+    ['write to ann@mail.example', 'write to ann@mail.example'],
+    ['@lee, @j-lee and @kim', '@lee, @j-lee and @kim'],
+    ['see https://unpkg.com/@scope/pkg@1.2.3/x.js', 'see https://unpkg.com/@scope/pkg@1.2.3/x.js'],
+  ];
+  const textsOf = (body) => new Map(body.flatMap((c) => [c, ...(c.replies || [])]).map((c) => [c.id, c.text]));
+
+  await t('mention tags read the same whatever is written around them, for every reader and route', async () => {
+    await seed('tags', { visibility: 'public' });
+    const ids = [];
+    for (const [text] of TAGS) {
+      const c = await call('/api/comments', { method: 'POST', cookie: carol, body: { slug: 'tags', version: 1, text } });
+      assert(c.status === 200, `comment ${c.status} ${c.text}`);
+      const r = await call('/api/comments', { method: 'POST', cookie: carol, body: { slug: 'tags', version: 1, parent_id: c.body.id, text } });
+      assert(r.status === 200, `reply ${r.status}`);
+      ids.push([c.body.id, r.body.id]);
+    }
+    for (const [who, o] of [['anonymous', {}], ['another account', { cookie: eve.cookie }], ['a token', { token: eve.token }], ['the owner', { cookie: alice.cookie }]]) {
+      for (const path of ['/api/comments?slug=tags', '/api/comments?slug=tags&version=all']) {
+        const shown = textsOf((await call(path, o)).body);
+        TAGS.forEach(([text, want], i) => {
+          for (const id of ids[i]) assert(shown.get(id) === want, `${who} ${path}: ${JSON.stringify(text)} shows ${JSON.stringify(shown.get(id))}`);
+        });
+      }
+      for (const path of ['/d/tags', '/d/tags/v/1/export?download=0', '/d/tags/v/1/fork']) {
+        const r = await call(path, o);
+        assert(r.status === 200 && !/(one|two|three)\./.test(r.text), `${who} ${path}: ${(r.text.match(/.{30}(one|two|three)\..{10}/) || [r.status])[0]}`);
+      }
+      const md = await call('/d/tags', { ...o, headers: { Accept: 'text/markdown' } });
+      assert(md.status === 200 && !/(one|two|three)\./.test(md.text), `${who} markdown`);
+    }
+    // The author's own words are whole, and saving an edit of them keeps them so.
+    const own = textsOf((await call('/api/comments?slug=tags', { cookie: carol })).body);
+    for (const [i, [text]] of TAGS.entries()) {
+      for (const id of ids[i]) {
+        assert(own.get(id) === text, `own words: ${JSON.stringify(own.get(id))}`);
+        const saved = await call('/api/comments', { method: 'PATCH', cookie: carol, body: { slug: 'tags', version: 1, id, text: `${own.get(id)} !` } });
+        assert(saved.status === 200 && saved.body.text === `${text} !`, `edited: ${saved.status} ${saved.body && saved.body.text}`);
+      }
+    }
+  });
+
+  await t('mention tags in the two feeds', async () => {
+    const team = (await call('/api/teams', { method: 'POST', cookie: alice.cookie, body: { name: 'T' } })).body.team;
+    await call('/api/team/join', { method: 'POST', cookie: eve.cookie, body: { token: team.invite_url.split('/').pop() } });
+    await seed('team-tags', { visibility: 'private', team: true, commenting: 'signed_in', allowed_users: [] });
+    await env.META.put('meta:team-tags', JSON.stringify({ ...JSON.parse(await env.META.get('meta:team-tags')), workspace_id: team.id }));
+    await seed('eve-tags', { visibility: 'public' });
+    await env.META.put('meta:eve-tags', JSON.stringify({ ...JSON.parse(await env.META.get('meta:eve-tags')), hosted: { account_id: eve.account_id, github_login: 'eve' } }));
+    for (const slug of ['team-tags', 'eve-tags']) {
+      await env.META.put(`comments:${slug}`, JSON.stringify(TAGS.map(([text], i) => ({ id: `${slug}${i}`, text, created, version: 1, author: { login: 'quinn', name: 'quinn' } }))));
+    }
+    for (const [slug, path] of [['team-tags', `/api/team/comments?id=${team.id}`], ['eve-tags', '/api/me/comments?offset=0']]) {
+      const r = await call(path, { cookie: eve.cookie });
+      const rows = new Map(((r.body && r.body.items) || []).filter((x) => x.slug === slug).map((x) => [x.id, x.text]));
+      TAGS.forEach(([text, want], i) => assert(rows.get(`${slug}${i}`) === want, `${path}: ${JSON.stringify(text)} shows ${JSON.stringify(rows.get(`${slug}${i}`))}`));
+    }
+  });
+
+  await t('mention tags: the owner sees the ones they invited, and long text is read quickly', async () => {
+    await seed('long-tags', { visibility: 'public', allowed_users: [CAROL] });
+    const long = ['@a@b.example,'.repeat(8000), '@'.repeat(60000), 'a@'.repeat(60000), `@a@${'.'.repeat(60000)} `, `@a@${'b.'.repeat(60000)}`, `@a@b.example${'-'.repeat(60000)}`, `${'_'.repeat(60000)}@a@b.example`, `@a@b.example${'好'.repeat(60000)}`];
+    await env.META.put('comments:long-tags', JSON.stringify([`see @lee,@${CAROL} ok`, ...long].map((text, i) => ({ id: `l${i}`, text, created, version: 1, author: { login: 'quinn', name: 'quinn' } }))));
+    const started = process.hrtime.bigint();
+    const r = await call('/api/comments?slug=long-tags', { cookie: alice.cookie });
+    const ms = Number(process.hrtime.bigint() - started) / 1e6;
+    assert(r.status === 200 && r.body[0].text === `see @lee,@${CAROL} ok`, `invited: ${r.status} ${r.body && r.body[0].text}`);
+    assert(!r.body[1].text.includes('example') && ms < 3000, `${Math.round(ms)} ms`);
+    assert((await call('/api/comments?slug=long-tags')).body[0].text === 'see @lee,@carol.writer ok', 'another reader');
+  });
+
   await t('with no secret configured there is no alias to match: every hidden address is the same placeholder', async () => {
     delete env.TDOC_EMAIL_ALIAS_SECRET;
     const r = await call('/api/comments?slug=open');

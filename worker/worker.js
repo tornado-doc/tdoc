@@ -14992,6 +14992,53 @@ async function accountClaimedHandle(env, accountId) {
 const EMAIL_KEY_RE = /^email:([^\s@]+@[^\s@]+\.[^\s@]+)$/i;
 const BARE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMAIL_TAG_RE = /(^|[^A-Za-z0-9_@/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
+// Other people's words: every tag of a run of text without a space, however
+// the tags in it are parted or wrapped. EMAIL_TAG_RE reads the reader's own.
+const TAG_RUN_RE = /@(?<![A-Za-z0-9@/][_-]*@)\S+/g;
+const TAG_HOST_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+/;
+// `shows(address)`: may this reader see it? Otherwise its host goes, and what
+// follows the host stays unless it may be more of the host.
+function cutEmailTags(text, shows) {
+  return text.replace(TAG_RUN_RE, (run) => {
+    const parts = run.slice(1).split('@');
+    if (parts.length < 2) return run;
+    let out = `@${parts[0]}`;
+    let name = parts[0]; // what a host would belong to; '' just after one
+    let parted = false; // after a host and what parts it from the next tag
+    for (let i = 1; i < parts.length; i++) {
+      const seg = parts[i];
+      const isHost = (x) => { const dot = (x || '').indexOf('.', 1); return dot > 0 && dot < x.length - 1; };
+      // "@lee,@j.kim@host": a dotted name, after a comma and before its host.
+      const dotted = /[^\p{L}\p{N}\p{M}\p{C}_+.-]$/u.test(name) && /[\p{L}\p{N}]$/u.test(seg) && isHost(parts[i + 1]);
+      if (parted || !isHost(seg) || dotted) {
+        out += `@${seg}`;
+        name = seg;
+        parted = false;
+        continue;
+      }
+      if (!name) continue; // a host right after another
+      if (shows(`${name}@${seg}`)) { out += `@${seg}`; name = ''; continue; }
+      const rest = afterTagHost(seg);
+      out += rest;
+      const word = /[A-Za-z0-9_+.-]$/.test(rest);
+      name = word ? rest : '';
+      parted = !!rest && !word;
+    }
+    return out;
+  });
+}
+function afterTagHost(seg) {
+  const host = seg.match(TAG_HOST_RE);
+  const rest = host ? seg.slice(host[0].length) : '';
+  if (host && (!rest
+    || /^[^\p{L}\p{N}\p{M}\p{C}_.-]/u.test(rest)
+    || /^[.-]+(?:$|[^\p{L}\p{N}\p{M}\p{C}_.-])/u.test(rest)
+    || (/^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u.test(rest) && !/^[\p{L}\p{N}\p{M}-]*\.[\p{L}\p{N}]/u.test(rest)))) return rest;
+  // Not told apart from the host: only the punctuation it ends with stays.
+  let end = seg.length;
+  while (end > 0 && /[^\p{L}\p{N}\p{M}\p{C}_-]/u.test(seg[end - 1])) end -= 1;
+  return seg.slice(end);
+}
 const EMAIL_ALIAS_PREFIX = 'email-alias:';
 const EMAIL_HIDDEN_KEY = 'email-hidden';
 
@@ -15033,6 +15080,20 @@ function collectEmails(value, out, key = '') {
   return out;
 }
 
+// collectEmails, then the addresses only cutEmailTags reads: last, so that a
+// limited check takes them after the rest.
+function presentEmails(value) {
+  const out = collectEmails(value, new Set());
+  const walk = (v, key) => {
+    if (key === 'anchor' || v == null) return;
+    if (typeof v === 'string') { if (key === 'text') cutEmailTags(v, (e) => { out.add(e.toLowerCase()); return false; }); return; }
+    if (Array.isArray(v)) { for (const x of v) walk(x, ''); return; }
+    if (typeof v === 'object') for (const [k, x] of Object.entries(v)) walk(x, k);
+  };
+  walk(value, '');
+  return [...out];
+}
+
 async function redactCommentEmails(value, privacy) {
   // Every comment-shaped payload that leaves the worker (the doc page, the
   // feedback widget and space, team review, inbox, exports, agent reads)
@@ -15040,7 +15101,7 @@ async function redactCommentEmails(value, privacy) {
   // the one they chose -- before addresses are aliased, while the actor key
   // still names them. Existing comments keep their snapshot as the fallback.
   value = await withActorDisplayNames(privacy && privacy.env, value);
-  const present = [...collectEmails(value, new Set())];
+  const present = presentEmails(value);
   // A deleted account's address is nobody's to see any more, not even the
   // owner who invited it or a former teammate (the person's own session is
   // gone with the account, so `mine` never names it).
@@ -15096,7 +15157,7 @@ async function strictDeletedCheck(env) {
 async function redactCommentRowsByDoc(env, docs) {
   if (!docs.length) return [];
   const named = await withActorDisplayNames(env, docs.map((doc) => doc.rows));
-  const present = named.map((rows) => [...collectEmails(rows, new Set())]);
+  const present = named.map((rows) => presentEmails(rows));
   const shown = new Set();
   docs.forEach(({ privacy }, i) => {
     const about = new Set(present[i].filter((e) => privacy.reveal.has(e)));
@@ -15118,8 +15179,8 @@ async function redactCommentRowsByDoc(env, docs) {
 
 // The addresses `present` in `value` that this reader may not see, replaced.
 async function aliasCommentEmails(value, privacy, present, gone) {
-  const hidden = present.filter((e) => !privacy.reveal.has(e) || gone.has(e));
-  if (!hidden.length) return value;
+  const shows = (e) => privacy.reveal.has(e.toLowerCase()) && !gone.has(e.toLowerCase());
+  const hidden = present.filter((e) => !shows(e));
   const alias = new Map();
   await Promise.all(hidden.map(async (email) => {
     if (!privacy.secret) { alias.set(email, EMAIL_HIDDEN_KEY); return; }
@@ -15138,7 +15199,8 @@ async function aliasCommentEmails(value, privacy, present, gone) {
     if (typeof v === 'string') {
       // A reader's own words keep the addresses they typed -- except a
       // deleted account's, which nobody sees any more.
-      if (key === 'text') return v.replace(EMAIL_TAG_RE, (all, pre, addr) => (alias.has(addr.toLowerCase()) && (!ownText || gone.has(addr.toLowerCase())) ? `${pre}@${local(addr)}` : all));
+      if (key === 'text' && !ownText) return cutEmailTags(v, shows);
+      if (key === 'text') return v.replace(EMAIL_TAG_RE, (all, pre, addr) => (alias.has(addr.toLowerCase()) && gone.has(addr.toLowerCase()) ? `${pre}@${local(addr)}` : all));
       return str(v);
     }
     if (Array.isArray(v)) return v.map((x) => walk(x, '', ownText));
