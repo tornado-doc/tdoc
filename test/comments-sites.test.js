@@ -37,7 +37,9 @@ async function seedDoc(env, slug, owner, extra = {}) {
 (async () => {
   const mod = await loadWorker();
   const worker = mod.default;
-  const env = makeEnv(mod.CommentsStore);
+  // TDOC_OWNER: Julie is also the deploy operator, who owns docs naming no
+  // owner (the ownerless facet). An alias secret, so hidden addresses alias.
+  const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie', TDOC_EMAIL_ALIAS_SECRET: 'test-alias-secret' });
   const call = async (path, opts = {}) => {
     const r = await worker.fetch(req(path, opts), env, { waitUntil() {} });
     let body = null;
@@ -52,6 +54,26 @@ async function seedDoc(env, slug, owner, extra = {}) {
   const dave = await sessionFor(env, 'dave');
   await seedDoc(env, 'q4-plan', 'julie');
   await seedDoc(env, 'bob-doc', 'bob');
+  // A commenter who signed in by email, on three of Julie's docs; she
+  // invited that address to one of them.
+  const ERIN = 'erin.hidden@example.com';
+  const erinSid = 'e1'.repeat(16);
+  await env.META.put(`session:${erinSid}`, JSON.stringify({ email: ERIN, name: ERIN, created: '2026-01-01T00:00:00.000Z' }));
+  const erin = `tdoc_sid=${erinSid}`;
+  const publicAccess = { visibility: 'public', commenting: 'signed_in', history_visibility: 'owner' };
+  await seedDoc(env, 'erin-a', 'julie', { access: { ...publicAccess, allowed_users: [] } });
+  await seedDoc(env, 'erin-b', 'julie', { access: { ...publicAccess, allowed_users: [] } });
+  await seedDoc(env, 'erin-invited', 'julie', { access: { ...publicAccess, allowed_users: [ERIN] } });
+  for (const slug of ['erin-a', 'erin-b', 'erin-invited']) {
+    const c = await call('/api/comments', { method: 'POST', cookie: erin, body: { slug, version: 1, text: `Erin on ${slug}`, anchor: { text: 'Ship on Dec 18' } } });
+    assert(c.status === 200, `erin comment ${slug} ${c.status} ${JSON.stringify(c.body)}`);
+  }
+  // A legacy doc that names no owner: the operator's.
+  const created = '2026-01-01T00:00:00.000Z';
+  await env.META.put('meta:legacy-note', JSON.stringify({ title: 'Legacy note', slug: 'legacy-note', created, versions: [{ n: 1, created }], access: { visibility: 'unlisted', commenting: 'signed_in' } }));
+  await env.DOCS.put('docs/legacy-note/v1/index.html', '<h1>Legacy</h1><p>Ship on Dec 18</p>');
+  const legacy = await call('/api/comments', { method: 'POST', cookie: julie, body: { slug: 'legacy-note', version: 1, text: 'Operator note', anchor: { text: 'Ship on Dec 18' } } });
+  assert(legacy.status === 200, `legacy comment ${legacy.status} ${JSON.stringify(legacy.body)}`);
   // Enough of Julie's docs for more than one page of the feed.
   for (let i = 0; i < 14; i++) await seedDoc(env, `bulk-${String(i).padStart(2, '0')}`, 'julie');
 
@@ -100,6 +122,29 @@ async function seedDoc(env, slug, owner, extra = {}) {
     assert(l && l.site.host === 'localhost:3000' && l.site.element === 'img.hero-logo', `test site row ${JSON.stringify(l)}`);
     assert(!items.some((item) => item.text === 'Bob private note' || item.slug === 'bob-doc'), 'another person\'s site or doc listed');
     assert(!JSON.stringify(items).includes('allowed_users'), 'feed leaks access policy');
+  });
+
+  await t('addresses are redacted per doc: a hidden commenter has a different alias on each doc; one she was invited to shows her as on its page', async () => {
+    const { items } = await all(julie);
+    const on = (slug) => items.find((item) => item.slug === slug && item.text === `Erin on ${slug}`);
+    const a = on('erin-a'), b = on('erin-b'), invited = on('erin-invited');
+    assert(a && b && invited, `erin rows ${JSON.stringify(items.filter((i) => /Erin/.test(i.text)).map((i) => i.slug))}`);
+    assert(/^email-alias:[0-9a-f]{12}$/.test(a.author.key) && /^email-alias:[0-9a-f]{12}$/.test(b.author.key), `aliases ${a.author.key} ${b.author.key}`);
+    assert(a.author.key !== b.author.key, 'the same alias across docs');
+    assert(!JSON.stringify([a, b]).includes(ERIN), 'a hidden address leaks');
+    // The doc page shows the owner the address she invited; so does the feed.
+    const page = await call('/api/comments?slug=erin-invited', { cookie: julie });
+    const there = (Array.isArray(page.body) ? page.body : []).find((c) => c.text === 'Erin on erin-invited');
+    assert(there && JSON.stringify(there.author).includes(ERIN), `doc page ${JSON.stringify(there && there.author)}`);
+    assert(invited.author.key === `email:${ERIN}`, `invited ${JSON.stringify(invited.author)}`);
+    // And the same doc's alias is the one its own page gives.
+    const pageA = await call('/api/comments?slug=erin-a', { cookie: julie });
+    assert(pageA.body.find((c) => c.text === 'Erin on erin-a').author.login === a.author.key, 'feed alias differs from the doc page');
+  });
+
+  await t('the deploy operator\'s feed includes docs that name no owner; nobody else\'s does', async () => {
+    assert((await all(julie)).items.some((item) => item.slug === 'legacy-note' && item.text === 'Operator note'), 'operator misses the ownerless doc');
+    assert(!(await all(bob)).items.some((item) => item.slug === 'legacy-note'), 'a stranger sees the ownerless doc');
   });
 
   await t('a stranger gets none of them; anonymous and a feedback token are refused', async () => {

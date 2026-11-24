@@ -7646,7 +7646,9 @@ async function feedbackSpaceCounts(env, slug) {
   return { open, replied };
 }
 
-async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
+// `site: false`: the caller only asks whether each space is the person's
+// (My docs' comment feed), so the site binding is not read.
+async function feedbackSpacesFor(env, session, rows, toPublic, withCounts, { site: withSite = true } = {}) {
   if (!session) return [];
   const out = await Promise.all(rows.map(async (row) => {
     const origin = feedbackOrigin(row.meta && row.meta.feedback && row.meta.feedback.origin);
@@ -7658,7 +7660,7 @@ async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
     }
     if (!owned && !joined) return null;
     if (!docReadableBy(env, session, row.meta)) return null;
-    const site = owned ? await loadSiteBinding(env, row.slug, row.meta) : null;
+    const site = owned && withSite ? await loadSiteBinding(env, row.slug, row.meta) : null;
     const item = { ...toPublic(row), origin, mine: owned, ...(site ? { site } : {}) };
     if (withCounts) Object.assign(item, await feedbackSpaceCounts(env, row.slug));
     return item;
@@ -7878,6 +7880,9 @@ async function personalCommentSlugs(env, session, origin) {
   if (hostedRegistrationEnabled(env, origin) && (session.account_id || login)) {
     const facet = session.account_id ? `p:${session.account_id}` : `l:${login}`;
     owned = await docIndexSlugs(env, facet, personalDocMatcher({ accountIds, login, actorKeys }));
+    // The deploy operator (TDOC_OWNER) also owns the docs that name no
+    // owner, as in indexData's facets.
+    if (isOwnerSession(env, session)) owned = [...owned, ...(await docIndexSlugs(env, 'n', ownerlessDocMatcher))];
   } else {
     // A self-hosted worker: every doc is the operator's, one catalog read.
     const data = await indexData(env, session, origin);
@@ -7899,12 +7904,17 @@ async function personalCommentsPage(env, session, origin, offset = 0) {
       // A team's site is listed with that team, not here.
       if (meta.workspace_id && myTeams.has(meta.workspace_id)) return [];
       // Owned or joined, and readable: the rule of the Sites list itself.
-      const ok = await feedbackSpacesFor(env, session, [{ slug, meta }], (row) => ({ slug: row.slug }), false);
+      const ok = await feedbackSpacesFor(env, session, [{ slug, meta }], (row) => ({ slug: row.slug }), false, { site: false });
       if (!ok.length) return [];
     } else if (meta.workspace_id || !isDocOwnerSession(env, session, meta) || !docReadableBy(env, session, meta)) {
       return [];
     }
-    try { return teamCommentRows(slug, meta, await readComments(env, slug)); } catch { return []; }
+    let rows = [];
+    try { rows = teamCommentRows(slug, meta, await readComments(env, slug)); } catch { return []; }
+    // Addresses are redacted per doc, as on the doc page: a hidden
+    // commenter's alias is that doc's, and the people this person invited
+    // to it by address show as they do there.
+    return redactCommentEmails(rows, await emailPrivacyFor(env, session, slug, meta));
   }));
   const items = chunks.flat().sort((a, b) => String(b.created).localeCompare(String(a.created)));
   const next = start + page.length < slugs.length ? start + page.length : null;
@@ -29121,9 +29131,9 @@ const tdocHandlers = {
       // The browser's My docs, like /api/me/feedback: a cookie session.
       const s = await getSession(env, req);
       if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      // Rows come back redacted per doc (personalCommentsPage).
       const page = await personalCommentsPage(env, s, url.origin, url.searchParams.get('offset'));
-      const privacy = await emailPrivacyFor(env, s, 'me:comments', null);
-      return json(await redactCommentEmails({ ok: true, ...page }, privacy), { headers: { 'Cache-Control': 'private, no-store' } });
+      return json({ ok: true, ...page }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (p === '/api/team/comments' && method === 'GET') {
       const s = await getViewerSession(env, req);
