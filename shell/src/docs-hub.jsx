@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, Inbox, LayoutGrid, List, ListFilter, MessageSquareText, Plus, Search, Settings, Trash2, UsersRound, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, Globe, Inbox, LayoutGrid, List, ListFilter, MessageSquareText, Plus, Search, Settings, Trash2, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppButton } from './ui/button.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { AppMenu, AppMenuItem, AppMenuSeparator } from './ui/menu.jsx';
-import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu, agentRecipeFor } from './create-from-scratch.jsx';
 import { WriteWithAiDialog } from './write-with-ai.jsx';
 import { createBlankDeck } from './blank-deck.js';
@@ -26,6 +25,7 @@ import { QuotaBumpDialog, ShareLinkRow } from './document/document-dialogs.jsx';
 import {
   createFolder,
   deleteDocument,
+  listMyComments,
   deleteFolder as deleteFolderRequest,
   moveDocsToFolder,
   moveDocsToTeam,
@@ -41,7 +41,9 @@ import { NeedsYou, needsCards, useNeedsInbox } from './docs-hub/needs-you.jsx';
 import { SettingsPage } from './docs-hub/settings-page.jsx';
 import { docTypeOf } from './docs-hub/row-meta.js';
 import { rememberTrashed } from './recent-trash.js';
+import { SiteEmbedDialog, SitesPane, isTestSite, useFeedbackSpaces } from './docs-hub/sites.jsx';
 import {
+  CommentsPane,
   LeaveTeamDialog,
   MoveFolderToTeamDialog,
   MoveToTeamDialog,
@@ -60,8 +62,12 @@ import './docs-hub.css';
 import './docs-hub/my-docs-a.css';
 
 const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['trash', 'Trash'], ['settings', 'Settings'], ['needs', 'Needs you']];
+// commentsSitesTabs: Sites, beside Comments (the sites people comment on;
+// Comments lists only comments, docs' and sites' together).
+const SITES_VIEWS = [...VIEWS.slice(0, 4), ['sites', 'Sites'], ...VIEWS.slice(4)];
+const viewsFor = (sitesTabs) => (sitesTabs ? SITES_VIEWS : VIEWS);
 // The one-column layout's tabs; Needs you is the wide layout's alone.
-const OLD_TABS = VIEWS.filter(([id]) => id !== 'needs');
+const oldTabsFor = (sitesTabs) => viewsFor(sitesTabs).filter(([id]) => id !== 'needs');
 const CATALOG_LAYOUT_KEY = 'tdoc.catalogLayout';
 // Wide layout (A): grid or list, remembered apart from the phone's choice.
 const MY_DOCS_LAYOUT_KEY = 'tdoc.myDocsLayout';
@@ -339,7 +345,7 @@ function DocsToolbar({ query, onQuery, sort, onSort, children }) {
 // the site settings).
 function FeedbackList({ spaces: initial, teams = [], team = null }) {
   // Counts cost a comment read per space, so they load when the tab opens.
-  const [spaces, setSpaces] = useState(initial);
+  const [spaces, setSpaces] = useFeedbackSpaces(initial, team);
   const [embedding, setEmbedding] = useState(null);
   const [teamFirst, setTeamFirst] = useState(null);
   // Site mode lets many people comment into one space, and many people's
@@ -365,14 +371,6 @@ function FeedbackList({ spaces: initial, teams = [], team = null }) {
       setTeamFirst((current) => ({ ...current, busy: false, error: err.message || 'Could not move this space.' }));
     }
   };
-  useEffect(() => {
-    let cancelled = false;
-    fetch(team ? `/api/me/feedback?team=${encodeURIComponent(team.id)}` : '/api/me/feedback', { credentials: 'same-origin' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((b) => { if (!cancelled && b && Array.isArray(b.spaces)) setSpaces(b.spaces); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [team && team.id]);
   if (!spaces.length && team) return null;
   if (!spaces.length) {
     // The first visit to this tab is usually someone who has not tried it:
@@ -442,69 +440,6 @@ function FeedbackList({ spaces: initial, teams = [], team = null }) {
       />
     ) : null}
     </>
-  );
-}
-
-// Turn a feedback space into the site's own comment space: the snippet any
-// page can paste and which origins it works on. Who may comment is the
-// space's own Share settings, as on any doc.
-function SiteEmbedDialog({ space, onClose, onSaved }) {
-  const [origins, setOrigins] = useState(() => ((space.site && space.site.origins) || [space.origin]).join('\n'));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [snippet, setSnippet] = useState(space.site ? `<script src="${location.origin}/feedback.js" data-tdoc-space="${space.slug}" async></script>` : '');
-  const save = async (off = false) => {
-    setBusy(true);
-    setError('');
-    try {
-      const r = await fetch('/api/feedback/site', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(off ? { slug: space.slug, off: true } : { slug: space.slug, origins: origins.split(/[\s,]+/).filter(Boolean) }),
-      });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.error === 'invalid_origin' ? `Not a site address: ${body.origin}. Use the form https://example.com.` : (body.message || body.error || 'Could not save'));
-      if (off) { onSaved(null); onClose(); return; }
-      setSnippet(body.snippet);
-      onSaved(body.site);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <AppDialog
-      open
-      onOpenChange={(open) => { if (!open) onClose(); }}
-      title="Comments on your site"
-      description="Paste one line into your site and the people you share this space with can comment on any page. Every comment lands here."
-      actions={(
-        <>
-          {space.site ? <AppButton variant="danger" className="danger" disabled={busy} onClick={() => save(true)}>Turn off</AppButton> : null}
-          <AppButton onClick={onClose}>Close</AppButton>
-          <AppButton variant="primary" className="primary" disabled={busy} onClick={() => save(false)}>{busy ? 'Saving…' : 'Save'}</AppButton>
-        </>
-      )}
-    >
-      <div className="tdoc-send">
-        <div className="tdoc-send-field">
-          <label className="tdoc-send-label" htmlFor="tdoc-site-origins">Site addresses <span>one per line</span></label>
-          <textarea id="tdoc-site-origins" className="tdoc-notify-instruction" rows={2} value={origins} onChange={(e) => setOrigins(e.target.value)} placeholder="https://example.com" />
-        </div>
-        <p className="tdoc-send-hint">Who can comment follows this space's <a href={`/d/${encodeURIComponent(space.slug)}?share=1`}>Share settings</a>, like any doc.</p>
-        {snippet ? (
-          <div className="tdoc-send-field">
-            <span className="tdoc-send-label">Paste this into your site</span>
-            <code className="tdoc-site-snippet">{snippet}</code>
-            <CopyPromptButton text={snippet} />
-            <p className="tdoc-send-hint">If your site sends a Content-Security-Policy, add <code>{(snippet.match(/src="(https?:\/\/[^/"]+)\/feedback\.js"/) || [])[1] || location.origin}</code> to <code>script-src</code>, <code>connect-src</code> and <code>img-src</code>. Nothing else is needed.</p>
-          </div>
-        ) : null}
-        {error ? <p className="tdoc-send-result tdoc-notify-error" role="status">{error}</p> : null}
-      </div>
-    </AppDialog>
   );
 }
 
@@ -680,12 +615,21 @@ export function DocsHub({ boot }) {
   // Every workspace uses the same navigation; every view follows the active
   // workspace, including Recent and Starred.
   // Keep old ?tab=feedback links working while moving to the unified ?view=.
+  // Comments and Sites as two tabs (commentsSitesTabs, dev mode). Off: the
+  // Comments tab lists the sites (My docs) or the sites over the team's
+  // comments, as before.
+  const [sitesTabs] = useState(() => isFeatureOn('commentsSitesTabs'));
   const [view, setView] = useState(() => {
     const params = new URLSearchParams(location.search);
     const asked = params.get('view') || params.get('tab');
-    const normalized = asked === 'feedback' ? 'comments' : asked === 'mine' ? 'docs' : asked;
-    return VIEWS.some(([id]) => id === normalized) ? normalized : 'docs';
+    const normalized = asked === 'feedback' ? (sitesTabs ? 'sites' : 'comments') : asked === 'mine' ? 'docs' : asked;
+    return viewsFor(sitesTabs).some(([id]) => id === normalized) ? normalized : 'docs';
   });
+  // A Sites row's name opens Comments on that site alone; leaving Comments
+  // drops the filter.
+  const [commentsSite, setCommentsSite] = useState('');
+  useEffect(() => { if (view !== 'comments') setCommentsSite(''); }, [view]);
+  const openSiteComments = (space) => { setCommentsSite(space.slug); setView('comments'); };
   // Capture the account-menu destination before useDocsHub normalizes the URL.
   // ?new_team=1 is the top-bar switcher's "New team" from any page.
   const [modal, setModal] = useState(() => (
@@ -749,6 +693,12 @@ export function DocsHub({ boot }) {
   // listed under Comments rather than among the documents.
   const allTeamDocs = team ? teamDocs.filter((doc) => doc.team === team.id && doc.kind !== 'feedback') : [];
   const teamFeedback = team ? teamDocs.filter((doc) => doc.team === team.id && doc.kind === 'feedback') : [];
+  // commentsSitesTabs: My docs' Sites are the person's own and joined sites
+  // that are not one of their teams' (those are on the team's Sites); test
+  // sites are not counted.
+  const mySites = Array.isArray(boot.feedback) ? boot.feedback : [];
+  const inMySites = (space) => !space.workspace_id || !teams.some((item) => item.id === space.workspace_id);
+  const sitesCount = (team ? teamFeedback : mySites.filter(inMySites)).filter((space) => !isTestSite(space.origin)).length;
   const inActiveWorkspace = (doc) => (team ? doc.workspace_id === team.id : !doc.workspace_id);
   const scopedRecent = hub.recent.filter(inActiveWorkspace);
   const scopedStarred = hub.starred.filter(inActiveWorkspace);
@@ -1310,7 +1260,23 @@ export function DocsHub({ boot }) {
       empty={<p className="empty mda-empty">You’re all caught up. New comments, @mentions and agent replies show up here.</p>}
     />
   );
-  const ownViewA = view === 'comments' ? (
+  const sitesTabsView = !sitesTabs ? null : view === 'comments' ? (
+    team ? (
+      <TeamCommentsPane key={`${team.id}:${commentsSite}`} team={team} sources initialDoc={commentsSite} />
+    ) : (
+      <CommentsPane key={`me:${commentsSite}`} scopeKey="me" scopeName="My docs" load={listMyComments} sources initialDoc={commentsSite} id="pane-my-comments" />
+    )
+  ) : view === 'sites' ? (
+    <SitesPane
+      key={team ? team.id : 'me'}
+      spaces={team ? teamFeedback : mySites}
+      team={team}
+      teams={teams}
+      inScope={team ? undefined : inMySites}
+      onOpenComments={openSiteComments}
+    />
+  ) : null;
+  const ownViewA = sitesTabsView || (view === 'comments' ? (
     team ? (
       <>
         {teamFeedback.length ? (
@@ -1340,7 +1306,7 @@ export function DocsHub({ boot }) {
       )))}
       onLeave={(current, me) => setModal({ type: 'leave-team', team: current, me })}
     />
-  ) : null;
+  ) : null);
   const searchA = (className, autoFocus = false) => (
     <label className={`search-field mda-search${className ? ` ${className}` : ''}`}>
       <Search size={phoneA ? 18 : 15} />
@@ -1423,7 +1389,7 @@ export function DocsHub({ boot }) {
   // and the type and folder filters as two chip rows that scroll sideways;
   // then one row per doc: type, title, one meta line, unread, ⋯.
   const phoneFolders = folderTree(spaceFolderList);
-  const phoneViewLabel = ({ docs: 'All docs', recent: 'Recent', starred: 'Starred', needs: 'Needs you', comments: 'Comments', trash: 'Trash', settings: team ? 'Team settings' : 'Settings' })[view] || 'All docs';
+  const phoneViewLabel = ({ docs: 'All docs', recent: 'Recent', starred: 'Starred', needs: 'Needs you', comments: 'Comments', sites: 'Sites', trash: 'Trash', settings: team ? 'Team settings' : 'Settings' })[view] || 'All docs';
   const newFolderA = team || capabilities.folders ? () => setModal({ type: team ? 'new-team-folder' : 'new-folder', top: true }) : null;
   const activeFolderItem = activeFolder ? spaceFolderById.get(activeFolder) : null;
   const activeFolderMenu = activeFolderItem ? (team ? teamFolderMenu : folderMenu)(activeFolderItem) : [];
@@ -1471,7 +1437,7 @@ export function DocsHub({ boot }) {
                 </AppMenuItem>
               ))}
               <AppMenuSeparator />
-              {[['comments', 'Comments', MessageSquareText], ['trash', 'Trash', Trash2], ['settings', team ? 'Team settings' : 'Settings', Settings]].map(([id, label, Icon]) => (
+              {[['comments', 'Comments', MessageSquareText], ...(sitesTabs ? [['sites', 'Sites', Globe]] : []), ['trash', 'Trash', Trash2], ['settings', team ? 'Team settings' : 'Settings', Settings]].map(([id, label, Icon]) => (
                 <AppMenuItem key={id} className={`mda-pmenu-item mda-view-${id}${view === id ? ' is-on' : ''}`} onClick={() => setView(id)}>
                   <span className="mda-pmenu-check"><Icon size={15} aria-hidden="true" /></span>{label}
                 </AppMenuItem>
@@ -1554,6 +1520,7 @@ export function DocsHub({ boot }) {
         view={view}
         onView={(next) => { setView(next); }}
         settingsLabel={team ? 'Team settings' : 'Settings'}
+        sitesCount={sitesTabs ? sitesCount : null}
       />
       <main className="mda-main">
         <div className="mda-main-in">
@@ -1632,7 +1599,7 @@ export function DocsHub({ boot }) {
           ) : null}
         </div>
         <div className="tabs" role="tablist" aria-label={`${team ? team.name : 'My docs'} views`}>
-          {OLD_TABS.map(([id, label]) => (
+          {oldTabsFor(sitesTabs).map(([id, label]) => (
             <button key={id} type="button" className={`tab${view === id ? ' is-active' : ''}`} role="tab" aria-selected={view === id} onClick={() => { setTeamFolder(''); setView(id); }}>
               {label}
             </button>
@@ -1646,7 +1613,7 @@ export function DocsHub({ boot }) {
           <section className="pane" id="pane-starred">
             <FlatList docs={scopedStarred} label="starred" viewer={viewer} empty={`Star docs in ${team ? team.name : 'My docs'} to find them here.`} onToggleStar={hub.toggleStar} layout={layout} />
           </section>
-        ) : team ? (
+        ) : sitesTabsView ? sitesTabsView : team ? (
           <>
             {view === 'comments' ? (
               <>

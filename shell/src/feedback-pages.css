@@ -260,3 +260,48 @@
 .tdoc-feedback-page .fb-invite-step h2 { margin: 0 0 .6rem; font-size: 1.05rem; line-height: 1.6; overflow-wrap: anywhere; }
 .tdoc-feedback-page .fb-invite-step .fb-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tdoc-feedback-page .fb-invite-step .phone-only { margin: 0 0 .5rem; }
+
+/* commentsSitesTabs: the SDK picture plays the loop (select, comment, the
+   agent fixes it), here and on an empty Sites tab, with its three steps
+   named under it. One 9s cycle; still for reduced motion. */
+.tdoc-feedback-page .site-demo.is-animated { margin-bottom: .6rem; }
+.tdoc-feedback-page .site-demo.is-animated .site-demo-note { top: 4.4rem; }
+.tdoc-feedback-page .site-demo.is-animated .site-demo-target { animation: fb-demo-target 9s infinite; }
+.tdoc-feedback-page .site-demo.is-animated .site-demo-pin { animation: fb-demo-ring 9s infinite; }
+.tdoc-feedback-page .site-demo.is-animated .site-demo-note { animation: fb-demo-note 9s infinite; }
+.tdoc-feedback-page .site-demo-fix { display: block; margin-top: .35rem; padding-top: .35rem; border-top: 1px solid var(--fb-line);
+  color: #18743a; font-weight: 600; animation: fb-demo-fix 9s infinite; } /* teams.css's running green */
+.tdoc-feedback-page .site-demo-steps { display: flex; justify-content: center; gap: 1.1rem; margin: 0 0 1.25rem; font-size: .8rem; color: var(--fb-muted); }
+.tdoc-feedback-page .site-demo-steps span { animation: fb-demo-s1 9s infinite; }
+.tdoc-feedback-page .site-demo-steps span:nth-child(2) { animation-name: fb-demo-s2; }
+.tdoc-feedback-page .site-demo-steps span:nth-child(3) { animation-name: fb-demo-s3; }
+@keyframes fb-demo-target { 0%, 20% { outline-color: transparent; background: #2b2d33; } 26%, 62% { outline-color: var(--td-accent); background: #2b2d33; } 68%, 92% { outline-color: var(--td-accent); background: var(--td-accent); } 100% { outline-color: transparent; background: #2b2d33; } }
+@keyframes fb-demo-ring { 0%, 22% { opacity: 0; } 26%, 90% { opacity: 1; } 96%, 100% { opacity: 0; } }
+@keyframes fb-demo-note { 0%, 30% { opacity: 0; transform: translateY(6px); } 35%, 90% { opacity: 1; transform: none; } 96%, 100% { opacity: 0; } }
+@keyframes fb-demo-fix { 0%, 55% { opacity: 0; } 60%, 90% { opacity: 1; } 96%, 100% { opacity: 0; } }
+@keyframes fb-demo-s1 { 0%, 30% { color: var(--td-accent); font-weight: 650; } 31%, 100% { color: var(--fb-muted); font-weight: 400; } }
+@keyframes fb-demo-s2 { 0%, 30% { color: var(--fb-muted); } 31%, 56% { color: var(--td-accent); font-weight: 650; } 57%, 100% { color: var(--fb-muted); font-weight: 400; } }
+@keyframes fb-demo-s3 { 0%, 56% { color: var(--fb-muted); } 57%, 92% { color: var(--td-accent); font-weight: 650; } 93%, 100% { color: var(--fb-muted); font-weight: 400; } }
+@media (prefers-reduced-motion: reduce) {
+  .tdoc-feedback-page .site-demo.is-animated .site-demo-target,
+  .tdoc-feedback-page .site-demo.is-animated .site-demo-pin,
+  .tdoc-feedback-page .site-demo.is-animated .site-demo-note,
+  .tdoc-feedback-page .site-demo-fix,
+  .tdoc-feedback-page .site-demo-steps span { animation: none; }
+}
+
+/* The same block as the empty Sites tab of My docs and a team
+   (docs-hub/sites.jsx): the /feedback page's styles, inside the hub. */
+.tdoc-feedback-page.fb-sites-intro { max-width: 34rem; margin: 8px auto 0; text-align: center; }
+.tdoc-feedback-page.fb-sites-intro h2 { margin: 0 0 .4rem; font-size: 1.2rem; }
+.tdoc-feedback-page.fb-sites-intro .fb-sites-lead { margin: 0 auto 1.1rem; max-width: 28rem; color: var(--fb-muted); font-size: .92rem; }
+.tdoc-feedback-page.fb-sites-intro .site-demo { text-align: left; }
+.tdoc-feedback-page.fb-sites-intro .fb-steps { margin-top: .5rem; text-align: left; }
+.tdoc-feedback-page.fb-sites-intro .fb-step { padding-bottom: 1.1rem; }
+.tdoc-feedback-page.fb-sites-intro .fb-step p { font-size: .85rem; }
+.tdoc-feedback-page.fb-sites-intro .code-copy pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tdoc-feedback-page.fb-sites-intro .fb-sites-actions { display: flex; justify-content: center; align-items: center; gap: 14px; flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .tdoc-feedback-page.fb-sites-intro .fb-sites-actions { flex-direction: column; align-items: stretch; gap: 10px; }
+}
+.tdoc-feedback-page.fb-sites-intro .fb-sites-add { margin: 0; text-align: left; }

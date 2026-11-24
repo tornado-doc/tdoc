@@ -166,6 +166,16 @@ export const FLAGS = Object.freeze({
   // avatar. No ⋯; the space switcher is a row of the account menu; the
   // comment filter is the list's own. Doc, slides and sheets alike.
   docTopbarB: Object.freeze({ label: 'Doc bar B (title menu left, people right)', owner: 'julie', added: '2026-11-21', default: false, graduate_by: '2026-11-28' }),
+  // Comments and Sites (design: tdoc.dev/d/comments-and-sites-design). In
+  // My docs and a team, Comments lists only comments, a doc's and a site's
+  // (feedback space) together, each marked with where it came from, with
+  // From (All / Docs / Sites) in its filters; a new Sites tab lists the sites
+  // themselves (open count, Settings under the row or Add to your site,
+  // local and preview hosts folded under Test sites), and when there are
+  // none it is the /feedback SDK block. Server: /api/me/comments (My docs'
+  // feed, read like /api/team/comments). Off: Comments lists the sites, as
+  // before.
+  commentsSitesTabs: Object.freeze({ label: 'Comments and Sites tabs', owner: 'julie', added: '2026-11-24', default: false, preview: true, graduate_by: '2026-12-01' }),
   reactSourceCapture: Object.freeze({ label: 'Feedback: React component and source on comments', owner: 'julie', added: '2026-11-20', default: false, preview: true, graduate_by: '2026-11-27' }),
 });
 

@@ -7783,9 +7783,27 @@ function productAnchorLine(where) {
   return ` [page ${oneLine(path, 300)}${where.selector ? ` · ${oneLine(where.selector, 120)}` : ''}${area}${react}${inDoc}]`;
 }
 
+// A comment left on a site (a feedback space): which page, and the element
+// clicked there, in a few words ("button "Start free trial"", "img.hero").
+// The page is the path only: the host is the space's, said once per row.
+function siteCommentWhere(anchor) {
+  if (!anchor || typeof anchor !== 'object' || anchor.kind !== 'product') return { page: '', element: '' };
+  let page = '';
+  try { const u = new URL(String(anchor.url || '')); page = `${u.pathname}${u.search}`.slice(0, 300); } catch {}
+  const tag = typeof anchor.tag === 'string' ? anchor.tag.trim().toLowerCase().slice(0, 40) : '';
+  const text = typeof anchor.text === 'string' ? anchor.text.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+  const selector = typeof anchor.selector === 'string' ? anchor.selector.replace(/\s+/g, ' ').trim().slice(0, 120) : '';
+  const element = text ? `${tag ? `${tag} ` : ''}"${text}"` : (selector || tag);
+  return { page, element };
+}
+
 function teamCommentRows(slug, meta, list) {
   ensureMigrated(list);
   const title = String((meta && meta.title) || slug);
+  // A feedback space's comments are a site's: the row says which site.
+  const siteOrigin = meta && meta.created_from === 'feedback' ? feedbackOrigin(meta.feedback && meta.feedback.origin) : null;
+  let siteHost = '';
+  try { siteHost = siteOrigin ? new URL(siteOrigin).host : ''; } catch {}
   const rows = [];
   for (const thread of historyList(list)) {
     if (!thread || thread.deleted) continue;
@@ -7799,6 +7817,7 @@ function teamCommentRows(slug, meta, list) {
       anchor,
       resolved,
       reply_count: replies.length,
+      ...(siteOrigin ? { source: 'site', site: { origin: siteOrigin, host: siteHost, ...siteCommentWhere(thread.anchor) } } : { source: 'doc' }),
     };
     rows.push({
       ...base,
@@ -7842,6 +7861,54 @@ async function teamCommentsPage(env, session, teamId, offset = 0) {
   const items = chunks.flat().sort((a, b) => String(b.created).localeCompare(String(a.created)));
   const next = start + page.length < slugs.length ? start + page.length : null;
   return { team: { id: team.id, name: team.name }, items, next, docs_scanned: page.length, docs_total: slugs.length };
+}
+
+// My docs' Comments: the comments on the person's own My docs docs and on
+// the sites (feedback spaces) they own or joined that are not a team's (a
+// team's are on that team's Comments). Read like the team feed: candidate
+// slugs from the person's own index facet and join keys (two list calls),
+// then bounded pages of documents, each checked on its full record. The
+// same rules as /api/me/feedback and My docs: nothing here the person
+// could not already open.
+async function personalCommentSlugs(env, session, origin) {
+  const accountIds = sessionAccountIds(session);
+  const login = sessionLogin(session);
+  const actorKeys = [actorKey(session), ...((session && session.linked_actor_keys) || [])].filter(Boolean).map(String);
+  let owned = [];
+  if (hostedRegistrationEnabled(env, origin) && (session.account_id || login)) {
+    const facet = session.account_id ? `p:${session.account_id}` : `l:${login}`;
+    owned = await docIndexSlugs(env, facet, personalDocMatcher({ accountIds, login, actorKeys }));
+  } else {
+    // A self-hosted worker: every doc is the operator's, one catalog read.
+    const data = await indexData(env, session, origin);
+    owned = [...(data.docs || []), ...(data.feedback || [])].map((row) => row.slug);
+  }
+  const joined = await joinedFeedbackSpaceSlugs(env, session).catch(() => []);
+  return [...new Set([...owned, ...joined])].filter(isValidSlug).sort();
+}
+
+async function personalCommentsPage(env, session, origin, offset = 0) {
+  const slugs = await personalCommentSlugs(env, session, origin);
+  const start = Math.max(0, Number(offset) || 0);
+  const page = slugs.slice(start, start + TEAM_COMMENT_DOC_PAGE);
+  const myTeams = new Set((session && session.team_ids) || []);
+  const chunks = await Promise.all(page.map(async (slug) => {
+    const meta = await loadDocMeta(env, slug);
+    if (!meta) return [];
+    if (meta.created_from === 'feedback') {
+      // A team's site is listed with that team, not here.
+      if (meta.workspace_id && myTeams.has(meta.workspace_id)) return [];
+      // Owned or joined, and readable: the rule of the Sites list itself.
+      const ok = await feedbackSpacesFor(env, session, [{ slug, meta }], (row) => ({ slug: row.slug }), false);
+      if (!ok.length) return [];
+    } else if (meta.workspace_id || !isDocOwnerSession(env, session, meta) || !docReadableBy(env, session, meta)) {
+      return [];
+    }
+    try { return teamCommentRows(slug, meta, await readComments(env, slug)); } catch { return []; }
+  }));
+  const items = chunks.flat().sort((a, b) => String(b.created).localeCompare(String(a.created)));
+  const next = start + page.length < slugs.length ? start + page.length : null;
+  return { items, next, docs_scanned: page.length, docs_total: slugs.length };
 }
 
 // ─────────────────── customer-owned team backup mirrors ───────────────────
@@ -29049,6 +29116,14 @@ const tdocHandlers = {
       const bySlug = new Map((data.feedback || []).map((x) => [x.slug, x]));
       const spaces = await feedbackSpacesFor(env, s, metas.filter((m) => m.meta).map((m) => ({ ...m, updated: bySlug.get(m.slug).updated })), (row) => bySlug.get(row.slug), true);
       return json(await redactCommentEmails({ ok: true, spaces }, await emailPrivacyFor(env, s, 'me:feedback', null)), { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (p === '/api/me/comments' && method === 'GET') {
+      // The browser's My docs, like /api/me/feedback: a cookie session.
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const page = await personalCommentsPage(env, s, url.origin, url.searchParams.get('offset'));
+      const privacy = await emailPrivacyFor(env, s, 'me:comments', null);
+      return json(await redactCommentEmails({ ok: true, ...page }, privacy), { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (p === '/api/team/comments' && method === 'GET') {
       const s = await getViewerSession(env, req);

@@ -317,6 +317,13 @@ export function listNotifications(offset = 0, { unread = false } = {}) {
   return request(`/api/notifications?${query}`);
 }
 
+// My docs' Comments (commentsSitesTabs): comments on your own docs and on
+// your sites, in bounded pages like the team feed.
+export function listMyComments(offset = 0) {
+  const query = new URLSearchParams({ offset: String(offset) });
+  return request(`/api/me/comments?${query}`);
+}
+
 export function listTeamComments(team, offset = 0) {
   const query = new URLSearchParams({ id: team, offset: String(offset) });
   return request(`/api/team/comments?${query}`);
