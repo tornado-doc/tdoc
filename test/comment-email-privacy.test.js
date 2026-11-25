@@ -241,11 +241,19 @@ const DAVE = 'dave.reader@example.org';
     assert((await call('/api/comments?slug=long-tags')).body[0].text === 'see @lee, ok', 'another reader');
   });
 
+  // The worker's own functions, by name (they are not exported).
+  const workerFunctions = (names, constants = []) => {
+    const src = require('fs').readFileSync(process.env.TDOC_WORKER_JS || require('path').join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+    const fn = (name) => { const at = src.indexOf(`function ${name}(`); return src.slice(at, src.indexOf('\n}\n', at) + 3); };
+    const line = (name) => src.match(new RegExp(`const ${name} = .*`))[0];
+    return new Function(`${constants.map(line).join('\n')}\n${names.map(fn).join('')}return { ${names.join(', ')} };`)();
+  };
+
   await t('address patterns: what they match', () => {
     const src = require('fs').readFileSync(process.env.TDOC_WORKER_JS || require('path').join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
     const pattern = (name) => new Function(`return ${src.match(new RegExp(`const ${name} = (.*);`))[1]}`)();
-    const [bare, key, ask] = ['BARE_EMAIL_RE', 'EMAIL_KEY_RE', 'ASK_EMAIL_RE'].map(pattern);
-    const hide = (text) => text.replace(ask, (all, host) => (host === undefined ? all : '[email hidden]'));
+    const [bare, key] = ['BARE_EMAIL_RE', 'EMAIL_KEY_RE'].map(pattern);
+    const hide = workerFunctions(['askNoEmails'], ['ASK_EMAIL_RE']).askNoEmails;
     const was = (text) => text.replace(/[^\s@<>()"',;:]+@[^\s@<>()"',;:]+\.[A-Za-z]{2,}/g, '[email hidden]');
     const same = (text) => {
       assert(bare.test(text) === /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text), `bare: ${JSON.stringify(text)}`);
@@ -258,7 +266,7 @@ const DAVE = 'dave.reader@example.org';
   });
 
   await t('address patterns: long strings cost their length', async () => {
-    const N = 8000;
+    const N = 40000;
     const ms = async (fn) => { const from = process.hrtime.bigint(); const r = await fn(); assert(r.status === 200, `${r.status}`); return Math.round(Number(process.hrtime.bigint() - from) / 1e6); };
     for (const long of [`x@${'.'.repeat(N)} z`, `email:x@${'.'.repeat(N)} z`]) {
       // What a comment says, in its reader's bell; what an upload carries, on the page.
@@ -270,7 +278,17 @@ const DAVE = 'dave.reader@example.org';
       await env.META.put('comments:cost-names', JSON.stringify([{ id: 'n', created, version: 1, text: 'x', author: { login: long, name: long, avatar_url: long }, reactions: { y: [long] } }]));
       const page = await ms(() => call('/api/comments?slug=cost-names'));
       console.log(`    bell ${bell} ms, page ${page} ms`);
-      assert(bell < 1000 && page < 1000, `bell ${bell} ms, page ${page} ms`);
+      assert(bell < 2000 && page < 2000, `bell ${bell} ms, page ${page} ms`);
+    }
+  });
+
+  await t('address patterns: an Ask prompt of one long word costs its length', () => {
+    const { askNoEmails } = workerFunctions(['askNoEmails'], ['ASK_EMAIL_RE']);
+    for (const long of ['a'.repeat(50000), `a@${'.'.repeat(50000)}`, `a@${'a1.'.repeat(16000)}`]) {
+      const from = process.hrtime.bigint();
+      assert(askNoEmails(long) === long, 'changed');
+      const ms = Math.round(Number(process.hrtime.bigint() - from) / 1e6);
+      assert(ms < 1000, `${long.slice(0, 4)}: ${ms} ms`);
     }
   });
 
