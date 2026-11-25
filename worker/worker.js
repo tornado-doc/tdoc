@@ -15001,20 +15001,27 @@ const TAG_HOST_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?
 const TAG_REST_RE = /^[,;:!?)\]}>"'(</\u2018-\u201f\u2026\u3001\u3002\u3008-\u3011\uff01\uff08\uff09\uff0c\uff1a\uff1b\uff1f]/;
 const TAG_HAN_RE = /^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u;
 const TAG_MORE_HOST_RE = /[.\uff0e][)\]}>\uff09]*[\p{L}\p{N}\p{M}]|[\u3002\uff61][A-Za-z0-9]|^[(<\uff08]dot[)>\uff09]/iu;
-// `shows(address)`: may this reader see it? Otherwise its host goes, and what
+// `shows(address)`: may this reader see it? (A string: yes, but for this end
+// of it, which only follows the address.) Otherwise its host goes, and what
 // follows the host stays unless it may be more of the host.
-function cutEmailTags(text, shows) {
-  return text.replace(TAG_RUN_RE, (run) => {
+// `cut`: the text was cut to a length, so a host it ends in may not be whole.
+function cutEmailTags(text, shows, { cut = false } = {}) {
+  return text.replace(TAG_RUN_RE, (run, at) => {
     const parts = run.slice(1).split('@');
     if (parts.length < 2) return run;
     const isHost = (x) => { const dot = (x || '').indexOf('.', 1); return dot > 0 && dot < x.length - 1; };
     let out = `@${parts[0]}`;
     let name = parts[0]; // what a host would belong to
+    const last = cut && at + run.length === text.length ? parts.length - 1 : 0;
     let after = ''; // 'host': just after one; 'parted': and what parts it from the next tag
     for (let i = 1; i < parts.length; i++) {
       const seg = parts[i];
       // "@name@@host": still that name's, and "@name@host@@host" that host's.
       if (!seg && (after === 'host' || (!after && /[\p{L}\p{N}\p{M}_+.-]$/u.test(name)))) { out += '@'; continue; }
+      // Nothing after it: the start of a host, its dot cut off (not a handle
+      // and text: "@lee请看@eli然后").
+      if (i === last && name && !after && !isHost(seg) && (/^[A-Za-z0-9.-]*$/.test(seg)
+        || (/^[\p{L}\p{N}\p{M}\p{C}.-]*$/u.test(seg) && (/[A-Za-z0-9_+.-]$/.test(name) || !/^[A-Za-z0-9]/.test(name))))) continue;
       const again = after === 'host' && isHost(seg); // a host right after another
       // "@lee,@j.kim@host": "lee," has no host, j.kim does -- or j.kim is the
       // host: shown only to who may see the address.
@@ -15025,9 +15032,11 @@ function cutEmailTags(text, shows) {
         after = '';
         continue;
       }
-      if (!again && shows(`${name}@${seg}`)) { out += `@${seg}`; name = ''; after = 'host'; continue; }
-      const rest = afterTagHost(seg);
-      out += rest;
+      const shown = !again && shows(`${name}@${seg}`);
+      if (shown === true) { out += `@${seg}`; name = ''; after = 'host'; continue; }
+      let rest = shown || afterTagHost(seg);
+      if (i === last && !shown) rest = rest.replace(/[A-Za-z0-9.-]{1,64}$/, '');
+      out += shown ? `@${seg}` : rest;
       const word = /[A-Za-z0-9_+.-]$/.test(rest);
       name = word ? rest : '';
       after = word ? '' : rest ? 'parted' : 'host';
@@ -15048,7 +15057,8 @@ function afterTagHost(seg) {
 const EMAIL_ALIAS_PREFIX = 'email-alias:';
 const EMAIL_HIDDEN_KEY = 'email-hidden';
 
-async function emailPrivacyFor(env, session, slug, meta) {
+// `teams`: a Map shared by one request's calls (one read per team).
+async function emailPrivacyFor(env, session, slug, meta, { teams = null } = {}) {
   const reveal = new Set();
   const addEmail = (key) => {
     const raw = String(key || '').trim().toLowerCase();
@@ -15059,7 +15069,9 @@ async function emailPrivacyFor(env, session, slug, meta) {
   if (session && meta) {
     if (isDocOwnerSession(env, session, meta)) for (const u of accessFromMeta(meta).allowed_users || []) addEmail(u);
     if (meta.workspace_id && session.account_id) {
-      const team = await loadTeam(env, meta.workspace_id).catch(() => null);
+      const read = (teams && teams.get(meta.workspace_id)) || loadTeam(env, meta.workspace_id).catch(() => null);
+      if (teams) teams.set(meta.workspace_id, read);
+      const team = await read;
       if (team && teamMember(team, session.account_id)) for (const m of team.members || []) addEmail(m.key);
     }
   }
@@ -15219,6 +15231,75 @@ async function aliasCommentEmails(value, privacy, present, gone) {
     return v;
   };
   return walk(value, '', false);
+}
+
+// ── Notifications ───────────────────────────────────────────────────────
+// An inbox row keeps the comment as written; whoever it is shown to (the
+// bell, push, email) gets it as the doc page would show them it, worked out
+// then: who may see which address is the doc's to say, per person, and it
+// changes. A tag this reader may see stays whole with punctuation around it.
+// `gone`: addresses nobody sees.
+function notificationPreview(text, privacy, { cut = false, gone = new Set() } = {}) {
+  const may = (address) => { const e = address.toLowerCase(); return privacy.reveal.has(e) && !gone.has(e); };
+  const shows = (address) => {
+    if (may(address)) return true;
+    const at = address.lastIndexOf('@');
+    const rest = afterTagHost(address.slice(at + 1));
+    const name = address.slice(0, at).replace(/^[<([{"'\u2018\u201c\u300a\u300c\u3010\uff08]+/, '');
+    return may(`${name}@${address.slice(at + 1, address.length - rest.length)}`) ? rest || true : false;
+  };
+  return cutEmailTags(String(text || ''), shows, { cut });
+}
+function notificationRowTags(row) {
+  return !!row && typeof row.preview === 'string' && /@[^\s@]*@/.test(row.preview);
+}
+function notificationRowCut(row) {
+  return row.kind === 'agent_reply' && row.preview.length >= AGENT_REPLY_PREVIEW_MAX;
+}
+function notificationRowText(row, privacy) {
+  const actor = row.actor && typeof row.actor.login === 'string' ? row.actor.login.toLowerCase() : '';
+  if (!notificationRowTags(row) || privacy.mine.has(actor)) return row;
+  return { ...row, preview: notificationPreview(row.preview, privacy, { cut: notificationRowCut(row) }) };
+}
+// The rows of one page of one person's bell. Only a doc with a tag in one of
+// them is asked about, once: its record (`metas`: those already read) and its
+// team. A record that cannot be read leaves the person their own address.
+async function notificationRowsFor(env, session, rows, metas = new Map()) {
+  const slugs = [...new Set(rows.filter((r) => notificationRowTags(r) && isValidSlug(r.slug)).map((r) => r.slug))];
+  if (!slugs.length && !rows.some(notificationRowTags)) return rows;
+  const teams = new Map();
+  const own = await emailPrivacyFor(env, session, '', null);
+  // Their account's address is theirs too, where the session has only the
+  // login (as the email about the row was sent: buildInboxReaderSession).
+  let address = null;
+  if (session.login && !session.email && session.account_id) {
+    try { const rec = await lookupHostedAccount(env, session.login); address = rec && rec.account_id === session.account_id ? normalizeEmail(rec.email) : null; } catch {}
+  }
+  if (address) own.reveal.add(address);
+  const bySlug = new Map(await Promise.all(slugs.map(async (slug) => {
+    let meta = metas.get(slug) || null;
+    if (!meta) try { meta = await readDocRecord(env, slug); } catch {}
+    if (!meta || isTrashedMeta(meta)) return [slug, own];
+    const privacy = await emailPrivacyFor(env, session, slug, meta, { teams });
+    if (address) privacy.reveal.add(address);
+    return [slug, privacy];
+  })));
+  return rows.map((r) => (notificationRowTags(r) ? notificationRowText(r, bySlug.get(r.slug) || own) : r));
+}
+// A row on its way out (push, email), for the one person it is for.
+// `privacyOf`: theirs on the row's doc, asked only when the row needs it.
+async function notificationRowOut(env, who, row, privacyOf = null) {
+  const actor = row.actor || {};
+  const named = [...collectEmails({ login: actor.login, name: actor.name }, new Set())];
+  if (!named.length && !notificationRowTags(row)) return row;
+  const own = await emailPrivacyFor(env, who.startsWith('email:') ? { email: who.slice(6) } : { login: who }, '', null);
+  const privacy = { ...((privacyOf && await Promise.resolve(privacyOf()).catch(() => null)) || own), slug: 'me:inbox' };
+  const out = { ...notificationRowText(row, privacy) };
+  if (row.actor) {
+    const seen = await aliasCommentEmails({ login: actor.login, name: actor.name }, privacy, named, new Set());
+    out.actor = { ...row.actor, ...seen, name: seen.name || (seen.login === actor.login ? actor.name : 'Someone') };
+  }
+  return out;
 }
 
 async function commentPrivacyJson(env, session, slug, body, init, knownMeta = undefined) {
@@ -16904,7 +16985,8 @@ const INBOX_UNREADABLE_TTL_MS = 10 * 60 * 1000;
 const INBOX_READABLE_CACHE_MAX = 5000;
 const INBOX_GATE_READS_MAX = 20;
 const inboxReadableCache = new Map();
-async function inboxRowGate(env, session, rows, { now = Date.now(), maxReads = Infinity } = {}) {
+// `metas`: filled with the records read here.
+async function inboxRowGate(env, session, rows, { now = Date.now(), maxReads = Infinity, metas = null } = {}) {
   const slugs = [];
   for (const i of (rows || []).slice().sort((a, b) => String(b && b.at || '').localeCompare(String(a && a.at || '')))) {
     if (i && INBOX_DOC_CONTENT_KINDS.has(i.kind) && isValidSlug(i.slug) && !slugs.includes(i.slug)) slugs.push(i.slug);
@@ -16940,6 +17022,7 @@ async function inboxRowGate(env, session, rows, { now = Date.now(), maxReads = I
       let meta = null;
       try { meta = await readDocRecord(env, slug); } catch { verdict.set(slug, { read: false, manage: false }); return; }
       if (meta && isTrashedMeta(meta)) meta = null;
+      if (meta && metas) metas.set(slug, meta);
       const read = Boolean(meta) && canReadDoc(accessFromMeta(meta), session, env, meta);
       const manage = read && isDocOwnerSession(env, session, meta);
       const entry = { read, manage, checked: now, until: now + (read ? INBOX_READABLE_TTL_MS : INBOX_UNREADABLE_TTL_MS) };
@@ -17020,7 +17103,65 @@ const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
 // writing someone's address is not the same act as calling them into the
 // thread. Matched before the handle pass so "@dana@example.com" cannot be
 // half-read as a mention of a GitHub user named dana.
-const EMAIL_MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
+const EMAIL_MENTION_RE = /(?<![A-Za-z0-9_@\/-])@(?=([^\s@]+)@([^\s@]+)(@[^\s@]+)?)/g;
+
+// The address an email tag names: `name` and `rest` are what is around its
+// second @. It ends where its host does, whatever is written against it
+// ("@a@b.com, then", full-width punctuation, a sentence with no space); a
+// bracket or a quote before it is not in it. null: not a tag (a handle, with
+// the next tag after it); no `address`: one that is nobody's, and none of it
+// is a handle either (`next`: the next tag starts after it).
+function emailTagAddress(name, rest, next = '') {
+  const local = name.replace(/^[<([\x7b"'`\u2018\u201c\u300a\u300c\u3010\uff08]+/, '');
+  const nobody = { address: '', host: -1 };
+  if (!looksLikeHost(rest)) return null;
+  // "@lee,@j.kim@host": a name, and the next tag's dotted one.
+  if (looksLikeHost(next.slice(1)) && /[A-Za-z0-9]$/.test(rest) && !/[A-Za-z0-9_+.-]$/.test(name)) return /^[A-Za-z0-9-]{1,39}[^A-Za-z0-9_@.+'-]/.test(name) ? null : { ...nobody, next: true };
+  // A name that punctuation ends is not a tag's, and what follows its @ is
+  // still a host ("@lee,@example.com"): nobody is named.
+  if (/[,;:!?)|/>\]\u2019\u201d\u2026\u3000-\u3002\u3009\u300b\u300d\u300f\u3011\uff01-\uff0f\uff1a-\uff20]$/.test(name)) return nobody;
+  if (!local || /[,;:"<>()[\]\\\u2018-\u201f\u2026\u3000-\u3002\u3008-\u3011\uff01-\uff0f\uff1a-\uff20]|\.$/.test(local)) return nobody;
+  const ascii = (/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+/.exec(rest) || [''])[0];
+  const after = rest.slice(ascii.length);
+  // A dot before a letter further on: more of the host, not text after it.
+  const more = (x) => /[.\uff0e][)\]\x7d>\uff09]*[\p{L}\p{N}\p{M}]|[\u3002\uff61][A-Za-z0-9]|^[(<\uff08]dot[)>\uff09]|\p{C}/iu.test(x);
+  let host = '';
+  if (ascii && (!/[\p{L}\p{N}\p{M}\p{C}]/u.test(after) || (!more(after) && (
+    /^[!?)\]\x7d>"'(<\u2018-\u201f\u2026\u3001\u3008-\u3011\uff01\uff08\uff09\uff1f]|^[,;:\u3002\uff0c\uff1a\uff1b](?![A-Za-z0-9])/.test(after)
+    || /^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u.test(after))))) {
+    host = ascii;
+  } else {
+    // A host that is not ASCII: as typed, up to punctuation.
+    let end = rest.length;
+    while (end > 0 && '.,;:!?)_-'.includes(rest[end - 1])) end -= 1;
+    const typed = rest.slice(0, end);
+    host = typed.split(/[,;:!?()<>[\]\x7b\x7d"'`|/\\\u2018-\u201f\u2026\u3000-\u3002\u3008-\u3011\uff01-\uff0f\uff1a-\uff20]/)[0];
+    if (host !== typed && (host === ascii || more(typed.slice(host.length)))) host = '';
+  }
+  const address = host ? normalizeEmail(`${local}@${host}`) : null;
+  return address ? { address, host: host.length } : nobody;
+}
+// Dots between two labels (full-width ones too).
+function looksLikeHost(s) {
+  return /[^.\u3002\uff0e\uff61](?:[.\uff0e\uff61]+[^.\u3002\uff0e\uff61]|[\u3002\uff61][A-Za-z0-9])/.test(s);
+}
+// `after`: the text after a handle. Is the handle on its own, or part of
+// something else: a longer word ("@k_l", "@x+y"), a host ("@example.com", with
+// any joiner), or an address ("@dana@example.com")?
+function handleStandsAlone(after) {
+  const word = /^[^\s@]*/.exec(after)[0];
+  if (/^(?:[_+][A-Za-z0-9]|(?![A-Za-z\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}])[\p{L}\p{M}])/u.test(word)) return false;
+  // Chinese, Japanese and Korean are written on without a space, so a dot
+  // further on is the text's (a file name, a sentence's end), not a host's.
+  if (!/^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}\u3002]/u.test(word)) {
+    const piece = /^[^,;:!?()<>[\]\x7b\x7d"'`|/\\\u2018-\u201f\u2026\u3001\u3008-\u3011\uff01\uff08\uff09\uff0c\uff1a\uff1b\uff1f]*/.exec(word)[0];
+    if (/(?<![.\u3002\uff0e\uff61])(?:[.\uff0e\uff61][\p{L}\p{N}\p{M}]|[\u3002\uff61][A-Za-z0-9])/u.test(piece)) return false;
+    if (/^[^\p{L}\p{N}]*(?<![.\uff0e])[.\uff0e][\p{L}\p{N}]/u.test(word)) return false;
+  }
+  if (after[word.length] !== '@') return true;
+  const next = /^[^\s@]*/.exec(after.slice(word.length + 1))[0];
+  return !looksLikeHost(next) && (!!word || !/^[\p{L}\p{N}]/u.test(next));
+}
 
 function parseMentionLogins(text) {
   if (typeof text !== 'string' || !text) return [];
@@ -17029,19 +17170,28 @@ function parseMentionLogins(text) {
   const add = (key) => { if (key && !seen.has(key)) { seen.add(key); out.push(key); } };
   // Email tags first, and blank their spans so the handle pass cannot re-read
   // the local part of an address as a handle.
-  let source = text;
+  let source = '';
+  let from = 0;
   const er = new RegExp(EMAIL_MENTION_RE.source, 'g');
   let m;
-  while ((m = er.exec(source))) {
-    const addr = String(m[2]).replace(/[.,;:!?)]+$/, '').toLowerCase();
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) add(`email:${addr}`);
+  while ((m = er.exec(text))) {
+    const tag = emailTagAddress(m[1], m[2], m[3]);
+    if (!tag) continue;
+    add(tag.address && `email:${tag.address}`);
+    const end = m.index + m[1].length + 2 + tag.host;
+    // Nothing is read on from a slash; a handle right after an address is.
+    const on = tag.address ? /^[-/_]*(?=@)/.exec(text.slice(end, end + 8)) : null;
+    source += text.slice(from, m.index) + (on ? ' ' : '/');
+    from = end + (on ? on[0].length : 0);
+    er.lastIndex = tag.address || tag.next ? from : from + 1;
   }
-  source = source.replace(new RegExp(EMAIL_MENTION_RE.source, 'g'), '$1');
+  source += text.slice(from);
   const re = new RegExp(MENTION_RE.source, 'g');
   while ((m = re.exec(source))) {
     // A GitHub login never ends in a hyphen, so `@dana-` names dana.
     const login = String(m[2]).replace(/-+$/, '').toLowerCase();
-    add(login);
+    const at = re.lastIndex - (m[2].length - login.length);
+    if (handleStandsAlone(source.slice(at, at + 600))) add(login);
   }
   return out;
 }
@@ -17882,7 +18032,9 @@ async function clearAgentUnreadMany(env, session, bySlug) {
 // web push to the browsers the recipient turned alerts on in (#771) and an
 // email (#772). Both run after the row is stored and never fail the write.
 // `origin` is the site the event happened on, for the links in an email.
-async function writeInboxEvent(env, who, ev, { ctx = null, origin = '' } = {}) {
+// `privacyOf`: what the recipient may see on the event's doc
+// (notificationRowOut).
+async function writeInboxEvent(env, who, ev, { ctx = null, origin = '', privacyOf = null } = {}) {
   const key = inboxKey(who);
   if (!key) return null;
   // The row goes in through one lane per recipient (serialKvOp): delivery
@@ -17896,11 +18048,12 @@ async function writeInboxEvent(env, who, ev, { ctx = null, origin = '' } = {}) {
   // A quiet row (an agent's reply) is only in the bell: no push, no email.
   if (ev.quiet) return row;
   const recipient = key.slice('inbox:'.length);
+  const shown = notificationRowOut(env, recipient, row, privacyOf);
   const out = Promise.all([
-    pushInboxRow(env, recipient, row).catch((error) => {
+    shown.then((seen) => pushInboxRow(env, recipient, seen)).catch((error) => {
       console.error('[push] fan-out failed:', error && error.message ? error.message : error);
     }),
-    emailInboxRow(env, recipient, row, origin).catch((error) => {
+    shown.then((seen) => emailInboxRow(env, recipient, seen, origin)).catch((error) => {
       console.error('[email] notification failed:', error && error.message ? error.message : error);
     }),
   ]);
@@ -18032,12 +18185,14 @@ async function deliverInbox(env, recipientLogin, ev, delivery = {}) {
   }
   const access = accessFromMeta(meta);
   const authors = delivery.authors || {};
+  // The doc's team, read once for everyone told (emailPrivacyFor).
+  const teams = delivery.teams || new Map();
   const at = ev.at || new Date().toISOString();
   for (const who of recips) {
     try {
       const reader = await inboxReaderSession(env, who, { author: authors[who] || null, memo: delivery.readers || null });
       if (!canReadDoc(access, reader, env, meta)) continue;
-      await writeInboxEvent(env, who, { ...ev, at }, delivery);
+      await writeInboxEvent(env, who, { ...ev, at }, { ...delivery, privacyOf: () => emailPrivacyFor(env, reader, ev.slug, meta, { teams }) });
     } catch (error) {
       // The comment/reply/reaction is already committed in the document DO.
       // A KV quota or transient inbox failure must not turn that success into
@@ -31883,11 +32038,13 @@ const tdocHandlers = {
       // Docs no longer readable: those of the unread rows (the count, and
       // Needs you's list), then those of the rows on this page.
       const merged = mergeInboxes(parts);
-      const hiddenUnread = await inboxRowGate(env, s, merged.items.filter((i) => inboxRowUnread(i)), { maxReads: INBOX_GATE_READS_MAX });
+      const metas = new Map();
+      const hiddenUnread = await inboxRowGate(env, s, merged.items.filter((i) => inboxRowUnread(i)), { maxReads: INBOX_GATE_READS_MAX, metas });
       let page = pageInbox(merged, { offset, unread: onlyUnread, hidden: hiddenUnread });
       // The rows shown are always checked in full.
-      const hiddenPage = await inboxRowGate(env, s, page.items);
+      const hiddenPage = await inboxRowGate(env, s, page.items, { metas });
       page = { ...page, items: page.items.map((i) => (i.no_access || !hiddenPage(i) ? i : blankInboxRow(i))) };
+      page = { ...page, items: await notificationRowsFor(env, s, page.items, metas) };
       return json(await redactCommentEmails(page, await emailPrivacyFor(env, s, 'me:inbox', null)));
     }
     if (p === '/api/notifications/unread' && method === 'GET') {
@@ -33638,6 +33795,16 @@ const tdocHandlers = {
           inviteBudget: Math.max(0, MENTION_INVITE_ALLOWLIST_MAX - access.allowed_users.length),
         },
       );
+      // A mention never fails the comment: what cannot be invited is not told.
+      const patched = outcome.invited.length ? applyAccessPatch(meta, {
+        allowed_users: access.allowed_users.concat(outcome.invited.map((k) =>
+          String(k).startsWith('email:') ? String(k).slice(6) : k)),
+      }) : null;
+      if (patched && patched.error) {
+        outcome.notified = outcome.notified.filter((k) => !outcome.invited.includes(k));
+        outcome.blocked.push(...outcome.invited);
+        outcome.invited = [];
+      }
       const mentions = outcome.notified;
       // Who among them is new to this doc, and can the mention find them on
       // its own. Computed against the doc as it stood BEFORE the invite below
@@ -33654,11 +33821,6 @@ const tdocHandlers = {
       // An invite is a meta write, so it happens before the comment lands: a
       // notification whose link 403s is worse than no notification.
       if (outcome.invited.length) {
-        const patched = applyAccessPatch(meta, {
-          allowed_users: access.allowed_users.concat(outcome.invited.map((k) =>
-            String(k).startsWith('email:') ? String(k).slice(6) : k)),
-        });
-        if (patched.error) return json(patched, { status: 400 });
         await putDocMetaJson(env, slug, JSON.stringify(patched.meta));
         metaNow = patched.meta;
       }
@@ -33706,7 +33868,7 @@ const tdocHandlers = {
           // the parent's author found by their GitHub id when it is known.
           const parentRec = parent_id ? recordAuthor(priorList, parent_id) : null;
           const delivery = {
-            ctx, origin: url.origin, readers: new Map(), meta: metaNow,
+            ctx, origin: url.origin, readers: new Map(), teams: new Map(), meta: metaNow,
             authors: parentRec && parentRec.login ? { [normalizeActorKey(parentRec.login)]: parentRec } : {},
           };
           if (mentions.length) {

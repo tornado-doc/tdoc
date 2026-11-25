@@ -430,7 +430,7 @@ const MENTION_MAX_PER_COMMENT = 10;
 const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
 // Mirrors the worker: "@dana@example.com" is a deliberate email tag, a bare
 // address in prose is not.
-const EMAIL_MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
+const EMAIL_MENTION_RE = /(?<![A-Za-z0-9_@\/-])@(?=([^\s@]+)@([^\s@]+)(@[^\s@]+)?)/g;
 
 function normalizeGithubLogin(v) {
   if (typeof v !== 'string') return null;
@@ -443,6 +443,71 @@ function normalizeGithubLogin(v) {
   return s;
 }
 
+// Mirrors the worker's: the address, or null.
+function normalizeEmail(email) {
+  const v = String(email || '').trim().toLowerCase();
+  if (v.length > 254) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return null;
+  return v;
+}
+// The address an email tag names: `name` and `rest` are what is around its
+// second @. It ends where its host does, whatever is written against it
+// ("@a@b.com, then", full-width punctuation, a sentence with no space); a
+// bracket or a quote before it is not in it. null: not a tag (a handle, with
+// the next tag after it); no `address`: one that is nobody's, and none of it
+// is a handle either (`next`: the next tag starts after it).
+function emailTagAddress(name, rest, next = '') {
+  const local = name.replace(/^[<([\x7b"'`\u2018\u201c\u300a\u300c\u3010\uff08]+/, '');
+  const nobody = { address: '', host: -1 };
+  if (!looksLikeHost(rest)) return null;
+  // "@lee,@j.kim@host": a name, and the next tag's dotted one.
+  if (looksLikeHost(next.slice(1)) && /[A-Za-z0-9]$/.test(rest) && !/[A-Za-z0-9_+.-]$/.test(name)) return /^[A-Za-z0-9-]{1,39}[^A-Za-z0-9_@.+'-]/.test(name) ? null : { ...nobody, next: true };
+  // A name that punctuation ends is not a tag's, and what follows its @ is
+  // still a host ("@lee,@example.com"): nobody is named.
+  if (/[,;:!?)|/>\]\u2019\u201d\u2026\u3000-\u3002\u3009\u300b\u300d\u300f\u3011\uff01-\uff0f\uff1a-\uff20]$/.test(name)) return nobody;
+  if (!local || /[,;:"<>()[\]\\\u2018-\u201f\u2026\u3000-\u3002\u3008-\u3011\uff01-\uff0f\uff1a-\uff20]|\.$/.test(local)) return nobody;
+  const ascii = (/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+/.exec(rest) || [''])[0];
+  const after = rest.slice(ascii.length);
+  // A dot before a letter further on: more of the host, not text after it.
+  const more = (x) => /[.\uff0e][)\]\x7d>\uff09]*[\p{L}\p{N}\p{M}]|[\u3002\uff61][A-Za-z0-9]|^[(<\uff08]dot[)>\uff09]|\p{C}/iu.test(x);
+  let host = '';
+  if (ascii && (!/[\p{L}\p{N}\p{M}\p{C}]/u.test(after) || (!more(after) && (
+    /^[!?)\]\x7d>"'(<\u2018-\u201f\u2026\u3001\u3008-\u3011\uff01\uff08\uff09\uff1f]|^[,;:\u3002\uff0c\uff1a\uff1b](?![A-Za-z0-9])/.test(after)
+    || /^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u.test(after))))) {
+    host = ascii;
+  } else {
+    // A host that is not ASCII: as typed, up to punctuation.
+    let end = rest.length;
+    while (end > 0 && '.,;:!?)_-'.includes(rest[end - 1])) end -= 1;
+    const typed = rest.slice(0, end);
+    host = typed.split(/[,;:!?()<>[\]\x7b\x7d"'`|/\\\u2018-\u201f\u2026\u3000-\u3002\u3008-\u3011\uff01-\uff0f\uff1a-\uff20]/)[0];
+    if (host !== typed && (host === ascii || more(typed.slice(host.length)))) host = '';
+  }
+  const address = host ? normalizeEmail(`${local}@${host}`) : null;
+  return address ? { address, host: host.length } : nobody;
+}
+// Dots between two labels (full-width ones too).
+function looksLikeHost(s) {
+  return /[^.\u3002\uff0e\uff61](?:[.\uff0e\uff61]+[^.\u3002\uff0e\uff61]|[\u3002\uff61][A-Za-z0-9])/.test(s);
+}
+// `after`: the text after a handle. Is the handle on its own, or part of
+// something else: a longer word ("@k_l", "@x+y"), a host ("@example.com", with
+// any joiner), or an address ("@dana@example.com")?
+function handleStandsAlone(after) {
+  const word = /^[^\s@]*/.exec(after)[0];
+  if (/^(?:[_+][A-Za-z0-9]|(?![A-Za-z\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}])[\p{L}\p{M}])/u.test(word)) return false;
+  // Chinese, Japanese and Korean are written on without a space, so a dot
+  // further on is the text's (a file name, a sentence's end), not a host's.
+  if (!/^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}\u3002]/u.test(word)) {
+    const piece = /^[^,;:!?()<>[\]\x7b\x7d"'`|/\\\u2018-\u201f\u2026\u3001\u3008-\u3011\uff01\uff08\uff09\uff0c\uff1a\uff1b\uff1f]*/.exec(word)[0];
+    if (/(?<![.\u3002\uff0e\uff61])(?:[.\uff0e\uff61][\p{L}\p{N}\p{M}]|[\u3002\uff61][A-Za-z0-9])/u.test(piece)) return false;
+    if (/^[^\p{L}\p{N}]*(?<![.\uff0e])[.\uff0e][\p{L}\p{N}]/u.test(word)) return false;
+  }
+  if (after[word.length] !== '@') return true;
+  const next = /^[^\s@]*/.exec(after.slice(word.length + 1))[0];
+  return !looksLikeHost(next) && (!!word || !/^[\p{L}\p{N}]/u.test(next));
+}
+
 function parseMentionLogins(text) {
   if (typeof text !== 'string' || !text) return [];
   const out = [];
@@ -450,19 +515,28 @@ function parseMentionLogins(text) {
   const add = (key) => { if (key && !seen.has(key)) { seen.add(key); out.push(key); } };
   // Email tags first, and blank their spans so the handle pass cannot re-read
   // the local part of an address as a handle.
-  let source = text;
+  let source = '';
+  let from = 0;
   const er = new RegExp(EMAIL_MENTION_RE.source, 'g');
   let m;
-  while ((m = er.exec(source))) {
-    const addr = String(m[2]).replace(/[.,;:!?)]+$/, '').toLowerCase();
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) add(`email:${addr}`);
+  while ((m = er.exec(text))) {
+    const tag = emailTagAddress(m[1], m[2], m[3]);
+    if (!tag) continue;
+    add(tag.address && `email:${tag.address}`);
+    const end = m.index + m[1].length + 2 + tag.host;
+    // Nothing is read on from a slash; a handle right after an address is.
+    const on = tag.address ? /^[-/_]*(?=@)/.exec(text.slice(end, end + 8)) : null;
+    source += text.slice(from, m.index) + (on ? ' ' : '/');
+    from = end + (on ? on[0].length : 0);
+    er.lastIndex = tag.address || tag.next ? from : from + 1;
   }
-  source = source.replace(new RegExp(EMAIL_MENTION_RE.source, 'g'), '$1');
+  source += text.slice(from);
   const re = new RegExp(MENTION_RE.source, 'g');
   while ((m = re.exec(source))) {
     // A GitHub login never ends in a hyphen, so `@dana-` names dana.
     const login = String(m[2]).replace(/-+$/, '').toLowerCase();
-    add(login);
+    const at = re.lastIndex - (m[2].length - login.length);
+    if (handleStandsAlone(source.slice(at, at + 600))) add(login);
   }
   return out;
 }

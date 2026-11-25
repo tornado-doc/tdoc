@@ -52,7 +52,8 @@ vm.runInContext([
   fn(src, 'normalizeGithubLogin'),
   fn(src, 'normalizeEmail'),
   fn(src, 'normalizeActorKey'),
-  fn(src, 'parseMentionLogins'),
+  fn(src, 'normalizeInvitee'),
+  ...['emailTagAddress', 'looksLikeHost', 'handleStandsAlone'].map((name) => { try { return fn(src, name); } catch { return ''; } }), fn(src, 'parseMentionLogins'),
   fn(src, 'isNonHumanAuthor'),
   fn(src, 'commentParticipants'),
   fn(src, 'mentionableUsers'),
@@ -97,6 +98,75 @@ t('a bare address in prose is not a mention; "@address" is a deliberate tag', ()
   // and both shapes coexist in one comment.
   assert(JSON.stringify(box.parseMentionLogins('@alice and @dana@example.com'))
     === JSON.stringify(['email:dana@example.com', 'alice']));
+});
+
+t('an email tag ends where its address does, whatever is written against it', () => {
+  const D = 'email:dana@example.com';
+  for (const [text, ...want] of [
+    ['@dana@example.com, please', D], ['@dana@example.com，请看', D], ['@dana@example.com请看', D], ['请@dana@example.com。', D],
+    ['(@dana@example.com)', D], ['"@dana@example.com"', D], ['<@dana@example.com>', D], ['@<dana@example.com>', D], ['@dana@example.com/', D], ['@dana@example.com_', D], ['@dana@example.com!?', D],
+    ['@dana@example.com,@eli@example.org', D, 'email:eli@example.org'], ['@dana@example.com，@eli@example.org;@fay@x.io', D, 'email:eli@example.org', 'email:fay@x.io'],
+    ['@dana@example.com,@eli', D, 'eli'], ['@lee,@j.kim@example.com', 'email:j.kim@example.com', 'lee'],
+    ['@dana@example.com/@eli@example.org', D], ['@dana@example.com/@eli', D, 'eli'], ['@dana@example.com@eli', D, 'eli'], ['@dana@example.com-@eli@example.org', D],
+    // As they were.
+    ['@o\'n+x@mail.example.co.uk', 'email:o\'n+x@mail.example.co.uk'], ['@Dana.Q@Example.COM', 'email:dana.q@example.com'], ['@dana@bücher.example, ok', 'email:dana@bücher.example'], ['@dana@example.例子 ok', 'email:dana@example.例子'],
+    ['@dana@mail.paral·lel.example', 'email:dana@mail.paral·lel.example'], ['@dana@one.bücher.example，请看', 'email:dana@one.bücher.example'],
+    ['@dana@localhost'], ['@dana.@eli', 'dana', 'eli'], ['@dana, @eli', 'dana', 'eli'],
+    // Nobody's, and no handle read out of them.
+    ['@dana@mail.one,com'], ['@dana@mail.one[.]example'], ['@dana@mail.one(dot)example'], ['@dana@mail.one.co．uk'], ['@dana@mail.one。com'], ['@dana@mail.one,x.example'],
+    ['@dana@one.example,\u00adfoo'], ['@john.@example.com'], ['@john!@one.example\u8bf7@mail.example'], ['@john.@example.com@mail.example'], ['@dana!@example.com'], ['(@dana)@example.com'], ['@lee,@example.com'], ['@lee, @example.com', 'lee'], ['@one\u2011x.example'], ['@example.com'], ['@k_l and @x+y and @b.ob'],
+    ['@k_l|@b.ob@x1.example', 'email:b.ob@x1.example'], ['@lee,@jkim@x.example', 'email:jkim@x.example', 'lee'], ['@lee,@eli', 'lee', 'eli'], ['@dana@x.example@eli@y.example', 'email:dana@x.example'], ['@dana@x.example@eli.example', 'email:dana@x.example'], ['@lee@example,com'], ['@dana\'s and @eli\u8bf7\u770b', 'dana', 'eli'],
+    ['@o\'n,@j.kim@x.example', 'email:j.kim@x.example'], ['@dana@one._'], ['@john:x@example.com'], ['@a"b@example.com'],
+  ]) {
+    const got = box.parseMentionLogins(text);
+    assert(JSON.stringify(got) === JSON.stringify(want), `${text}: ${JSON.stringify(got)}`);
+  }
+  for (const long of ['@a@b.example,'.repeat(8000), '@'.repeat(60000), 'a@'.repeat(60000), `@a@b.c${'_'.repeat(60000)}a`, `@a@${'.'.repeat(60000)}x`, `@a@b.c,${','.repeat(60000)}x`, `@a@${'b.'.repeat(60000)}`, `@a@b.example${'-'.repeat(60000)}`]) {
+    const from = Date.now();
+    box.parseMentionLogins(long);
+    assert(Date.now() - from < 1000, `${long.slice(0, 20)} took ${Date.now() - from} ms`);
+  }
+});
+
+t('a handle with Chinese, Japanese or Korean written on after it is told, dots or not', () => {
+  for (const text of ['@eli\u8fd9\u91cc\u6ca1\u95ee\u9898\u3002PR\u5df2\u5408\u5e76', '@eli\u770b\u8fc7\u4e86\u3002OK', '@eli\u8bf7\u770bREADME.md', '@eli\u8bf7\u770b\u4e00\u4e0b\u8fd9\u4e2a\u65b9\u6848\u3002\u53c2\u8003tdoc.dev', '@eli\u8fd9\u4e2a\u6539\u62103.5\u5427', '@eli\u770b\u4e0b\u7b2c2.3\u8282', '@eli\u3055\u3093\u3002OK\u3067\u3059', '@eli\ud655\uc778\ud574\uc8fc\uc138\uc694\u3002OK', '@eli\u3002OK', '@eli\u8fd9\u91cc\u6ca1\u95ee\u9898\u3002']) {
+    assert(JSON.stringify(box.parseMentionLogins(text)) === '["eli"]', `${text}: ${JSON.stringify(box.parseMentionLogins(text))}`);
+  }
+  // Still a host, an address, or a label that is no handle at all.
+  for (const text of ['@example.com', '@john.@gmail.com', '@\u4f8b\u3048.jp', '@john.@one\u516c\u53f8.cn', '@eli.@gmail.com', '@b\u00fccher.de', '@example!.com', '@john@gmail\uff61com', '\u3042\u308a\u304c\u3068\u3046@lee@corp\uff61ok \u3067\u3059']) {
+    assert(!box.parseMentionLogins(text).some((k) => !k.startsWith('email:')), `${text}: ${JSON.stringify(box.parseMentionLogins(text))}`);
+  }
+});
+
+t('every parsed mention is one an invitation takes', () => {
+  const pieces = ['@lee', '@john', 'x@corp', '@a@b.c', '@gmail', '.com', '\uff61com', '\uff0ecom', '\u3002com', '.', ',', '\u8bf7\u770b', ' ', '!', '(', '\u00fc', '@'.repeat(2), 'a'.repeat(260), '-', '_', '\u200b', '\u0130', "'", '"'];
+  let seed = 7;
+  const next = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return Math.floor(seed / 65536) % n; };
+  for (let i = 0; i < 20000; i++) {
+    let text = '';
+    for (let j = 2 + next(6); j > 0; j--) text += pieces[next(pieces.length)];
+    for (const k of box.parseMentionLogins(text)) {
+      assert(box.normalizeActorKey(k) === k && box.normalizeInvitee(k.replace(/^email:/, '')) === k.replace(/^email:/, ''), `${JSON.stringify(text)}: ${k}`);
+    }
+  }
+});
+
+t('no part of an address is a handle, whatever character stands in it', () => {
+  const marks = [];
+  for (let c = 0x21; c < 0x10000; c++) {
+    const ch = String.fromCharCode(c);
+    if ((c < 0xd800 || c > 0xdfff) && ch !== '@' && !/\s/.test(ch) && /[\p{P}\p{S}]/u.test(ch)) marks.push(ch);
+  }
+  const alone = { '@lee @john{}@example.com': ['lee'] };
+  for (const shape of ['@john{}@example.com', '@jo{}hn@example.com', '@john{}{}@sub.example.com', '(@john{}@example.com)', '@john@exam{}ple.com', '@john@example.com{}@mail.example.org', '@dana@x.io{}@john{}@example.com', '@john{}@example.com{}tail', '{}@example.com', '@lee @john{}@example.com']) {
+    for (const mark of marks) {
+      const text = shape.replaceAll('{}', mark);
+      const told = box.parseMentionLogins(text);
+      const handles = told.filter((k) => !k.startsWith('email:'));
+      assert(handles.every((h) => (alone[shape] || []).includes(h)), `${JSON.stringify(text)}: ${JSON.stringify(told)}`);
+      for (const k of told) if (k.startsWith('email:')) assert(text.toLowerCase().includes(k.slice(6)), `${JSON.stringify(text)}: ${k}`);
+    }
+  }
 });
 
 t('two mentions separated by one space both resolve', () => {
