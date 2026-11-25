@@ -17457,6 +17457,8 @@ function classifyMentions(logins, { canRead, canInvite = false, inviteBudget = 0
 // Being told says the doc knows them, so to a `poster` who is not of the doc
 // (or a feedback token's) it knows only whom /api/mentions offers them by that
 // very login: the owner, and who wrote on it. Nothing is looked up for them.
+// A guest (on the sharing list, neither owner nor of the team) reaches the
+// logins on that list too; only the owner and the team, linked identities.
 // `readers`: the request's memo, so delivery does not look them up again.
 async function weakMentionsTold(env, logins, { poster, meta, access, list, readers }) {
   if (!logins.length) return [];
@@ -17464,8 +17466,11 @@ async function weakMentionsTold(env, logins, { poster, meta, access, list, reade
   const teamId = meta && meta.workspace_id;
   const insider = !poster.feedback && tokenScopeAllows(poster, meta)
     && (isAllowlisted(access, poster, env, meta) || sessionInTeam(poster, teamId));
+  const full = insider && (isDocOwnerSession(env, poster, meta) || sessionInTeam(poster, teamId));
+  if (insider && !full) for (const login of access.allowed_users) here.add(login);
   const told = await Promise.all(logins.map(async (login) => {
     if (!insider) return here.has(login) && canReadDoc(access, { login }, env, meta);
+    if (!full && !here.has(login)) return false;
     try {
       const reader = await inboxReaderSession(env, login, { memo: readers });
       const known = actorKeys(reader).some((k) => here.has(k)) || isAllowlisted(access, reader, env, meta) || sessionInTeam(reader, teamId);

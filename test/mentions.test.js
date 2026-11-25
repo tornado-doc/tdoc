@@ -438,7 +438,7 @@ ${fn(src, 'normalizeEmail')}
 ${fn(src, 'normalizeGithubLogin')}
 ${fn(src, 'commentParticipants')}
 ${fn(src, 'canReadDoc')}
-const ownerActorKey = () => 'olga', tokenScopeAllows = (s) => !s.outOfScope, isAllowlisted = (a, s) => s.login !== 'mia', sessionInTeam = () => true, actorKeys = (s) => [s.login];
+const ownerActorKey = () => 'olga', tokenScopeAllows = (s) => !s.outOfScope, isAllowlisted = (a, s) => s.login !== 'mia', sessionInTeam = () => true, isDocOwnerSession = () => false, actorKeys = (s) => [s.login];
 const inboxReaderSession = async (env, login) => { if (login === 'down') throw new Error('KV is down'); if (login === 'gone') return null.x; return { login }; };
 ${fn(src, 'weakMentionsTold')}
 weakMentionsTold`);

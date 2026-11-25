@@ -326,7 +326,8 @@ async function seedDoc(env, slug, owner) {
     // Invited: by login (either case), by an address of the same account.
     for (const text of [TEXT1, '@Lee，@ELI。pr已合并', '**@lee**，**@eli**。OK']) for (const as of ['olga', 'ned']) {
       const r = await say('plain', as, text, { ...priv, allowed_users: ['lee', 'eli@handle.example', 'ned'] });
-      assert(r.told === 'eli,lee' && r.mentions === 'lee,eli' && !r.blocked, `${as} ${text}: ${JSON.stringify(r)}`);
+      const want = as === 'olga' ? 'lee,eli' : 'lee'; // a guest reaches whom the list names by login
+      assert(r.told === want.split(',').sort().join() && r.mentions === want && !r.blocked, `${as} ${text}: ${JSON.stringify(r)}`);
     }
     // Nobody here knows them: private, public, sign-in-required, and whatever
     // else they are a contact or a user of.
@@ -366,7 +367,7 @@ async function seedDoc(env, slug, owner) {
     // Who wrote here under an address, named by the account's handle.
     await env.META.put(`account-group:${who.gmail.account_id}`, JSON.stringify({ canonical: who.gmail.account_id, ids: [who.gmail.account_id], actor_keys: ['gmail', 'email:g@own.example'] }));
     await record({ login: 'email:g@own.example', name: 'g' }, 4);
-    r = await say('plain', 'ned', '@john，@gmail。OK', { visibility: 'public', allowed_users: ['ned'] });
+    r = await say('plain', 'olga', '@john，@gmail。OK', { visibility: 'public' });
     assert(r.told === 'gmail', `linked: ${JSON.stringify(r)}`);
     // Both kinds in one comment; the owner invites only the plain one.
     await env.META.put('meta:plain', JSON.stringify({ ...base.plain, access: { ...priv, commenting: 'signed_in', allowed_users: ['lee'] } }));
@@ -375,7 +376,7 @@ async function seedDoc(env, slug, owner) {
     assert(JSON.parse(env.META.map.get('meta:plain')).access.allowed_users.join() === 'lee,john', 'allowed');
   });
 
-  await t('a poster who is not of the doc learns nothing from a weak handle about whom it knows', async () => {
+  await t('a poster who is not of the doc learns nothing from a weak handle about whom it knows, nor a guest beyond the logins listed', async () => {
     const { env, post, api, who } = await tagged();
     const names = ['ivo', 'adr', 'ali', 'cora', 'guest', 'zed', 'yan'];
     for (const login of names) {
@@ -412,7 +413,7 @@ async function seedDoc(env, slug, owner) {
     };
     for (const slug of Object.keys(docs)) {
       const priv = slug.endsWith('private');
-      const posters = priv ? [] : [['eve'], ['cora']];
+      const posters = priv ? [['guest']] : [['eve'], ['cora'], ['guest']];
       for (const as of ['olga', ...(slug === 't-private' ? ['mia'] : priv || slug === 'p-signin' ? ['guest'] : ['mia', 'guest'])]) posters.push([as, { token: token[`${as} ${slug}`] }]);
       for (const [as, opts] of posters) {
         await probe(slug, as, 'zed', opts); // warm
@@ -421,12 +422,14 @@ async function seedDoc(env, slug, owner) {
         // Whoever is on the team, invited by login or by address, or writing under an address.
         for (const name of ['pat', 'ivo', 'adr', 'ali', 'yan']) {
           const r = await probe(slug, as, name, opts);
-          const listed = priv && name === 'ivo';
-          if (!listed) assert(r.all === none.all, `${slug} ${as}${opts ? ' (feedback)' : ''} ${name}:\n${r.all}\n${none.all}`);
+          // A guest reaches the logins the sharing list holds, and no more.
+          const listed = name === 'ivo' && as === 'guest' && !opts;
+          if (listed) assert(r.told === 'ivo', `${slug} ${as} ivo: ${r.told}`);
+          else assert(r.all === none.all, `${slug} ${as}${opts ? ' (feedback)' : ''} ${name}:\n${r.all}\n${none.all}`);
         }
         // Whom everybody sees here by that login.
         if (as !== 'cora') assert((await probe(slug, as, 'cora', opts)).told === (priv ? '' : 'cora'), `${slug} ${as}: cora`);
-        if (as !== 'olga') assert((await probe(slug, as, 'olga', opts)).told === 'olga' || slug === 't-private', `${slug} ${as}: olga`);
+        if (as !== 'olga') assert((await probe(slug, as, 'olga', opts)).told === 'olga' || (slug === 't-private' && opts), `${slug} ${as}: olga`);
       }
     }
     // Those of the doc are told of everyone it knows.
@@ -434,8 +437,18 @@ async function seedDoc(env, slug, owner) {
     for (const slug of Object.keys(docs)) for (const as of ['olga', 'guest', ...(slug.startsWith('t') ? ['mia'] : [])]) {
       const told = [];
       for (const name of ['pat', 'ivo', 'adr', 'ali', 'yan']) if ((await probe(slug, as, name)).told) told.push(name);
-      assert(told.join(' ') === want[slug], `${slug} ${as}: ${told}`);
+      assert(told.join(' ') === (as === 'guest' ? 'ivo' : want[slug]), `${slug} ${as}: ${told}`);
     }
+  });
+
+  await t('a guest on a private team doc reaches a member who wrote on it, not one who did not', async () => {
+    const { env, post, who } = await tagged();
+    who.guest = await issue(worker, env, 'guest');
+    const meta = JSON.parse(env.META.map.get('meta:teamed'));
+    await env.META.put('meta:teamed', JSON.stringify({ ...meta, access: { ...meta.access, allowed_users: ['guest'] } }));
+    await post('teamed', 'pat', 'x');
+    const r = await post('teamed', 'guest', '@pat\uff0c@mia\u3002OK @olga.ok');
+    assert(r.status === 200 && r.body.mention_outcome.notified.join() === 'pat,olga', JSON.stringify(r.body.mention_outcome));
   });
 
   await t('what weak handles cost: no read for a comment without one, and a bounded few with', async () => {
