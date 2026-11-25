@@ -1,7 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { usePortalContainer } from './portal.js';
 import { isPlainNavigationClick, startNavigationProgress } from '../nav-progress.js';
+
+// A press on a row ends in the browser's own click. Base UI also clicks a row
+// when the mouse goes up on it, for a press that began on the menu's button
+// and was dragged here; it learns that press is over from a mouseup on the
+// document, which the feedback widget's presses never reach (they stay in its
+// shadow tree: isolateLayerEvents). There each row acted twice on a press, and
+// once on a right press. A press that began in the popup is not a drag from
+// the button: the row's mouseup handler is skipped.
+const PressContext = createContext(null);
+function MenuPopup(props) {
+  const pressed = useRef(false);
+  return (
+    <PressContext.Provider value={pressed}>
+      <Menu.Popup {...props} onMouseDownCapture={() => { pressed.current = true; }} />
+    </PressContext.Provider>
+  );
+}
 
 export function AppMenu({
   trigger,
@@ -22,7 +39,7 @@ export function AppMenu({
       <Menu.Trigger render={trigger} />
       <Menu.Portal container={usePortalContainer()}>
         <Menu.Positioner align={align} sideOffset={sideOffset} className={`ui-menu-positioner ${positionerClassName}`.trim()}>
-          <Menu.Popup className={`ui-menu-popup ${popupClassName}`.trim()} finalFocus={finalFocus}>{children}</Menu.Popup>
+          <MenuPopup className={`ui-menu-popup ${popupClassName}`.trim()} finalFocus={finalFocus}>{children}</MenuPopup>
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.Root>
@@ -37,6 +54,7 @@ export function AppMenuItem({
   className,
   ...props
 }) {
+  const pressed = useContext(PressContext);
   const classes = ['ui-menu-item', tone === 'danger' ? 'ui-menu-item-danger' : null, className]
     .filter(Boolean)
     .join(' ');
@@ -44,6 +62,7 @@ export function AppMenuItem({
     <Menu.Item
       className={classes}
       onClick={onClick}
+      onMouseUp={(event) => { if (pressed?.current) event.preventBaseUIHandler(); }}
       disabled={disabled}
       {...props}
     >
@@ -114,9 +133,9 @@ export function AppSubmenu({
           sideOffset={sideOffset}
           className="ui-menu-positioner"
         >
-          <Menu.Popup className={`ui-menu-popup ${popupClassName}`.trim()}>
+          <MenuPopup className={`ui-menu-popup ${popupClassName}`.trim()}>
             {children}
-          </Menu.Popup>
+          </MenuPopup>
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.SubmenuRoot>
