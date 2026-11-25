@@ -1057,7 +1057,12 @@ const SLUG = 'hostile-body-css';
               throw new Error(`the caret opened at ${caret.start}-${caret.end}, expected ${caret.len} (the end)`);
             }
             await page.fill(`${card} .tdoc-edit-form textarea`, 'rewritten by its author');
-            await page.click(`${card} .tdoc-edit-save`);
+            const [patch] = await Promise.all([
+              page.waitForRequest((r) => r.method() === 'PATCH' && r.url().includes('/api/comments')),
+              page.click(`${card} .tdoc-edit-save`),
+            ]);
+            // …and the save says which text it started from
+            if (patch.postDataJSON().base_text !== seeded) throw new Error(`base_text ${JSON.stringify(patch.postDataJSON())}`);
             await page.waitForSelector(`${card} .tdoc-edit-form`, { state: 'detached', timeout: 4000 });
             await page.waitForFunction(
               (sel) => document.querySelector(`${sel} .text`)?.textContent === 'rewritten by its author',

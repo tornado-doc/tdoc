@@ -132,7 +132,7 @@ export function useComments({ slug, version, versionNow = null, onChange, onUnau
       { show: (list, made) => withPostedComment(list, made, parentId) });
   }, [applyLocal, demo, identity, mutate, slug, version]);
 
-  const edit = useCallback(async (id, text) => {
+  const edit = useCallback(async (id, text, base) => {
     if (demo) {
       const trimmed = text.trim();
       applyLocal((list) => list.map((c) => {
@@ -142,7 +142,7 @@ export function useComments({ slug, version, versionNow = null, onChange, onUnau
       }));
       return { ok: true };
     }
-    return mutate(() => updateCommentText({ slug, version, id, text: text.trim() }));
+    return mutate(() => updateCommentText({ slug, version, id, text: text.trim(), base_text: base }));
   }, [applyLocal, demo, mutate, slug, version]);
 
   const react = useCallback(async (commentId, emoji) => {

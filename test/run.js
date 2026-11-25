@@ -95,6 +95,7 @@ const OFFLINE = [
   'agent-authorship.test.js',  // authorship at write time (upload, agent replies that mark applied) and answer-only locks from send to answer, per question, failing closed
   'comment-wipe-authorship.test.js', // the comment wipe and team move follow agent authorship; a successful wipe answers 200
   'comment-email-privacy.test.js', // email commenters: aliases for other readers, own/invited/team keep the address
+  'comment-email-checks.test.js', // shown addresses: every one's deletion check read (batched), a failed read hides; long strings cost linear time
   'display-name.test.js',       // Settings -> Name: validation, gates, rate limit; chosen name beats re-login and shows on existing comments, @ list, roster, inbox; agents keep theirs
   'mcp-discovery.test.js',     // MCP findable: llms.txt Connect, markdown connect line, raw Link rel=mcp (bytes unchanged), server card + AI catalog, remoteMcp default on
   'agent-native.test.js',      // doc pages point agents at /raw + skill; /llms.txt; Bearer /raw for team/invited docs
