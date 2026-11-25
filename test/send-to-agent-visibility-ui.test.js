@@ -5,6 +5,7 @@
 // (no team daemon, team admin only, no team agent, an agent that may not
 // write, Finding your agents… while it loads). Dogfood 2026-11-20.
 // Run with: node test/send-to-agent-visibility-ui.test.js
+require('./helpers/temp-dirs');
 const assert = require('assert/strict');
 const fs = require('fs');
 const os = require('os');

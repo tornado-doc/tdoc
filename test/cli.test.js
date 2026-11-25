@@ -727,7 +727,7 @@ t('tdoc-new --force preserves the existing doc when new HTML is INVALID [the bug
 // without validation, so a `..` slug escaped TDOC_DIR. Each must now reject a
 // non-kebab-case slug BEFORE any side effect.
 t('publish/pull/unpublish reject traversal + non-kebab slugs', () => {
-  const env = { ...process.env, TDOC_DIR: '/tmp/tdoc-slugtest-nonexistent', HOME: '/tmp/tdoc-slugtest-home', TDOC_SKIP_UPDATE_CHECK: '1' };
+  const env = { ...process.env, TDOC_DIR: path.join(os.tmpdir(), 'tdoc-slugtest-nonexistent'), HOME: path.join(os.tmpdir(), 'tdoc-slugtest-home'), TDOC_SKIP_UPDATE_CHECK: '1' };
   const bad = ['../private', 'a/../b', 'UPPER', 'has space', 'trailing-', '-leading', 'with/slash'];
   for (const cli of ['tdoc-publish', 'tdoc-pull', 'tdoc-unpublish']) {
     for (const slug of bad) {
@@ -740,7 +740,7 @@ t('publish/pull/unpublish reject traversal + non-kebab slugs', () => {
 
 t('tdoc-agent-reply --print-identity detects host runtime from env', () => {
   const bin = path.join(BIN, 'tdoc-agent-reply');
-  const base = { ...process.env, HOME: '/tmp/tdoc-no-home-' + Date.now() };
+  const base = { ...process.env, HOME: path.join(os.tmpdir(), 'tdoc-no-home') };
   for (const k of Object.keys(base)) {
     if (/^(GROK_|CLAUDE_|CLAUDECODE$|CODEX_|CURSOR_|COMPOSER_|GEMINI_|XAI_|TDOC_AGENT_)/.test(k)) delete base[k];
   }
@@ -767,7 +767,7 @@ t('tdoc-agent-reply --print-identity detects host runtime from env', () => {
 });
 
 t('publish accepts a valid kebab-case slug (passes validation, fails later on missing doc)', () => {
-  const env = { ...process.env, TDOC_DIR: '/tmp/tdoc-slugtest-nonexistent', TDOC_SKIP_UPDATE_CHECK: '1' };
+  const env = { ...process.env, TDOC_DIR: path.join(os.tmpdir(), 'tdoc-slugtest-nonexistent'), TDOC_SKIP_UPDATE_CHECK: '1' };
   const r = spawnSync(path.join(BIN, 'tdoc-publish'), ['valid-slug-123'], { env, encoding: 'utf8', timeout: 15000 });
   // It should get PAST slug validation (no 'invalid slug') and fail on the
   // missing doc instead — proving valid slugs aren't over-rejected.

@@ -16,6 +16,7 @@
 //   - a PR preview with no key streams its fixed draft over time.
 //
 // Run with: node test/write-with-ai-workerd.test.js   (part of npm run test:workerd)
+require('./helpers/temp-dirs');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');

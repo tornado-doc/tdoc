@@ -11,13 +11,29 @@ import { isPlainNavigationClick, startNavigationProgress } from '../nav-progress
 // once on a right press. A press that began in the popup is not a drag from
 // the button: the row's mouseup handler is skipped.
 const PressContext = createContext(null);
-function MenuPopup(props) {
+// Each time the menu opens or closes the press starts over.
+function usePress(open, onOpenChange) {
   const pressed = useRef(false);
+  useEffect(() => { pressed.current = false; }, [open]);
+  return {
+    pressed,
+    onOpenChange: (...args) => { pressed.current = false; onOpenChange?.(...args); },
+  };
+}
+function MenuPopup({ pressed, ...props }) {
   return (
     <PressContext.Provider value={pressed}>
       <Menu.Popup {...props} onMouseDownCapture={() => { pressed.current = true; }} />
     </PressContext.Provider>
   );
+}
+// A row's mouseup: the caller's, and the skip above.
+function useRowMouseUp(onMouseUp) {
+  const pressed = useContext(PressContext);
+  return (event) => {
+    onMouseUp?.(event);
+    if (pressed?.current) event.preventBaseUIHandler();
+  };
 }
 
 export function AppMenu({
@@ -34,12 +50,13 @@ export function AppMenu({
   // title menu's Rename, to its field) passes a function returning false.
   finalFocus = undefined,
 }) {
+  const press = usePress(open, onOpenChange);
   return (
-    <Menu.Root open={open} onOpenChange={onOpenChange}>
+    <Menu.Root open={open} onOpenChange={press.onOpenChange}>
       <Menu.Trigger render={trigger} />
       <Menu.Portal container={usePortalContainer()}>
         <Menu.Positioner align={align} sideOffset={sideOffset} className={`ui-menu-positioner ${positionerClassName}`.trim()}>
-          <MenuPopup className={`ui-menu-popup ${popupClassName}`.trim()} finalFocus={finalFocus}>{children}</MenuPopup>
+          <MenuPopup pressed={press.pressed} className={`ui-menu-popup ${popupClassName}`.trim()} finalFocus={finalFocus}>{children}</MenuPopup>
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.Root>
@@ -52,9 +69,10 @@ export function AppMenuItem({
   disabled = false,
   tone,
   className,
+  onMouseUp,
   ...props
 }) {
-  const pressed = useContext(PressContext);
+  const rowMouseUp = useRowMouseUp(onMouseUp);
   const classes = ['ui-menu-item', tone === 'danger' ? 'ui-menu-item-danger' : null, className]
     .filter(Boolean)
     .join(' ');
@@ -62,7 +80,7 @@ export function AppMenuItem({
     <Menu.Item
       className={classes}
       onClick={onClick}
-      onMouseUp={(event) => { if (pressed?.current) event.preventBaseUIHandler(); }}
+      onMouseUp={rowMouseUp}
       disabled={disabled}
       {...props}
     >
@@ -76,7 +94,8 @@ export function AppMenuItem({
 // shows its address on hover. A plain click keeps the menu open with the row
 // marked busy, and the top-of-page bar starts, until the next page arrives:
 // a slow page must never look like a click that did nothing.
-export function AppMenuLinkItem({ href, children, className, onClick, ...props }) {
+export function AppMenuLinkItem({ href, children, className, onClick, onMouseUp, ...props }) {
+  const rowMouseUp = useRowMouseUp(onMouseUp);
   const [pending, setPending] = useState(false);
   useEffect(() => {
     if (!pending) return undefined;
@@ -97,6 +116,7 @@ export function AppMenuLinkItem({ href, children, className, onClick, ...props }
         setPending(true);
         startNavigationProgress();
       }}
+      onMouseUp={rowMouseUp}
       {...props}
     >
       {children}
@@ -121,8 +141,9 @@ export function AppSubmenu({
   align = 'start',
   sideOffset = 4,
 }) {
+  const press = usePress(undefined);
   return (
-    <Menu.SubmenuRoot>
+    <Menu.SubmenuRoot onOpenChange={press.onOpenChange}>
       <Menu.SubmenuTrigger className={`ui-menu-item ${className}`.trim()}>
         {trigger}
       </Menu.SubmenuTrigger>
@@ -133,7 +154,7 @@ export function AppSubmenu({
           sideOffset={sideOffset}
           className="ui-menu-positioner"
         >
-          <MenuPopup className={`ui-menu-popup ${popupClassName}`.trim()}>
+          <MenuPopup pressed={press.pressed} className={`ui-menu-popup ${popupClassName}`.trim()}>
             {children}
           </MenuPopup>
         </Menu.Positioner>

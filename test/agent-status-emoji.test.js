@@ -3,6 +3,7 @@
 //
 // Run with: node test/agent-status-emoji.test.js
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');

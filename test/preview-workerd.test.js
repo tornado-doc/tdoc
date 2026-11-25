@@ -1,5 +1,6 @@
 // Exercise the deployed bundle's renderPreviewPng in workerd. Node allows
 // runtime WASM compilation, so the ordinary Worker harness misses this.
+require('./helpers/temp-dirs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

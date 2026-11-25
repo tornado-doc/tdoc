@@ -9,6 +9,7 @@
 // and results.json (per-side page errors). Scenes cover the reader chrome:
 // bar, menus, Publish dialog, comment card/reply/composer, dark mode, phone
 // drawer, the owner Share panel (boot payload rewritten in-flight), and /me.
+require('../helpers/temp-dirs');
 const { chromium } = require('playwright');
 const { toggleTheme } = require('../helpers/theme-toggle');
 const { spawn } = require('child_process');

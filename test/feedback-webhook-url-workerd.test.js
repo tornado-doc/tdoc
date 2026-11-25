@@ -7,6 +7,7 @@
 // inside the isolate. KV and R2 are small in-memory fakes.
 //
 // Run with: node test/feedback-webhook-url-workerd.test.js   (part of npm run test:workerd)
+require('./helpers/temp-dirs');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');

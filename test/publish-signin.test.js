@@ -10,6 +10,7 @@
 // HERMETIC: spawns its own server with a throwaway HOME and TDOC_DIR.
 // Run with: node test/publish-signin.test.js
 
+require('./helpers/temp-dirs');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');

@@ -5,6 +5,7 @@
 // port (was: assumed an already-running server on :7878 and wrote into the real
 // ~/tdocs, so it shared state with the user's actual docs and could collide).
 
+require('./helpers/temp-dirs');
 const http = require('http');
 const HOST = '127.0.0.1';
 let PORT = 0; // assigned after the spawned server picks an ephemeral port

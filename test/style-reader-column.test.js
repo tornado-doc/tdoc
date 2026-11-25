@@ -3,6 +3,7 @@
 // must read like a published tdoc, so the style's copy of the column rules has
 // to stay equal to server/reader.css, the template tdoc-bake stamps in. This
 // file is the drift guard: one source of values, four copies held to it.
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

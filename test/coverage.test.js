@@ -6,6 +6,7 @@
 //
 // Run with: node test/coverage.test.js
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

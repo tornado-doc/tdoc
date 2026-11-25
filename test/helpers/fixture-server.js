@@ -15,6 +15,7 @@
 // This file also owns port allocation for every test that boots a server, so
 // that no suite has to guess a free port. See startStub() below for why.
 
+require('./temp-dirs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

@@ -3,6 +3,7 @@
 // live Cloudflare. Extracted from hosted-oob-behavior.test.js when a second
 // suite needed the same boot; that file still owns the hosted-token cases.
 
+require('./temp-dirs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

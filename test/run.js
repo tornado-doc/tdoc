@@ -12,10 +12,17 @@
 //   node test/run.js --all      # also attempt network/browser suites
 //   node test/run.js --perf     # performance budgets enforced (CI perf job)
 
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 
+// A kill of the runner stops the suite it is running; then the temp folders go
+// (a suite that could not remove its own, too).
+let running = null;
+for (const signal of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.once(signal, () => { if (running) running.kill(signal); });
+require('./helpers/temp-dirs');
+
 const OFFLINE = [
+  'temp-dirs.test.js', // what tests make under the temp folder goes with them: done, failed, thrown, Ctrl-C, kill; every test that makes one uses the helper; tdoc-publish and tdoc-new leave nothing
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
   'feedback-frame-anchor.test.js', // a comment inside a tdoc doc (anchor.frame): get_comments shows it on one line, no brackets, short, as author content, only for tdoc's own pages
   'react-source.test.js', // feedback on a React site: component chain + source from fiber / bundler attributes, best effort, never throws, nothing read without React, capped, escaped in Copy for agent and get_comments, rebuilt on save
@@ -314,7 +321,7 @@ const BROWSER = [
   'send-to-agent-visibility-ui.test.js', // needs npm ci (esbuild, react-dom), so it runs with the browser suites. @agent rendered: hidden only for who may never send (SEND_TO_AGENT_WHO); disabled with its reason for a permitted person (no team daemon, admin only, no team agent, not a writer, Finding your agents…); connect link
   'comment-first-signin-ui.test.js', // comment first, sign in later (doc page, slides, sheets): signed-out Post signs in in a window and the held comment posts by itself, the page stays; the window's word alone posts nothing; blocked window: redirect, words restored ("Your comment is saved — Post"), never posted by themselves; Esc mid sign-in holds nothing
   'dogfood-frictions-ui.test.js', // dogfood 2026-11-20: landing Any web app tab readable on a phone, Feedback for your site (bar / phone ⋯), comment button over no CTA; widget signed out: Post + sign-in line, no @agent, one tdoc window, Esc closes the composer and keeps the words
-  'menu-one-press-ui.test.js', // a press on a menu row acts once (mouse, tap, keys, drag from the button, right press) on the widget and the doc page; the widget's Copy / markers / Edit / Delete / Move anchor for real
+  'menu-one-press-ui.test.js', // needs npm ci (esbuild). A press on a menu row acts once (mouse, tap, keys, drag from the button, right press; rows, links, submenus) in a shadow tree; the widget's Copy / markers / Edit / Delete / Move anchor for real
   'feedback-panel-parity-ui.test.js', // the widget's comment list = the doc page's: same side width, same filter row (one line, options inside the pill, same geometry), on a plain and a hostile host page; desktop + phone
   'comment-one-behaviour-ui.test.js', // doc page, feedback space and widget draw one card: reply prefill rule, one agent-list height, a reply draft per thread, floating card fits the screen, panel drag width
   'ask-edit-feedback-ui.test.js', // Ask/Edit v2 feedback: @agent in a comment or reply asks for suggestions (phone drawer, ⌘⇧Enter), nothing changes outside dev mode, a reply box is not held by delivery, rewrites read as blocks, edits stay text
@@ -403,19 +410,26 @@ if (runAll || runBrowser) {
   process.env.TDOC_REQUIRE_BROWSER_TESTS = '1';
 }
 
-let failed = [];
-for (const f of files) {
-  const p = path.join(__dirname, f);
-  process.stdout.write(`\n=== ${f} ===\n`);
-  const env = perfFilter.has(f) ? { ...process.env, TDOC_PERF: 'enforce', TDOC_TEST_FILTER: perfFilter.get(f) } : process.env;
-  const r = spawnSync(process.execPath, [p], { stdio: 'inherit', env });
-  if (r.status !== 0) failed.push(f);
-}
+const run = (file, env) => new Promise((done) => {
+  running = spawn(process.execPath, [file], { stdio: 'inherit', env });
+  running.once('error', () => done(1));
+  running.once('exit', (status) => { running = null; done(status); });
+});
 
-console.log('\n────────────────────────────────────────');
-if (failed.length) {
-  console.log(`FAIL — ${failed.length}/${files.length} suite(s) failed: ${failed.join(', ')}`);
-  process.exit(1);
-}
-console.log(`PASS — all ${files.length} suite(s) green`);
-if (!runAll && !runBrowser) console.log('(browser suites: npm run test:browser; provider integration: npm run test:all)');
+(async () => {
+  let failed = [];
+  for (const f of files) {
+    const p = path.join(__dirname, f);
+    process.stdout.write(`\n=== ${f} ===\n`);
+    const env = perfFilter.has(f) ? { ...process.env, TDOC_PERF: 'enforce', TDOC_TEST_FILTER: perfFilter.get(f) } : process.env;
+    if (await run(p, env) !== 0) failed.push(f);
+  }
+
+  console.log('\n────────────────────────────────────────');
+  if (failed.length) {
+    console.log(`FAIL — ${failed.length}/${files.length} suite(s) failed: ${failed.join(', ')}`);
+    process.exit(1);
+  }
+  console.log(`PASS — all ${files.length} suite(s) green`);
+  if (!runAll && !runBrowser) console.log('(browser suites: npm run test:browser; provider integration: npm run test:all)');
+})();

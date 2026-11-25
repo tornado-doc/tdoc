@@ -9,6 +9,7 @@
 // Why this exists: the browser Save path (#329) shipped without baking, which
 // is exactly what happens when "store a version" is not a function anyone can
 // be routed through. The harness mirrors hosted-oob-behavior.test.js.
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

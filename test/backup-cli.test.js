@@ -1,3 +1,4 @@
+require('./helpers/temp-dirs');
 const assert = require('assert/strict');
 const crypto = require('crypto');
 const fs = require('fs');

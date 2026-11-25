@@ -14,6 +14,7 @@
 //
 // Run with: node test/resume-signin.test.js
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');

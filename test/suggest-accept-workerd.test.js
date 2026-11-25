@@ -12,6 +12,7 @@
 // and a Raft agent signs suggestions with its own handle.
 //
 // Run with: node test/suggest-accept-workerd.test.js   (part of npm run test:workerd)
+require('./helpers/temp-dirs');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');

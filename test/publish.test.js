@@ -5,6 +5,7 @@
 //
 // Run: NODE_PATH=/private/tmp/node_modules node test/publish.test.js
 
+require('./helpers/temp-dirs');
 const { chromium } = require('playwright');
 const { spawn } = require('child_process');
 const fs = require('fs');

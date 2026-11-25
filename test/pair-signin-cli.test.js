@@ -9,6 +9,7 @@
 //
 // Run with: node test/pair-signin-cli.test.js
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');

@@ -5,6 +5,7 @@
 // are small in-memory fakes inside the isolate.
 //
 // Run with: node test/search-workerd.test.js   (part of npm run test:workerd)
+require('./helpers/temp-dirs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

@@ -5,6 +5,7 @@
 // (same pattern as csp-headers.test.js) because the offline suite cannot
 // boot Cloudflare.
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
