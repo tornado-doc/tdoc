@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Bot, DatabaseBackup, FileText, Globe, MessageSquareText, RefreshCw, ServerCog, SlidersHorizontal, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppButton } from '../ui/button.jsx';
@@ -135,7 +135,7 @@ export function TeamCommentsPane({ team, pageSize = 25, sources = false, initial
     <CommentsPane
       scopeKey={`team:${team.id}`}
       scopeName={team.name}
-      load={(offset) => listTeamComments(team.id, offset)}
+      load={(at) => listTeamComments(team.id, at)}
       pageSize={pageSize}
       sources={sources}
       initialDoc={initialDoc}
@@ -147,6 +147,11 @@ export function TeamCommentsPane({ team, pageSize = 25, sources = false, initial
 // commentsSitesTabs My docs' too. `sources` (the flag) marks each row with
 // where it came from, a doc or a site, and adds From to the filters.
 // `initialDoc` opens it filtered to one doc or site (a Sites row's name).
+// With `sources` it also loads a page at a time, newest first (the worker's
+// commentFeedPage); what is older than `through` waits, so that rows do not
+// move as more load. Filters look in the comments loaded.
+const FEED_PAGES = 4;
+const time = (created) => Date.parse(created) || 0;
 export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources = false, initialDoc = '', id = 'pane-team-comments' }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -162,33 +167,67 @@ export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources
   const [since, setSince] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
+  // Where the feed is: { items, next, through, missed }; null once left.
+  const feed = useRef(null);
+  const [more, setMore] = useState(false);
+  // The doc the Doc filter loaded whole (a Sites row's name).
+  const [wholeDoc, setWholeDoc] = useState('');
+
+  const add = (at, page) => {
+    for (const item of page.items || []) at.items.set(`${item.slug}:${item.id}`, item);
+    setItems([...at.items.values()]);
+  };
+  // Pages until `enough()`, at most `pages` of them (by offset: all).
+  const loadPages = async (at, pages, enough) => {
+    for (let n = 0; n < pages && at.next !== null && !enough(); n += sources ? 1 : 0) {
+      const got = await load(at.next);
+      if (feed.current !== at) return;
+      add(at, got);
+      at.next = got.next == null ? null : sources ? { cursor: got.next } : Number(got.next);
+      if (got.through && (!at.through || time(got.through) < time(at.through))) at.through = got.through;
+      at.missed = at.missed || !!got.missed;
+      setLoadedDocs((n) => n + Number(got.docs_scanned || 0));
+      setTotalDocs(Number(got.docs_total || 0));
+      setMore(at.next !== null);
+    }
+  };
+  const run = async (at, work) => {
+    setLoading(true);
+    setError('');
+    try {
+      await work();
+    } catch (e) {
+      if (feed.current === at) setError(message(e));
+    } finally {
+      if (feed.current === at) setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let cancelled = false;
+    const at = { items: new Map(), next: sources ? {} : 0, through: '', missed: false };
+    feed.current = at;
     setItems([]);
-    setLoading(true);
     setLoadedDocs(0);
     setTotalDocs(0);
-    setError('');
-    (async () => {
-      let offset = 0;
-      try {
-        do {
-          const page = await load(offset);
-          if (cancelled) return;
-          setItems((current) => [...current, ...(page.items || [])]);
-          setLoadedDocs((n) => n + Number(page.docs_scanned || 0));
-          setTotalDocs(Number(page.docs_total || 0));
-          offset = page.next == null ? null : Number(page.next);
-        } while (offset != null);
-      } catch (e) {
-        if (!cancelled) setError(message(e));
-      } finally {
-        if (!cancelled) setLoading(false);
+    setMore(false);
+    run(at, async () => {
+      if (sources && initialDoc) {
+        const got = await load({ doc: initialDoc });
+        if (feed.current !== at) return;
+        add(at, got);
+        setWholeDoc(initialDoc);
       }
-    })();
-    return () => { cancelled = true; };
+      await loadPages(at, FEED_PAGES, () => sources && typeof at.next.cursor === 'string' && rowsShown(at).length > 0);
+    });
+    return () => { feed.current = null; };
   }, [scopeKey]);
+
+  const loadMore = () => {
+    const at = feed.current;
+    const had = rowsShown(at).length;
+    setPage((n) => n + 1);
+    if (had <= visible && at.next !== null) run(at, () => loadPages(at, FEED_PAGES, () => rowsShown(at).length > had));
+  };
 
   const isSite = (item) => item.source === 'site';
   const people = new Map();
@@ -209,7 +248,7 @@ export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources
     setSince('');
     setFrom('all');
   };
-  const shown = items
+  const matching = (list) => list
     .filter((item) => status === 'all' || (status === 'resolved' ? item.resolved : !item.resolved))
     .filter((item) => replyState === 'all'
       || (replyState === 'unreplied' ? item.kind === 'comment' && Number(item.reply_count || 0) === 0 : Number(item.reply_count || 0) > 0))
@@ -218,12 +257,17 @@ export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources
     .filter((item) => !doc || item.slug === doc)
     .filter((item) => !sources || from === 'all' || (from === 'sites' ? isSite(item) : !isSite(item)))
     .filter((item) => !sinceMs || Date.parse(item.created || '') >= sinceMs)
-    .sort((a, b) => String(b.created).localeCompare(String(a.created)));
+    .sort((a, b) => (sources && time(b.created) - time(a.created)) || String(b.created).localeCompare(String(a.created)));
+  // Not those older than what is left to load; a doc's come together.
+  const rowsShown = (at) => matching([...at.items.values()].filter((item) => !sources || doc || at.next === null || !at.through || time(item.created) >= time(at.through)));
+  const shown = feed.current ? rowsShown(feed.current) : [];
   const safePageSize = Math.max(1, Number(pageSize) || 25);
   const pageCount = Math.max(1, Math.ceil(shown.length / safePageSize));
   const visiblePage = Math.min(page, pageCount);
   const pageStart = (visiblePage - 1) * safePageSize;
-  const pageItems = shown.slice(pageStart, pageStart + safePageSize);
+  const visible = page * safePageSize;
+  const pageItems = sources ? shown.slice(0, visible) : shown.slice(pageStart, pageStart + safePageSize);
+  const partial = sources && more && !(doc && (doc === wholeDoc || items.some((item) => item.slug === doc)));
 
   useEffect(() => { setPage(1); }, [status, replyState, authorKind, person, doc, since, from, scopeKey]);
 
@@ -332,12 +376,12 @@ export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources
         </div>
       </AppDialog>
 
-      {loading ? <p className="muted tm-comment-progress">Loading comments… {loadedDocs}{totalDocs ? ` of ${totalDocs}` : ''} docs</p> : null}
+      {loading && !(sources && pageItems.length) ? <p className="muted tm-comment-progress">Loading comments…{sources ? '' : ` ${loadedDocs}${totalDocs ? ` of ${totalDocs}` : ''} docs`}</p> : null}
       {error ? <p className="tm-comment-error">{error}</p> : null}
       {!loading && !error && !shown.length ? (
         <div className="empty">
           <MessageSquareText size={22} aria-hidden="true" />
-          <p>{items.length ? 'No comments match these filters.' : `No comments in ${scopeName} yet.`}</p>
+          <p>{partial ? 'Nothing matches in the comments loaded so far.' : items.length ? 'No comments match these filters.' : `No comments in ${scopeName} yet.`}</p>
         </div>
       ) : null}
       <div className="tm-comment-list">
@@ -368,7 +412,14 @@ export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources
           );
         })}
       </div>
-      {shown.length > safePageSize ? (
+      {sources && (shown.length > visible || partial || feed.current?.missed) ? (
+        <div className="tm-comment-more">
+          {feed.current?.missed ? <span>Some comments could not be loaded. Reload to try again.</span> : null}
+          {partial ? <span>Newest first. Load more for older comments. Filters look in what is loaded.</span> : null}
+          {shown.length > visible || partial ? <AppButton disabled={loading} onClick={loadMore}>{loading ? 'Loading…' : 'Load more'}</AppButton> : null}
+        </div>
+      ) : null}
+      {!sources && shown.length > safePageSize ? (
         <nav className="tm-comment-pagination" aria-label="Comment pages">
           <span>{pageStart + 1}–{Math.min(pageStart + safePageSize, shown.length)} of {shown.length}</span>
           <div>
