@@ -375,7 +375,7 @@ const addresses = (text) => new Set(text.match(/[a-z0-9.]+@(?:corp|people)\.exam
           assert(r.status === (want.names ? 409 : 200), `${what}: ${r.status} ${r.text}`);
           if (want.names) {
             const body = JSON.parse(r.text);
-            assert(body.error === 'edit_hidden_address' && JSON.stringify(body.names) === JSON.stringify(want.names) && want.names.every((x) => body.message.includes(x)) && !/reload/.test(body.message), `${what}: ${r.text}`);
+            assert(body.error === 'edit_hidden_address' && JSON.stringify(body.names) === JSON.stringify(want.names) && want.names.every((x) => body.message.includes(x)) && !/reload|Too many/.test(body.message), `${what}: ${r.text}`);
           }
           const now = await n.stored(id);
           assert(now === (want.names ? null : want), `${what}: stored ${JSON.stringify(now)}`);
@@ -406,6 +406,8 @@ const addresses = (text) => new Set(text.match(/[a-z0-9.]+@(?:corp|people)\.exam
       ['read @ann@corp.example now', (s) => s.replace('@ann', '@Ann'), { names: ['@ann'] }],
       ['read @ann@corp.example now', (s) => s.replace('@ann', '@ann-led'), { names: ['@ann'] }],
       ['read @ann@corp.example now', (s) => s.replace('@ann', '@ann.then'), { names: ['@ann'] }],
+      ['read @a.b@corp.example now', (s) => s.replace('@a.b', '@a.b_x'), { names: ['@a.b'] }],
+      ['read @a.b@corp.example now', () => '_read @a.b_ now', { names: ['@a.b'] }],
       ['read @ann@corp.example;@bob@corp.example now', (s) => s.replace('@ann;@bob', "@ann;@bob's"), { names: ['@bob'] }],
       ['read @ann@corp.example\'s draft', (s) => `${s} now`, 'read @ann@corp.example\'s draft now'],
       ['ask @ann@corp.example or @ann-led now ok', () => 'well @ann-led then, fine', 'well @ann-led then, fine'],
@@ -460,7 +462,7 @@ const addresses = (text) => new Set(text.match(/[a-z0-9.]+@(?:corp|people)\.exam
           const r = await n.save('onet0', body);
           const ms = Math.round(Number(process.hrtime.bigint() - started) / 1e6);
           const names = r.status === 409 ? JSON.parse(r.text).names : [];
-          assert(ms < 1500 && (next === plain ? r.status === 200 : r.status === 409 && names.length && names.every((x) => base_text.includes(x))), `${text.slice(0, 30)} ${next.slice(0, 20)}: ${r.status} ${ms} ms ${names.slice(0, 4)}`);
+          assert(ms < 1500 && (next === plain ? r.status === 200 : r.status === 409 && names.length && names.every((x) => base_text.includes(x)) && /^Too many .* remove the @names\.$/.test(JSON.parse(r.text).message)), `${text.slice(0, 30)} ${next.slice(0, 20)}: ${r.status} ${ms} ms ${names.slice(0, 4)}`);
         }
         if (next === plain) assert(await n.stored('onet0') === plain, 'plain words');
       }

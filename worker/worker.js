@@ -15294,7 +15294,8 @@ async function redactCommentRowsByDoc(env, docs) {
 // words, the address goes back. Which is which is told by the words around
 // it; where that does not tell, nothing is saved.
 // `texts`: what the record has said, newest first. { text }, or { names }: the
-// @names that could be either; or { outdated }: it has changed since `base`.
+// @names that could be either (`many`: too many to look); or { outdated }: it
+// has changed since `base`.
 const EDIT_TEXTS_MAX = 20;
 // The hidden tags x the characters of the words with an `@` to find them in
 // (it runs in the doc's DO): past this nothing is told.
@@ -15317,7 +15318,7 @@ function restoreShortTags(texts, base, next) {
   const tagged = (list) => list.filter((w) => w.includes('@')).join(' ');
   const size = said.reduce((n, w, i) => n + (w === B[i] ? 0 : w.split('@').length), 0);
   const [was, now] = [tagged(B), tagged(N)];
-  if (size * (was.length + now.length) > EDIT_LOOK_MAX) return { names: [...new Set(tagged(B.filter((w, i) => w !== said[i])).match(/@[^\s@,;]+/g))].slice(0, 3) };
+  if (size * (was.length + now.length) > EDIT_LOOK_MAX) return { names: [...new Set(tagged(B.filter((w, i) => w !== said[i])).match(/@[^\s@,;]+/g))].slice(0, 3), many: true };
   // Per word of `base` with an address left out: each name as shown, and the host.
   const hidden = new Map();
   said.forEach((word, i) => {
@@ -15399,7 +15400,7 @@ function restoreShortTags(texts, base, next) {
     // way ("(@gone's)", "@Gone").
     const other = out.slice(p, N.length - q).filter((w) => w.includes('@') && !words.has(w)).join(' ').toLowerCase();
     for (const [i, tags] of hidden) {
-      if (i >= p && i < B.length - q) for (const t of tags) if (!back.has(t) && placesOf(other, t.name.toLowerCase(), /^[a-z0-9_@]/).length) unclear.add(t.name);
+      if (i >= p && i < B.length - q) for (const t of tags) if (!back.has(t) && placesOf(other, t.name.toLowerCase(), /^[a-z0-9@]/).length) unclear.add(t.name);
     }
     return { words: out, unclear };
   };
@@ -15421,10 +15422,11 @@ function recordTexts(c, id, version) {
 }
 // edit_text, when the words do not tell: what to do about it.
 function editUnclear(kept) {
-  const { names = [], outdated = false } = kept;
+  const { names = [], outdated = false, many = false } = kept;
+  if (many) return { status: 409, body: { error: 'edit_hidden_address', names, message: 'Too many of the addresses in this comment are hidden now. Try again later, or remove the @names.' } };
   return { status: 409, body: outdated
     ? { error: 'edit_outdated', message: 'This comment has changed since you opened it. Copy your text, reload the page and edit again.' }
-    : { error: 'edit_hidden_address', names, message: `${names.slice(0, 3).join(', ') || 'A name in it'} stands for an address that is hidden now. To save, keep the words next to it as they were, or remove or reword it.` } };
+    : { error: 'edit_hidden_address', names, message: `${names.slice(0, 3).join(', ')} stands for an address that is hidden now. To save, keep the words next to it as they were, or remove or reword it.` } };
 }
 
 // The addresses `present` in `value` that this reader may not see, replaced.
