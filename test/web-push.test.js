@@ -162,6 +162,8 @@ async function seedDoc(env, slug, owner) {
     for (const p of cap.sent) { const who = pushed[p.url.split('/').pop()]; who.item = (await who.browser.open(p.body)).item; }
     assert(pushed.eve.item.preview === '@eve ask @carol, or @bob', JSON.stringify(pushed.eve.item));
     assert(pushed.alice.item.preview === '@eve ask @carol@invited.example, or @bob', JSON.stringify(pushed.alice.item));
+    const bell = await (await worker.fetch(req('/api/notifications', { cookie: await putSession(env, 'eve') }), env, {})).json();
+    assert(pushed.eve.item.actor.login === bell.items[0].actor.login && /^email-alias:/.test(bell.items[0].actor.login), `${pushed.eve.item.actor.login} / ${bell.items[0].actor.login}`);
     for (const { item } of Object.values(pushed)) assert(item.actor.name === 'dave' && !JSON.stringify(item).includes('hidden.example'), JSON.stringify(item.actor));
   });
 

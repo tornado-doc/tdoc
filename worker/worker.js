@@ -15004,18 +15004,24 @@ const TAG_MORE_HOST_RE = /[.\uff0e][)\]}>\uff09]*[\p{L}\p{N}\p{M}]|[\u3002\uff61
 // `shows(address)`: may this reader see it? (A string: yes, but for this end
 // of it, which only follows the address.) Otherwise its host goes, and what
 // follows the host stays unless it may be more of the host.
-function cutEmailTags(text, shows) {
-  return text.replace(TAG_RUN_RE, (run) => {
+// `cut`: the text was cut to a length, so a host it ends in may not be whole.
+function cutEmailTags(text, shows, { cut = false } = {}) {
+  return text.replace(TAG_RUN_RE, (run, at) => {
     const parts = run.slice(1).split('@');
     if (parts.length < 2) return run;
     const isHost = (x) => { const dot = (x || '').indexOf('.', 1); return dot > 0 && dot < x.length - 1; };
     let out = `@${parts[0]}`;
     let name = parts[0]; // what a host would belong to
+    const last = cut && at + run.length === text.length ? parts.length - 1 : 0;
     let after = ''; // 'host': just after one; 'parted': and what parts it from the next tag
     for (let i = 1; i < parts.length; i++) {
       const seg = parts[i];
       // "@name@@host": still that name's, and "@name@host@@host" that host's.
       if (!seg && (after === 'host' || (!after && /[\p{L}\p{N}\p{M}_+.-]$/u.test(name)))) { out += '@'; continue; }
+      // Nothing after it: the start of a host, its dot cut off (not a handle
+      // and text: "@lee请看@eli然后").
+      if (i === last && name && !after && !isHost(seg) && (/^[A-Za-z0-9.-]*$/.test(seg)
+        || (/^[\p{L}\p{N}\p{M}\p{C}.-]*$/u.test(seg) && (/[A-Za-z0-9_+.-]$/.test(name) || !/^[A-Za-z0-9]/.test(name))))) continue;
       const again = after === 'host' && isHost(seg); // a host right after another
       // "@lee,@j.kim@host": "lee," has no host, j.kim does -- or j.kim is the
       // host: shown only to who may see the address.
@@ -15028,7 +15034,8 @@ function cutEmailTags(text, shows) {
       }
       const shown = !again && shows(`${name}@${seg}`);
       if (shown === true) { out += `@${seg}`; name = ''; after = 'host'; continue; }
-      const rest = shown || afterTagHost(seg);
+      let rest = shown || afterTagHost(seg);
+      if (i === last && !shown) rest = rest.replace(/[A-Za-z0-9.-]{1,64}$/, '');
       out += shown ? `@${seg}` : rest;
       const word = /[A-Za-z0-9_+.-]$/.test(rest);
       name = word ? rest : '';
@@ -15233,7 +15240,6 @@ async function aliasCommentEmails(value, privacy, present, gone) {
 // changes. A tag this reader may see stays whole with punctuation around it.
 // `gone`: addresses nobody sees.
 function notificationPreview(text, privacy, { cut = false, gone = new Set() } = {}) {
-  let s = String(text || '');
   const may = (address) => { const e = address.toLowerCase(); return privacy.reveal.has(e) && !gone.has(e); };
   const shows = (address) => {
     if (may(address)) return true;
@@ -15242,17 +15248,7 @@ function notificationPreview(text, privacy, { cut = false, gone = new Set() } = 
     const name = address.slice(0, at).replace(/^[<([{"'\u2018\u201c\u300a\u300c\u3010\uff08]+/, '');
     return may(`${name}@${address.slice(at + 1, address.length - rest.length)}`) ? rest || true : false;
   };
-  // Stored cut to a length: the host it ends in may not be all there.
-  if (cut) {
-    let start = s.length;
-    while (start > 0 && !/\s/.test(s[start - 1])) start -= 1;
-    const at = s.lastIndexOf('@');
-    if (at > s.indexOf('@', start) && s.indexOf('@', start) >= start) {
-      const name = s.slice(Math.max(start, s.lastIndexOf('@', at - 1) + 1), at);
-      if (!may(`${name}@${s.slice(at + 1)}`)) s = s.slice(0, at);
-    }
-  }
-  return cutEmailTags(s, shows);
+  return cutEmailTags(String(text || ''), shows, { cut });
 }
 function notificationRowTags(row) {
   return !!row && typeof row.preview === 'string' && /@[^\s@]*@/.test(row.preview);
@@ -17107,7 +17103,65 @@ const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
 // writing someone's address is not the same act as calling them into the
 // thread. Matched before the handle pass so "@dana@example.com" cannot be
 // half-read as a mention of a GitHub user named dana.
-const EMAIL_MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
+const EMAIL_MENTION_RE = /(?<![A-Za-z0-9_@\/-])@(?=([^\s@]+)@([^\s@]+)(@[^\s@]+)?)/g;
+
+// The address an email tag names: `name` and `rest` are what is around its
+// second @. It ends where its host does, whatever is written against it
+// ("@a@b.com, then", full-width punctuation, a sentence with no space); a
+// bracket or a quote before it is not in it. null: not a tag (a handle, with
+// the next tag after it); no `address`: one that is nobody's, and none of it
+// is a handle either (`next`: the next tag starts after it).
+function emailTagAddress(name, rest, next = '') {
+  const local = name.replace(/^[<([\x7b"'`\u2018\u201c\u300a\u300c\u3010\uff08]+/, '');
+  const nobody = { address: '', host: -1 };
+  if (!looksLikeHost(rest)) return null;
+  // "@lee,@j.kim@host": a name, and the next tag's dotted one.
+  if (looksLikeHost(next.slice(1)) && /[A-Za-z0-9]$/.test(rest) && !/[A-Za-z0-9_+.-]$/.test(name)) return /^[A-Za-z0-9-]{1,39}[^A-Za-z0-9_@.+'-]/.test(name) ? null : { ...nobody, next: true };
+  // A name that punctuation ends is not a tag's, and what follows its @ is
+  // still a host ("@lee,@example.com"): nobody is named.
+  if (/[,;:!?)|/>\]\u2019\u201d\u2026\u3000-\u3002\u3009\u300b\u300d\u300f\u3011\uff01-\uff0f\uff1a-\uff20]$/.test(name)) return nobody;
+  if (!local || /[,;:"<>()[\]\\\u2018-\u201f\u2026\u3000-\u3002\u3008-\u3011\uff01-\uff0f\uff1a-\uff20]|\.$/.test(local)) return nobody;
+  const ascii = (/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+/.exec(rest) || [''])[0];
+  const after = rest.slice(ascii.length);
+  // A dot before a letter further on: more of the host, not text after it.
+  const more = (x) => /[.\uff0e][)\]\x7d>\uff09]*[\p{L}\p{N}\p{M}]|[\u3002\uff61][A-Za-z0-9]|^[(<\uff08]dot[)>\uff09]|\p{C}/iu.test(x);
+  let host = '';
+  if (ascii && (!/[\p{L}\p{N}\p{M}\p{C}]/u.test(after) || (!more(after) && (
+    /^[!?)\]\x7d>"'(<\u2018-\u201f\u2026\u3001\u3008-\u3011\uff01\uff08\uff09\uff1f]|^[,;:\u3002\uff0c\uff1a\uff1b](?![A-Za-z0-9])/.test(after)
+    || /^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u.test(after))))) {
+    host = ascii;
+  } else {
+    // A host that is not ASCII: as typed, up to punctuation.
+    let end = rest.length;
+    while (end > 0 && '.,;:!?)_-'.includes(rest[end - 1])) end -= 1;
+    const typed = rest.slice(0, end);
+    host = typed.split(/[,;:!?()<>[\]\x7b\x7d"'`|/\\\u2018-\u201f\u2026\u3000-\u3002\u3008-\u3011\uff01-\uff0f\uff1a-\uff20]/)[0];
+    if (host !== typed && (host === ascii || more(typed.slice(host.length)))) host = '';
+  }
+  const address = host ? normalizeEmail(`${local}@${host}`) : null;
+  return address ? { address, host: host.length } : nobody;
+}
+// Dots between two labels (full-width ones too).
+function looksLikeHost(s) {
+  return /[^.\u3002\uff0e\uff61](?:[.\uff0e\uff61]+[^.\u3002\uff0e\uff61]|[\u3002\uff61][A-Za-z0-9])/.test(s);
+}
+// `after`: the text after a handle. Is the handle on its own, or part of
+// something else: a longer word ("@k_l", "@x+y"), a host ("@example.com", with
+// any joiner), or an address ("@dana@example.com")?
+function handleStandsAlone(after) {
+  const word = /^[^\s@]*/.exec(after)[0];
+  if (/^(?:[_+][A-Za-z0-9]|(?![A-Za-z\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}])[\p{L}\p{M}])/u.test(word)) return false;
+  // Chinese, Japanese and Korean are written on without a space, so a dot
+  // further on is the text's (a file name, a sentence's end), not a host's.
+  if (!/^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}\u3002]/u.test(word)) {
+    const piece = /^[^,;:!?()<>[\]\x7b\x7d"'`|/\\\u2018-\u201f\u2026\u3001\u3008-\u3011\uff01\uff08\uff09\uff0c\uff1a\uff1b\uff1f]*/.exec(word)[0];
+    if (/(?<![.\u3002\uff0e\uff61])(?:[.\uff0e\uff61][\p{L}\p{N}\p{M}]|[\u3002\uff61][A-Za-z0-9])/u.test(piece)) return false;
+    if (/^[^\p{L}\p{N}]*(?<![.\uff0e])[.\uff0e][\p{L}\p{N}]/u.test(word)) return false;
+  }
+  if (after[word.length] !== '@') return true;
+  const next = /^[^\s@]*/.exec(after.slice(word.length + 1))[0];
+  return !looksLikeHost(next) && (!!word || !/^[\p{L}\p{N}]/u.test(next));
+}
 
 function parseMentionLogins(text) {
   if (typeof text !== 'string' || !text) return [];
@@ -17116,19 +17170,28 @@ function parseMentionLogins(text) {
   const add = (key) => { if (key && !seen.has(key)) { seen.add(key); out.push(key); } };
   // Email tags first, and blank their spans so the handle pass cannot re-read
   // the local part of an address as a handle.
-  let source = text;
+  let source = '';
+  let from = 0;
   const er = new RegExp(EMAIL_MENTION_RE.source, 'g');
   let m;
-  while ((m = er.exec(source))) {
-    const addr = String(m[2]).replace(/[.,;:!?)]+$/, '').toLowerCase();
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) add(`email:${addr}`);
+  while ((m = er.exec(text))) {
+    const tag = emailTagAddress(m[1], m[2], m[3]);
+    if (!tag) continue;
+    add(tag.address && `email:${tag.address}`);
+    const end = m.index + m[1].length + 2 + tag.host;
+    // Nothing is read on from a slash; a handle right after an address is.
+    const on = tag.address ? /^[-/_]*(?=@)/.exec(text.slice(end, end + 8)) : null;
+    source += text.slice(from, m.index) + (on ? ' ' : '/');
+    from = end + (on ? on[0].length : 0);
+    er.lastIndex = tag.address || tag.next ? from : from + 1;
   }
-  source = source.replace(new RegExp(EMAIL_MENTION_RE.source, 'g'), '$1');
+  source += text.slice(from);
   const re = new RegExp(MENTION_RE.source, 'g');
   while ((m = re.exec(source))) {
     // A GitHub login never ends in a hyphen, so `@dana-` names dana.
     const login = String(m[2]).replace(/-+$/, '').toLowerCase();
-    add(login);
+    const at = re.lastIndex - (m[2].length - login.length);
+    if (handleStandsAlone(source.slice(at, at + 600))) add(login);
   }
   return out;
 }
@@ -33732,6 +33795,16 @@ const tdocHandlers = {
           inviteBudget: Math.max(0, MENTION_INVITE_ALLOWLIST_MAX - access.allowed_users.length),
         },
       );
+      // A mention never fails the comment: what cannot be invited is not told.
+      const patched = outcome.invited.length ? applyAccessPatch(meta, {
+        allowed_users: access.allowed_users.concat(outcome.invited.map((k) =>
+          String(k).startsWith('email:') ? String(k).slice(6) : k)),
+      }) : null;
+      if (patched && patched.error) {
+        outcome.notified = outcome.notified.filter((k) => !outcome.invited.includes(k));
+        outcome.blocked.push(...outcome.invited);
+        outcome.invited = [];
+      }
       const mentions = outcome.notified;
       // Who among them is new to this doc, and can the mention find them on
       // its own. Computed against the doc as it stood BEFORE the invite below
@@ -33748,11 +33821,6 @@ const tdocHandlers = {
       // An invite is a meta write, so it happens before the comment lands: a
       // notification whose link 403s is worse than no notification.
       if (outcome.invited.length) {
-        const patched = applyAccessPatch(meta, {
-          allowed_users: access.allowed_users.concat(outcome.invited.map((k) =>
-            String(k).startsWith('email:') ? String(k).slice(6) : k)),
-        });
-        if (patched.error) return json(patched, { status: 400 });
         await putDocMetaJson(env, slug, JSON.stringify(patched.meta));
         metaNow = patched.meta;
       }

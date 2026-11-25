@@ -143,7 +143,7 @@ async function seedDoc(env, slug, owner) {
   async function tagged() {
     const { env, sent } = mailEnv(mod, { TDOC_EMAIL_ALIAS_SECRET: 'x' });
     const who = {};
-    for (const login of ['olga', 'eve', 'mia']) {
+    for (const login of ['olga', 'eve', 'mia', 'ned', 'pat', 'quin']) {
       who[login] = await issue(worker, env, login);
       const key = `hosted-account:${login}`;
       await env.META.put(key, JSON.stringify({ ...JSON.parse(await env.META.get(key) || '{}'), account_id: who[login].account_id, github_login: login, email: login === 'eve' ? 'eve@own.example' : `${login}@example.com` }));
@@ -152,7 +152,7 @@ async function seedDoc(env, slug, owner) {
     who.dave = { cookie: `tdoc_sid=${'d'.repeat(32)}` };
     const api = async (path, o = {}) => { const r = await worker.fetch(req(path, o), env, {}); const text = await r.text(); let body = null; try { body = JSON.parse(text); } catch {} return { status: r.status, text, body }; };
     const { team } = (await api('/api/teams', { method: 'POST', cookie: who.olga.cookie, body: { name: 'T' } })).body;
-    await api('/api/team/join', { method: 'POST', cookie: who.mia.cookie, body: { token: team.invite_url.split('/').pop() } });
+    for (const login of ['mia', 'ned', 'pat', 'quin']) await api('/api/team/join', { method: 'POST', cookie: who[login].cookie, body: { token: team.invite_url.split('/').pop() } });
     const teamKey = [...env.META.map.keys()].find((k) => { try { const v = JSON.parse(env.META.map.get(k)); return v && v.id === team.id && Array.isArray(v.members); } catch { return false; } });
     const rec = JSON.parse(env.META.map.get(teamKey));
     rec.members.push({ ...rec.members[1], key: `email:${TEAM}`, account_id: 'acct-tess' });
@@ -161,6 +161,7 @@ async function seedDoc(env, slug, owner) {
     const doc = (slug, extra) => env.META.put(`meta:${slug}`, JSON.stringify({ slug, title: slug, created, versions: [{ n: 1, created }], hosted: { account_id: who.olga.account_id, github_login: 'olga' }, access: { visibility: 'public', commenting: 'signed_in', allowed_users: [INV] }, ...extra }));
     await doc('plain', {});
     await doc('teamed', { workspace_id: team.id, access: { visibility: 'private', team: true, commenting: 'signed_in', allowed_users: [] } });
+    await doc('open-team', { workspace_id: team.id, access: { visibility: 'public', team: true, commenting: 'signed_in', allowed_users: [] } });
     return { env, sent, who, api, post: (slug, as, text, extra = {}) => api('/api/comments', { method: 'POST', cookie: who[as].cookie, body: { slug, version: 1, text, anchor: null, ...extra } }) };
   }
   const hosts = (text, own = '') => [...new Set(String(text).match(/[a-z]+@(?:invited|other|team|own|hidden)\.example/g) || [])].filter((x) => x !== own).sort().join(' ');
@@ -209,6 +210,27 @@ async function seedDoc(env, slug, owner) {
     assert(at(e, 'n2').endsWith(' @zed') && at(e, 'n3').endsWith(' @bob') && at(e, 'n4').endsWith(' @carol') && at(e, 'n5') === 'short @lee@x', `${at(e, 'n2').slice(-12)} ${at(e, 'n3').slice(-12)}`);
     const o = await bell('olga');
     assert(at(o, 'n1').includes(`@${INV}, @bob (@tess)`) && at(o, 'n4').endsWith(` @${INV}`) && at(o, 'n3').endsWith(' @bob'), at(o, 'n1'));
+    // What is cut off is a host's end, not the text after one.
+    const tail = '，' + '然后继续'.repeat(60);
+    for (const login of ['eve', 'olga']) await env.META.put(`inbox:${login}`, JSON.stringify({ items: [row('n1', 'agent_reply', `${'请看'.repeat(20)}@${INV}${tail}`.slice(0, 300)), row('n2', 'mention', `see @<${INV}> ok`), { ...row('n3', 'mention', `my own @${OTHER}`), actor: { login: 'eve', name: 'eve' } }, row('n4', 'agent_reply', pad(`@${INV},x`))] }));
+    const [ce, co] = [await bell('eve'), await bell('olga')];
+    assert(at(ce, 'n1').length === 300 - '@invited.example'.length && !hosts(at(ce, 'n1')), at(ce, 'n1'));
+    assert(at(co, 'n1').length === 300 && at(co, 'n1').includes(`@${INV}`), at(co, 'n1'));
+    assert(at(ce, 'n2') === 'see @<carol> ok' && at(co, 'n2') === `see @<${INV}> ok`, `${at(ce, 'n2')} / ${at(co, 'n2')}`);
+    assert(at(ce, 'n3') === `my own @${OTHER}` && at(co, 'n3') === 'my own @bob', `own words: ${at(ce, 'n3')} / ${at(co, 'n3')}`);
+    assert(at(ce, 'n4').endsWith(' @carol,') && at(co, 'n4').endsWith(` @${INV},x`), `${at(ce, 'n4').slice(-20)} / ${at(co, 'n4').slice(-30)}`);
+    // Cut inside a host that is not ASCII; a handle and text stay.
+    await env.META.put('inbox:eve', JSON.stringify({ items: [row('n1', 'agent_reply', pad('@zed@\u4f8b\u5b50')), row('n2', 'agent_reply', pad('@zed@b\u00fc')), row('n3', 'agent_reply', pad('@zed@one\u65e5')), row('n4', 'agent_reply', pad('@lee\u8bf7\u770b@eli\u7136\u540e'))] }));
+    const cutRows = await bell('eve');
+    for (const id of ['n1', 'n2', 'n3']) assert(at(cutRows, id).endsWith(' @zed'), `${id}: ${at(cutRows, id).slice(-12)}`);
+    assert(at(cutRows, 'n4').endsWith('@eli\u7136\u540e'), at(cutRows, 'n4').slice(-12));
+    // The handle's record is somebody else's account now: not their address.
+    const handle = JSON.parse(await env.META.get('hosted-account:eve'));
+    await env.META.put('hosted-account:eve', JSON.stringify({ ...handle, account_id: 'acct-somebody-else' }));
+    await env.META.put(`session:${'e'.repeat(32)}`, JSON.stringify({ login: 'eve', name: 'eve', account_id: who.eve.account_id, created: new Date().toISOString() }));
+    await env.META.put('inbox:eve', JSON.stringify({ items: [row('n1', 'mention', TEXT)] }));
+    const other = await api('/api/notifications', { cookie: `tdoc_sid=${'e'.repeat(32)}` });
+    assert(other.status === 200 && at(other, 'n1') === `@eve ask ${CUT}`, `${other.status} ${other.text.slice(0, 200)}`);
     // The doc's record cannot be read: nobody's but their own.
     const get = env.META.get;
     await bell('olga');
@@ -218,14 +240,78 @@ async function seedDoc(env, slug, owner) {
     assert(!hosts(down.text), `unreadable doc: ${hosts(down.text)}`);
   });
 
+  await t('email tags written against each other: each address is told, and nobody else', async () => {
+    for (const visibility of ['public', 'private']) {
+      const { env, sent, post, who } = await tagged();
+      const bob = await issue(worker, env, 'bob');
+      await env.META.put('hosted-account:bob', JSON.stringify({ ...JSON.parse(await env.META.get('hosted-account:bob') || '{}'), account_id: bob.account_id, github_login: 'bob', email: 'bob@elsewhere.example' }));
+      const meta = JSON.parse(await env.META.get('meta:plain'));
+      await env.META.put('meta:plain', JSON.stringify({ ...meta, access: { visibility, commenting: 'signed_in', allowed_users: [] } }));
+      const r = await post('plain', 'olga', 'ask @ann@one.example,@bob@two.example，请看');
+      assert(r.status === 200, `${r.status}`);
+      assert(sent.map((m) => m.to).sort().join() === 'ann@one.example,bob@two.example', `${visibility}: mailed ${sent.map((m) => m.to)}`);
+      const bells = [...env.META.map.keys()].filter((k) => k.startsWith('inbox:')).sort().join();
+      assert(bells === 'inbox:email:ann@one.example,inbox:email:bob@two.example', `${visibility}: ${bells}`);
+      const allowed = JSON.parse(await env.META.get('meta:plain')).access.allowed_users;
+      assert(allowed.join() === (visibility === 'private' ? 'ann@one.example,bob@two.example' : ''), `${visibility}: invited ${allowed}`);
+      assert(who.olga, 'owner');
+    }
+  });
+
+  await t('an address with punctuation in it invites, mails and tells nobody by a part of it', async () => {
+    const marks = [...'.!?,;:)]}>|/\'"&*~=#%^$+', '，', '。', '、', '！', '）', '…', '—', '‑', '·', '・', '”', '．'];
+    const shapes = (m) => [`@john${m}@example.com`, `ask (@john${m}@example.com)`, `@lee @john${m}${m}@example.com`, `@john@exam${m}ple.com`, `@dana@one.example${m}@john${m}@example.com`];
+    const { env, sent, post } = await tagged();
+    const meta = JSON.parse(await env.META.get('meta:plain'));
+    for (const login of ['john', 'example', 'exam', 'ple', 'one', 'com']) await env.META.put(`hosted-account:${login}`, JSON.stringify({ account_id: `acct-${login}`, github_login: login, email: `${login}@stranger.example` }));
+    for (const mark of marks) for (const text of shapes(mark)) {
+      await env.META.put('meta:plain', JSON.stringify({ ...meta, access: { visibility: 'private', commenting: 'signed_in', allowed_users: [] } }));
+      for (const k of [...env.META.map.keys()]) if (k.startsWith('inbox:')) env.META.map.delete(k);
+      sent.length = 0;
+      const r = await post('plain', 'olga', text);
+      assert(r.status === 200, `${text}: ${r.status}`);
+      const allowed = JSON.parse(await env.META.get('meta:plain')).access.allowed_users;
+      const told = [...env.META.map.keys()].filter((k) => k.startsWith('inbox:')).map((k) => k.slice(6));
+      const fine = (k) => k === 'lee' || (k.includes('@') && text.includes(k.replace(/^email:/, '')));
+      assert([...allowed, ...told].every(fine), `${text}: invited ${allowed}, told ${told}`);
+      assert(sent.every((m) => !m.to.endsWith('@stranger.example')), `${text}: mailed ${sent.map((m) => m.to)}`);
+    }
+  });
+
+  await t('on a private doc: a handle with text written on after it is invited and told; an address nobody can have fails nothing', async () => {
+    const { env, sent, post } = await tagged();
+    const meta = JSON.parse(await env.META.get('meta:plain'));
+    for (const login of ['eli', 'gmail', 'lee', 'john', 'corp']) await env.META.put(`hosted-account:${login}`, JSON.stringify({ account_id: `acct-${login}`, github_login: login, email: `${login}@handle.example` }));
+    const say = async (text) => {
+      await env.META.put('meta:plain', JSON.stringify({ ...meta, access: { visibility: 'private', commenting: 'signed_in', allowed_users: [] } }));
+      for (const k of [...env.META.map.keys()]) if (k.startsWith('inbox:')) env.META.map.delete(k);
+      sent.length = 0;
+      const r = await post('plain', 'olga', text);
+      assert(r.status === 200 && r.body.text === text, `${text}: ${r.status} ${r.text}`);
+      return { allowed: JSON.parse(await env.META.get('meta:plain')).access.allowed_users.join(), told: [...env.META.map.keys()].filter((k) => k.startsWith('inbox:')).join(), mailed: sent.map((m) => m.to).join() };
+    };
+    for (const text of ['@eli\u8fd9\u91cc\u6ca1\u95ee\u9898\u3002PR\u5df2\u5408\u5e76', '@eli\u770b\u8fc7\u4e86\u3002OK', '@eli\u8bf7\u770bREADME.md', '@eli\u8bf7\u770b\u4e00\u4e0b\u8fd9\u4e2a\u65b9\u6848\u3002\u53c2\u8003tdoc.dev', '@eli\u8fd9\u4e2a\u6539\u62103.5\u5427', '@eli\u770b\u4e0b\u7b2c2.3\u8282', '@eli\u3055\u3093\u3002OK\u3067\u3059', '@eli\ud655\uc778\ud574\uc8fc\uc138\uc694\u3002OK', '@eli\u3002OK', '@eli\u8fd9\u91cc\u6ca1\u95ee\u9898\u3002']) {
+      const r = await say(text);
+      assert(r.allowed === 'eli' && r.told === 'inbox:eli' && r.mailed === 'eli@handle.example', `${text}: ${JSON.stringify(r)}`);
+    }
+    for (const text of ['\u3042\u308a\u304c\u3068\u3046@lee@corp\uff61ok \u3067\u3059', '@john@gmail\uff61com', '@john.@gmail\uff61com', '@john@gmail\uff0ecom', '@example.com ok', '@john.@gmail.com ok']) {
+      const r = await say(text);
+      assert(!r.allowed && !r.told && !r.mailed, `${text}: ${JSON.stringify(r)}`);
+    }
+    const both = await say('@john@gmail\uff61com and @eli');
+    assert(both.allowed === 'eli' && both.told === 'inbox:eli', JSON.stringify(both));
+  });
+
   await t('what telling people costs: one read of the doc\'s team, however many are told; none without a tag', async () => {
-    const { env, post, api, who } = await tagged();
+    const { env, sent, post, api, who } = await tagged();
     const reads = async (fn) => { const from = env.META.gets.length; const r = await fn(); assert(r.status === 200, `${r.status}`); return env.META.gets.slice(from); };
-    const names = '@olga @mia @tess';
-    const bare = await reads(() => post('teamed', 'mia', `${names} a`));
-    const tags = await reads(() => post('teamed', 'mia', `${names} b @${TEAM} @${OTHER}`));
+    const names = '@olga @ned @pat @quin';
+    const bare = await reads(() => post('open-team', 'mia', `${names} a`));
+    const tags = await reads(() => post('open-team', 'mia', `${names} b @${TEAM} @${OTHER} x`));
     const teamReads = (list) => list.filter((k) => /^team:/.test(k)).length;
     console.log(`    reads: ${bare.length} without a tag, ${tags.length} with; team records ${teamReads(bare)} and ${teamReads(tags)}`);
+    const mailed = sent.filter((m) => m.text.includes(' b @tess@team.example ')).length;
+    assert(mailed === 5, `mailed ${mailed}`);
     assert(teamReads(tags) <= teamReads(bare) + 1, `team reads ${teamReads(bare)} -> ${teamReads(tags)}`);
     // A page of the bell: a doc's record once, and only a doc with a tag.
     const now = new Date().toISOString();
