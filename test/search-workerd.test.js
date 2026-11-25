@@ -42,7 +42,7 @@ class R2 {
   async list({ prefix = '' } = {}) { return { objects: [...this.map.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })), truncated: false }; }
 }
 const fake = globalThis.__tdocFake || (globalThis.__tdocFake = { META: new KV(), DOCS: new R2() });
-const envFor = (env) => ({ META: fake.META, DOCS: fake.DOCS, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_SEARCH_CACHE_MS: '0' });
+const envFor = (env) => ({ META: fake.META, DOCS: fake.DOCS, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_SEARCH_CACHE_MS: '0', TDOC_EMAIL_ALIAS_SECRET: 'x' });
 export class TestStore extends CommentsStore { constructor(state, env) { super(state, envFor(env)); } }
 export default {
   async fetch(req, env, ctx) {

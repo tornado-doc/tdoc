@@ -183,7 +183,7 @@ export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources
       const got = await load(at.next);
       if (feed.current !== at) return;
       add(at, got);
-      at.next = got.next == null ? null : sources ? { cursor: got.next } : Number(got.next);
+      at.next = got.next == null ? null : typeof got.next === 'string' ? { cursor: got.next } : Number(got.next);
       if (got.through && (!at.through || time(got.through) < time(at.through))) at.through = got.through;
       at.missed = at.missed || !!got.missed;
       setLoadedDocs((n) => n + Number(got.docs_scanned || 0));
@@ -204,7 +204,8 @@ export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources
   };
 
   useEffect(() => {
-    const at = { items: new Map(), next: sources ? {} : 0, through: '', missed: false };
+    const start = sources ? {} : 0;
+    const at = { items: new Map(), next: start, through: '', missed: false };
     feed.current = at;
     setItems([]);
     setLoadedDocs(0);
@@ -217,7 +218,7 @@ export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources
         add(at, got);
         setWholeDoc(initialDoc);
       }
-      await loadPages(at, FEED_PAGES, () => sources && typeof at.next.cursor === 'string' && rowsShown(at).length > 0);
+      await loadPages(at, FEED_PAGES, () => sources && at.next !== start && rowsShown(at).length > 0);
     });
     return () => { feed.current = null; };
   }, [scopeKey]);
@@ -415,7 +416,7 @@ export function CommentsPane({ scopeKey, scopeName, load, pageSize = 25, sources
       {sources && (shown.length > visible || partial || feed.current?.missed) ? (
         <div className="tm-comment-more">
           {feed.current?.missed ? <span>Some comments could not be loaded. Reload to try again.</span> : null}
-          {partial ? <span>Newest first. Load more for older comments. Filters look in what is loaded.</span> : null}
+          {partial ? <span>{feed.current?.through ? 'Newest first. Load more for older comments.' : 'Comments loaded so far. Load more for others.'} Filters look in what is loaded.</span> : null}
           {shown.length > visible || partial ? <AppButton disabled={loading} onClick={loadMore}>{loading ? 'Loading…' : 'Load more'}</AppButton> : null}
         </div>
       ) : null}

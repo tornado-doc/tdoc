@@ -266,6 +266,90 @@ process.exitCode = 1; // unless it gets to its end
     assert(!now.includes(on2[0]) && now.includes(on2[1]), `${on2} ${now}`);
   });
 
+  await t('a cursor is not another member\'s, nor another secret\'s, nor anyone\'s who left; its length says nothing', async () => {
+    const w = await world(0, () => null);
+    const team = (await w.call('/api/teams', { method: 'POST', body: { name: 'T' } })).body.team;
+    for (const as of ['mia', 'bob']) await w.call('/api/team/join', { method: 'POST', as, body: { token: team.invite_url.split('/').pop() } });
+    const slugs = range(40, (i) => `${'t'.repeat(1 + i)}${i}`);
+    for (const [i, slug] of slugs.entries()) await w.doc(slug, { workspace_id: team.id, access }, [w.thread(`t${i}`, at(i))]);
+    await w.built(`w:${team.id}`, slugs, { w: team.id });
+    const path = `/api/team/comments?id=${team.id}&`;
+    await w.warm(path);
+    const ids = async (cursor, as) => { const x = await w.call(`${path}paged=1&cursor=${encodeURIComponent(cursor)}`, { as }); return x.status === 200 ? x.body.items.map((y) => y.id).join() : x.status; };
+    const { pages } = await later(60000, () => w.open(path, 'mia'));
+    const { next } = pages[0];
+    const top = await ids('', 'mia');
+    assert(new Set(pages.slice(0, -1).map((x) => x.next.length)).size === 1 && pages.length > 2, pages.map((x) => x.next && x.next.length).join());
+    assert(await ids(next, 'mia') !== top, 'her own');
+    assert(await ids(next, 'bob') === top && await ids(next, 'julie') === top, 'another member');
+    w.env.TDOC_EMAIL_ALIAS_SECRET = 'y';
+    assert(await ids(next, 'mia') === top, 'another secret');
+    w.env.TDOC_EMAIL_ALIAS_SECRET = 'x';
+    assert(await ids(next, 'mia') !== top, 'hers again');
+    const key = [...w.env.META.map.keys()].find((k) => { try { const v = JSON.parse(w.env.META.map.get(k)); return v && v.id === team.id && Array.isArray(v.members); } catch { return false; } });
+    const rec = JSON.parse(w.env.META.map.get(key));
+    await w.env.META.put(key, JSON.stringify({ ...rec, members: rec.members.filter((m) => m.account_id !== 'acct-mia') }), { metadata: w.env.META.metadata.get(key) });
+    assert(await ids(next, 'mia') === 404, `removed: ${await ids(next, 'mia')}`);
+  });
+
+  await t('no secret to seal a cursor with: by offset, every comment', async () => {
+    const w = await world(30, mixed, { TDOC_EMAIL_ALIAS_SECRET: undefined });
+    let at0 = 'paged=1', n = 0, pages = 0;
+    while (at0) { const b = (await w.call(`/api/me/comments?${at0}`)).body; assert(b.through === undefined && typeof b.next !== 'string', JSON.stringify(b.next)); n += b.items.length; pages += 1; at0 = b.next === null ? '' : `offset=${b.next}`; }
+    assert(pages === 3 && n === (await (await world(30, mixed)).open()).rows.length, `${pages} ${n}`);
+  });
+
+  await t('docs that cannot be read are left out, and the rest is in order', async () => {
+    const w = await world(100, one);
+    const up = w.down('"slug":"d0050"');
+    await w.warm();
+    let page;
+    for (let n = 0; n < 3; n++) { page = await w.first(); assert(page.through && page.missed && page.items[0].id === 'c99', `${n}: ${page.through} ${page.missed}`); }
+    const got = await later(60000, () => w.open());
+    assert(got.rows.length === 99 && JSON.stringify(got.rows.map((x) => x.created)) === JSON.stringify(got.rows.map((x) => x.created).sort().reverse()), `${got.rows.length}`);
+    up();
+    await w.first();
+    const now = await later(60000, () => w.open());
+    assert(now.rows.length === 100 && !now.pages.some((x) => x.missed) && now.pages[0].through, `${now.rows.length}`);
+    // What is known of one stays when it cannot be read later; many of them.
+    const again = w.down('"slug":"d0050"');
+    await later(26 * 60 * 60 * 1000, async () => { for (let n = 0; n < 7; n++) await w.first(); });
+    again();
+    assert(await w.timeOf('d0050') === at(50), await w.timeOf('d0050'));
+    const many = await world(220, one);
+    const own = many.env.COMMENTS.get;
+    many.env.COMMENTS.get = (id) => { const stub = own(id); return { ...stub, fetch: (url, init) => (/"slug":"d0(0|1[0-2])/.test(String(init && init.body)) && String(url).endsWith('/read') ? Promise.reject(new Error('down')) : stub.fetch(url, init)) }; };
+    assert(await many.warm() <= 5, 'a hundred and thirty of them');
+    // One a member may not read says nothing to them.
+    const t2 = await world(0, () => null);
+    const team = (await t2.call('/api/teams', { method: 'POST', body: { name: 'T' } })).body.team;
+    await t2.call('/api/team/join', { method: 'POST', as: 'mia', body: { token: team.invite_url.split('/').pop() } });
+    for (const [i, slug] of ['ta', 'tb'].entries()) await t2.doc(slug, { workspace_id: team.id, access: { ...access, team: !i } }, [t2.thread(slug, at(i))]);
+    await t2.built(`w:${team.id}`, ['ta', 'tb'], { w: team.id });
+    t2.down('"slug":"tb"');
+    const theirs = await t2.first(`/api/team/comments?id=${team.id}&`, 'mia');
+    assert(theirs.through && !theirs.missed && theirs.items.length === 1, JSON.stringify(theirs));
+    assert((await t2.first(`/api/team/comments?id=${team.id}&`)).missed, 'its owner');
+  });
+
+  await t('while in no order: reading on finds the order for the next opening, and a doc made or published meanwhile is there', async () => {
+    const w = await world(400, one);
+    let { next, through } = await w.first();
+    assert(through === undefined, 'in order already');
+    for (let n = 0; n < 4; n++) {
+      if (n === 1) {
+        await w.doc('made', {}, [w.thread('made', at(500))]);
+        await w.built('p:acct-julie', ['made'], { u: new Date().toISOString() });
+        await w.built('p:acct-julie', ['d0399'], { u: new Date().toISOString() });
+      }
+      const page = (await w.call(`/api/me/comments?paged=1&cursor=${encodeURIComponent(next)}`)).body;
+      assert(page.through === undefined, `${n}: ${page.through}`);
+      if (n === 1) assert(page.items.some((x) => x.id === 'made') && page.items.some((x) => x.id === 'c399'), page.items.map((x) => x.id).join());
+      next = page.next;
+    }
+    assert((await w.first()).through, 'not in order after 400 docs');
+  });
+
   await t('many docs changed while it is read: some at a time, newest first, and none lost', async () => {
     const w = await world(150, one);
     await w.warm();
