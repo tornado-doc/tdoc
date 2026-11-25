@@ -1234,7 +1234,7 @@ ${uiCss}
           await setCommentResolved(body({ id: message.id, resolved: Boolean(message.resolved) }));
           break;
         case 'tdoc-feedback-edit':
-          await updateCommentText(body({ id: message.id, text: message.text }));
+          await updateCommentText(body({ id: message.id, text: message.text, base_text: message.base }));
           break;
         case 'tdoc-feedback-reanchor':
           await updateCommentAnchor(body({ id: message.id, anchor: message.anchor }));
@@ -2237,7 +2237,7 @@ ${uiCss}
       onReact: (id, emoji) => mutate({ type: 'tdoc-feedback-react', id, emoji }),
       onDelete: (id) => mutate({ type: 'tdoc-feedback-delete', id }, false),
       onResolve: (id, resolved) => mutate({ type: 'tdoc-feedback-resolve', id, resolved }),
-      onEdit: (id, text) => mutate({ type: 'tdoc-feedback-edit', id, text }),
+      onEdit: (id, text, base) => mutate({ type: 'tdoc-feedback-edit', id, text, base }),
       onReanchor: (id) => { setOpenId(null); setPanelOpen(false); setReanchorId(id); },
       onMarkRead: area.markRead,
       onResendHandoff: canSendToAgent ? async (c) => {

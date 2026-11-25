@@ -12126,6 +12126,7 @@ async function setDeletedIdentityByHash(env, hash, patch) {
   const next = { ...(prev || {}), ...patch };
   await env.META.put(identityTombKey(hash), JSON.stringify(next));
   IDENTITY_TOMB_CACHE.set(hash, { v: next, t: Date.now() });
+  forgetDeletedCheck(env, hash);
 }
 
 // The identities a sign-in or a token mint is about to act as that belonged
@@ -12676,6 +12677,7 @@ async function restoreDeletedAccount(env, accountId) {
     for (const h of [...new Set([...(record.actor_hashes || []), ...(record.invitee_hashes || [])])]) {
       await env.META.delete(identityTombKey(h));
       IDENTITY_TOMB_CACHE.delete(h);
+      forgetDeletedCheck(env, h);
     }
     await env.META.delete(accountCommentsKey(accountId));
     await env.META.delete(accountDeletedKey(accountId));
@@ -14996,7 +14998,8 @@ async function accountClaimedHandle(env, accountId) {
 // address costs its length, not its square.
 const EMAIL_KEY_RE = /^email:([^\s@]+@[^\s@][^\s@.]*\.[^\s@]+)$/i;
 const BARE_EMAIL_RE = /^[^\s@]+@[^\s@][^\s@.]*\.[^\s@]+$/;
-const EMAIL_TAG_RE = /(^|[^A-Za-z0-9_@/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
+// Looked behind, not matched: what is before a tag may end the one before it.
+const EMAIL_TAG_RE = /(?<![A-Za-z0-9_@/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
 // Other people's words: every tag of a run of text without a space, however
 // the tags in it are parted or wrapped. EMAIL_TAG_RE reads the reader's own.
 const TAG_RUN_RE = /@(?<![A-Za-z0-9@/][_-]*@)\S+/g;
@@ -15090,7 +15093,7 @@ async function emailPrivacyFor(env, session, slug, meta, { teams = null } = {}) 
 function collectEmails(value, out, key = '') {
   if (key === 'anchor' || value == null) return out;
   if (typeof value === 'string') {
-    if (key === 'text') { for (const t of value.matchAll(EMAIL_TAG_RE)) out.add(t[2].toLowerCase()); return out; }
+    if (key === 'text') { for (const t of value.matchAll(EMAIL_TAG_RE)) out.add(t[1].toLowerCase()); return out; }
     const m = value.match(EMAIL_KEY_RE);
     if (m) out.add(m[1].toLowerCase());
     else if (BARE_EMAIL_RE.test(value)) out.add(value.toLowerCase());
@@ -15127,56 +15130,150 @@ async function redactCommentEmails(value, privacy) {
   const present = presentEmails(value);
   // A deleted account's address is nobody's to see any more, not even the
   // owner who invited it or a former teammate (the person's own session is
-  // gone with the account, so `mine` never names it).
-  const gone = new Set();
-  if (privacy.env && privacy.env.META) {
-    // Tombstone reads are cached per isolate (deletedIdentity), and per
-    // response here; a payload naming many addresses checks the first 20.
-    privacy.goneCache = privacy.goneCache || new Map();
-    const revealed = present.filter((e) => !privacy.mine.has(`email:${e}`)).slice(0, 20);
-    await Promise.all(revealed.map(async (e) => {
-      if (!privacy.goneCache.has(e)) privacy.goneCache.set(e, !!(await deletedIdentity(privacy.env, `email:${e}`)));
-      if (privacy.goneCache.get(e)) gone.add(e);
-    }));
-  }
+  // gone with the account, so `mine` never names it). Only addresses about
+  // to be shown are checked: the people this reader may see, then the
+  // addresses in their own words (aliasCommentEmails keeps those).
+  const shown = new Set(present.filter((e) => privacy.reveal.has(e)));
+  ownWordsEmails(value, privacy, shown);
+  const gone = await deletedEmails(privacy.env, [...shown].filter((e) => !privacy.mine.has(`email:${e}`)));
   return aliasCommentEmails(value, privacy, present, gone);
+}
+
+// The addresses a tag in comment text may name. A tag runs to the next
+// space, so the punctuation after it ("@a@b.com, then"), or a sentence that
+// follows without a space (as Chinese does), is in it too, as are a bracket
+// or a quote before it. Shortest reading first.
+const TAG_ADDRESS_RE = /^[^\s@]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+/;
+const TAG_OPEN_RE = /^[<([{"'`\u2018\u201c\u300a\u3008\u300c\u300e\u3010\uff08]+/;
+function tagAddresses(raw) {
+  const out = new Set();
+  const opened = raw.replace(TAG_OPEN_RE, '');
+  for (const s of opened === raw ? [raw] : [opened, raw]) {
+    const m = s.match(TAG_ADDRESS_RE);
+    if (m) out.add(m[0]);
+    let end = s.length;
+    while (end > 0 && /[^\p{L}\p{N}]/u.test(s[end - 1]) && !/[\ud800-\udfff]/.test(s[end - 1])) end -= 1;
+    if (BARE_EMAIL_RE.test(s.slice(0, end))) out.add(s.slice(0, end));
+    out.add(s);
+  }
+  // Nobody has an address with list punctuation in its name ("@lee,@x.io").
+  return [...out].filter((e) => BARE_EMAIL_RE.test(e) && !/[,;:"<>()[\]\\\u3000-\u303f\uff00-\uff20][^@]*@/.test(e));
+}
+// A tag as it reads with one of its addresses cut to the local part.
+function shortTag(raw, addr) {
+  const at = raw.indexOf(addr);
+  return raw.slice(0, at) + addr.split('@')[0] + raw.slice(at + addr.length);
+}
+
+function cutOwnTags(text, gone) {
+  return text.replace(EMAIL_TAG_RE, (all, addr) => {
+    const hide = tagAddresses(addr).find((e) => gone.has(e.toLowerCase()));
+    return hide ? `@${shortTag(addr, hide)}` : all;
+  });
+}
+
+// The reader's own record: the addresses in its words stay (a deleted
+// account's excepted).
+function isOwnRecord(v, privacy) {
+  return !!(v.author && typeof v.author.login === 'string' && privacy.mine.has(v.author.login.toLowerCase()));
+}
+function ownWordsEmails(v, privacy, out, key = '') {
+  if (key === 'anchor' || v == null || typeof v !== 'object') return out;
+  if (Array.isArray(v)) { for (const x of v) ownWordsEmails(x, privacy, out); return out; }
+  if (typeof v.text === 'string' && isOwnRecord(v, privacy)) {
+    for (const t of v.text.matchAll(EMAIL_TAG_RE)) for (const e of tagAddresses(t[1])) out.add(e.toLowerCase());
+  }
+  for (const [k, x] of Object.entries(v)) ownWordsEmails(x, privacy, out, k);
+  return out;
+}
+
+// How many of one payload's addresses are checked; one past that is not
+// shown. Tombstones are read many keys to an operation (KV takes 100), so
+// this is at most five of them, and more people than a doc or team has. A
+// key the answer leaves out (documented: null, when there is no such key) is
+// read on its own, where null can only mean that; at most this many are.
+const DELETED_CHECK_MAX = 500;
+const DELETED_CHECK_BATCH = 100;
+const DELETED_CHECK_SINGLES = 300;
+// What clean reads answered, for a minute: a doc page asks again
+// every few seconds. A read that failed is never kept, and the key pin is
+// read each time.
+const DELETED_CHECK_SEEN = new WeakMap();
+const DELETED_CHECK_SEEN_MAX = 2000;
+// A tombstone the sign-in path read or wrote here counts this long, whatever
+// KV answers (its reads can lag the write); then a restored account's
+// address shows again.
+const DELETED_CHECK_TOMB_MS = 10 * IDENTITY_TOMB_TTL_MS;
+function forgetDeletedCheck(env, hash) {
+  const seen = env && env.META && DELETED_CHECK_SEEN.get(env.META);
+  if (seen) seen.delete(hash);
+}
+
+// Which of these addresses are a deleted account's, for deciding to show
+// them: one whose check cannot be read, or does not match the pinned key, is.
+// Reads the pin and the tombstones itself: what deletedIdentity cached as
+// "not deleted" may be a failed read (sign-in must go on without KV; an
+// address need not show). A tombstone it did see still counts.
+async function deletedEmails(env, emails, max = DELETED_CHECK_MAX) {
+  const gone = new Set(emails.slice(max));
+  const asked = emails.slice(0, max);
+  if (!asked.length) return gone;
+  const hideAll = () => { for (const e of asked) gone.add(e); return gone; };
+  let hashes = null;
+  try {
+    const raw = await env.META.get(IDENTITY_KEY_PIN);
+    // No pin: no account was ever deleted here -- unless this isolate has
+    // seen one (then this read is stale).
+    if (raw == null) return IDENTITY_KEY_SEEN.has(env.META) ? hideAll() : gone;
+    IDENTITY_KEY_SEEN.add(env.META);
+    const rec = JSON.parse(raw);
+    const secret = rec.name ? String(env[rec.name] || '') : IDENTITY_FALLBACK_SECRET;
+    if (secret && typeof rec.kid === 'string' && await identityKeyId(secret) === rec.kid) {
+      hashes = await Promise.all(asked.map((e) => identityHashUnder(secret, `email:${e}`)));
+    }
+  } catch {}
+  if (!hashes) return hideAll();
+  let seen = DELETED_CHECK_SEEN.get(env.META);
+  if (!seen) DELETED_CHECK_SEEN.set(env.META, seen = new Map());
+  const now = Date.now();
+  const unread = [];
+  asked.forEach((email, i) => {
+    const hash = hashes[i];
+    const tomb = IDENTITY_TOMB_CACHE.get(hash);
+    if (tomb && tomb.v && tomb.v.at && now - tomb.t < DELETED_CHECK_TOMB_MS) { gone.add(email); return; }
+    const hit = seen.get(hash);
+    if (!hit || now - hit.t >= IDENTITY_TOMB_TTL_MS) unread.push({ email, hash });
+    else if (hit.gone) gone.add(email);
+  });
+  const batches = [];
+  for (let i = 0; i < unread.length; i += DELETED_CHECK_BATCH) batches.push(unread.slice(i, i + DELETED_CHECK_BATCH));
+  let singles = DELETED_CHECK_SINGLES;
+  await Promise.all(batches.map(async (batch) => {
+    let got = null;
+    try { got = await env.META.get(batch.map(({ hash }) => identityTombKey(hash))); } catch {}
+    await Promise.all(batch.map(async ({ email, hash }) => {
+      try {
+        const key = identityTombKey(hash);
+        let raw = null;
+        if (got.has(key)) raw = got.get(key);
+        else if (singles-- > 0) raw = await env.META.get(key);
+        else throw new Error('unread');
+        const isGone = raw !== null && !!JSON.parse(raw).at;
+        if (isGone) gone.add(email);
+        seen.delete(hash);
+        seen.set(hash, { gone: isGone, t: now });
+        if (seen.size > DELETED_CHECK_SEEN_MAX) seen.delete(seen.keys().next().value);
+      } catch { gone.add(email); }
+    }));
+  }));
+  return gone;
 }
 
 // Rows of several docs, each under its own doc's privacy (aliases, who is
 // revealed), with one set of reads for all of them: names resolve once under
-// the one payload's limits, and at most DELETED_CHECK_MAX of the addresses
-// about to be shown are checked. An address past that is not shown.
-const DELETED_CHECK_MAX = 20;
-
-// Is this identity a deleted account's, for deciding to show its address:
-// anything that cannot be read, or does not match the pinned key, is "yes".
-// Reads the pin and the tombstones itself: what deletedIdentity cached may be
-// a failed read. A tombstone it did see still counts.
-async function strictDeletedCheck(env) {
-  let key = null;
-  try {
-    const raw = await env.META.get(IDENTITY_KEY_PIN);
-    // No pin: no account was ever deleted here -- unless this isolate has
-    // seen one (then this read is stale). Asked per address: another request
-    // may be the one to see it.
-    if (raw == null) return async () => IDENTITY_KEY_SEEN.has(env.META);
-    IDENTITY_KEY_SEEN.add(env.META);
-    const rec = JSON.parse(raw);
-    const secret = rec.name ? String(env[rec.name] || '') : IDENTITY_FALLBACK_SECRET;
-    if (secret && typeof rec.kid === 'string' && await identityKeyId(secret) === rec.kid) key = secret;
-  } catch {}
-  if (!key) return async () => true;
-  return async (actor) => {
-    try {
-      const hash = await identityHashUnder(key, actor);
-      const hit = IDENTITY_TOMB_CACHE.get(hash);
-      if (hit && hit.v && hit.v.at) return true;
-      const raw = await env.META.get(identityTombKey(hash));
-      return raw != null && !!JSON.parse(raw).at;
-    } catch { return true; }
-  };
-}
-
+// the one payload's limits, and at most DELETED_CHECK_ROWS_MAX addresses are
+// checked.
+const DELETED_CHECK_ROWS_MAX = 20;
 async function redactCommentRowsByDoc(env, docs) {
   if (!docs.length) return [];
   const named = await withActorDisplayNames(env, docs.map((doc) => doc.rows));
@@ -15184,20 +15281,152 @@ async function redactCommentRowsByDoc(env, docs) {
   const shown = new Set();
   docs.forEach(({ privacy }, i) => {
     const about = new Set(present[i].filter((e) => privacy.reveal.has(e)));
-    // The reader's own words keep the addresses in them (aliasCommentEmails).
-    for (const row of named[i]) {
-      const login = row.author && row.author.login;
-      if (typeof login === 'string' && privacy.mine.has(login.toLowerCase())) collectEmails(row.text, about, 'text');
-    }
+    ownWordsEmails(named[i], privacy, about);
     for (const e of about) if (!privacy.mine.has(`email:${e}`)) shown.add(e);
   });
-  const gone = new Set([...shown].slice(DELETED_CHECK_MAX));
-  const checked = [...shown].slice(0, DELETED_CHECK_MAX);
-  if (checked.length) {
-    const isGone = await strictDeletedCheck(env);
-    await Promise.all(checked.map(async (e) => { if (await isGone(`email:${e}`)) gone.add(e); }));
-  }
+  const gone = await deletedEmails(env, [...shown], DELETED_CHECK_ROWS_MAX);
   return Promise.all(docs.map(({ privacy }, i) => aliasCommentEmails(named[i], privacy, present[i], gone)));
+}
+
+// An author edits the words they were shown (`base`), in which an address may
+// be down to its local part (a deleted account's, or one whose check could not
+// be read). What they save keeps it: where their text (`next`) still has those
+// words, the address goes back. Which is which is told by the words around
+// it; where that does not tell, nothing is saved.
+// `texts`: what the record has said, newest first. { text }, or { names }: the
+// @names that could be either (`many`: too many to look); or { outdated }: it
+// has changed since `base`.
+const EDIT_TEXTS_MAX = 20;
+// The hidden tags x the characters of the words with an `@` to find them in
+// (it runs in the doc's DO): past this nothing is told.
+const EDIT_LOOK_MAX = 2000000;
+function restoreShortTags(texts, base, next) {
+  if (typeof base !== 'string') return { text: next };
+  const split = (s) => s.trim().split(/\s+/);
+  const B = split(base);
+  // `shown` is `full` with parts left out, and only where `full` has a tag.
+  const cutFrom = (shown, full) => {
+    let k = 0;
+    for (let x = 0; x < full.length; x++) if (full[x] === shown[k]) k += 1;
+    return k === shown.length && /@[^@]*@/.test(full);
+  };
+  const said = texts.map(split)
+    .find((S) => S.length === B.length && S.every((w, i) => w === B[i] || cutFrom(B[i], w)));
+  if (!said) return !texts.length || !/@[^\s@]*@/.test(texts[0]) ? { text: next } : { outdated: true };
+  const N = split(next);
+  if (!N.some((w) => w.includes('@'))) return { text: next };
+  const tagged = (list) => list.filter((w) => w.includes('@')).join(' ');
+  const size = said.reduce((n, w, i) => n + (w === B[i] ? 0 : w.split('@').length), 0);
+  const [was, now] = [tagged(B), tagged(N)];
+  if (size * (was.length + now.length) > EDIT_LOOK_MAX) return { names: [...new Set(tagged(B.filter((w, i) => w !== said[i])).match(/@[^\s@,;]+/g))].slice(0, 3), many: true };
+  // Per word of `base` with an address left out: each name as shown, and the host.
+  const hidden = new Map();
+  said.forEach((word, i) => {
+    if (word === B[i]) return;
+    hidden.set(i, [...word.matchAll(EMAIL_TAG_RE)].flatMap(([whole, raw]) => {
+      const addr = !B[i].includes(whole) && tagAddresses(raw).find((a) => B[i].includes(`@${shortTag(raw, a)}`));
+      const at = addr && raw.indexOf(addr) + addr.indexOf('@');
+      return addr ? [{ name: `@${raw.slice(0, at)}`, host: addr.slice(addr.indexOf('@')) }] : [];
+    }));
+  });
+  if (!hidden.size) return { text: next };
+  // Where a word has the name, and not a longer one or the whole address.
+  const placesOf = (word, name, not = /^(?:[A-Za-z0-9_]|[.+'-][A-Za-z0-9]|@[^\s@]+\.)/) => {
+    const out = [];
+    for (let at = word.indexOf(name); at >= 0; at = word.indexOf(name, at + 1)) {
+      if (!not.test(word.slice(at + name.length))) out.push(at);
+    }
+    return out;
+  };
+  const m = Math.min(B.length, N.length);
+  let head = 0;
+  while (head < m && B[head] === N[head]) head += 1;
+  let tail = 0;
+  while (tail < m && B[B.length - 1 - tail] === N[N.length - 1 - tail]) tail += 1;
+  const around = (i, j) => Number(i ? j > 0 && B[i - 1] === N[j - 1] : !j)
+    + Number(i + 1 < B.length ? B[i + 1] === N[j + 1] : j + 1 === N.length);
+  const byName = new Map();
+  for (const { name, host } of [...hidden.values()].flat()) (byName.get(name) || byName.set(name, []).get(name)).push(host);
+  const changed = tagged([...B.slice(head, B.length - tail), ...N.slice(head, N.length - tail)]);
+  const [lower, left] = [now.toLowerCase(), []];
+  for (const name of byName.keys()) if (lower.includes(name.toLowerCase())) left.push(name);
+  // A name that stands for two things is told apart only where the words
+  // changed, at one place, are without it.
+  const here = (text, name) => placesOf(text, name).length;
+  const names = left.filter((name) => here(changed, name) && here(now, name)
+    && (byName.get(name).some((h) => h !== byName.get(name)[0]) || here(was, name) !== byName.get(name).length));
+  if (names.length) return { names };
+  // What both begin with and end with stays as it was said; a word between is
+  // the one in `next` that has its name and its neighbours.
+  const words = new Set(B);
+  const spots = [...N.keys()].filter((j) => N[j].includes('@'));
+  const put = (p, q) => {
+    const out = N.slice();
+    for (let i = 0; i < p; i++) out[i] = said[i];
+    for (let k = 1; k <= q; k++) out[N.length - k] = said[B.length - k];
+    const unclear = new Set();
+    const taken = new Set();
+    const back = new Set();
+    for (const [i, tags] of hidden) {
+      if (i < p || i >= B.length - q) continue;
+      const at = [];
+      for (const j of spots) if (j >= p && j < N.length - q && (N[j] === B[i] || tags.some((t) => placesOf(N[j], t.name).length))) at.push(j);
+      if (!at.length) continue;
+      const score = (j) => around(i, j) + (N[j] === B[i] ? 0.5 : 0);
+      at.sort((x, y) => score(y) - score(x));
+      const j = at[0];
+      let word = null;
+      if (around(i, j) && (at.length === 1 || score(j) > score(at[1])) && !taken.has(j)) {
+        taken.add(j);
+        if (N[j] === B[i]) {
+          word = said[i];
+          for (const t of tags) back.add(t);
+        } else {
+          word = N[j];
+          for (const t of tags) {
+            const places = placesOf(word, t.name);
+            if (places.length > 1) { word = null; break; }
+            if (places.length) {
+              word = word.slice(0, places[0] + t.name.length) + t.host + word.slice(places[0] + t.name.length);
+              back.add(t);
+            }
+          }
+        }
+      }
+      if (word == null) for (const t of tags) unclear.add(t.name);
+      else out[j] = word;
+    }
+    // A name not put back was taken out, unless a new word has it some other
+    // way ("(@gone's)", "@Gone").
+    const other = out.slice(p, N.length - q).filter((w) => w.includes('@') && !words.has(w)).join(' ').toLowerCase();
+    for (const [i, tags] of hidden) {
+      if (i >= p && i < B.length - q) for (const t of tags) if (!back.has(t) && placesOf(other, t.name.toLowerCase(), /^[a-z0-9@]/).length) unclear.add(t.name);
+    }
+    return { words: out, unclear };
+  };
+  const [a, b] = [put(head, Math.min(tail, m - head)), put(Math.min(head, m - tail), tail)];
+  if (a.unclear.size) return { names: [...a.unclear] };
+  if (a.words.some((w, k) => w !== b.words[k])) return { names: left };
+  let k = -1;
+  return { text: next.trim().replace(/\S+/g, () => a.words[k += 1]) };
+}
+// What a record says at a version, then what it said before, newest first.
+function recordTexts(c, id, version) {
+  const snap = snapshotAt(c, version);
+  const top = c.id === id;
+  const now = snap && (top ? snap : (snap.replies || []).find((r) => r.id === id));
+  const before = (c.events || []).map((e) => (top
+    ? (e.kind === 'created' || e.kind === 'text_edited' ? e.text : null)
+    : e.kind === 'reply_added' && e.reply && e.reply.id === id ? e.reply.text : e.kind === 'reply_text_edited' && e.reply_id === id ? e.text : null));
+  return [now && now.text, ...before.reverse()].filter((x) => typeof x === 'string').slice(0, EDIT_TEXTS_MAX);
+}
+// edit_text, when the words do not tell: what to do about it.
+function editUnclear(kept) {
+  const { names = [], outdated = false, many = false } = kept;
+  if (many) return { status: 409, body: { error: 'edit_hidden_address', names, message: 'Too many of the addresses in this comment are hidden now. Try again later, or remove the @names.' } };
+  return { status: 409, body: outdated
+    ? { error: 'edit_outdated', message: 'This comment has changed since you opened it. Copy your text, reload the page and edit again.' }
+    : { error: 'edit_hidden_address', names, message: `${names.slice(0, 3).join(', ')} stands for an address that is hidden now. To save, keep the words next to it as they were, or remove or reword it.` } };
 }
 
 // The addresses `present` in `value` that this reader may not see, replaced.
@@ -15223,12 +15452,12 @@ async function aliasCommentEmails(value, privacy, present, gone) {
       // A reader's own words keep the addresses they typed -- except a
       // deleted account's, which nobody sees any more.
       if (key === 'text' && !ownText) return cutEmailTags(v, shows);
-      if (key === 'text') return v.replace(EMAIL_TAG_RE, (all, pre, addr) => (alias.has(addr.toLowerCase()) && gone.has(addr.toLowerCase()) ? `${pre}@${local(addr)}` : all));
+      if (key === 'text') return cutOwnTags(v, gone);
       return str(v);
     }
     if (Array.isArray(v)) return v.map((x) => walk(x, '', ownText));
     if (typeof v === 'object') {
-      const own = !!(v.author && typeof v.author.login === 'string' && privacy.mine.has(v.author.login.toLowerCase()));
+      const own = isOwnRecord(v, privacy);
       const out = {};
       for (const [k, x] of Object.entries(v)) out[str(k)] = walk(x, k, own);
       return out;
@@ -15243,9 +15472,15 @@ async function aliasCommentEmails(value, privacy, present, gone) {
 // bell, push, email) gets it as the doc page would show them it, worked out
 // then: who may see which address is the doc's to say, per person, and it
 // changes. A tag this reader may see stays whole with punctuation around it.
-// `gone`: addresses nobody sees.
-function notificationPreview(text, privacy, { cut = false, gone = new Set() } = {}) {
-  const may = (address) => { const e = address.toLowerCase(); return privacy.reveal.has(e) && !gone.has(e); };
+// `seen`: filled with the addresses it would show, to be checked
+// (deletedEmails); `gone`: those that are nobody's to see.
+function notificationPreview(text, privacy, { cut = false, seen = null, gone = new Set() } = {}) {
+  const may = (address) => {
+    const e = address.toLowerCase();
+    if (!privacy.reveal.has(e)) return false;
+    if (seen) seen.add(e);
+    return privacy.mine.has(`email:${e}`) || !gone.has(e);
+  };
   const shows = (address) => {
     if (may(address)) return true;
     const at = address.lastIndexOf('@');
@@ -15261,10 +15496,21 @@ function notificationRowTags(row) {
 function notificationRowCut(row) {
   return row.kind === 'agent_reply' && row.preview.length >= AGENT_REPLY_PREVIEW_MAX;
 }
-function notificationRowText(row, privacy) {
-  const actor = row.actor && typeof row.actor.login === 'string' ? row.actor.login.toLowerCase() : '';
-  if (!notificationRowTags(row) || privacy.mine.has(actor)) return row;
-  return { ...row, preview: notificationPreview(row.preview, privacy, { cut: notificationRowCut(row) }) };
+function notificationRowOwn(row, privacy) {
+  return !!(row.actor && typeof row.actor.login === 'string' && privacy.mine.has(row.actor.login.toLowerCase()));
+}
+// The addresses a row would show this person, to be checked: not their own.
+function notificationRowShows(row, privacy, out = new Set()) {
+  if (!notificationRowTags(row)) return out;
+  const seen = new Set();
+  if (notificationRowOwn(row, privacy)) for (const t of row.preview.matchAll(EMAIL_TAG_RE)) for (const e of tagAddresses(t[1])) seen.add(e.toLowerCase());
+  else notificationPreview(row.preview, privacy, { cut: notificationRowCut(row), seen });
+  for (const e of seen) if (!privacy.mine.has(`email:${e}`)) out.add(e);
+  return out;
+}
+function notificationRowText(row, privacy, gone) {
+  if (!notificationRowTags(row)) return row;
+  return { ...row, preview: notificationRowOwn(row, privacy) ? cutOwnTags(row.preview, gone) : notificationPreview(row.preview, privacy, { cut: notificationRowCut(row), gone }) };
 }
 // The rows of one page of one person's bell. Only a doc with a tag in one of
 // them is asked about, once: its record (`metas`: those already read) and its
@@ -15280,28 +15526,41 @@ async function notificationRowsFor(env, session, rows, metas = new Map()) {
   if (session.login && !session.email && session.account_id) {
     try { const rec = await lookupHostedAccount(env, session.login); address = rec && rec.account_id === session.account_id ? normalizeEmail(rec.email) : null; } catch {}
   }
-  if (address) own.reveal.add(address);
+  const mine = (privacy) => { if (address) { privacy.reveal.add(address); privacy.mine.add(`email:${address}`); } return privacy; };
+  mine(own);
   const bySlug = new Map(await Promise.all(slugs.map(async (slug) => {
     let meta = metas.get(slug) || null;
     if (!meta) try { meta = await readDocRecord(env, slug); } catch {}
     if (!meta || isTrashedMeta(meta)) return [slug, own];
-    const privacy = await emailPrivacyFor(env, session, slug, meta, { teams });
-    if (address) privacy.reveal.add(address);
-    return [slug, privacy];
+    return [slug, mine(await emailPrivacyFor(env, session, slug, meta, { teams }))];
   })));
-  return rows.map((r) => (notificationRowTags(r) ? notificationRowText(r, bySlug.get(r.slug) || own) : r));
+  // A deleted account's address is nobody's, as on the doc page: one check
+  // for the page.
+  const shown = new Set();
+  for (const r of rows) notificationRowShows(r, bySlug.get(r.slug) || own, shown);
+  const gone = await deletedEmails(env, [...shown]);
+  return rows.map((r) => notificationRowText(r, bySlug.get(r.slug) || own, gone));
 }
 // A row on its way out (push, email), for the one person it is for.
 // `privacyOf`: theirs on the row's doc, asked only when the row needs it.
-async function notificationRowOut(env, who, row, privacyOf = null) {
+// `checks`: what deletedEmails answered for the others told (address -> gone).
+async function notificationRowOut(env, who, row, privacyOf = null, checks = new Map()) {
   const actor = row.actor || {};
   const named = [...collectEmails({ login: actor.login, name: actor.name }, new Set())];
   if (!named.length && !notificationRowTags(row)) return row;
   const own = await emailPrivacyFor(env, who.startsWith('email:') ? { email: who.slice(6) } : { login: who }, '', null);
   const privacy = { ...((privacyOf && await Promise.resolve(privacyOf()).catch(() => null)) || own), slug: 'me:inbox' };
-  const out = { ...notificationRowText(row, privacy) };
+  const shown = notificationRowShows(row, privacy);
+  for (const e of named) if (privacy.reveal.has(e) && !privacy.mine.has(`email:${e}`)) shown.add(e);
+  const ask = [...shown].filter((e) => !checks.has(e));
+  if (ask.length) {
+    const answer = await deletedEmails(env, ask);
+    for (const e of ask) checks.set(e, answer.has(e));
+  }
+  const gone = new Set([...shown].filter((e) => checks.get(e)));
+  const out = { ...notificationRowText(row, privacy, gone) };
   if (row.actor) {
-    const seen = await aliasCommentEmails({ login: actor.login, name: actor.name }, privacy, named, new Set());
+    const seen = await aliasCommentEmails({ login: actor.login, name: actor.name }, privacy, named, gone);
     out.actor = { ...row.actor, ...seen, name: seen.name || (seen.login === actor.login ? actor.name : 'Someone') };
   }
   return out;
@@ -17595,14 +17854,21 @@ function applyCommentOp(list, op) {
       // older version keeps the words it was published with.
       const top = list.find(c => c.id === op.id);
       if (top) {
-        appendEvent(top, { kind: 'text_edited', at_version: op.version, at: now, text: op.text, by: op.actor.login });
+        ensureEventLog(top);
+        const kept = restoreShortTags(recordTexts(top, op.id, op.version), op.base_text, op.text);
+        if (kept.text == null) return editUnclear(kept);
+        const text = kept.text;
+        appendEvent(top, { kind: 'text_edited', at_version: op.version, at: now, text, by: op.actor.login });
         return { status: 200, body: snapshotAt(top, op.version) };
       }
       for (const c of list) {
         ensureEventLog(c);
         const re = (c.events || []).find(e => e.kind === 'reply_added' && e.reply?.id === op.id);
         if (re) {
-          appendEvent(c, { kind: 'reply_text_edited', at_version: op.version, at: now, reply_id: op.id, text: op.text, by: op.actor.login });
+          const kept = restoreShortTags(recordTexts(c, op.id, op.version), op.base_text, op.text);
+          if (kept.text == null) return editUnclear(kept);
+          const text = kept.text;
+          appendEvent(c, { kind: 'reply_text_edited', at_version: op.version, at: now, reply_id: op.id, text, by: op.actor.login });
           const snap = snapshotAt(c, op.version);
           return { status: 200, body: (snap && snap.replies.find(r => r.id === op.id)) || { ok: true } };
         }
@@ -18093,7 +18359,7 @@ async function clearAgentUnreadMany(env, session, bySlug) {
 // `origin` is the site the event happened on, for the links in an email.
 // `privacyOf`: what the recipient may see on the event's doc
 // (notificationRowOut).
-async function writeInboxEvent(env, who, ev, { ctx = null, origin = '', privacyOf = null } = {}) {
+async function writeInboxEvent(env, who, ev, { ctx = null, origin = '', privacyOf = null, checks = undefined } = {}) {
   const key = inboxKey(who);
   if (!key) return null;
   // The row goes in through one lane per recipient (serialKvOp): delivery
@@ -18107,7 +18373,7 @@ async function writeInboxEvent(env, who, ev, { ctx = null, origin = '', privacyO
   // A quiet row (an agent's reply) is only in the bell: no push, no email.
   if (ev.quiet) return row;
   const recipient = key.slice('inbox:'.length);
-  const shown = notificationRowOut(env, recipient, row, privacyOf);
+  const shown = notificationRowOut(env, recipient, row, privacyOf, checks);
   const out = Promise.all([
     shown.then((seen) => pushInboxRow(env, recipient, seen)).catch((error) => {
       console.error('[push] fan-out failed:', error && error.message ? error.message : error);
@@ -22200,8 +22466,8 @@ function askFence(s) {
 function fenceTags(s, names) {
   const text = String(s == null ? '' : s);
   const end = text.lastIndexOf('>') + 1;
-  return text.slice(0, end).replace(new RegExp(`<\\/?\\s*(?:${names})\\b[^>]*>`, 'gi'), '[tag removed]')
-    + text.slice(end).replace(new RegExp(`<(?=\\/?\\s*(?:${names})\\b)`, 'gi'), '&lt;');
+  return text.slice(0, end).replace(new RegExp(`<[\\s/]*(?:${names})\\b[^>]*>`, 'gi'), '[tag removed]')
+    + text.slice(end).replace(new RegExp(`<(?=[\\s/]*(?:${names})\\b)`, 'gi'), '&lt;');
 }
 
 function askDocText(rawHtml) {
@@ -24679,7 +24945,7 @@ const SUGGEST_SYSTEM_PROMPT = [
 const SUGGEST_TAGS = 'passage|comments_to_fix|request|comment|system|instructions?';
 function suggestFence(s) {
   return fenceTags(askFence(s), SUGGEST_TAGS)
-    .replace(/\[comment id=/gi, '[comment-id=');
+    .replace(/\[comment\s+id=/gi, '[comment-id=');
 }
 
 // One piece of a comment to fix (its id, author, quote, words), on one line:
@@ -33972,7 +34238,7 @@ const tdocHandlers = {
           // the parent's author found by their GitHub id when it is known.
           const parentRec = parent_id ? recordAuthor(priorList, parent_id) : null;
           const delivery = {
-            ctx, origin: url.origin, readers, teams: new Map(), meta: metaNow,
+            ctx, origin: url.origin, readers, teams: new Map(), checks: new Map(), meta: metaNow,
             authors: parentRec && parentRec.login ? { [normalizeActorKey(parentRec.login)]: parentRec } : {},
           };
           if (mentions.length) {
@@ -34081,8 +34347,17 @@ const tdocHandlers = {
         if (!target) return json({ error: 'not_found' }, { status: 404 });
         if (!isRecordAuthor(target, s)) return json({ error: 'not_author' }, { status: 403 });
         const V = coerceBodyVersion(version);
+        // The text the edit started from (restoreShortTags): what the client
+        // says it was, else what its author would be shown now.
+        let base = typeof body.base_text === 'string' ? body.base_text : null;
+        if (base == null) {
+          const root = findCommentThread(list, id);
+          const [said = ''] = root ? recordTexts(root.root, id, V) : [];
+          base = (await redactCommentEmails({ author: target.author, text: said }, await emailPrivacyFor(env, s, slug, meta))).text;
+        }
         const res = await mutateComments(env, slug, {
           kind: 'edit_text', slug, id, text, version: V, actor: { login: actorKey(s) },
+          base_text: base,
         });
         return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
       }

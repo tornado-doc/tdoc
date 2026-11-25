@@ -269,6 +269,27 @@ async function settle(locator) {
         assert.equal(await list.locator('.tdoc-comment-filter [role="radio"]').first().evaluate((b) => getComputedStyle(b).textOverflow), 'ellipsis');
         await ctx.close();
       });
+      await t(`${tag}: widget: saving an edit says which words it started from`, async () => {
+        const ctx = await contextFor();
+        const page = await ctx.newPage();
+        await page.addInitScript(([key, value]) => { localStorage.setItem(key, value); }, [`tdoc-feedback:${base}`, JSON.stringify(space)]);
+        await page.goto(`${base}/__page`);
+        const root = page.locator('#tdoc-feedback-root');
+        await root.locator('.tdoc-fb-list [aria-label="More actions"]').first().click();
+        await root.locator('.ui-menu-popup .tdoc-edit-toggle').press('Enter');
+        const box = root.locator('.tdoc-edit-form textarea');
+        const before = await box.inputValue({ timeout: 5000 });
+        await box.fill(`${before} at all`);
+        const [patch] = await Promise.all([
+          page.waitForRequest((r) => r.method() === 'PATCH' && r.url().includes('/api/comments'), { timeout: 5000 }),
+          root.locator('.tdoc-edit-save').click(),
+        ]);
+        const sent = patch.postDataJSON();
+        assert.equal(sent.text, `${before} at all`);
+        assert.equal(sent.base_text, before);
+        await root.getByText(`${before} at all`).first().waitFor({ timeout: 5000 });
+        await ctx.close();
+      });
     }
     await doc.ctx.close();
   }

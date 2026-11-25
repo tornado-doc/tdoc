@@ -322,6 +322,9 @@ function ReplyForm({
 // leaves the card untouched when the text comes back unchanged.
 function EditForm({ item, onSave, onCancel }) {
   const [text, setText] = useState(item.text || '');
+  // What this edit started from: the list may refresh under it, and the
+  // worker tells by it which addresses were shown short (base_text).
+  const [base] = useState(item.text || '');
   const boxRef = useRef(null);
 
   // Open at the END of what is already written. autoFocus alone leaves the
@@ -337,9 +340,9 @@ function EditForm({ item, onSave, onCancel }) {
 
   const submit = async () => {
     const next = text.trim();
-    if (!next || next === item.text) return onCancel();
+    if (!next || next === base) return onCancel();
     // onSave resolves false when the shell reported a failure; keep the draft.
-    if (await onSave(item.id, next) !== false) onCancel();
+    if (await onSave(item.id, next, base) !== false) onCancel();
     return undefined;
   };
 
@@ -801,8 +804,8 @@ export function CommentCard({
     return result;
   };
 
-  const saveEdit = async (id, text) => {
-    const result = await onEdit(id, text);
+  const saveEdit = async (id, text, base) => {
+    const result = await onEdit(id, text, base);
     if (result === false) return false;
     setEditTarget(null);
     return result;

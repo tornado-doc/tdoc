@@ -469,6 +469,81 @@ async function seedDoc(env, slug, owner) {
     assert(unknown - bare <= 2 * 3 && many - bare <= 10 * 3, `${bare} ${unknown} ${many}`);
   });
 
+  await t('a deleted account\'s address: the owner\'s email and bell hide it, as the doc page does', async () => {
+    const hmac = (key, text) => require('crypto').createHmac('sha256', key).update(text).digest('hex');
+    const { env, sent, post, api, who } = await tagged();
+    const GONE = 'gone@invited.example';
+    const meta = JSON.parse(await env.META.get('meta:plain'));
+    await env.META.put('meta:plain', JSON.stringify({ ...meta, access: { ...meta.access, allowed_users: [INV, GONE] } }));
+    await env.META.put('account-identity-key', JSON.stringify({ name: 'TDOC_EMAIL_ALIAS_SECRET', kid: hmac('tdoc-identity-kid\0x', 'kid').slice(0, 16) }));
+    await env.META.put(`account-deleted-identity:${hmac('tdoc-deleted-identity-v1\0x', `email:${GONE}`)}`, JSON.stringify({ at: '2026-11-02T00:00:00.000Z' }));
+    const want = `ask @${INV}, @gone, or @gone ok`;
+    const r = await post('plain', 'dave', `ask @${INV}, @${GONE}, or @${GONE} ok`);
+    assert(r.status === 200, `${r.status}`);
+    const mail = () => sent.find((m) => m.to === 'olga@example.com');
+    assert(mail() && mail().text.includes(want) && mail().html.includes(want) && !both(mail()).includes('gone'), mail() && mail().text);
+    const bell = () => api('/api/notifications', { cookie: who.olga.cookie });
+    const rows = await bell();
+    assert(rows.body.items.some((i) => i.preview === want) && !rows.text.includes(GONE), rows.text);
+    // The check cannot be read: an email and the bell hide it all; their own stays.
+    const { env: env2, sent: sent2, who: who2 } = await tagged();
+    const worker2 = (await loadWorker()).default;
+    await env2.META.put('account-identity-key', JSON.stringify({ name: 'TDOC_EMAIL_ALIAS_SECRET', kid: hmac('tdoc-identity-kid\0x', 'kid').slice(0, 16) }));
+    const get = env2.META.get;
+    env2.META.get = function (k, ...a) { return [].concat(k).some((x) => String(x).startsWith('account-deleted-identity:')) ? Promise.reject(new Error('KV is down')) : get.call(this, k, ...a); };
+    const posted = await worker2.fetch(req('/api/comments', { method: 'POST', cookie: who2.dave.cookie, body: { slug: 'plain', version: 1, text: TEXT, anchor: null } }), env2, {});
+    assert(posted.status === 200, `${posted.status}`);
+    const to = (x) => sent2.find((m) => m.to === x);
+    assert(!both(to('olga@example.com')) && both(to('eve@own.example')) === 'eve@own.example', `${both(to('olga@example.com'))} / ${both(to('eve@own.example'))}`);
+    const down = await worker2.fetch(req('/api/notifications', { cookie: who2.olga.cookie }), env2, {});
+    assert(down.status === 200 && !hosts(await down.text()), 'bell, check unreadable');
+    const eve = await (await worker2.fetch(req('/api/notifications', { cookie: who2.eve.cookie }), env2, {})).text();
+    assert(hosts(eve) === 'eve@own.example', `own: ${hosts(eve)}`);
+  });
+
+  await t('a notification about one\'s own words, and the name of who wrote it: a deleted account\'s address, or one that cannot be checked, is in neither', async () => {
+    const hmac = (key, text) => require('crypto').createHmac('sha256', key).update(text).digest('hex');
+    const GONE = 'gone@invited.example';
+    const DAVE = 'dave@hidden.example';
+    for (const down of [false, true]) {
+      const { env, sent, who } = await tagged();
+      const w = (await loadWorker()).default;
+      const api = async (path, o) => { const r = await w.fetch(req(path, o), env, {}); assert(r.status === 200, `${path} ${r.status}`); return r.json(); };
+      const meta = JSON.parse(await env.META.get('meta:plain'));
+      await env.META.put('meta:plain', JSON.stringify({ ...meta, access: { ...meta.access, allowed_users: [DAVE, INV] } }));
+      await env.META.put('account-identity-key', JSON.stringify({ name: 'TDOC_EMAIL_ALIAS_SECRET', kid: hmac('tdoc-identity-kid\0x', 'kid').slice(0, 16) }));
+      await env.META.put(`account-deleted-identity:${hmac('tdoc-deleted-identity-v1\0x', `email:${GONE}`)}`, JSON.stringify({ at: '2026-11-02T00:00:00.000Z' }));
+      await env.META.put(`session:${'d'.repeat(32)}`, JSON.stringify({ email: DAVE, name: DAVE, created: '2026-01-01T00:00:00Z' }));
+      const get = env.META.get;
+      if (down) env.META.get = function (k, ...a) { return [].concat(k).some((x) => String(x).startsWith('account-deleted-identity:')) ? Promise.reject(new Error('KV is down')) : get.call(this, k, ...a); };
+      await api('/api/comments', { method: 'POST', cookie: who.dave.cookie, body: { slug: 'plain', version: 1, text: 'hello', anchor: null } });
+      const mail = sent.find((m) => m.to === 'olga@example.com');
+      const said = mail.subject + mail.text + mail.html + JSON.stringify(mail.from);
+      assert(said.includes('dave') && said.includes(DAVE) === !down, `${down}: ${mail.subject} ${mail.text}`);
+      const row = { id: 'n1', kind: 'mention', group_key: 'n1', slug: 'plain', version: 1, comment_id: 'c', thread_id: 'c', actor: { login: 'olga', name: 'olga' }, preview: `ask @${GONE}, or @${INV} ok`, title: 'plain', at: new Date().toISOString(), read: false, count: 1 };
+      await env.META.put('inbox:olga', JSON.stringify({ items: [row] }));
+      const { items } = await api('/api/notifications', { cookie: who.olga.cookie });
+      assert(items[0].preview === (down ? 'ask @gone, or @carol ok' : `ask @gone, or @${INV} ok`), `${down}: ${items[0].preview}`);
+    }
+  });
+
+  await t('what the deletion checks of a notification cost', async () => {
+    const hmac = (key, text) => require('crypto').createHmac('sha256', key).update(text).digest('hex');
+    const { env, post, api, who } = await tagged();
+    await env.META.put('account-identity-key', JSON.stringify({ name: 'TDOC_EMAIL_ALIAS_SECRET', kid: hmac('tdoc-identity-kid\0x', 'kid').slice(0, 16) }));
+    let ops = 0;
+    const get = env.META.get;
+    env.META.get = function (k, ...a) { if ([].concat(k).some((x) => String(x).startsWith('account-deleted-identity:') || x === 'account-identity-key')) ops += 1; return get.call(this, k, ...a); };
+    const count = async (fn) => { ops = 0; const r = await fn(); assert(r.status === 200, `${r.status}`); return ops; };
+    const bare = await count(() => post('open-team', 'mia', '@olga @ned @pat @quin a'));
+    const tags = await count(() => post('open-team', 'mia', `@olga @ned @pat @quin b @${TEAM} x`));
+    const none = await count(() => api('/api/notifications?offset=0', { cookie: who.mia.cookie }));
+    const bell = await count(() => api('/api/notifications', { cookie: who.ned.cookie }));
+    console.log(`    deletion reads: ${bare} without a tag, ${tags} with one shown to four; bell ${bell}, with nothing to show ${none}`);
+    assert(tags <= bare + 3, `${bare} -> ${tags}`);
+    assert(bell <= 6, `bell ${bell}`);
+  });
+
   await t('what telling people costs: one read of the doc\'s team, however many are told; none without a tag', async () => {
     const { env, sent, post, api, who } = await tagged();
     const reads = async (fn) => { const from = env.META.gets.length; const r = await fn(); assert(r.status === 200, `${r.status}`); return env.META.gets.slice(from); };

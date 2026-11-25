@@ -316,7 +316,7 @@ export function FeedbackSpace({ boot }) {
               onReact: (id, emoji) => act(() => toggleReaction({ slug, version, comment_id: id, emoji })),
               onDelete: (id) => act(() => removeComment(slug, version, id)),
               onResolve: (id, resolved) => act(() => setCommentResolved({ slug, version, id, resolved })),
-              onEdit: (id, text) => act(() => updateCommentText({ slug, version, id, text })),
+              onEdit: (id, text, base) => act(() => updateCommentText({ slug, version, id, text, base_text: base })),
               onReanchor: () => setNotice('Move a comment from the app: open it there and use Move anchor.'),
             }}
           />

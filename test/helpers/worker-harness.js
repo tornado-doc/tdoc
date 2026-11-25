@@ -28,7 +28,16 @@ class FakeKV {
     this.failPutOnce = new Set();
     this.gets = [];
   }
-  async get(k) { this.gets.push(k); return this.map.has(k) ? this.map.get(k) : null; }
+  // Several keys (at most 100) in one read, as Workers KV does: a Map of them.
+  async get(k) {
+    if (Array.isArray(k)) {
+      if (k.length > 100) throw new Error('KV GET_BULK takes at most 100 keys');
+      this.gets.push(...k);
+      return new Map(k.map((x) => [x, this.map.has(x) ? this.map.get(x) : null]));
+    }
+    this.gets.push(k);
+    return this.map.has(k) ? this.map.get(k) : null;
+  }
   // Workers KV returns the value and its metadata in one read; the doc and
   // team indexes diff the prior metadata against the next record on write.
   async getWithMetadata(k) {

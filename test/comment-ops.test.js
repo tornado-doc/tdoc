@@ -43,6 +43,9 @@ vm.runInContext([
   fn('reconcileAnchors'),
   fn('findCommentThread'),
   fn('isPersonShape'), fn('markImportedAuthors'), // uploaded authors are flagged imported
+  // an edit gives short-shown addresses back (restoreShortTags)
+  ...['BARE_EMAIL_RE', 'EMAIL_TAG_RE', 'TAG_ADDRESS_RE', 'TAG_OPEN_RE', 'EDIT_TEXTS_MAX', 'EDIT_LOOK_MAX'].map((name) => new RegExp(`const ${name} = .*`).exec(src)[0]),
+  fn('tagAddresses'), fn('shortTag'), fn('restoreShortTags'), fn('recordTexts'), fn('editUnclear'),
   fn('applyCommentOp'),
 ].join('\n\n'), box);
 const apply = box.applyCommentOp;
