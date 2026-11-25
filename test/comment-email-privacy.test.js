@@ -241,6 +241,39 @@ const DAVE = 'dave.reader@example.org';
     assert((await call('/api/comments?slug=long-tags')).body[0].text === 'see @lee, ok', 'another reader');
   });
 
+  await t('address patterns: what they match', () => {
+    const src = require('fs').readFileSync(process.env.TDOC_WORKER_JS || require('path').join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+    const pattern = (name) => new Function(`return ${src.match(new RegExp(`const ${name} = (.*);`))[1]}`)();
+    const [bare, key, ask] = ['BARE_EMAIL_RE', 'EMAIL_KEY_RE', 'ASK_EMAIL_RE'].map(pattern);
+    const hide = (text) => text.replace(ask, (all, host) => (host === undefined ? all : '[email hidden]'));
+    const was = (text) => text.replace(/[^\s@<>()"',;:]+@[^\s@<>()"',;:]+\.[A-Za-z]{2,}/g, '[email hidden]');
+    const same = (text) => {
+      assert(bare.test(text) === /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text), `bare: ${JSON.stringify(text)}`);
+      assert(JSON.stringify(text.match(key)) === JSON.stringify(text.match(/^email:([^\s@]+@[^\s@]+\.[^\s@]+)$/i)), `key: ${JSON.stringify(text)}`);
+      assert(hide(text) === was(text), `ask: ${JSON.stringify(text)}`);
+    };
+    const all = (text, depth) => { same(text); same(`Email:${text}`); if (depth) for (const c of 'a.@ ,1') all(text + c, depth - 1); };
+    all('', 6);
+    for (const text of ['a@b.com1c@d.org', 'x@y.zz@w.vv', 'ann@one.example, bob@two.example;c@d', '(a@b.co)', 'a@b..com', 'a@.b.com', 'é@ü.com', 'a@b.c', '😀@b.co']) same(text);
+  });
+
+  await t('address patterns: long strings cost their length', async () => {
+    const N = 8000;
+    const ms = async (fn) => { const from = process.hrtime.bigint(); const r = await fn(); assert(r.status === 200, `${r.status}`); return Math.round(Number(process.hrtime.bigint() - from) / 1e6); };
+    for (const long of [`x@${'.'.repeat(N)} z`, `email:x@${'.'.repeat(N)} z`]) {
+      // What a comment says, in its reader's bell; what an upload carries, on the page.
+      await seed('cost', { visibility: 'public' });
+      const c = await call('/api/comments', { method: 'POST', cookie: carol, body: { slug: 'cost', version: 1, text: long } });
+      assert(c.status === 200, `comment ${c.status}`);
+      const bell = await ms(() => call('/api/notifications', { cookie: alice.cookie }));
+      await seed('cost-names', { visibility: 'public' });
+      await env.META.put('comments:cost-names', JSON.stringify([{ id: 'n', created, version: 1, text: 'x', author: { login: long, name: long, avatar_url: long }, reactions: { y: [long] } }]));
+      const page = await ms(() => call('/api/comments?slug=cost-names'));
+      console.log(`    bell ${bell} ms, page ${page} ms`);
+      assert(bell < 1000 && page < 1000, `bell ${bell} ms, page ${page} ms`);
+    }
+  });
+
   await t('with no secret configured there is no alias to match: every hidden address is the same placeholder', async () => {
     delete env.TDOC_EMAIL_ALIAS_SECRET;
     const r = await call('/api/comments?slug=open');

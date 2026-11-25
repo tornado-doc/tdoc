@@ -14989,8 +14989,13 @@ async function accountClaimedHandle(env, accountId) {
 // addresses they invited, and a team keeps its members'. Document text in
 // anchors is left alone; mention tags in comment text are shortened except
 // in the reader's own comments.
-const EMAIL_KEY_RE = /^email:([^\s@]+@[^\s@]+\.[^\s@]+)$/i;
-const BARE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+//
+// The two anchored patterns run on every string and key of a payload, however
+// long. They match what `[^\s@]+@[^\s@]+\.[^\s@]+` does, but the first dot
+// that can split the host is the only one tried, so a string that is not an
+// address costs its length, not its square.
+const EMAIL_KEY_RE = /^email:([^\s@]+@[^\s@][^\s@.]*\.[^\s@]+)$/i;
+const BARE_EMAIL_RE = /^[^\s@]+@[^\s@][^\s@.]*\.[^\s@]+$/;
 const EMAIL_TAG_RE = /(^|[^A-Za-z0-9_@/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
 // Other people's words: every tag of a run of text without a space, however
 // the tags in it are parted or wrapped. EMAIL_TAG_RE reads the reader's own.
@@ -22066,7 +22071,9 @@ const ASK_SELECTION_CHARS = 4000;
 const ASK_DEFAULT_MAX_TOKENS = 4500;
 // Reasoning models think before they answer; give them time, once.
 const ASK_TIMEOUT_MS = 90000;
-const ASK_EMAIL_RE = /[^\s@<>()"',;:]+@[^\s@<>()"',;:]+\.[A-Za-z]{2,}/g;
+// What may be the start of an address, with the rest of one or not: a long run
+// without an @ is read once, not again from each of its characters.
+const ASK_EMAIL_RE = /[^\s@<>()"',;:]+(@[^\s@<>()"',;:]+\.[A-Za-z]{2,})?/g;
 const ASK_SYSTEM_PROMPT = [
   'You are "Ask this doc", a reading assistant on tdoc.dev. You answer questions about ONE document, using only the document text and comments provided.',
   'You cannot edit the document, post comments, or take any action. If the reader asks you to change the document, say you cannot, and suggest they leave a comment for the author or connect their own agent at tdoc.dev/start.',
@@ -22118,7 +22125,7 @@ async function askAccountKey(env, session) {
 }
 
 function askNoEmails(s) {
-  return String(s == null ? '' : s).replace(ASK_EMAIL_RE, '[email hidden]');
+  return String(s == null ? '' : s).replace(ASK_EMAIL_RE, (all, host) => (host ? '[email hidden]' : all));
 }
 
 function askCut(s, n) {
