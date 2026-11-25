@@ -1,14 +1,16 @@
 // A press on a menu row acts once: one click, not two (a press that acted
-// twice opened and closed Edit and sent DELETE twice). Every row of every menu on the feedback widget, the doc page (text,
-// slides, a sheet) and the feedback space page (TDOC_FULL): a real mouse press at a
-// person's pace, a tap, Enter and Space; a press held on the menu's button and
-// let go on a row acts once, a right press on a row not at all. Then what rows
-// of the widget do, for real.
-// Run with: node test/menu-one-press-ui.test.js (TDOC_FULL=1: every way everywhere)
+// twice opened and closed Edit and sent DELETE twice). The menu itself, in a
+// shadow tree its presses do not leave, as the feedback widget's: a press, a
+// right press, a tap, Enter, Space and a drag from the menu's button, on a row,
+// a link and a submenu's row. Then what rows of the widget do, for real.
+// TDOC_FULL=1 (many minutes): also every row of every menu on the widget, the
+// doc page (text, slides, a sheet) and the feedback space page.
+// Run with: node test/menu-one-press-ui.test.js
 const assert = require('assert/strict');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
+const esbuild = require('esbuild');
 const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
 const { loadWorker, makeEnv } = require('./helpers/worker-harness');
 const { loadRuntimeAssets } = require('../server/runtime-assets');
@@ -21,7 +23,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
 <body><main><h1>Settings</h1><p id="x">Something to comment on.</p><button id="save">Save</button></main>
 <script src="/feedback.js" data-tdoc-open="1"></script></body></html>`;
 // A person opens a menu, then presses a row: longer than Base UI's 200 ms.
-const PACE = 280;
+const PACE = 240;
 
 async function startServer(worker, env) {
   const assets = loadRuntimeAssets();
@@ -80,6 +82,30 @@ function countClicks() {
   Element.prototype.attachShadow = function attachShadow(init) { const root = attach.call(this, init); listen(root); return root; };
 }
 
+const MENU = `
+  import React from 'react';
+  import { createRoot } from 'react-dom/client';
+  import { AppMenu, AppMenuItem, AppMenuLinkItem, AppSubmenu } from './shell/src/ui/menu.jsx';
+  import { PortalContainerContext } from './shell/src/ui/portal.js';
+  window.__hits = [];
+  const hit = (name) => (event) => { if (event.type === 'click') event.preventDefault(); window.__hits.push(name); };
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const shadow = host.attachShadow({ mode: 'open' });
+  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click']) host.addEventListener(type, (event) => event.stopPropagation());
+  shadow.innerHTML = '<style>.ui-menu-popup { width: 160px; background: #fff } .ui-menu-item, .label, a { display: block; height: 30px }</style><div id="app"></div><div id="popups"></div>';
+  createRoot(shadow.getElementById('app')).render(
+    <PortalContainerContext.Provider value={shadow.getElementById('popups')}>
+      <AppMenu align="start" trigger={<button id="menu">Menu</button>}>
+        <div className="label">Label</div>
+        <AppMenuItem className="row" onClick={hit('row')} onMouseUp={hit('row up')}>Row</AppMenuItem>
+        <AppMenuLinkItem className="link" href="#there" onClick={hit('link')} onMouseUp={hit('link up')}>Link</AppMenuLinkItem>
+        <AppSubmenu className="more" trigger="More"><AppMenuItem className="sub" onClick={hit('sub')}>Sub</AppMenuItem></AppSubmenu>
+      </AppMenu>
+    </PortalContainerContext.Provider>,
+  );
+`;
+
 (async () => {
   console.log('Menus: one press acts once, on every comment surface');
   const mod = await loadWorker();
@@ -96,7 +122,7 @@ function countClicks() {
   const { server, base } = await startServer(worker, env);
   const M = await import('../shared/sheet-markup.mjs');
   const sheet = M.sheetDocumentHtml({ title: 'Tracker', sheets: [{ name: 'Tasks', columns: [{ name: 'Task', type: 'text' }, { name: 'Points', type: 'number' }], rows: [{ id: 'r1', cells: ['Alpha line one', '1'] }, { id: 'r2', cells: ['Bravo line two', '2'] }] }] });
-  for (const [slug, html] of [['press-doc', DOC], ['press-slides', SLIDES], ['press-sheet', sheet]]) {
+  for (const [slug, html] of process.env.TDOC_FULL ? [['press-doc', DOC], ['press-slides', SLIDES], ['press-sheet', sheet]] : []) {
     assert.equal((await call('/api/upload', { method: 'POST', token, body: { slug, version: 1, html, meta: { title: slug } } })).status, 200);
     assert.equal((await call('/api/comments', { method: 'POST', cookie, body: { slug, version: 1, text: 'Make this shorter', anchor: { kind: 'text', text: 'Alpha line one' } } })).status, 200);
   }
@@ -109,12 +135,83 @@ function countClicks() {
   await addThread('Too small');
 
   let failed = 0;
-  const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${String(error.stack || error.message).split('\n').slice(0, 14).join('\n    ')}`); } };
+  const t = async (name, fn) => { const from = Date.now(); try { await fn(); console.log(`  ✓ ${name} (${Math.round((Date.now() - from) / 100) / 10} s)`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${String(error.stack || error.message).split('\n').slice(0, 14).join('\n    ')}`); } };
   const engines = [['chromium', pw.chromium]];
   if (pw.webkit && fs.existsSync(pw.webkit.executablePath())) engines.push(['webkit', pw.webkit]);
 
+  const full = !!process.env.TDOC_FULL;
+  const bundle = (await esbuild.build({ stdin: { contents: MENU, resolveDir: path.join(__dirname, '..'), loader: 'jsx' }, bundle: true, write: false, format: 'iife', jsx: 'automatic', logLevel: 'silent', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0].text;
+
   for (const [engineName, engine] of engines) {
     const browser = await engine.launch({ headless: true });
+    const middle = async (locator) => { const b = await locator.boundingBox(); return [b.x + b.width / 2, b.y + b.height / 2]; };
+    const pressAt = async (page, [x, y], button = 'left') => {
+      await page.mouse.move(x, y);
+      await page.mouse.down({ button });
+      await page.waitForTimeout(40);
+      await page.mouse.up({ button });
+    };
+    for (const phone of [false, true]) {
+      await t(`${engineName} ${phone ? 'touch' : 'mouse and keys'}: the menu's rows, its link and its submenu`, async () => {
+        const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : { viewport: { width: 800, height: 600 } });
+        const page = await ctx.newPage();
+        await page.setContent('<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><p>Page</p></body></html>');
+        await page.addScriptTag({ content: bundle });
+        const menu = page.locator('#menu');
+        const popup = page.locator('.ui-menu-popup').first();
+        const open = async () => {
+          if (phone) await page.touchscreen.tap(...await middle(menu)); else await pressAt(page, await middle(menu));
+          await popup.waitFor();
+          await page.waitForTimeout(PACE);
+        };
+        const close = async () => { for (let k = 0; k < 3 && await popup.isVisible(); k++) { await page.keyboard.press('Escape'); await page.waitForTimeout(60); } await popup.waitFor({ state: 'detached' }); };
+        const dragTo = async (row) => {
+          await page.mouse.move(...await middle(menu));
+          await page.mouse.down();
+          await popup.waitFor();
+          await page.waitForTimeout(PACE);
+          await page.mouse.move(...await middle(page.locator(row)), { steps: 4 });
+          await page.mouse.up();
+        };
+        const hits = async (how, want) => {
+          await page.waitForTimeout(80);
+          assert.equal((await page.evaluate(() => window.__hits.splice(0))).join(), want, how);
+          await close();
+        };
+        const brief = engineName === 'webkit' && !full;
+        for (const row of brief ? ['row'] : ['row', 'link']) {
+          const up = `${row} up,${row}`;
+          for (const how of phone ? ['tap'] : brief || (row === 'link' && !full) ? ['left', 'drag'] : ['left', 'right', 'Enter', 'Space', 'drag']) {
+            if (how === 'drag') await dragTo(`.${row}`);
+            else {
+              await open();
+              const at = page.locator(`.${row}`);
+              if (how === 'tap') await page.touchscreen.tap(...await middle(at));
+              else if (how === 'left' || how === 'right') await pressAt(page, await middle(at), how);
+              else await at.press(how);
+            }
+            await hits(`${row}: ${how}`, how === 'right' ? `${row} up` : how === 'Enter' || how === 'Space' ? row : up);
+          }
+        }
+        if (!phone && !brief) {
+          await open();
+          await page.mouse.move(...await middle(page.locator('.more')));
+          await page.locator('.sub').waitFor();
+          await pressAt(page, await middle(page.locator('.sub')));
+          await hits('submenu', 'sub');
+          // A press that ended elsewhere says nothing about the next opening.
+          await open();
+          await page.mouse.move(...await middle(page.locator('.label')));
+          await page.mouse.down();
+          await page.mouse.move(700, 500, { steps: 3 });
+          await page.mouse.up();
+          await hits('a press let go outside', '');
+          await dragTo('.row');
+          await hits('a drag after it', 'row up,row');
+        }
+        await ctx.close();
+      });
+    }
     const open = async (surface, phone) => {
       const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } : { viewport: { width: 1280, height: 800 } });
       await ctx.addCookies([{ name: 'tdoc_sid', value: sid, url: base }]);
@@ -137,20 +234,14 @@ function countClicks() {
       };
       await page.goto(`${base}${surface === 'widget' ? '/__page' : `/d/${surface === 'space' ? space.slug : surface}`}`);
       if (surface.startsWith('press-')) await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
-      if (surface === 'widget') await thread.waitFor({ timeout: 6000 }).catch(() => {});
+      if (surface === 'widget') await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button, #tdoc-feedback-root .tdoc-fb-list [data-comment-id]').first().waitFor({ timeout: 15000 });
+      if (surface === 'widget') await thread.waitFor({ timeout: 1500 }).catch(() => {}); // it opens by itself on a wide screen
       await ready();
       await page.waitForTimeout(700);
       return { ctx, page, ready };
     };
     const rows = (page) => page.locator('.ui-menu-popup [role^="menuitem"]:not([aria-disabled="true"]):not([aria-haspopup]):visible, .ui-select-popup [role="option"]:visible');
     const clicks = (page) => page.evaluate(() => window.__clicks.splice(0));
-    const middle = async (locator) => { const b = await locator.boundingBox(); return [b.x + b.width / 2, b.y + b.height / 2]; };
-    const pressAt = async (page, [x, y], button = 'left') => {
-      await page.mouse.move(x, y);
-      await page.mouse.down({ button });
-      await page.waitForTimeout(40);
-      await page.mouse.up({ button });
-    };
     // Each row of each menu on the page, pressed each way: the clicks it got.
     const TRIGGERS = '[aria-haspopup="menu"]:visible, .ui-select-trigger:visible';
     const audit = async (page, only, ways, phone, ready) => {
@@ -181,7 +272,6 @@ function countClicks() {
           for (const how of ways) {
             // A dropdown's drag is Base UI's own gesture, not a click.
             if (how === 'drag' && label === 'Order') continue;
-            if (k && !process.env.TDOC_FULL && !['left', 'right', 'tap'].includes(how)) continue;
             await hide();
             if (how === 'drag') {
               await page.mouse.move(...await middle(button()));
@@ -210,18 +300,13 @@ function countClicks() {
       return seen;
     };
 
-    // TDOC_FULL: every way on every surface (many minutes). Else the widget,
-    // whose presses are relayed, with the ways besides a press on each menu's
-    // first row; and a press on the doc page, in one engine. Both engines do
-    // the rows of the widget for real, below.
-    const full = !!process.env.TDOC_FULL;
     const menus = /^(More actions|Comment list actions|Order)$/;
-    const surfaces = full ? ['widget', 'press-doc', 'press-slides', 'press-sheet', 'space'] : engineName === 'chromium' ? ['widget', 'press-doc'] : [];
+    const surfaces = full ? ['widget', 'press-doc', 'press-slides', 'press-sheet', 'space'] : [];
     for (const surface of surfaces) {
       for (const phone of [false, true]) {
         await t(`${engineName} ${surface} ${phone ? 'phone' : 'desktop'}: every row of every menu, one click a press`, async () => {
           const { ctx, page, ready } = await open(surface, phone);
-          const seen = await audit(page, menus, phone ? ['tap'] : full || surface === 'widget' ? ['left', 'right', 'Enter', 'Space', 'drag'] : ['left'], phone, ready);
+          const seen = await audit(page, menus, phone ? ['tap'] : ['left', 'right', 'Enter', 'Space', 'drag'], phone, ready);
           if (process.env.TDOC_DEBUG) console.log(seen.map((x) => `      ${x.menu} / ${x.text || x.row} / ${x.how}: ${x.got}`).join('\n'));
           await ctx.close();
           assert.deepEqual(seen.filter((x) => x.got !== x.want).map((x) => `${x.menu} / ${x.text || x.row} / ${x.how}: ${x.got} clicks`), []);
@@ -229,7 +314,7 @@ function countClicks() {
         });
       }
     }
-    for (const phone of [false, true]) {
+    for (const phone of full ? [false, true] : [engineName === 'webkit']) {
       await t(`${engineName} widget ${phone ? 'phone' : 'desktop'}: what its rows do, they do once`, async () => {
         const id = await addThread(`Remove me ${engineName} ${phone}`);
         const { ctx, page, ready } = await open('widget', phone);
@@ -240,12 +325,11 @@ function countClicks() {
         const choose = async (button, row) => {
           await button.scrollIntoViewIfNeeded();
           for (const [i, at] of [button, root.locator(`.ui-menu-popup ${row}`)].entries()) {
-            if (i) await at.waitFor();
-            await page.waitForTimeout(PACE);
+            if (i) { await at.waitFor(); await page.waitForTimeout(PACE); }
             const point = await middle(at);
             if (phone) await page.touchscreen.tap(...point); else await pressAt(page, point);
           }
-          await page.waitForTimeout(PACE);
+          await page.waitForTimeout(200);
         };
         const more = card.locator('[aria-label="More actions"]');
         await choose(more, '.tdoc-copy-for-agent');
