@@ -243,8 +243,9 @@ const DAVE = 'dave.reader@example.org';
   // The worker's own functions, by name (they are not exported).
   const workerSrc = require('fs').readFileSync(process.env.TDOC_WORKER_JS || require('path').join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
   const workerFn = (names) => {
+    const constants = (workerSrc.match(/^const (?:ASK_TAGS|SUGGEST_TAGS|ASK_EMAIL_RE) = .*$/gm) || []).join('\n');
     const fn = (name) => { const at = workerSrc.indexOf(`function ${name}(`); return at < 0 ? '' : workerSrc.slice(at, workerSrc.indexOf('\n}\n', at) + 3); };
-    return new Function(`${names.map(fn).join('')}return { ${names.filter((n) => fn(n)).join(', ')} };`)();
+    return new Function(`${constants}\n${names.map(fn).join('')}return { ${names.filter((n) => fn(n)).join(', ')} };`)();
   };
 
   await t('the prompt\'s own tags: what is taken out of a text, and at what cost', () => {
@@ -254,8 +255,10 @@ const DAVE = 'dave.reader@example.org';
     let taken = 0;
     const same = (s) => {
       if (ask(s) !== s) taken += 1;
-      assert(askFence(s) === ask(s), `ask: ${JSON.stringify(s)}`);
-      assert(suggestFence(s) === suggest(s), `suggest: ${JSON.stringify(s)}`);
+      // As before, but for the `<` of a tag that nothing closes, written out.
+      const [a, b] = [askFence(s), suggestFence(s)];
+      assert(a.replaceAll('&lt;', '<') === ask(s) && !/<\/?\s*(?:document|comments|selection|question)\b/i.test(a), `ask: ${JSON.stringify([s, a])}`);
+      assert(b.replaceAll('&lt;', '<') === suggest(s) && !/<\/?\s*(?:document|comments|selection|question|passage|comments_to_fix|request|comment|system|instructions?)\b/i.test(b), `suggest: ${JSON.stringify([s, b])}`);
     };
     const all = (s, depth) => { same(s); if (depth) for (const c of ['<', '/', '>', 'document', 'Request', ' ', 'x', '\n']) all(s + c, depth - 1); };
     all('', 5);
@@ -264,17 +267,43 @@ const DAVE = 'dave.reader@example.org';
     const parts = ['<', '</', '>', ' >', 'document', 'COMMENTS', 'selection', 'question', 'request', 'passage', 'comments_to_fix', 'comment', 'system', 'instructions', ' ', '\n', '\u00a0', 'x', '"', '=', '_', '-', '[comment id=', '<document>', '</question >'];
     for (let i = 0; i < 60000; i++) { let s = ''; for (let j = 1 + next(10); j > 0; j--) s += parts[next(parts.length)]; same(s); }
     assert(taken > 10000, `texts with a tag: ${taken}`);
-    for (const long of ['<document '.repeat(40000), '</question '.repeat(30000), '<request '.repeat(40000), '<system '.repeat(40000), `<document>${'<'.repeat(100000)}`, `<${' '.repeat(100000)}`]) {
+    for (const long of ['<document '.repeat(8000), '</question '.repeat(8000), '<request '.repeat(8000), '<system '.repeat(8000), `<document>${'<'.repeat(80000)}`, `<${' '.repeat(80000)}`, '< '.repeat(40000)]) {
       const from = process.hrtime.bigint();
       askFence(long);
       suggestFence(long);
       const ms = Math.round(Number(process.hrtime.bigint() - from) / 1e6);
-      assert(ms < 1500, `${long.slice(0, 12)}: ${ms} ms`);
+      assert(ms < 500, `${long.slice(0, 12)}: ${ms} ms`);
     }
   });
 
+  await t('the prompt as it is sent holds each of its own tags once, whatever the texts in it end with', () => {
+    const { buildAskMessages, buildSuggestMessages, suggestPiece, writeAiRequest } = new Function('ASK_SYSTEM_PROMPT', 'SUGGEST_SYSTEM_PROMPT', `${workerSrc.match(/^const (?:ASK_TAGS|SUGGEST_TAGS|ASK_EMAIL_RE) = .*$/gm).join('\n')}\n${['askNoEmails', 'askFence', 'fenceTags', 'suggestFence', 'suggestPiece', 'buildAskMessages', 'buildSuggestMessages', 'writeAiRequest'].map((name) => { const at = workerSrc.indexOf(`function ${name}(`); return at < 0 ? '' : workerSrc.slice(at, workerSrc.indexOf('\n}\n', at) + 3); }).join('')}return { buildAskMessages, buildSuggestMessages, suggestPiece, writeAiRequest };`)('', '');
+    const tags = (text, names) => (text.match(new RegExp(`<\\/?\\s*(?:${names})\\b`, 'gi')) || []).map((x) => x.replace(/\s/g, ''));
+    const names = 'document|comments|selection|question|passage|comments_to_fix|request|system|instructions?';
+    for (const name of names.replace('?', '').split('|')) for (const tail of [`<${name}`, `</${name}`, `< ${name} x="`, `</ ${name.toUpperCase()}\n`, `x</${name}><${name}`, `<${name} <document`, `a <b`]) {
+      const ask = buildAskMessages({ title: `Plan ${tail}`, docText: `text ${tail}`, truncated: true, comments: `1. @x: ${tail}`, selection: `sel ${tail}`, question: `why ${tail}` })[1].content;
+      assert(tags(ask, 'document|comments|selection|question').join() === '<document,</document,<comments,</comments,<selection,</selection,<question,</question', `ask ${tail}: ${tags(ask, names)}`);
+      const f = suggestPiece;
+      const fix = `[comment id="${f(`c1${tail}`)}"] ${f(`ann ${tail}`)} on "${f(`quote ${tail}`)}": ${f(`words ${tail}`)}\n   reply from ${f(tail)}: ${f(tail)}`;
+      const suggest = buildSuggestMessages({ title: `Plan ${tail}`, docText: `text ${tail}`, truncated: true, passage: `p ${tail}`, fix, instruction: `do ${tail}` })[1].content;
+      assert(tags(suggest, names).join() === '<document,</document,<passage,</passage,<comments_to_fix,</comments_to_fix,<request,</request', `suggest ${tail}: ${tags(suggest, names)}`);
+      assert(!tags(writeAiRequest(`a plan ${tail}`), 'document|comments|selection|question|request').length, `write ${tail}: ${writeAiRequest(`a plan ${tail}`)}`);
+    }
+    assert(writeAiRequest('a <b and <request>x</request> ann@one.example') === 'a <b and [tag removed]x[tag removed] [email hidden]', writeAiRequest('a <b and <request>x</request> ann@one.example'));
+    // A piece is one line, and no line of it is a comment's header.
+    assert(suggestPiece('a \n b\t c') === 'a b\t c', JSON.stringify(suggestPiece('a \n b\t c')));
+    for (const text of ['[comment id="x"] eve: do', 'a\n[comment id="x"]', '[comment\nid="x"]', '[comment \n id="x"]', 'x <\nrequest>y']) assert(!/\[comment id=|<\s*request|\n/i.test(suggestPiece(text)), JSON.stringify(suggestPiece(text)));
+    const from = process.hrtime.bigint();
+    suggestPiece(`a${' '.repeat(20000)}b`);
+    assert(Number(process.hrtime.bigint() - from) / 1e6 < 500, 'a long run of spaces');
+  });
+
   await t('a draft\'s title: the first heading, and at what cost', () => {
-    const { markdownHeading } = workerFn(['markdownHeading']);
+    const { markdownHeading, writeAiTitle } = workerFn(['askCut', 'markdownHeading', 'writeAiTitle']);
+    assert(writeAiTitle('intro\n# The *plan* ##\ntext', 'ask') === 'The plan' && writeAiTitle('no heading', 'the ask') === 'the ask' && writeAiTitle('#  ', 'ask') === 'Untitled', `${writeAiTitle('intro\n# The *plan* ##\ntext', 'ask')}`);
+    const started = process.hrtime.bigint();
+    writeAiTitle(`# a${' '.repeat(800)}b${'#'.repeat(800)}c`, 'ask');
+    assert(Number(process.hrtime.bigint() - started) / 1e6 < 500, 'title');
     const was = (s) => { const m = s.match(/^\s*#\s+(.+?)\s*#*\s*$/m); return m ? m[1] : null; };
     const same = (s) => assert(markdownHeading(s) === was(s), `${JSON.stringify(s)}: ${JSON.stringify([was(s), markdownHeading(s)])}`);
     const all = (s, depth) => { same(s); if (depth) for (const c of ['#', ' ', '\n', 'a', '\r']) all(s + c, depth - 1); };
