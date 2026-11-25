@@ -22447,8 +22447,8 @@ function askFence(s) {
 function fenceTags(s, names) {
   const text = String(s == null ? '' : s);
   const end = text.lastIndexOf('>') + 1;
-  return text.slice(0, end).replace(new RegExp(`<\\/?\\s*(?:${names})\\b[^>]*>`, 'gi'), '[tag removed]')
-    + text.slice(end).replace(new RegExp(`<(?=\\/?\\s*(?:${names})\\b)`, 'gi'), '&lt;');
+  return text.slice(0, end).replace(new RegExp(`<[\\s/]*(?:${names})\\b[^>]*>`, 'gi'), '[tag removed]')
+    + text.slice(end).replace(new RegExp(`<(?=[\\s/]*(?:${names})\\b)`, 'gi'), '&lt;');
 }
 
 function askDocText(rawHtml) {
@@ -24926,7 +24926,7 @@ const SUGGEST_SYSTEM_PROMPT = [
 const SUGGEST_TAGS = 'passage|comments_to_fix|request|comment|system|instructions?';
 function suggestFence(s) {
   return fenceTags(askFence(s), SUGGEST_TAGS)
-    .replace(/\[comment id=/gi, '[comment-id=');
+    .replace(/\[comment\s+id=/gi, '[comment-id=');
 }
 
 // One piece of a comment to fix (its id, author, quote, words), on one line:

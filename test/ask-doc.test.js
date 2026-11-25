@@ -250,24 +250,24 @@ const DAVE = 'dave.reader@example.org';
 
   await t('the prompt\'s own tags: what is taken out of a text, and at what cost', () => {
     const { askFence, suggestFence } = workerFn(['askFence', 'fenceTags', 'suggestFence']);
-    const ask = (s) => s.replace(/<\/?\s*(document|comments|selection|question)\b[^>]*>/gi, '[tag removed]');
-    const suggest = (s) => ask(s).replace(/<\/?\s*(passage|comments_to_fix|request|comment|system|instructions?)\b[^>]*>/gi, '[tag removed]').replace(/\[comment id=/gi, '[comment-id=');
+    const ask = (s) => s.replace(/<[\s/]*(document|comments|selection|question)\b[^>]*>/gi, '[tag removed]');
+    const suggest = (s) => ask(s).replace(/<[\s/]*(passage|comments_to_fix|request|comment|system|instructions?)\b[^>]*>/gi, '[tag removed]').replace(/\[comment\s+id=/gi, '[comment-id=');
     let taken = 0;
     const same = (s) => {
       if (ask(s) !== s) taken += 1;
       // As before, but for the `<` of a tag that nothing closes, written out.
       const [a, b] = [askFence(s), suggestFence(s)];
-      assert(a.replaceAll('&lt;', '<') === ask(s) && !/<\/?\s*(?:document|comments|selection|question)\b/i.test(a), `ask: ${JSON.stringify([s, a])}`);
-      assert(b.replaceAll('&lt;', '<') === suggest(s) && !/<\/?\s*(?:document|comments|selection|question|passage|comments_to_fix|request|comment|system|instructions?)\b/i.test(b), `suggest: ${JSON.stringify([s, b])}`);
+      assert(a.replaceAll('&lt;', '<') === ask(s) && !/<[\s/]*(?:document|comments|selection|question)\b/i.test(a), `ask: ${JSON.stringify([s, a])}`);
+      assert(b.replaceAll('&lt;', '<') === suggest(s) && !/<[\s/]*(?:document|comments|selection|question|passage|comments_to_fix|request|comment|system|instructions?)\b/i.test(b), `suggest: ${JSON.stringify([s, b])}`);
     };
     const all = (s, depth) => { same(s); if (depth) for (const c of ['<', '/', '>', 'document', 'Request', ' ', 'x', '\n']) all(s + c, depth - 1); };
     all('', 5);
     let seed = 11;
     const next = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return Math.floor(seed / 65536) % n; };
-    const parts = ['<', '</', '>', ' >', 'document', 'COMMENTS', 'selection', 'question', 'request', 'passage', 'comments_to_fix', 'comment', 'system', 'instructions', ' ', '\n', '\u00a0', 'x', '"', '=', '_', '-', '[comment id=', '<document>', '</question >'];
+    const parts = ['<', '</', '>', ' >', 'document', 'COMMENTS', 'selection', 'question', 'request', 'passage', 'comments_to_fix', 'comment', 'system', 'instructions', ' ', '\n', '\u00a0', 'x', '"', '=', '_', '-', '[comment id=', '[comment  id=', '<document>', '</question >'];
     for (let i = 0; i < 60000; i++) { let s = ''; for (let j = 1 + next(10); j > 0; j--) s += parts[next(parts.length)]; same(s); }
     assert(taken > 10000, `texts with a tag: ${taken}`);
-    for (const long of ['<document '.repeat(8000), '</question '.repeat(8000), '<request '.repeat(8000), '<system '.repeat(8000), `<document>${'<'.repeat(80000)}`, `<${' '.repeat(80000)}`, '< '.repeat(40000)]) {
+    for (const long of ['<document '.repeat(8000), '</question '.repeat(8000), '<request '.repeat(8000), '<system '.repeat(8000), `<document>${'<'.repeat(80000)}`, `<${' '.repeat(80000)}`, '< '.repeat(40000), `<${'/ '.repeat(40000)}`, `[comment${' '.repeat(80000)}`]) {
       const from = process.hrtime.bigint();
       askFence(long);
       suggestFence(long);
