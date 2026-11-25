@@ -15,6 +15,7 @@
 // plumbing comment; no live Cloudflare deploy needed to trust the shared code
 // path, but see csp-xss.test.js's fixture-server boot for the local proof.
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');

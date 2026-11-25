@@ -1,4 +1,5 @@
 // PR preview workflow (#148) — shareable published-chrome URL, not tdoc.dev.
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');

@@ -4,6 +4,7 @@
 // a PATH that deliberately lacks the selected CLI; cancellation tests use a
 // local GitHub-device-flow stand-in and send SIGINT to the publish process.
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');

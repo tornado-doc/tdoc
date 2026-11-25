@@ -146,6 +146,9 @@ fi
 
 # A spreadsheet becomes the v1 HTML before anything else looks at it.
 SHEET_HTML=""
+STAGE_DIR=""
+cleanup() { [ -z "$STAGE_DIR" ] || rm -rf "$STAGE_DIR" 2>/dev/null || true; [ -z "$SHEET_HTML" ] || rm -f "$SHEET_HTML"; }
+trap cleanup EXIT
 if [ -n "$FROM_SHEET" ]; then
   if [ -n "$HTML_FILE" ] || [ "$HTML_STDIN" = "1" ]; then
     die "--from-$FROM_KIND replaces --html-file / --html-stdin; use one"
@@ -159,7 +162,6 @@ if [ -n "$FROM_SHEET" ]; then
   SHEET_ARGS=(--kind "$FROM_KIND" --title "$TITLE")
   if [ "$QUIET" = "1" ]; then SHEET_ARGS+=(--quiet); fi
   if ! node "$(cd "$(dirname "$0")" && pwd)/lib/sheet-from-file.mjs" "${SHEET_ARGS[@]}" "$FROM_SHEET" > "$SHEET_HTML"; then
-    rm -f "$SHEET_HTML"
     exit 1
   fi
   HTML_FILE="$SHEET_HTML"
@@ -256,8 +258,6 @@ fi
 # `rm -rf "$DOC_DIR"` BEFORE validating, so empty stdin / a failed cp / markdown
 # passed by mistake permanently destroyed the prior doc's versions + comments.
 STAGE_DIR="$(mktemp -d "${TDOC_DIR}/.stage-${SLUG}.XXXXXX")"
-cleanup_stage() { rm -rf "$STAGE_DIR" 2>/dev/null || true; [ -z "$SHEET_HTML" ] || rm -f "$SHEET_HTML"; }
-trap cleanup_stage EXIT
 mkdir -p "$STAGE_DIR/v$VERSION_N"
 STAGE_HTML="$STAGE_DIR/v$VERSION_N/index.html"
 

@@ -22,8 +22,8 @@
 //     Chromium and WebKit);
 //   - no request reaches /api/comments, /api/notify or /api/docs/*, and
 //     nothing but GETs reaches /api at all.
-// Desktop 1280/1440 and phone 390/430. Screenshots: TDOC_UI_SHOTS (default
-// /tmp/landing-demo).
+// Desktop 1280/1440 and phone 390/430. TDOC_UI_SHOTS=<dir> keeps the
+// screenshots.
 // Run with: node test/landing-demo-agents-ui.test.js
 
 const fs = require('fs');
@@ -34,7 +34,7 @@ const { loadWorker, makeEnv } = require('./helpers/worker-harness');
 const { loadRuntimeAssets } = require('../server/runtime-assets');
 
 const { chromium, webkit, devices } = requirePlaywrightOrSkip('landing-demo-agents-ui.test.js');
-const SHOTS = process.env.TDOC_UI_SHOTS || '/tmp/landing-demo';
+const SHOTS = process.env.TDOC_UI_SHOTS || path.join(require('os').tmpdir(), 'landing-demo');
 const TOKEN = 'landing-upload-token';
 const SLUG = 'tornado-doc';
 const root = path.join(__dirname, '..');

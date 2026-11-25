@@ -14,6 +14,7 @@
 //
 // Exit code: 0 if all pass, 1 otherwise.
 
+require('./helpers/temp-dirs');
 const { execFileSync, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');

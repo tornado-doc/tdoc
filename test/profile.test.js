@@ -2,6 +2,7 @@
 // public + unlisted docs listed, private excluded. Same worker harness as
 // me-docs-experience.test.js.
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

@@ -3,6 +3,7 @@
 // Guards: own storage, no Durable Object, 14-day content lifetime, bundle
 // strip of `export class CommentsStore` so Cloudflare will mint preview URLs.
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

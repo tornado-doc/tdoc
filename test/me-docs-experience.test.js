@@ -6,6 +6,7 @@
 // folders:<login> KV values; nothing here may touch another user's state or
 // leak access data into the catalog HTML.
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

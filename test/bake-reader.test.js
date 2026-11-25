@@ -4,6 +4,7 @@
 // overlay.js's TDOC_READER_CSS markers, all :where() zero-specificity) into new
 // docs as <style id="tdoc-reader">, the same id /export stamps. The validator
 // exempts that block (it is tdoc's CSS, not author CSS).
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

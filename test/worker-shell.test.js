@@ -1,5 +1,6 @@
 // React/Vite shell architecture guard. Author HTML remains isolated and
 // framework-free; provider UI is emitted as boot data plus hashed assets.
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');

@@ -6,6 +6,7 @@
 // caches: no network.
 //
 // Run with: node test/mcp-raft-agent-workerd.test.js   (part of npm run test:workerd)
+require('./helpers/temp-dirs');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');

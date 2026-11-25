@@ -4,6 +4,7 @@
 // It must never look like a rollout to BYOK publishers, must not run on pull
 // requests (forks), and must not rotate TDOC_UPLOAD_TOKEN.
 
+require('./helpers/temp-dirs');
 const fs = require('fs');
 const path = require('path');
 

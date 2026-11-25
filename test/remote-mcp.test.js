@@ -660,15 +660,11 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(/<main class="wrap">\s*<h1>Q3 churn<\/h1>/.test(stored), 'content in the styled root');
     const meta = JSON.parse(env.META.map.get(`meta:${slug}`));
     assert(meta.style === 'default' && meta.versions[0].style === 'default', `style recorded: ${meta.style}`);
-    require('fs').mkdirSync('/tmp/mcp-guide', { recursive: true });
-    require('fs').writeFileSync('/tmp/mcp-guide/fragment-in.html', fragment);
-    require('fs').writeFileSync('/tmp/mcp-guide/fragment-out-default.html', stored);
 
     const paper = await tool(julieConn.access_token, 'create_doc', { title: 'Q3 churn paper', html: fragment, style: 'paper' });
     const pStored = env.DOCS.map.get(`docs/${paper.structuredContent.slug}/v1/index.html`);
     assert(/data-tdoc-style="paper"/.test(pStored) && !/data-tdoc-style="default"/.test(pStored), 'style param honored');
     assert(JSON.parse(env.META.map.get(`meta:${paper.structuredContent.slug}`)).style === 'paper', 'paper recorded');
-    require('fs').writeFileSync('/tmp/mcp-guide/fragment-out-paper.html', pStored);
 
     const md = await tool(julieConn.access_token, 'create_doc', { title: 'MD', markdown: '# Hi\n\nA *line*.', style: 'technical' });
     const mStored = env.DOCS.map.get(`docs/${md.structuredContent.slug}/v1/index.html`);

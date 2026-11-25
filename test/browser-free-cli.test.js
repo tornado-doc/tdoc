@@ -1,4 +1,5 @@
 // Exercise the installed skill, not a developer checkout with dependencies.
+require('./helpers/temp-dirs');
 const assert = require('assert/strict');
 const fs = require('fs');
 const os = require('os');

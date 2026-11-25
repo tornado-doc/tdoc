@@ -33,6 +33,20 @@
 #   Just upload the requested slug via /api/upload.
 
 set -euo pipefail
+# Temp files go in one folder, removed however this ends (done, failed, Ctrl-C,
+# a kill); a platform switch that did not finish puts the old config back too.
+TDOC_TMP=""
+CONFIG_BACKUP=""
+SETUP_OK=1
+on_exit() {
+  if [ "$SETUP_OK" != "1" ] && [ -f "$CONFIG_BACKUP" ]; then
+    mv "$CONFIG_BACKUP" "$CONFIG_FILE"
+    echo "[tdoc] platform switch failed — restored previous config." >&2
+  fi
+  if [ -n "$TDOC_TMP" ]; then rm -rf "$TDOC_TMP"; fi
+}
+trap on_exit EXIT
+TDOC_TMP="$(mktemp -d "${TMPDIR:-/tmp}/tdoc-publish.XXXXXX")"
 # BYOK: tell the user immediately when this checkout is behind origin/main.
 # Human nag on stderr; discard the machine line (skill preamble / doctor).
 bash "$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
@@ -336,7 +350,7 @@ $prompt
 EOF
   # Every failure path funnels through here, so this is where a half-finished
   # sign-in stops being advertised to the modal. A trap would be tidier but
-  # EXIT is already claimed by the platform-switch config restore below.
+  # EXIT is on_exit's (it must not clear another terminal's sign-in).
   clear_pending_signin
   exit 1
 }
@@ -964,7 +978,7 @@ first_time_setup_hosted() {
     write_hosted_config "$base" "$token" "$account_id" "$github_login"
     return 0
   fi
-  cookiejar="$(mktemp -t tdoc-hosted-cookie.XXXXXX)"
+  cookiejar="$(mktemp "$TDOC_TMP/cookie.XXXXXX")"
   hosted_github_signin "$base" "$cookiejar"
   resp="$(curl -sS --connect-timeout 10 --max-time 30 -b "$cookiejar" -w $'\n%{http_code}' \
     -X POST "$base/api/hosted/token" -H "Content-Type: application/json" \
@@ -1429,16 +1443,8 @@ else
     cp "$CONFIG_FILE" "$CONFIG_BACKUP"
     chmod 600 "$CONFIG_BACKUP"
     SETUP_OK=0
-    restore_config_on_fail() {
-      if [ "${SETUP_OK:-0}" != "1" ] && [ -f "$CONFIG_BACKUP" ]; then
-        mv "$CONFIG_BACKUP" "$CONFIG_FILE"
-        echo "[tdoc] platform switch failed — restored previous config." >&2
-      fi
-    }
-    trap restore_config_on_fail EXIT
     run_platform_setup "$PLATFORM_FLAG"
     SETUP_OK=1
-    trap - EXIT
     echo "[tdoc] previous config kept at $CONFIG_BACKUP"
   fi
 fi
@@ -1653,7 +1659,7 @@ if [ -n "$VISIBILITY_FLAG" ] || [ -n "$HISTORY_FLAG" ] || [ -n "$COMMENTING_FLAG
     process.stdout.write(JSON.stringify(patch));
   ' "$VISIBILITY_FLAG" "$HISTORY_FLAG" "$COMMENTING_FLAG" "$ALLOW_JSON")"
   export TDOC_UPLOAD_ACCESS_PATCH
-  tmp_meta="$(mktemp -t tdoc-meta.XXXXXX)"
+  tmp_meta="$(mktemp "$TDOC_TMP/meta.XXXXXX")"
   node -e '
     const fs = require("fs");
     const [metaPath, vis, hist, comm, allowJson] = process.argv.slice(1);
@@ -1723,7 +1729,7 @@ upload_version() {
   # Pass the payload via a temp file, not an argument — docs with embedded
   # images exceed ARG_MAX as a curl argument (curl: Argument list too long).
   local payload_file
-  payload_file="$(mktemp -t tdoc-upload.XXXXXX)"
+  payload_file="$(mktemp "$TDOC_TMP/upload.XXXXXX")"
   printf '%s' "$payload" > "$payload_file"
   local resp
   # Tier-1 client visibility: the server records which client produced each

@@ -2,6 +2,7 @@
 // scaled (never tightened) by the runner's measured speed; performance
 // budgets fail only when enforced (the CI perf job) and warn when
 // TDOC_PERF=report (the blocking jobs); every measurement is logged.
+require('./helpers/temp-dirs');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');

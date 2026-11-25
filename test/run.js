@@ -12,10 +12,17 @@
 //   node test/run.js --all      # also attempt network/browser suites
 //   node test/run.js --perf     # performance budgets enforced (CI perf job)
 
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 
+// A kill of the runner stops the suite it is running; then the temp folders go
+// (a suite that could not remove its own, too).
+let running = null;
+for (const signal of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.once(signal, () => { if (running) running.kill(signal); });
+require('./helpers/temp-dirs');
+
 const OFFLINE = [
+  'temp-dirs.test.js', // what tests make under the temp folder goes with them: done, failed, thrown, Ctrl-C, kill; every test that makes one uses the helper; tdoc-publish and tdoc-new leave nothing
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
   'feedback-frame-anchor.test.js', // a comment inside a tdoc doc (anchor.frame): get_comments shows it on one line, no brackets, short, as author content, only for tdoc's own pages
   'react-source.test.js', // feedback on a React site: component chain + source from fiber / bundler attributes, best effort, never throws, nothing read without React, capped, escaped in Copy for agent and get_comments, rebuilt on save
@@ -403,19 +410,26 @@ if (runAll || runBrowser) {
   process.env.TDOC_REQUIRE_BROWSER_TESTS = '1';
 }
 
-let failed = [];
-for (const f of files) {
-  const p = path.join(__dirname, f);
-  process.stdout.write(`\n=== ${f} ===\n`);
-  const env = perfFilter.has(f) ? { ...process.env, TDOC_PERF: 'enforce', TDOC_TEST_FILTER: perfFilter.get(f) } : process.env;
-  const r = spawnSync(process.execPath, [p], { stdio: 'inherit', env });
-  if (r.status !== 0) failed.push(f);
-}
+const run = (file, env) => new Promise((done) => {
+  running = spawn(process.execPath, [file], { stdio: 'inherit', env });
+  running.once('error', () => done(1));
+  running.once('exit', (status) => { running = null; done(status); });
+});
 
-console.log('\n────────────────────────────────────────');
-if (failed.length) {
-  console.log(`FAIL — ${failed.length}/${files.length} suite(s) failed: ${failed.join(', ')}`);
-  process.exit(1);
-}
-console.log(`PASS — all ${files.length} suite(s) green`);
-if (!runAll && !runBrowser) console.log('(browser suites: npm run test:browser; provider integration: npm run test:all)');
+(async () => {
+  let failed = [];
+  for (const f of files) {
+    const p = path.join(__dirname, f);
+    process.stdout.write(`\n=== ${f} ===\n`);
+    const env = perfFilter.has(f) ? { ...process.env, TDOC_PERF: 'enforce', TDOC_TEST_FILTER: perfFilter.get(f) } : process.env;
+    if (await run(p, env) !== 0) failed.push(f);
+  }
+
+  console.log('\n────────────────────────────────────────');
+  if (failed.length) {
+    console.log(`FAIL — ${failed.length}/${files.length} suite(s) failed: ${failed.join(', ')}`);
+    process.exit(1);
+  }
+  console.log(`PASS — all ${files.length} suite(s) green`);
+  if (!runAll && !runBrowser) console.log('(browser suites: npm run test:browser; provider integration: npm run test:all)');
+})();
