@@ -7888,12 +7888,14 @@ async function teamCommentsPage(env, session, teamId, query = {}) {
 // last commented on. That is in a doc's owner's search store: set when a
 // comment or reply is added (the op every comment change sends there), and to
 // the true value when the doc is checked (20 a request, each once a day). A
-// doc with none is checked, 40 before the answer and 60 after; while any are
-// left, or a store does not answer, docs come by when they were last updated
-// (cursor `e`). What is at or after `through` does not move as more loads.
+// doc with none is checked, 40 before the answer and 60 after; one that cannot
+// be read is left out until it can. While any have none, or a store does
+// not answer, docs come by when they were last updated (cursor `e`). What is
+// at or after `through` does not move as more loads.
 // Each doc is checked on its full record, at most 100 a request, so a page
 // may be short. The cursor, sealed (it may name a doc the viewer may not
-// read), is when the page was asked for and where it ended.
+// read), is when the page was asked for and where it ended. With no secret to
+// seal it, pages are by `offset`.
 const COMMENT_FEED_LEARN = 40;
 const COMMENT_FEED_LOOK = 100;
 const COMMENT_FEED_CHECK = 20;
@@ -7902,6 +7904,8 @@ const COMMENT_DAY_MS = 24 * 60 * 60 * 1000;
 const COMMENT_CLOCKS_MS = 5000;
 // The time of a doc that is not in its owner's feed: one in a team.
 const COMMENT_ELSEWHERE = '-';
+// And of one that could not be read.
+const COMMENT_UNREAD = '!';
 
 function commentFeedQuery(url, ctx) {
   const q = (name) => url.searchParams.get(name) || '';
@@ -7925,32 +7929,36 @@ async function commentFeedPage(env, { feed, list, may, shown, scopes = [], offse
   };
   if (doc) return { items: isValidSlug(doc) ? (await read(await readable([{ slug: doc }]))).items : [], next: null };
   const docs = (await list()).filter((d) => isValidSlug(d.slug)).sort((a, b) => (a.slug < b.slug ? -1 : 1));
-  if (!paged) {
+  const { secret } = await emailPrivacyFor(env, null, '', null);
+  if (!paged || !secret) {
     const start = Math.max(0, Number(offset) || 0);
     const page = docs.slice(start, start + TEAM_COMMENT_DOC_PAGE);
     const next = start + page.length < docs.length ? start + page.length : null;
     return { items: (await read(await readable(page))).items, next, docs_scanned: page.length, docs_total: docs.length };
   }
   const now = Date.now();
-  let from = await openCommentCursor(env, feed, cursor);
+  let from = await openCommentCursor(secret, feed, cursor);
   if (from && !(now - from.opened < COMMENT_DAY_MS && from.opened <= now + 60000)) from = null;
-  let times = from && from.e ? null : await commentTimes(env, docs, scopes);
+  const times = from && from.e === 'down' ? null : await commentTimes(env, docs, scopes);
   if (!times && from && !from.e) return { unavailable: true };
+  let e = times ? '' : 'down';
   if (times) {
-    const unknown = docs.filter((d) => !times.has(d.slug)).sort((a, b) => byText(b.updated, a.updated) || byText(a.slug, b.slug));
+    const unread = (d) => times.has(d.slug) && times.get(d.slug).at === COMMENT_UNREAD;
+    const unknown = docs.filter((d) => !times.has(d.slug) || unread(d)).sort((a, b) => unread(a) - unread(b) || byText(b.updated, a.updated) || byText(a.slug, b.slug));
     for (const t of await checkCommentTimes(env, unknown.slice(0, COMMENT_FEED_LEARN), scopes)) times.set(t.slug, t);
     const old = docs.filter((d) => times.has(d.slug) && now - times.get(d.slug).checked > COMMENT_DAY_MS)
       .sort((a, b) => times.get(a.slug).checked - times.get(b.slug).checked).slice(0, COMMENT_FEED_CHECK);
     await afterResponse(ctx, checkCommentTimes(env, [...unknown.slice(COMMENT_FEED_LEARN, COMMENT_FEED_LOOK), ...old], scopes), 'comment-times');
-    if (!from && unknown.some((d) => !times.has(d.slug))) times = null;
+    if (from ? from.e : unknown.some((d) => !times.has(d.slug))) e = 'unread';
+    if (!e && (await readable(docs.filter(unread).slice(0, COMMENT_FEED_CHECK))).length) missed = true;
   }
   const opened = Date.now();
-  const all = docs.map((d) => ({ ...d, ...(times ? times.get(d.slug) || { at: '' } : { at: d.updated || '0' }) }))
-    .filter((d) => d.at && d.at !== COMMENT_ELSEWHERE)
+  const all = docs.map((d) => ({ ...d, ...(e ? { at: d.updated || '0', changed: Date.parse(d.updated) || 0 } : times.get(d.slug) || { at: '' }) }))
+    .filter((d) => d.at > COMMENT_ELSEWHERE)
     .sort((a, b) => byText(b.at, a.at) || byText(a.slug, b.slug));
   const after = (d) => !from || d.at < from.at || (d.at === from.at && d.slug > from.slug);
   // Changed since: again, the first 40 and then on from there.
-  const since = from && times ? all.filter((d) => !after(d) && d.changed > from.opened) : [];
+  const since = from ? all.filter((d) => !after(d) && d.changed > from.opened) : [];
   const many = since.length > COMMENT_FEED_LEARN;
   const floor = many ? opened : from ? from.floor : 0;
   const ahead = many ? [] : all.filter(after);
@@ -7967,29 +7975,28 @@ async function commentFeedPage(env, { feed, list, may, shown, scopes = [], offse
   return {
     items,
     ...(missed || got.length < page.length ? { missed: true } : {}),
-    next: end ? await sealCommentCursor(env, feed, { opened: Math.max(floor, opened - COMMENT_CLOCKS_MS), floor, e: !times, at: end.at, slug: end.slug }) : null,
-    ...(times && last ? { through: last.at } : {}),
+    next: end ? await sealCommentCursor(secret, feed, { opened: Math.max(floor, opened - COMMENT_CLOCKS_MS), floor, e, at: end.at, slug: end.slug }) : null,
+    ...(!e && last ? { through: last.at } : {}),
   };
 }
 function byText(a, b) { return String(a || '').localeCompare(String(b || '')); }
 function newestRows(rows) { return rows.sort((a, b) => byText(b.created, a.created)); }
 
 // A cursor is one viewer's, of one feed.
-async function commentCursorKey(env, feed) {
-  const { secret } = await emailPrivacyFor(env, null, '', null);
+async function commentCursorKey(secret, feed) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`tdoc-comment-cursor-v1\0${secret}\0${feed}`));
   return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
-async function sealCommentCursor(env, feed, place) {
+async function sealCommentCursor(secret, feed, place) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const sealed = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await commentCursorKey(env, feed), new TextEncoder().encode(JSON.stringify(place)));
+  const sealed = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await commentCursorKey(secret, feed), new TextEncoder().encode(JSON.stringify(place).padEnd(400)));
   return `${b64urlBytes(iv)}.${b64urlBytes(new Uint8Array(sealed))}`;
 }
 // null: none, or not one of this feed's; the feed then starts again.
-async function openCommentCursor(env, feed, cursor) {
+async function openCommentCursor(secret, feed, cursor) {
   try {
     const [iv, sealed] = cursor.split('.').map(bytesFromB64url);
-    return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, await commentCursorKey(env, feed), sealed)));
+    return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, await commentCursorKey(secret, feed), sealed)));
   } catch { return null; }
 }
 
@@ -8037,15 +8044,14 @@ async function checkCommentTimes(env, docs, scopes) {
   const metas = await loadDocMetas(env, docs.filter((d) => !d.scope).map((d) => d.slug));
   const byScope = new Map();
   await Promise.all(docs.map(async (d) => {
-    if (!d.scope && !metas.has(d.slug)) return;
     const meta = metas.get(d.slug);
     const elsewhere = !d.scope && (!meta || meta.workspace_id);
     const scope = d.scope || (elsewhere ? scopes[0] : searchScopeOf(meta));
     const readAt = Date.now();
-    try {
-      const at = elsewhere ? COMMENT_ELSEWHERE : newestCommentAt(teamCommentRows(d.slug, null, await readComments(env, d.slug)));
-      byScope.set(scope, [...(byScope.get(scope) || []), [d.slug, at, readAt]]);
-    } catch {}
+    let at = COMMENT_UNREAD;
+    if (elsewhere && metas.has(d.slug)) at = COMMENT_ELSEWHERE;
+    else if (!elsewhere) try { at = newestCommentAt(teamCommentRows(d.slug, null, await readComments(env, d.slug))); } catch {}
+    byScope.set(scope, [...(byScope.get(scope) || []), [d.slug, at, readAt]]);
   }));
   const out = await Promise.all([...byScope].map(([scope, times]) => searchStoreOp(env, scope, { kind: 'comment_checked', times }, { timeoutMs: SEARCH_QUERY_TIMEOUT_MS })));
   return out.flatMap((x) => (x ? x.times : []));
@@ -8072,6 +8078,8 @@ function commentTimesHandle(sql, op) {
   const now = Date.now();
   for (const [slug, at, readAt] of list.filter((x) => isValidSlug(x[0]))) {
     const had = rows([slug])[0];
+    // What is known of a doc stays when it cannot be read.
+    if (at === COMMENT_UNREAD && had && had.at !== COMMENT_UNREAD) continue;
     // An older comment (an import) says nothing of a doc not read yet.
     if (added && !had && now - Date.parse(at) > 60000) continue;
     // A date to come stands for when it was first seen; a check is the doc as

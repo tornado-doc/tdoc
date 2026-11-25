@@ -66,7 +66,7 @@ async function startServer(worker, env) {
   // 60 docs with three comments each, one of the oldest doc's resolved; in My
   // docs and, the same again, in a team.
   const seeded = async () => {
-    const env = makeEnv(mod.CommentsStore, { GITHUB_CLIENT_ID: 'test-client' });
+    const env = makeEnv(mod.CommentsStore, { GITHUB_CLIENT_ID: 'test-client', TDOC_EMAIL_ALIAS_SECRET: 'x' });
     await env.META.put('hosted-account:julie', JSON.stringify({ account_id: 'acct-julie', github_login: 'julie', created: at(0) }));
     await env.META.put(`session:${JULIE}`, JSON.stringify({ login: 'julie', account_id: 'acct-julie', name: 'Julie', avatar_url: '', created: new Date().toISOString() }));
     const team = (await (await worker.fetch(new Request('https://tdoc.dev/api/teams', { method: 'POST', headers: { Cookie: `tdoc_sid=${JULIE}`, 'Content-Type': 'application/json', Origin: 'https://tdoc.dev' }, body: JSON.stringify({ name: 'Tdoc' }) }), env, { waitUntil() {} })).json()).team;
@@ -109,6 +109,7 @@ async function startServer(worker, env) {
 
   const asked0 = { n: 0 };
   const SAYS = 'Newest first. Load more for older comments. Filters look in what is loaded.';
+  const SO_FAR = 'Comments loaded so far. Load more for others. Filters look in what is loaded.';
 
   await t('the first time and the next: comments at once, one request each', async () => {
     const w = await seeded();
@@ -118,12 +119,29 @@ async function startServer(worker, env) {
       await more(page).waitFor();
       await page.waitForTimeout(300);
       assert.equal(asked.length, 1, asked.join());
-      assert.equal(await status(page), SAYS);
+      const says = await status(page);
+      assert.ok(n ? (says === SAYS || n < 3) : says === SO_FAR, `${n}: ${says}`);
       if (!n) await shot(page, 'comments-first-time-1440');
       if (n === 3) assert.deepEqual(await texts(page), want.slice(0, 25));
       await context.close();
     }
     s.server.close();
+  });
+
+  await t('by offset (no secret to seal a cursor): every comment, and nothing is called newest', async () => {
+    const asked = [];
+    const { context, page } = await open('/me?view=comments', { before: (p) => p.route('**/api/me/comments?*', (route) => {
+      const at = Number(new URL(route.request().url()).searchParams.get('offset')) || 0;
+      asked.push(at);
+      return route.fulfill({ json: { ok: true, items: Array.from({ length: 30 }, (_, i) => ({ id: `${at}-${i}`, slug: 'p00', thread_id: 'x', kind: 'comment', text: `${at}-${i}`, created: '2026-01-02T01:00:00.000Z', title: 'x', author: { key: 'q', name: 'q' }, source: 'doc' })), next: at < 60 ? at + 12 : null, docs_scanned: 12, docs_total: 72 } });
+    }) });
+    await more(page).waitFor();
+    assert.deepEqual(asked, [0]);
+    assert.equal(await status(page), SO_FAR);
+    for (let n = 0; n < 20 && await more(page).count(); n++) { const had = (await texts(page)).length; await more(page).click(); await page.waitForFunction((x) => document.querySelectorAll('.tm-comment-text').length > x || !document.querySelector('.tm-comment-more'), had); }
+    assert.equal(new Set(await texts(page)).size, 180);
+    assert.deepEqual(asked, [0, 12, 24, 36, 48, 60]);
+    await context.close();
   });
 
   await t('dates of other zones are in their place', async () => {
