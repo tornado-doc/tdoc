@@ -132,7 +132,16 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     await until(bob, 'full-text search', 'bob-only');
     const leak = await search(alice, 'Bob writes');
     assert.equal(leak.body.results.length, 0, 'another person\'s private doc was returned');
-    console.log('search in workerd: FTS5 trigram (English + Chinese), comments, alarm indexing, access ok');
+    // The same stores order the Comments feed (commentFeedPage).
+    for (const want of ['Remember the pangolin budget', 'and the Chinese one']) {
+      const feed = await call('/api/me/comments?paged=1', { cookie: alice.cookie });
+      assert.equal(feed.status, 200, feed.text);
+      assert.equal(feed.body.items[0].text, want, feed.text);
+      assert.ok(feed.body.next === null && feed.body.through && !feed.body.missed, feed.text);
+      await call('/api/comments', { method: 'POST', cookie: alice.cookie, body: { slug: 'plan-zh', version: 1, text: 'and the Chinese one', anchor: null } });
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+    console.log('search in workerd: FTS5 trigram (English + Chinese), comments, alarm indexing, access, the Comments feed ok');
   } finally {
     child.kill();
     fs.rmSync(dir, { recursive: true, force: true });

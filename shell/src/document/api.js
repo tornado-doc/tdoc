@@ -319,14 +319,17 @@ export function listNotifications(offset = 0, { unread = false } = {}) {
 
 // My docs' Comments (commentsSitesTabs): comments on your own docs and on
 // your sites, in bounded pages like the team feed.
-export function listMyComments(offset = 0) {
-  const query = new URLSearchParams({ offset: String(offset) });
-  return request(`/api/me/comments?${query}`);
+// `at`: an offset, or { cursor }, { doc } or {} (the first page, newest first).
+function commentPage(path, at, id = {}) {
+  const query = new URLSearchParams({ ...id, ...(typeof at === 'object' ? { paged: '1', ...at } : { offset: String(at) }) });
+  return request(`${path}?${query}`);
+}
+export function listMyComments(at = 0) {
+  return commentPage('/api/me/comments', at);
 }
 
-export function listTeamComments(team, offset = 0) {
-  const query = new URLSearchParams({ id: team, offset: String(offset) });
-  return request(`/api/team/comments?${query}`);
+export function listTeamComments(team, at = 0) {
+  return commentPage('/api/team/comments', at, { id: team });
 }
 
 // Raft / provider notify handoff (Connected App). Same endpoint for doc-level

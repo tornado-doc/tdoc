@@ -7868,23 +7868,220 @@ function teamCommentRows(slug, meta, list) {
   return rows;
 }
 
-async function teamCommentsPage(env, session, teamId, offset = 0) {
+async function teamCommentsPage(env, session, teamId, query = {}) {
   const team = await loadTeam(env, teamId);
   if (!team || !session || !teamInsider(team, session.account_id)) return null;
   if (session.scope && !session.scope.teams.includes(teamId)) return null;
-  const slugs = await docIndexSlugs(env, `w:${teamId}`, teamDocMatcher(teamId));
-  slugs.sort();
-  const start = Math.max(0, Number(offset) || 0);
-  const page = slugs.slice(start, start + TEAM_COMMENT_DOC_PAGE);
-  const chunks = await Promise.all(page.map(async (slug) => {
-    const meta = await loadDocMeta(env, slug);
+  const page = await commentFeedPage(env, {
+    ...query,
+    feed: `${actorKey(session)}\0${teamId}`,
+    list: async () => (await docIndexRows(env, `w:${teamId}`, teamDocMatcher(teamId))).map((row) => ({ slug: row.slug, scope: `w:${teamId}`, updated: row.idx && row.idx.u })),
     // Index markers only narrow; the full record is the permission truth.
-    if (!meta || meta.workspace_id !== teamId || !docReadableBy(env, session, meta)) return [];
-    try { return teamCommentRows(slug, meta, await readComments(env, slug)); } catch { return []; }
+    may: (slug, meta) => meta.workspace_id === teamId && docReadableBy(env, session, meta),
+    shown: async (docs) => docs.flatMap((d) => d.rows),
+  });
+  return { team: { id: team.id, name: team.name }, ...page };
+}
+
+// Comment feeds. By `offset` (the old way) docs come in no order, and the
+// client asks for all of them. `paged`: 12 docs at a time, by when each was
+// last commented on. That is in a doc's owner's search store: set when a
+// comment or reply is added (the op every comment change sends there), and to
+// the true value when the doc is checked (20 a request, each once a day). A
+// doc with none is checked, 40 before the answer and 60 after; while any are
+// left, or a store does not answer, docs come by when they were last updated
+// (cursor `e`). What is at or after `through` does not move as more loads.
+// Each doc is checked on its full record, at most 100 a request, so a page
+// may be short. The cursor, sealed (it may name a doc the viewer may not
+// read), is when the page was asked for and where it ended.
+const COMMENT_FEED_LEARN = 40;
+const COMMENT_FEED_LOOK = 100;
+const COMMENT_FEED_CHECK = 20;
+const COMMENT_DAY_MS = 24 * 60 * 60 * 1000;
+// Stores' and workers' clocks differ a little, which matters for what is added.
+const COMMENT_CLOCKS_MS = 5000;
+// The time of a doc that is not in its owner's feed: one in a team.
+const COMMENT_ELSEWHERE = '-';
+
+function commentFeedQuery(url, ctx) {
+  const q = (name) => url.searchParams.get(name) || '';
+  return { offset: q('offset'), paged: q('paged') === '1', cursor: q('cursor'), doc: q('doc'), ctx };
+}
+
+async function commentFeedPage(env, { feed, list, may, shown, scopes = [], offset = 0, paged = false, cursor = '', doc = '', ctx = null }) {
+  const read = async (docs) => {
+    const got = (await Promise.all(docs.map(async (d) => {
+      try { return { ...d, rows: teamCommentRows(d.slug, d.meta, await readComments(env, d.slug)) }; } catch { return null; }
+    }))).filter(Boolean);
+    return { got, items: newestRows(await shown(got)) };
+  };
+  // Those of them the viewer may read; `missed`, when a record was not read.
+  let missed = false;
+  const readable = async (docs) => {
+    const metas = await loadDocMetas(env, docs.map((d) => d.slug));
+    if (metas.size < docs.length) missed = true;
+    const ok = await Promise.all(docs.map((d) => (metas.get(d.slug) ? may(d.slug, metas.get(d.slug)) : false)));
+    return docs.map((d) => ({ ...d, meta: metas.get(d.slug) })).filter((d, i) => ok[i]);
+  };
+  if (doc) return { items: isValidSlug(doc) ? (await read(await readable([{ slug: doc }]))).items : [], next: null };
+  const docs = (await list()).filter((d) => isValidSlug(d.slug)).sort((a, b) => (a.slug < b.slug ? -1 : 1));
+  if (!paged) {
+    const start = Math.max(0, Number(offset) || 0);
+    const page = docs.slice(start, start + TEAM_COMMENT_DOC_PAGE);
+    const next = start + page.length < docs.length ? start + page.length : null;
+    return { items: (await read(await readable(page))).items, next, docs_scanned: page.length, docs_total: docs.length };
+  }
+  const now = Date.now();
+  let from = await openCommentCursor(env, feed, cursor);
+  if (from && !(now - from.opened < COMMENT_DAY_MS && from.opened <= now + 60000)) from = null;
+  let times = from && from.e ? null : await commentTimes(env, docs, scopes);
+  if (!times && from && !from.e) return { unavailable: true };
+  if (times) {
+    const unknown = docs.filter((d) => !times.has(d.slug)).sort((a, b) => byText(b.updated, a.updated) || byText(a.slug, b.slug));
+    for (const t of await checkCommentTimes(env, unknown.slice(0, COMMENT_FEED_LEARN), scopes)) times.set(t.slug, t);
+    const old = docs.filter((d) => times.has(d.slug) && now - times.get(d.slug).checked > COMMENT_DAY_MS)
+      .sort((a, b) => times.get(a.slug).checked - times.get(b.slug).checked).slice(0, COMMENT_FEED_CHECK);
+    await afterResponse(ctx, checkCommentTimes(env, [...unknown.slice(COMMENT_FEED_LEARN, COMMENT_FEED_LOOK), ...old], scopes), 'comment-times');
+    if (!from && unknown.some((d) => !times.has(d.slug))) times = null;
+  }
+  const opened = Date.now();
+  const all = docs.map((d) => ({ ...d, ...(times ? times.get(d.slug) || { at: '' } : { at: d.updated || '0' }) }))
+    .filter((d) => d.at && d.at !== COMMENT_ELSEWHERE)
+    .sort((a, b) => byText(b.at, a.at) || byText(a.slug, b.slug));
+  const after = (d) => !from || d.at < from.at || (d.at === from.at && d.slug > from.slug);
+  // Changed since: again, the first 40 and then on from there.
+  const since = from && times ? all.filter((d) => !after(d) && d.changed > from.opened) : [];
+  const many = since.length > COMMENT_FEED_LEARN;
+  const floor = many ? opened : from ? from.floor : 0;
+  const ahead = many ? [] : all.filter(after);
+  let end = many ? since[COMMENT_FEED_LEARN - 1] : null;
+  const page = await readable(since.slice(0, COMMENT_FEED_LEARN));
+  const most = page.length + TEAM_COMMENT_DOC_PAGE;
+  for (let k = 0, n = 2 * TEAM_COMMENT_DOC_PAGE; k < ahead.length && page.length <= most; k += n, n = COMMENT_FEED_LOOK - n) {
+    if (k >= COMMENT_FEED_LOOK) { end = ahead[k - 1]; break; }
+    page.push(...await readable(ahead.slice(k, k + n)));
+  }
+  if (page.length > most) { page.length = most; end = page[most - 1]; }
+  const { got, items } = await read(page);
+  const last = got[got.length - 1];
+  return {
+    items,
+    ...(missed || got.length < page.length ? { missed: true } : {}),
+    next: end ? await sealCommentCursor(env, feed, { opened: Math.max(floor, opened - COMMENT_CLOCKS_MS), floor, e: !times, at: end.at, slug: end.slug }) : null,
+    ...(times && last ? { through: last.at } : {}),
+  };
+}
+function byText(a, b) { return String(a || '').localeCompare(String(b || '')); }
+function newestRows(rows) { return rows.sort((a, b) => byText(b.created, a.created)); }
+
+// A cursor is one viewer's, of one feed.
+async function commentCursorKey(env, feed) {
+  const { secret } = await emailPrivacyFor(env, null, '', null);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`tdoc-comment-cursor-v1\0${secret}\0${feed}`));
+  return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+async function sealCommentCursor(env, feed, place) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const sealed = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await commentCursorKey(env, feed), new TextEncoder().encode(JSON.stringify(place)));
+  return `${b64urlBytes(iv)}.${b64urlBytes(new Uint8Array(sealed))}`;
+}
+// null: none, or not one of this feed's; the feed then starts again.
+async function openCommentCursor(env, feed, cursor) {
+  try {
+    const [iv, sealed] = cursor.split('.').map(bytesFromB64url);
+    return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, await commentCursorKey(env, feed), sealed)));
+  } catch { return null; }
+}
+
+// Records of many docs, as loadDocMeta has them, 100 to a KV read: null, no
+// such doc; not there, it could not be read.
+async function loadDocMetas(env, slugs) {
+  const out = new Map();
+  for (let i = 0; i < slugs.length; i += 100) {
+    const part = slugs.slice(i, i + 100);
+    const got = await env.META.get(part.map((slug) => `meta:${slug}`)).catch(() => null);
+    await Promise.all(part.map(async (slug) => {
+      try {
+        const meta = got && got.has && got.has(`meta:${slug}`) ? JSON.parse(got.get(`meta:${slug}`)) : await readDocRecord(env, slug);
+        out.set(slug, meta && typeof meta === 'object' && !isTrashedMeta(meta) ? meta : null);
+      } catch {}
+    }));
+  }
+  return out;
+}
+
+// The newest of these rows, '' when there are none.
+function newestCommentAt(rows) {
+  return rows.length ? new Date(rows.reduce((max, row) => Math.max(max, Date.parse(row.created) || 0), 0)).toISOString() : '';
+}
+
+// What the stores know (slug -> { at, checked, changed }); null when one does
+// not answer. A doc with no `scope` is in one of `scopes`, the viewer's own.
+async function commentTimes(env, docs, scopes) {
+  if (!env || !env.COMMENTS) return null;
+  const ask = new Map();
+  for (const d of docs) for (const scope of d.scope ? [d.scope] : scopes) {
+    if (!ask.has(scope)) ask.set(scope, []);
+    ask.get(scope).push(d.slug);
+  }
+  const answers = await Promise.all([...ask].map(([scope, slugs]) => searchStoreOp(env, scope, { kind: 'comment_times', slugs }, { timeoutMs: SEARCH_QUERY_TIMEOUT_MS })));
+  if (answers.some((a) => !a)) return null;
+  const times = new Map();
+  for (const t of answers.flatMap((a) => a.times)) if (!times.has(t.slug) || t.at > times.get(t.slug).at) times.set(t.slug, t);
+  return times;
+}
+
+// Reads these docs for when each was last commented on, whoever may read
+// them; answers what their stores took.
+async function checkCommentTimes(env, docs, scopes) {
+  const metas = await loadDocMetas(env, docs.filter((d) => !d.scope).map((d) => d.slug));
+  const byScope = new Map();
+  await Promise.all(docs.map(async (d) => {
+    if (!d.scope && !metas.has(d.slug)) return;
+    const meta = metas.get(d.slug);
+    const elsewhere = !d.scope && (!meta || meta.workspace_id);
+    const scope = d.scope || (elsewhere ? scopes[0] : searchScopeOf(meta));
+    const readAt = Date.now();
+    try {
+      const at = elsewhere ? COMMENT_ELSEWHERE : newestCommentAt(teamCommentRows(d.slug, null, await readComments(env, d.slug)));
+      byScope.set(scope, [...(byScope.get(scope) || []), [d.slug, at, readAt]]);
+    } catch {}
   }));
-  const items = chunks.flat().sort((a, b) => String(b.created).localeCompare(String(a.created)));
-  const next = start + page.length < slugs.length ? start + page.length : null;
-  return { team: { id: team.id, name: team.name }, items, next, docs_scanned: page.length, docs_total: slugs.length };
+  const out = await Promise.all([...byScope].map(([scope, times]) => searchStoreOp(env, scope, { kind: 'comment_checked', times }, { timeoutMs: SEARCH_QUERY_TIMEOUT_MS })));
+  return out.flatMap((x) => (x ? x.times : []));
+}
+
+// When a comment change added a comment or a reply: its own time, else ''.
+function commentAddedAt(op, result) {
+  try {
+    if (op.kind === 'create' || op.kind === 'reply') return newestCommentAt([result.body]);
+    if (op.kind === 'raw_events') return newestCommentAt(op.events.filter((e) => e.kind === 'reply_added').map((e) => ({ created: e.at || new Date().toISOString() })));
+    if (op.kind === 'publish_merge' && result.body.mergedComments) return newestCommentAt(teamCommentRows('', null, op.localComments));
+  } catch {}
+  return '';
+}
+
+// The stores' side. (A table of another name, if this is taken out and put
+// back: what was added in between is not in this one.)
+const COMMENT_TIMES_TABLE = 'CREATE TABLE IF NOT EXISTS comment_times_1 (slug TEXT PRIMARY KEY, at TEXT NOT NULL, checked INTEGER NOT NULL, changed INTEGER NOT NULL)';
+function commentTimesHandle(sql, op) {
+  const rows = (slugs) => searchRows(sql, 'SELECT slug, at, checked, changed FROM comment_times_1 WHERE slug IN (SELECT value FROM json_each(?))', JSON.stringify(slugs));
+  if (op.kind === 'comment_times') return { ok: true, times: rows(op.slugs) };
+  const added = op.kind === 'comments';
+  const list = added ? [[op.slug, op.at, 0]] : op.times;
+  const now = Date.now();
+  for (const [slug, at, readAt] of list.filter((x) => isValidSlug(x[0]))) {
+    const had = rows([slug])[0];
+    // An older comment (an import) says nothing of a doc not read yet.
+    if (added && !had && now - Date.parse(at) > 60000) continue;
+    // A date to come stands for when it was first seen; a check is the doc as
+    // it was read, and a comment added since stays.
+    let to = Date.parse(at) < now + 60000 || at <= COMMENT_ELSEWHERE ? at : had && had.at > COMMENT_ELSEWHERE ? had.at : new Date(now).toISOString();
+    if (had && had.at > to && had.changed >= readAt) to = had.at;
+    sql.exec('INSERT OR REPLACE INTO comment_times_1 (slug, at, checked, changed) VALUES (?, ?, ?, ?)',
+      slug, to, added && had ? had.checked : now, added ? now : !had || had.at !== to ? now - COMMENT_CLOCKS_MS : had.changed);
+  }
+  return { ok: true, times: rows(list.map((x) => x[0])) };
 }
 
 // My docs' Comments: the comments on the person's own My docs docs and on
@@ -7894,52 +8091,52 @@ async function teamCommentsPage(env, session, teamId, offset = 0) {
 // then bounded pages of documents, each checked on its full record. The
 // same rules as /api/me/feedback and My docs: nothing here the person
 // could not already open.
-async function personalCommentSlugs(env, session, origin) {
+async function personalCommentDocs(env, session, origin) {
   const accountIds = sessionAccountIds(session);
   const login = sessionLogin(session);
   const actorKeys = [actorKey(session), ...((session && session.linked_actor_keys) || [])].filter(Boolean).map(String);
   let owned = [];
   if (hostedRegistrationEnabled(env, origin) && (session.account_id || login)) {
     const facet = session.account_id ? `p:${session.account_id}` : `l:${login}`;
-    owned = await docIndexSlugs(env, facet, personalDocMatcher({ accountIds, login, actorKeys }));
+    owned = await docIndexRows(env, facet, personalDocMatcher({ accountIds, login, actorKeys }));
     // The deploy operator (TDOC_OWNER) also owns the docs that name no
     // owner, as in indexData's facets.
-    if (isOwnerSession(env, session)) owned = [...owned, ...(await docIndexSlugs(env, 'n', ownerlessDocMatcher))];
+    if (isOwnerSession(env, session)) owned = [...owned, ...(await docIndexRows(env, 'n', ownerlessDocMatcher))];
   } else {
     // A self-hosted worker: every doc is the operator's, one catalog read.
-    const data = await indexData(env, session, origin);
-    owned = [...(data.docs || []), ...(data.feedback || [])].map((row) => row.slug);
+    const data = await indexData(env, session, origin, { searchScopes: true });
+    owned = [...(data.docs || []), ...(data.feedback || [])].map((row) => ({ slug: row.slug, idx: { u: row.updated }, scope: data.search_scopes.get(row.slug) }));
   }
-  const joined = await joinedFeedbackSpaceSlugs(env, session).catch(() => []);
-  return [...new Set([...owned, ...joined])].filter(isValidSlug).sort();
+  const docs = new Map(owned.map((row) => [row.slug, { slug: row.slug, scope: row.scope || '', updated: row.idx && !row.idx.w ? row.idx.u : '0', site: !row.scope && !!(row.idx && row.idx.f) }]));
+  for (const slug of await joinedFeedbackSpaceSlugs(env, session).catch(() => [])) if (!docs.has(slug)) docs.set(slug, { slug, scope: '', site: true });
+  // A site may be a team's, or the person's who made it: its record says.
+  const sites = [...docs.values()].filter((d) => d.site);
+  const metas = await loadDocMetas(env, sites.map((d) => d.slug));
+  for (const d of sites) d.scope = searchScopeOf(metas.get(d.slug));
+  return [...docs.values()];
 }
 
-async function personalCommentsPage(env, session, origin, offset = 0) {
-  const slugs = await personalCommentSlugs(env, session, origin);
-  const start = Math.max(0, Number(offset) || 0);
-  const page = slugs.slice(start, start + TEAM_COMMENT_DOC_PAGE);
+async function personalCommentsPage(env, session, origin, query = {}) {
   const myTeams = new Set((session && session.team_ids) || []);
-  const chunks = await Promise.all(page.map(async (slug) => {
-    const meta = await loadDocMeta(env, slug);
-    if (!meta) return null;
-    if (meta.created_from === 'feedback') {
+  return commentFeedPage(env, {
+    ...query,
+    feed: `${actorKey(session)}\0me`,
+    list: () => personalCommentDocs(env, session, origin),
+    scopes: [...searchOwnScopes(env, session)].filter((scope) => !scope.startsWith('w:')),
+    may: async (slug, meta) => {
+      if (meta.created_from !== 'feedback') return !meta.workspace_id && isDocOwnerSession(env, session, meta) && docReadableBy(env, session, meta);
       // A team's site is listed with that team, not here.
-      if (meta.workspace_id && myTeams.has(meta.workspace_id)) return null;
+      if (meta.workspace_id && myTeams.has(meta.workspace_id)) return false;
       // Owned or joined, and readable: the rule of the Sites list itself.
-      const ok = await feedbackSpacesFor(env, session, [{ slug, meta }], (row) => ({ slug: row.slug }), false, { site: false });
-      if (!ok.length) return null;
-    } else if (meta.workspace_id || !isDocOwnerSession(env, session, meta) || !docReadableBy(env, session, meta)) {
-      return null;
-    }
-    let rows = [];
-    try { rows = teamCommentRows(slug, meta, await readComments(env, slug)); } catch { return null; }
-    return rows.length ? { rows, privacy: await emailPrivacyFor(env, session, slug, meta) } : null;
-  }));
-  // Redacted per doc, as on the doc page; the reads that takes are the
-  // page's, once (redactCommentRowsByDoc).
-  const items = cutCommentRows((await redactCommentRowsByDoc(env, chunks.filter(Boolean))).flat()).sort((a, b) => String(b.created).localeCompare(String(a.created)));
-  const next = start + page.length < slugs.length ? start + page.length : null;
-  return { items, next, docs_scanned: page.length, docs_total: slugs.length };
+      return (await feedbackSpacesFor(env, session, [{ slug, meta }], (row) => ({ slug: row.slug }), false, { site: false })).length > 0;
+    },
+    // Redacted per doc, as on the doc page; the reads that takes are the
+    // page's, once (redactCommentRowsByDoc).
+    shown: async (docs) => {
+      const some = await Promise.all(docs.filter((d) => d.rows.length).map(async (d) => ({ rows: d.rows, privacy: await emailPrivacyFor(env, session, d.slug, d.meta) })));
+      return cutCommentRows((await redactCommentRowsByDoc(env, some)).flat());
+    },
+  });
 }
 
 // ─────────────────── customer-owned team backup mirrors ───────────────────
@@ -8681,14 +8878,17 @@ function personalDocMatcher({ accountIds = [], login = null, actorKeys = [] }) {
 const teamDocMatcher = (teamId) => (idx) => idx.w === teamId;
 const ownerlessDocMatcher = (idx) => !idx.a && !idx.o && !idx.k;
 
-// One facet's slugs, from its markers when built; otherwise from the
+// One facet's docs, from its markers when built; otherwise from the
 // platform scan, building the facet on the way.
-async function docIndexSlugs(env, facet, matches) {
+async function docIndexRows(env, facet, matches) {
   const unbuilt = await unbuiltDocIndexes(env, [facet]);
-  if (!unbuilt.length) return (await listDocIndex(env, facet)).map((m) => m.slug);
+  if (!unbuilt.length) return listDocIndex(env, facet);
   const rows = await scanDocIndex(env);
   await buildDocIndexes(env, [{ facet, matches }], rows);
-  return rows.filter((r) => matches(r.idx)).map((r) => r.slug);
+  return rows.filter((r) => matches(r.idx)).map((r) => ({ slug: r.slug, idx: r.idx }));
+}
+async function docIndexSlugs(env, facet, matches) {
+  return (await docIndexRows(env, facet, matches)).map((m) => m.slug);
 }
 
 // A stale marker, found by a reader: swept, a few per request.
@@ -14473,6 +14673,8 @@ function searchSql(store) {
     sql.exec('CREATE TABLE IF NOT EXISTS search_failed (slug TEXT PRIMARY KEY, version INTEGER NOT NULL)');
     sql.exec('CREATE TABLE IF NOT EXISTS search_rate (bucket TEXT PRIMARY KEY, win INTEGER NOT NULL, n INTEGER NOT NULL)');
     sql.exec('CREATE TABLE IF NOT EXISTS search_store (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+    // When each doc was last commented on (commentFeedPage).
+    sql.exec(COMMENT_TIMES_TABLE);
     store._searchReady = true;
   }
   return sql;
@@ -14540,6 +14742,7 @@ async function searchStoreHandle(store, name, op) {
   const slugOk = (s) => isValidSlug(s);
   if (kind === 'touch') {
     if (!slugOk(op.slug)) return { ok: false };
+    if (op.moved) sql.exec('DELETE FROM comment_times_1 WHERE slug = ?', op.slug);
     if (op.gone) { searchRemove(sql, op.slug); return { ok: true, removed: true }; }
     const row = searchRows(sql, 'SELECT id, version, epoch, title FROM search_docs WHERE slug = ?', op.slug)[0];
     const pending = searchRows(sql, 'SELECT 1 AS p FROM search_pending WHERE slug = ?', op.slug).length > 0;
@@ -14559,16 +14762,19 @@ async function searchStoreHandle(store, name, op) {
     await searchArm(store);
     return { ok: true, queued: true };
   }
+  if (kind === 'comment_times' || kind === 'comment_checked') return commentTimesHandle(sql, op);
   if (kind === 'comments') {
     if (!slugOk(op.slug)) return { ok: false };
     searchQueue(sql, op.slug, 0);
     await searchArm(store);
+    try { if (op.at) commentTimesHandle(sql, op); } catch {}
     return { ok: true, queued: true };
   }
   if (kind === 'remove') {
     if (slugOk(op.slug)) {
       searchRemove(sql, op.slug);
       sql.exec('DELETE FROM search_failed WHERE slug = ?', op.slug);
+      sql.exec('DELETE FROM comment_times_1 WHERE slug = ?', op.slug);
     }
     return { ok: true };
   }
@@ -21138,7 +21344,7 @@ async function mutateComments(env, slug, op, { ctx = null, meta: knownMeta = nul
       // reindex that was not queued is logged under one tag, so a run of
       // them shows in Workers Logs (it was silent before as well).
       if (meta) {
-        const queued = await searchStoreOp(env, searchScopeOf(meta), { kind: 'comments', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
+        const queued = await searchStoreOp(env, searchScopeOf(meta), { kind: 'comments', slug, at: commentAddedAt(op, result) }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
         // No search store without the DO binding: nothing was meant to queue.
         if (!queued && env.COMMENTS) console.error('[comment-followup] search reindex not queued', JSON.stringify({ slug }));
       }
@@ -29813,7 +30019,8 @@ const tdocHandlers = {
       const s = await getSession(env, req);
       if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
       // Rows come back redacted per doc (personalCommentsPage).
-      const page = await personalCommentsPage(env, s, url.origin, url.searchParams.get('offset'));
+      const page = await personalCommentsPage(env, s, url.origin, commentFeedQuery(url, ctx));
+      if (page.unavailable) return json({ error: 'try_again', message: 'More comments could not be loaded. Try again.' }, { status: 503 });
       return json({ ok: true, ...page }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (p === '/api/team/comments' && method === 'GET') {
@@ -29821,10 +30028,11 @@ const tdocHandlers = {
       if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
       const teamId = url.searchParams.get('id');
       if (!validTeamId(teamId)) return json({ error: 'invalid_team' }, { status: 400 });
-      const page = await teamCommentsPage(env, s, teamId, url.searchParams.get('offset'));
+      const page = await teamCommentsPage(env, s, teamId, commentFeedQuery(url, ctx));
       // A team is private membership data: outsiders get the same answer as a
       // missing team and cannot use this endpoint to enumerate names or ids.
       if (!page) return json({ error: 'not_found' }, { status: 404 });
+      if (page.unavailable) return json({ error: 'try_again', message: 'More comments could not be loaded. Try again.' }, { status: 503 });
       const privacy = await emailPrivacyFor(env, s, `team:${teamId}`, { workspace_id: teamId });
       const feed = await redactCommentEmails({ ok: true, ...page }, privacy);
       return json({ ...feed, items: cutCommentRows(feed.items) }, { headers: { 'Cache-Control': 'private, no-store' } });
