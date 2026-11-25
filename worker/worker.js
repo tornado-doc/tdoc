@@ -7889,7 +7889,7 @@ async function teamCommentsPage(env, session, teamId, query = {}) {
 // comment or reply is added (the op every comment change sends there), and to
 // the true value when the doc is checked (20 a request, each once a day). A
 // doc with none is checked, 40 before the answer and 60 after; one that cannot
-// be read is left out until it can. While any have none, or a store does
+// be read is left out, and read again after an answer, once a minute. While any have none, or a store does
 // not answer, docs come by when they were last updated (cursor `e`). What is
 // at or after `through` does not move as more loads.
 // Each doc is checked on its full record, at most 100 a request, so a page
@@ -7906,6 +7906,7 @@ const COMMENT_CLOCKS_MS = 5000;
 const COMMENT_ELSEWHERE = '-';
 // And of one that could not be read.
 const COMMENT_UNREAD = '!';
+const COMMENT_UNREAD_MS = 60 * 1000;
 
 function commentFeedQuery(url, ctx) {
   const q = (name) => url.searchParams.get(name) || '';
@@ -7915,7 +7916,7 @@ function commentFeedQuery(url, ctx) {
 async function commentFeedPage(env, { feed, list, may, shown, scopes = [], offset = 0, paged = false, cursor = '', doc = '', ctx = null }) {
   const read = async (docs) => {
     const got = (await Promise.all(docs.map(async (d) => {
-      try { return { ...d, rows: teamCommentRows(d.slug, d.meta, await readComments(env, d.slug)) }; } catch { return null; }
+      try { return { ...d, rows: teamCommentRows(d.slug, d.meta, await readCommentsSoon(env, d.slug)) }; } catch { return null; }
     }))).filter(Boolean);
     return { got, items: newestRows(await shown(got)) };
   };
@@ -7944,9 +7945,9 @@ async function commentFeedPage(env, { feed, list, may, shown, scopes = [], offse
   let e = times ? '' : 'down';
   if (times) {
     const unread = (d) => times.has(d.slug) && times.get(d.slug).at === COMMENT_UNREAD;
-    const unknown = docs.filter((d) => !times.has(d.slug) || unread(d)).sort((a, b) => unread(a) - unread(b) || byText(b.updated, a.updated) || byText(a.slug, b.slug));
+    const unknown = docs.filter((d) => !times.has(d.slug)).sort((a, b) => byText(b.updated, a.updated) || byText(a.slug, b.slug));
     for (const t of await checkCommentTimes(env, unknown.slice(0, COMMENT_FEED_LEARN), scopes)) times.set(t.slug, t);
-    const old = docs.filter((d) => times.has(d.slug) && now - times.get(d.slug).checked > COMMENT_DAY_MS)
+    const old = docs.filter((d) => times.has(d.slug) && now - times.get(d.slug).checked > (unread(d) ? COMMENT_UNREAD_MS : COMMENT_DAY_MS))
       .sort((a, b) => times.get(a.slug).checked - times.get(b.slug).checked).slice(0, COMMENT_FEED_CHECK);
     await afterResponse(ctx, checkCommentTimes(env, [...unknown.slice(COMMENT_FEED_LEARN, COMMENT_FEED_LOOK), ...old], scopes), 'comment-times');
     if (from ? from.e : unknown.some((d) => !times.has(d.slug))) e = 'unread';
@@ -8038,6 +8039,12 @@ async function commentTimes(env, docs, scopes) {
   return times;
 }
 
+async function readCommentsSoon(env, slug) {
+  const list = await searchWithin(readComments(env, slug), SEARCH_QUERY_TIMEOUT_MS);
+  if (!list) throw new Error('not read in time');
+  return list;
+}
+
 // Reads these docs for when each was last commented on, whoever may read
 // them; answers what their stores took.
 async function checkCommentTimes(env, docs, scopes) {
@@ -8050,7 +8057,7 @@ async function checkCommentTimes(env, docs, scopes) {
     const readAt = Date.now();
     let at = COMMENT_UNREAD;
     if (elsewhere && metas.has(d.slug)) at = COMMENT_ELSEWHERE;
-    else if (!elsewhere) try { at = newestCommentAt(teamCommentRows(d.slug, null, await readComments(env, d.slug))); } catch {}
+    else if (!elsewhere) try { at = newestCommentAt(teamCommentRows(d.slug, null, await readCommentsSoon(env, d.slug))); } catch {}
     byScope.set(scope, [...(byScope.get(scope) || []), [d.slug, at, readAt]]);
   }));
   const out = await Promise.all([...byScope].map(([scope, times]) => searchStoreOp(env, scope, { kind: 'comment_checked', times }, { timeoutMs: SEARCH_QUERY_TIMEOUT_MS })));
