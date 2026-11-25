@@ -97,7 +97,12 @@ async function startServer(worker, env) {
     await ctx.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), modelessEdit: false }; });
     await ctx.addCookies([{ name: 'tdoc_sid', value: opts.sid || sid, domain: '127.0.0.1', path: '/' }]);
     await ctx.route(/api\.github\.com/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' }));
-    if (opts.delayHandoff) await ctx.route(/\/(hand-off|api\/notify\/handoff)(\?|$)/, async (r) => { await new Promise((f) => setTimeout(f, opts.delayHandoff)); await r.continue(); });
+    // holdHandoff: the delivery does not end until the test lets it.
+    let releaseHandoff = () => {};
+    if (opts.holdHandoff) {
+      const gate = new Promise((f) => { releaseHandoff = f; });
+      await ctx.route(/\/(hand-off|api\/notify\/handoff)(\?|$)/, async (r) => { await gate; await r.continue(); });
+    }
     // holdLists: the agent lists wait until the test calls releaseLists(), so
     // "before they arrive" is a state the test controls, not a guess about
     // how long opening the page takes (a 1.5s delay lost that race on CI).
@@ -126,7 +131,7 @@ async function startServer(worker, env) {
     await page.goto(`${base}/d/${SLUG}`);
     await page.frameLocator('iframe').locator('h1').waitFor({ timeout: 15000 });
     await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
-    return { ctx, page, sends, handedOff, errors, github, releaseLists, frame: page.frames().find((f) => f !== page.mainFrame()) };
+    return { ctx, page, sends, handedOff, releaseHandoff, errors, github, releaseLists, frame: page.frames().find((f) => f !== page.mainFrame()) };
   };
   // The phone: drawer, Reply on the card, @, the agent picked by a tap.
   // On a thread with no replies yet (pass `id` for one made before the page loaded).
@@ -263,13 +268,13 @@ async function startServer(worker, env) {
 
     await t('the reply box is done when the reply is posted, not when the delivery ends', async () => {
       const fresh = await comment();
-      const v = await open({ phone: true, delayHandoff: 1500 });
+      const v = await open({ phone: true, holdHandoff: true });
       await replyInDrawer(v.page, /Claude Code/, fresh);
-      const t0 = Date.now();
       await sendReply(v.page);
+      // Gone while the delivery is still on its way.
       await v.page.waitForFunction(() => !document.querySelector('#tdoc-comment-layer .tdoc-reply-form textarea'), null, { timeout: 8000 });
-      const took = Date.now() - t0;
-      assert.ok(took < 1400, `the box waited ${took}ms on a 1500ms delivery`);
+      v.releaseHandoff();
+      await v.handedOff();
       await v.ctx.close();
     });
 
@@ -601,17 +606,16 @@ async function startServer(worker, env) {
     });
 
     await outside('the reply box is done when the reply is posted, not when the delivery ends', () => threadOf(async (id) => {
-      const v = await open({ phone: true, delayHandoff: 1500 });
+      const v = await open({ phone: true, holdHandoff: true });
       const { card, box } = await openReply(v.page, true, id);
       await tagged(card, box);
       await box.tap();
       await v.page.keyboard.press('End');
       await v.page.keyboard.type('shorter please');
-      const started = Date.now();
       await card.locator('.tdoc-reply-submit').last().tap();
-      await box.waitFor({ state: 'detached', timeout: 5000 });
-      const took = Date.now() - started;
-      assert.ok(took < 1400, `the box waited ${took}ms on a 1500ms delivery`);
+      await box.waitFor({ state: 'detached', timeout: 8000 });
+      v.releaseHandoff();
+      await v.handedOff();
       await v.ctx.close();
     }));
 

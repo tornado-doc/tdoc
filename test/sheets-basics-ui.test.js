@@ -224,7 +224,18 @@ async function shot(page, name) {
       const f = frameLoc();
       await chooseMode(page, 'Read');
       await frameMode(frame, 'read');
-      for (const c of [0, 1, 2]) await dragBy(page, f.locator(`.ts-h[data-c="${c}"] .ts-resize`), 30, 0);
+      // One after another in the page: the save goes out 1.5 s after the last
+      // drag, and three drags from here take longer than that on a busy machine.
+      await frame.evaluate(() => {
+        for (const c of [0, 1, 2]) {
+          const grip = document.querySelector(`.ts-h[data-c="${c}"] .ts-resize`);
+          const r = grip.getBoundingClientRect();
+          const at = (type, dx) => new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', button: type === 'pointermove' ? -1 : 0, buttons: type === 'pointerup' ? 0 : 1, clientX: r.left + r.width / 2 + dx, clientY: r.top + r.height / 2 });
+          grip.dispatchEvent(at('pointerdown', 0));
+          document.body.dispatchEvent(at('pointermove', 30));
+          document.body.dispatchEvent(at('pointerup', 30));
+        }
+      });
       await waitForVersion('resize-burst', 2);
       await page.waitForTimeout(2500);
       assert(!fs.existsSync(path.join(root, 'resize-burst', 'v3')), 'three resizes in a row: one version');
