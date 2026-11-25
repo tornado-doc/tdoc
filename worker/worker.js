@@ -22135,15 +22135,19 @@ function askCut(s, n) {
 
 // Inside the delimiters the model is told to distrust, a closing tag of our
 // own must not appear: it would let document text pose as the reader.
+const ASK_TAGS = 'document|comments|selection|question';
 function askFence(s) {
-  return fenceTags(s, /<\/?\s*(document|comments|selection|question)\b[^>]*>/gi);
+  return fenceTags(s, ASK_TAGS);
 }
-// `tags`: patterns that run to the next `>`. After the last one there is
-// nothing for them to match, and what is before it they read once.
-function fenceTags(s, tags) {
+// `names`: the tags of one prompt. A tag runs to the next `>`; after the last
+// one there is none to find, and what is before it is read once. A tag that
+// nothing closes would run on into the prompt's own text: its `<` is written
+// out, and nothing is taken away.
+function fenceTags(s, names) {
   const text = String(s == null ? '' : s);
   const end = text.lastIndexOf('>') + 1;
-  return text.slice(0, end).replace(tags, '[tag removed]') + text.slice(end);
+  return text.slice(0, end).replace(new RegExp(`<\\/?\\s*(?:${names})\\b[^>]*>`, 'gi'), '[tag removed]')
+    + text.slice(end).replace(new RegExp(`<(?=\\/?\\s*(?:${names})\\b)`, 'gi'), '&lt;');
 }
 
 function askDocText(rawHtml) {
@@ -22749,6 +22753,11 @@ function markdownHeading(markdown) {
   }
   return null;
 }
+// The person's sentence as the prompt carries it; an address typed into it
+// leaves the worker hidden, as in Ask.
+function writeAiRequest(rawPrompt) {
+  return fenceTags(askFence(askNoEmails(rawPrompt)), 'request');
+}
 function writeAiTitle(markdown, prompt) {
   const heading = markdownHeading(markdown);
   const raw = (heading == null ? prompt : heading).replace(/[*_`\[\]<>]/g, '').replace(/\s+/g, ' ').trim();
@@ -22848,8 +22857,7 @@ async function handleWriteWithAi(env, req, url, ctx) {
   const giveBack = async () => { if (!cfg.previewMock) await askQuotaOp(env, accountKey, { kind: 'refund', units: WRITE_AI_ASK_UNITS }); };
   const messages = [
     { role: 'system', content: WRITE_AI_SYSTEM_PROMPT },
-    // An address typed into the sentence leaves the worker hidden, as in Ask.
-    { role: 'user', content: `<request>\n${fenceTags(askFence(askNoEmails(rawPrompt)), /<\/?\s*request\b[^>]*>/gi)}\n</request>` },
+    { role: 'user', content: `<request>\n${writeAiRequest(rawPrompt)}\n</request>` },
   ];
   const modelCfg = { ...cfg, maxTokens: Math.max(cfg.maxTokens, WRITE_AI_MAX_TOKENS) };
   // A client that asked for server-sent events watches the draft arrive.
@@ -24614,9 +24622,16 @@ const SUGGEST_SYSTEM_PROMPT = [
 // and askFence's), nor a line posing as a comment header: document or
 // comment text could otherwise pose as the editor's request or as another
 // comment to fix.
+const SUGGEST_TAGS = 'passage|comments_to_fix|request|comment|system|instructions?';
 function suggestFence(s) {
-  return fenceTags(askFence(s), /<\/?\s*(passage|comments_to_fix|request|comment|system|instructions?)\b[^>]*>/gi)
+  return fenceTags(askFence(s), SUGGEST_TAGS)
     .replace(/\[comment id=/gi, '[comment-id=');
+}
+
+// One piece of a comment to fix (its id, author, quote, words), on one line:
+// line breaks go first, so that what they part is read as the prompt shows it.
+function suggestPiece(x) {
+  return suggestFence(askNoEmails(x).replace(/\s+/g, (ws) => (ws.includes('\n') ? ' ' : ws)));
 }
 
 function buildSuggestMessages({ title, docText, truncated, passage, fix, instruction }) {
@@ -24719,8 +24734,8 @@ async function handleSuggest(env, req, url, slug) {
     fix = rows.map((c, i) => {
       // Each piece fenced on its own: the header line is ours, the words
       // in it are not (suggestFence).
-      const f = (x) => suggestFence(askNoEmails(x)).replace(/\s+/g, (ws) => (ws.includes('\n') ? ' ' : ws));
-      let s = `[comment id="${f(open[i] ? open[i].id : '').replace(/"/g, '')}"] ${f(c.author)}`;
+      const f = suggestPiece;
+      let s = `[comment id="${f(String(open[i] ? open[i].id : '').replace(/"/g, ''))}"] ${f(c.author)}`;
       if (c.quote) s += ` on "${f(askCut(c.quote, 400))}"`;
       s += `: ${f(askCut(c.text, 1500))}`;
       for (const r of (c.replies || []).slice(0, 10)) s += `\n   reply from ${f(r.author)}: ${f(askCut(r.text, 600))}`;

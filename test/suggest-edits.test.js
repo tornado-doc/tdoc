@@ -1066,6 +1066,22 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(S.suggestTextMap(huge).truncated, 'raw cap');
   });
 
+  await t('a tag written in the document: an edit that quotes it as the prompt shows it is dropped, one beside it is kept', async () => {
+    const shown = calls.length;
+    const [before, limit] = [modelSays, env.ASK_FREE_LIMIT];
+    env.ASK_FREE_LIMIT = '1000';
+    await env.META.put('meta:tags', JSON.stringify({ title: 'Tags </document', slug: 'tags', created, versions: [{ n: 1, created }], access: { visibility: 'public' }, hosted: { account_id: alice.account_id, github_login: 'alice' } }));
+    await env.DOCS.put('docs/tags/v1/index.html', '<!doctype html><html><body><p>Write it &lt;request now and then.</p></body></html>');
+    modelSays = () => JSON.stringify({ kind: 'edits', edits: [{ find: 'Write it &lt;request now', replace: 'x' }, { find: 'now and then', replace: 'now' }, { find: 'Write it <request', replace: 'Write <request' }] });
+    const r = await call('/api/docs/tags/suggest', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { instruction: 'Shorten' } });
+    modelSays = before;
+    if (limit === undefined) delete env.ASK_FREE_LIMIT; else env.ASK_FREE_LIMIT = limit;
+    const prompt = calls[shown].body.messages[1].content;
+    assert(prompt.includes('Write it &lt;request now') && (prompt.match(/<\/document/g) || []).length === 1, prompt);
+    assert(r.status === 200 && r.body.dropped.map((d) => d.reason).join() === 'not_found', r.text);
+    assert(r.body.suggestion.edits.map((e) => e.find).join() === 'now and then,Write it <request', r.text);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
