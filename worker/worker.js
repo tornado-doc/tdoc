@@ -17085,6 +17085,10 @@ function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targ
 //                       allowlist, then get notified); anyone else naming
 //                       them changes nothing — plain text, no notification
 //
+// A name that may be part of an address is told only to a person the doc
+// already knows, whatever its visibility, and only as far as the poster may
+// know it too (weakMentionsTold).
+//
 // The last row is the one that matters: an inbox row carries the doc title
 // and a line of the comment, so notifying a stranger about a private doc
 // would hand them content they are not allowed to open.
@@ -17168,7 +17172,16 @@ function handleStandsAlone(after) {
   return !looksLikeHost(next) && (!!word || !/^[\p{L}\p{N}]/u.test(next));
 }
 
-function parseMentionLogins(text) {
+// Is it a handle all the same, if somebody here has it? Not a longer word, nor
+// an address's name ("@dana.k@example.com").
+function handleMayBeNamed(after) {
+  return !/^(?:_?[A-Za-z0-9]|(?![\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Hangul}])[\p{L}\p{M}]|[A-Za-z0-9._%+'-]*@[A-Za-z0-9-]+\.[A-Za-z0-9])/u.test(after);
+}
+
+// `weak` is filled with the handles that may be part of an address or of a
+// host ("@lee\uff0c@eli\u3002OK" is written like "@john\uff0c@gmail\u3002com"): never in the
+// result, and told only when the doc already knows them.
+function parseMentionLogins(text, weak = new Set()) {
   if (typeof text !== 'string' || !text) return [];
   const out = [];
   const seen = new Set();
@@ -17176,6 +17189,7 @@ function parseMentionLogins(text) {
   // Email tags first, and blank their spans so the handle pass cannot re-read
   // the local part of an address as a handle.
   let source = '';
+  let loose = ''; // the same, with what may be a list of handles left in
   let from = 0;
   const er = new RegExp(EMAIL_MENTION_RE.source, 'g');
   let m;
@@ -17186,25 +17200,34 @@ function parseMentionLogins(text) {
     const end = m.index + m[1].length + 2 + tag.host;
     // Nothing is read on from a slash; a handle right after an address is.
     const on = tag.address ? /^[-/_]*(?=@)/.exec(text.slice(end, end + 8)) : null;
-    source += text.slice(from, m.index) + (on ? ' ' : '/');
+    const before = text.slice(from, m.index);
+    source += before + (on ? ' ' : '/');
+    loose += before + (on ? ' ' : tag.address ? '/' : text.slice(m.index, end));
     from = end + (on ? on[0].length : 0);
     er.lastIndex = tag.address || tag.next ? from : from + 1;
   }
-  source += text.slice(from);
-  const re = new RegExp(MENTION_RE.source, 'g');
-  while ((m = re.exec(source))) {
-    // A GitHub login never ends in a hyphen, so `@dana-` names dana.
-    const login = String(m[2]).replace(/-+$/, '').toLowerCase();
-    const at = re.lastIndex - (m[2].length - login.length);
-    if (handleStandsAlone(source.slice(at, at + 600))) add(login);
-  }
+  const handles = (read, named) => {
+    const re = new RegExp(MENTION_RE.source, 'g');
+    while ((m = re.exec(read))) {
+      // A GitHub login never ends in a hyphen, so `@dana-` names dana.
+      const login = String(m[2]).replace(/-+$/, '').toLowerCase();
+      const at = re.lastIndex - (m[2].length - login.length);
+      named(login, read.slice(at, at + 600));
+    }
+  };
+  handles(source + text.slice(from), (login, after) => { if (handleStandsAlone(after)) add(login); });
+  handles(loose + text.slice(from), (login, after) => { if (!seen.has(login) && handleMayBeNamed(after)) weak.add(login); });
   return out;
 }
 
 // The logins a single comment may act on: parsed in the order they were
-// typed, deduped, and capped.
-function mentionCandidates(text) {
-  return parseMentionLogins(text).slice(0, MENTION_MAX_PER_COMMENT);
+// typed, deduped, and capped. `weak` (parseMentionLogins) gets what is left
+// of the cap.
+function mentionCandidates(text, weak = []) {
+  const found = new Set();
+  const out = parseMentionLogins(text, found).slice(0, MENTION_MAX_PER_COMMENT);
+  weak.push(...[...found].slice(0, MENTION_MAX_PER_COMMENT - out.length));
+  return out;
 }
 
 // Everyone who has written on this doc, newest record last. Reads the raw
@@ -17228,10 +17251,11 @@ function isNonHumanAuthor(author) {
     || String(author.login || '').toLowerCase() === 'tdoc';
 }
 
-function commentParticipants(list) {
+// `imported: false` leaves out whoever only an upload names.
+function commentParticipants(list, { imported = true } = {}) {
   const byLogin = new Map();
   const push = (author) => {
-    if (isNonHumanAuthor(author)) return;
+    if (isNonHumanAuthor(author) || (!imported && author && author.imported)) return;
     const login = normalizeActorKey(author && author.login);
     if (!login) return;
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
@@ -17424,6 +17448,36 @@ function classifyMentions(logins, { canRead, canInvite = false, inviteBudget = 0
     blocked.push(login);
   }
   return { notified, invited, blocked };
+}
+
+// Who is told of the weak handles (parseMentionLogins): only a person this doc
+// already knows -- its owner, someone its sharing lists, a member of its team,
+// or someone who wrote on it -- and only if they can read it. Nobody is
+// invited, and an unknown name is not a mention at all (nor a blocked one).
+// Being told says the doc knows them, so to a `poster` who is not of the doc
+// (or a feedback token's) it knows only whom /api/mentions offers them by that
+// very login: the owner, and who wrote on it. Nothing is looked up for them.
+// A guest (on the sharing list, neither owner nor of the team) reaches the
+// logins on that list too; only the owner and the team, linked identities.
+// `readers`: the request's memo, so delivery does not look them up again.
+async function weakMentionsTold(env, logins, { poster, meta, access, list, readers }) {
+  if (!logins.length) return [];
+  const here = new Set([normalizeActorKey(ownerActorKey(meta, env)), ...commentParticipants(list, { imported: false }).map((p) => p.login)]);
+  const teamId = meta && meta.workspace_id;
+  const insider = !poster.feedback && tokenScopeAllows(poster, meta)
+    && (isAllowlisted(access, poster, env, meta) || sessionInTeam(poster, teamId));
+  const full = insider && (isDocOwnerSession(env, poster, meta) || sessionInTeam(poster, teamId));
+  if (insider && !full) for (const login of access.allowed_users) here.add(login);
+  const told = await Promise.all(logins.map(async (login) => {
+    if (!insider) return here.has(login) && canReadDoc(access, { login }, env, meta);
+    if (!full && !here.has(login)) return false;
+    try {
+      const reader = await inboxReaderSession(env, login, { memo: readers });
+      const known = actorKeys(reader).some((k) => here.has(k)) || isAllowlisted(access, reader, env, meta) || sessionInTeam(reader, teamId);
+      return known && canReadDoc(access, reader, env, meta);
+    } catch { return false; }
+  }));
+  return logins.filter((_, i) => told[i]);
 }
 
 // Has this login ever actually used tdoc on THIS host? Read-only on purpose,
@@ -33828,8 +33882,10 @@ const tdocHandlers = {
       // the event, so a chip on the card is exactly the set that was notified.
       // Named logins come from the text, never from the request body.
       const isDocOwner = isDocOwnerSession(env, s, meta);
+      const weak = [];
+      const readers = new Map();
       const outcome = classifyMentions(
-        mentionCandidates(commentText).filter((login) => login !== actorKey(s)),
+        mentionCandidates(commentText, weak).filter((login) => login !== actorKey(s)),
         {
           // The key is an actor key; canReadDoc expects a session. An email
           // key posing as a login never matches a bare-address invite, which
@@ -33865,6 +33921,7 @@ const tdocHandlers = {
           participants: commentParticipants(priorList),
         }).map((u) => u.login),
       });
+      outcome.notified.push(...await weakMentionsTold(env, weak.filter((login) => login !== actorKey(s)), { poster: s, meta, access, list: priorList, readers }));
       // An invite is a meta write, so it happens before the comment lands: a
       // notification whose link 403s is worse than no notification.
       if (outcome.invited.length) {
@@ -33915,7 +33972,7 @@ const tdocHandlers = {
           // the parent's author found by their GitHub id when it is known.
           const parentRec = parent_id ? recordAuthor(priorList, parent_id) : null;
           const delivery = {
-            ctx, origin: url.origin, readers: new Map(), teams: new Map(), meta: metaNow,
+            ctx, origin: url.origin, readers, teams: new Map(), meta: metaNow,
             authors: parentRec && parentRec.login ? { [normalizeActorKey(parentRec.login)]: parentRec } : {},
           };
           if (mentions.length) {

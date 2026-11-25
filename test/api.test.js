@@ -151,6 +151,17 @@ function waitReady(port, ms = 5000) {
   // The edit route has always trimmed before deciding whether there is anything
   // to save. Create and agent-reply only checked for the empty string, so "\n"
   // got in — and what it produced could not be seen or removed (#532).
+  await t('POST /api/comments: a handle written like a part of an address is told only when it wrote on the doc', async () => {
+    const dir = path.join(TMP_DIR, 'weak-handles');
+    fs.mkdirSync(dir, { recursive: true });
+    const rec = (id, author, extra = {}) => ({ id, version: 1, text: 'x', mentions: [], author, status: 'open', created: new Date().toISOString(), replies: [], reactions: {}, ...extra });
+    fs.writeFileSync(path.join(dir, 'comments.json'), JSON.stringify([rec('c_1', { login: 'lee', name: 'Lee' }, { replies: [rec('r_1', { login: 'Uma' }), rec('r_2', { login: 'verdict' }, { agent_status: 'applied' })] }), rec('c_2', { login: 'codex', kind: 'agent' })]));
+    for (const [text, want] of [['@lee，@eli。OK', 'lee'], ['@UMA,@gmail。com', 'uma'], ['@codex，@verdict。OK', ''], ['@bo @lee.ok', 'bo,lee']]) {
+      const r = await req('POST', '/api/comments', { slug: 'weak-handles', version: 1, text, anchor: null });
+      if (r.status !== 200 || r.body.mentions.join() !== want) throw new Error(`${text}: ${r.status} ${JSON.stringify(r.body.mentions)}`);
+    }
+  });
+
   await t('POST /api/comments refuses text that is only whitespace', async () => {
     const before = (await req('GET', `/api/comments?slug=${SLUG}`)).body.length;
     for (const text of ['   ', '\n\n', '\u3000']) {

@@ -302,6 +302,173 @@ async function seedDoc(env, slug, owner) {
     assert(both.allowed === 'eli' && both.told === 'inbox:eli', JSON.stringify(both));
   });
 
+  await t('a handle written like a part of an address is told when the doc knows it; nobody else is told, invited or blocked', async () => {
+    const { env, sent, post, who } = await tagged();
+    const known = async (login) => { who[login] = await issue(worker, env, login); await env.META.put(`hosted-account:${login}`, JSON.stringify({ account_id: who[login].account_id, github_login: login, email: `${login}@handle.example` })); };
+    for (const login of ['lee', 'eli', 'gmail', 'john', 'claude', 'uma']) await known(login);
+    const base = Object.fromEntries(['plain', 'teamed', 'open-team'].map((slug) => [slug, JSON.parse(env.META.map.get(`meta:${slug}`))]));
+    const say = async (slug, as, text, access, extra) => {
+      await env.META.put(`meta:${slug}`, JSON.stringify({ ...base[slug], access: { ...base[slug].access, allowed_users: [], ...access } }));
+      for (const k of [...env.META.map.keys()]) if (/^(?:inbox:|notify-email)/.test(k)) env.META.map.delete(k);
+      sent.length = 0;
+      const r = await post(slug, as, text, extra);
+      assert(r.status === 200, `${text}: ${r.status} ${r.text}`);
+      const o = r.body.mention_outcome;
+      const told = [...env.META.map.keys()].filter((k) => k.startsWith('inbox:')).map((k) => k.slice(6)).filter((k) => k !== 'olga').sort().join();
+      const mailed = sent.map((m) => m.to).filter((to) => to !== 'olga@example.com').sort().join();
+      assert(mailed === told.split(',').filter(Boolean).map((k) => JSON.parse(env.META.map.get(`hosted-account:${k}`)).email).sort().join(), `${text}: told ${told}, mailed ${mailed}`);
+      assert(!o.invited.length && !o.newcomers.length, `${text}: ${JSON.stringify(o)}`);
+      assert(JSON.parse(env.META.map.get(`meta:${slug}`)).access.allowed_users.join() === ((access || {}).allowed_users || []).join(), `${text}: ${env.META.map.get(`meta:${slug}`)}`);
+      return { told, blocked: o.blocked.join(), mentions: (r.body.mentions || []).join(), id: r.body.id };
+    };
+    const TEXT1 = '@lee，@eli。OK';
+    const priv = { visibility: 'private' };
+    // Invited: by login (either case), by an address of the same account.
+    for (const text of [TEXT1, '@Lee，@ELI。pr已合并', '**@lee**，**@eli**。OK']) for (const as of ['olga', 'ned']) {
+      const r = await say('plain', as, text, { ...priv, allowed_users: ['lee', 'eli@handle.example', 'ned'] });
+      const want = as === 'olga' ? 'lee,eli' : 'lee'; // a guest reaches whom the list names by login
+      assert(r.told === want.split(',').sort().join() && r.mentions === want && !r.blocked, `${as} ${text}: ${JSON.stringify(r)}`);
+    }
+    // Nobody here knows them: private, public, sign-in-required, and whatever
+    // else they are a contact or a user of.
+    await env.META.put('contacts:olga', JSON.stringify([{ login: 'gmail', name: 'g' }, { login: 'john', name: 'j' }]));
+    await env.META.put('recents:gmail', '[1]');
+    for (const text of ['@john，@gmail。com', '@john，@gmail。com请看', '@john请@gmail。com', '@john,@gmail.con', '@john!@gmail.com', '@gmail.com', '@john.@gmail｡com']) {
+      for (const access of [priv, { visibility: 'public' }, { visibility: 'unlisted', signin_required: true }]) for (const as of access === priv ? ['olga'] : ['olga', 'eve']) {
+        const r = await say('plain', as, text, access);
+        assert(!r.told && !r.mentions && !r.blocked, `${access.visibility} ${as} ${text}: ${JSON.stringify(r)}`);
+      }
+    }
+    // Somebody who wrote on it; not an agent, nor a name an upload carries.
+    await post('plain', 'lee', 'one');
+    const reply = (await post('plain', 'uma', 'two')).body.id;
+    const record = (author, i) => env.COMMENTS.get(env.COMMENTS.idFromName('plain')).fetch('https://do/mutate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug: 'plain', op: { kind: 'create', slug: 'plain', id: `c_x${i}`, author, text: 'x', version: 1 } }) });
+    await record({ login: 'john', name: 'john', imported: true }, 1);
+    await record({ login: 'claude', name: 'Claude', kind: 'agent' }, 2);
+    await record({ login: 'email:gmail@handle.example', name: 'g', imported: true }, 3);
+    let r = await say('plain', 'eve', '@lee，@eli。OK @uma，@john。OK @claude，@gmail。OK', { visibility: 'public' });
+    assert(r.told === 'lee,uma' && r.mentions === 'lee,uma', JSON.stringify(r));
+    r = await say('plain', 'eve', 'x @lee，@gmail。OK', { visibility: 'public' }, { parent_id: reply });
+    assert(r.told === 'lee,uma', `reply: ${JSON.stringify(r)}`);
+    // They wrote on it, and can no longer read it.
+    r = await say('plain', 'olga', '@lee，@uma。ok', priv);
+    assert(!r.told && !r.mentions && !r.blocked, `removed: ${JSON.stringify(r)}`);
+    // The writer is not told.
+    r = await say('plain', 'lee', '@lee，@eli。OK', { ...priv, allowed_users: ['lee', 'eli'] });
+    assert(r.told === 'eli' && r.mentions === 'eli', `writer: ${JSON.stringify(r)}`);
+    // The team's members, not the byline nor another team's.
+    for (const slug of ['teamed', 'open-team']) {
+      r = await say(slug, 'ned', '@mia，@lee。OK @pat.ok', base[slug].access);
+      assert(r.told === 'mia,pat' && r.mentions === 'mia,pat' && !r.blocked, `${slug}: ${JSON.stringify(r)}`);
+    }
+    // A team doc everybody reads, not shared with the team as such.
+    r = await say('open-team', 'ned', '@mia，@john。OK', { ...base['open-team'].access, team: false });
+    assert(r.told === 'mia', `team doc, public: ${JSON.stringify(r)}`);
+    // Who wrote here under an address, named by the account's handle.
+    await env.META.put(`account-group:${who.gmail.account_id}`, JSON.stringify({ canonical: who.gmail.account_id, ids: [who.gmail.account_id], actor_keys: ['gmail', 'email:g@own.example'] }));
+    await record({ login: 'email:g@own.example', name: 'g' }, 4);
+    r = await say('plain', 'olga', '@john，@gmail。OK', { visibility: 'public' });
+    assert(r.told === 'gmail', `linked: ${JSON.stringify(r)}`);
+    // Both kinds in one comment; the owner invites only the plain one.
+    await env.META.put('meta:plain', JSON.stringify({ ...base.plain, access: { ...priv, commenting: 'signed_in', allowed_users: ['lee'] } }));
+    const o = (await post('plain', 'olga', '@john @lee，@gmail。com')).body.mention_outcome;
+    assert(o.notified.join() === 'john,lee' && o.invited.join() === 'john' && !o.blocked.length, JSON.stringify(o));
+    assert(JSON.parse(env.META.map.get('meta:plain')).access.allowed_users.join() === 'lee,john', 'allowed');
+  });
+
+  await t('a poster who is not of the doc learns nothing from a weak handle about whom it knows, nor a guest beyond the logins listed', async () => {
+    const { env, post, api, who } = await tagged();
+    const names = ['ivo', 'adr', 'ali', 'cora', 'guest', 'zed', 'yan'];
+    for (const login of names) {
+      who[login] = await issue(worker, env, login);
+      await env.META.put(`hosted-account:${login}`, JSON.stringify({ account_id: who[login].account_id, github_login: login, email: `${login}@x.example` }));
+    }
+    await env.META.put(`account-group:${who.ali.account_id}`, JSON.stringify({ canonical: who.ali.account_id, ids: [who.ali.account_id], actor_keys: ['ali', 'email:ali@x.example'] }));
+    const open = JSON.parse(env.META.map.get('meta:open-team'));
+    const allowed = ['guest', 'ivo', 'adr@x.example'];
+    const docs = { 'p-public': [0, { visibility: 'public' }], 'p-link': [0, { visibility: 'unlisted' }], 'p-signin': [0, { visibility: 'unlisted', signin_required: true }], 't-public': [1, { visibility: 'public', team: true }], 't-link': [1, { visibility: 'unlisted' }], 'p-private': [0, { visibility: 'private' }], 't-private': [1, { visibility: 'private', team: true }] };
+    const record = (slug, author) => env.COMMENTS.get(env.COMMENTS.idFromName(slug)).fetch('https://do/mutate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, op: { kind: 'create', slug, id: `c_${author.name}`, author, text: 'x', version: 1 } }) });
+    const token = {};
+    for (const [slug, [team, access]] of Object.entries(docs)) {
+      await env.META.put(`meta:${slug}`, JSON.stringify({ ...open, slug, title: slug, ...(team ? {} : { workspace_id: undefined }), access: { commenting: 'signed_in', allowed_users: allowed, ...access } }));
+      await record(slug, { login: 'email:ali@x.example', name: 'ali2', account_id: who.ali.account_id });
+      await record(slug, { login: 'cora', name: 'cora', account_id: who.cora.account_id });
+      for (const as of ['olga', 'mia', 'guest']) {
+        token[`${as} ${slug}`] = `fb_${as.length}${slug.length}${[...`${as}${slug}`].map((c) => c.charCodeAt(0).toString(16)).join('')}`.padEnd(51, '0').slice(0, 51);
+        await env.META.put(`feedback:token:${token[`${as} ${slug}`]}`, JSON.stringify({ sid: who[as].cookie.split('=')[1], slug, origin: 'https://app.example', created: '2026-01-01T00:00:00Z' }));
+      }
+    }
+    // What the poster can see of it, with the name taken out: the answer, the
+    // comment as stored, and what was read for it.
+    const probe = async (slug, as, name, opts) => {
+      const from = env.META.gets.length;
+      const r = opts ? await api('/api/comments', { method: 'POST', ...opts, body: { slug, version: 1, text: `@${name}.ok`, anchor: null } }) : await post(slug, as, `@${name}.ok`);
+      const reads = env.META.gets.slice(from);
+      assert(r.status === 200, `${slug} ${as}: ${r.status} ${r.text}`);
+      const seen = await api(`/api/comments?slug=${slug}&version=1`, opts || { cookie: who[as].cookie });
+      const stored = seen.body.find((c) => c.id === r.body.id);
+      assert(stored, 'stored');
+      const blank = (x) => JSON.stringify(x).replace(new RegExp(`\\b${name}\\b`, 'g'), 'NAME').replace(/c_\d+_\w+/g, 'ID').replace(/\d{4}-\d\d-\d\dT[\d:.]+Z/g, 'AT').replace(/"(?:eid|id)":"[^"]*"/g, '');
+      return { told: r.body.mention_outcome.notified.join(), all: blank([r.body, stored, reads.filter((k) => !/^(?:inbox|push-subs|notify)/.test(k)).length]) };
+    };
+    for (const slug of Object.keys(docs)) {
+      const priv = slug.endsWith('private');
+      const posters = priv ? [['guest']] : [['eve'], ['cora'], ['guest']];
+      for (const as of ['olga', ...(slug === 't-private' ? ['mia'] : priv || slug === 'p-signin' ? ['guest'] : ['mia', 'guest'])]) posters.push([as, { token: token[`${as} ${slug}`] }]);
+      for (const [as, opts] of posters) {
+        await probe(slug, as, 'zed', opts); // warm
+        const none = await probe(slug, as, 'zed', opts);
+        assert(!none.told, `${slug} ${as}: zed`);
+        // Whoever is on the team, invited by login or by address, or writing under an address.
+        for (const name of ['pat', 'ivo', 'adr', 'ali', 'yan']) {
+          const r = await probe(slug, as, name, opts);
+          // A guest reaches the logins the sharing list holds, and no more.
+          const listed = name === 'ivo' && as === 'guest' && !opts;
+          if (listed) assert(r.told === 'ivo', `${slug} ${as} ivo: ${r.told}`);
+          else assert(r.all === none.all, `${slug} ${as}${opts ? ' (feedback)' : ''} ${name}:\n${r.all}\n${none.all}`);
+        }
+        // Whom everybody sees here by that login.
+        if (as !== 'cora') assert((await probe(slug, as, 'cora', opts)).told === (priv ? '' : 'cora'), `${slug} ${as}: cora`);
+        if (as !== 'olga') assert((await probe(slug, as, 'olga', opts)).told === 'olga' || (slug === 't-private' && opts), `${slug} ${as}: olga`);
+      }
+    }
+    // Those of the doc are told of everyone it knows.
+    const want = { 'p-public': 'ivo adr ali', 'p-link': 'ivo adr ali', 'p-signin': 'ivo adr ali', 't-public': 'pat ivo adr ali', 't-link': 'pat ivo adr ali', 'p-private': 'ivo adr', 't-private': 'pat ivo adr' };
+    for (const slug of Object.keys(docs)) for (const as of ['olga', 'guest', ...(slug.startsWith('t') ? ['mia'] : [])]) {
+      const told = [];
+      for (const name of ['pat', 'ivo', 'adr', 'ali', 'yan']) if ((await probe(slug, as, name)).told) told.push(name);
+      assert(told.join(' ') === (as === 'guest' ? 'ivo' : want[slug]), `${slug} ${as}: ${told}`);
+    }
+  });
+
+  await t('a guest on a private team doc reaches a member who wrote on it, not one who did not', async () => {
+    const { env, post, who } = await tagged();
+    who.guest = await issue(worker, env, 'guest');
+    const meta = JSON.parse(env.META.map.get('meta:teamed'));
+    await env.META.put('meta:teamed', JSON.stringify({ ...meta, access: { ...meta.access, allowed_users: ['guest'] } }));
+    await post('teamed', 'pat', 'x');
+    const r = await post('teamed', 'guest', '@pat\uff0c@mia\u3002OK @olga.ok');
+    assert(r.status === 200 && r.body.mention_outcome.notified.join() === 'pat,olga', JSON.stringify(r.body.mention_outcome));
+  });
+
+  await t('what weak handles cost: no read for a comment without one, and a bounded few with', async () => {
+    const { env, post } = await tagged();
+    const reads = async (text) => { const from = env.META.gets.length; const r = await post('plain', 'olga', text); assert(r.status === 200, `${r.status}`); return env.META.gets.slice(from).length; };
+    await reads('warm');
+    const bare = await reads('a plain comment');
+    const unknown = await reads('@no1，@no2。ok');
+    const many = await reads(Array.from({ length: 400 }, (_, i) => `@z${i}.ok`).join(' '));
+    console.log(`    reads: ${bare} with none, ${unknown} with two unknown, ${many} with 400`);
+    // Telling them looks them up once: what a plain mention costs, at most.
+    for (const text of ['@ned @pat @quin', '@ned，@pat，@quin。ok']) await reads(text);
+    await post('plain', 'ned', 'x'); await post('plain', 'pat', 'x'); await post('plain', 'quin', 'x');
+    const strong = await reads('@ned @pat @quin now');
+    const weak = await reads('@ned，@pat.ok @quin.ok now');
+    console.log(`    reads: ${strong} for three plain, ${weak} for three weak`);
+    assert(weak <= strong, `${strong} ${weak}`);
+    assert(unknown - bare <= 2 * 3 && many - bare <= 10 * 3, `${bare} ${unknown} ${many}`);
+  });
+
   await t('what telling people costs: one read of the doc\'s team, however many are told; none without a tag', async () => {
     const { env, sent, post, api, who } = await tagged();
     const reads = async (fn) => { const from = env.META.gets.length; const r = await fn(); assert(r.status === 200, `${r.status}`); return env.META.gets.slice(from); };

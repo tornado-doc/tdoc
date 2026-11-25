@@ -53,7 +53,7 @@ vm.runInContext([
   fn(src, 'normalizeEmail'),
   fn(src, 'normalizeActorKey'),
   fn(src, 'normalizeInvitee'),
-  ...['emailTagAddress', 'looksLikeHost', 'handleStandsAlone'].map((name) => { try { return fn(src, name); } catch { return ''; } }), fn(src, 'parseMentionLogins'),
+  ...['emailTagAddress', 'looksLikeHost', 'handleStandsAlone', 'handleMayBeNamed'].map((name) => { try { return fn(src, name); } catch { return ''; } }), fn(src, 'parseMentionLogins'),
   fn(src, 'isNonHumanAuthor'),
   fn(src, 'commentParticipants'),
   fn(src, 'mentionableUsers'),
@@ -135,6 +135,47 @@ t('a handle with Chinese, Japanese or Korean written on after it is told, dots o
   // Still a host, an address, or a label that is no handle at all.
   for (const text of ['@example.com', '@john.@gmail.com', '@\u4f8b\u3048.jp', '@john.@one\u516c\u53f8.cn', '@eli.@gmail.com', '@b\u00fccher.de', '@example!.com', '@john@gmail\uff61com', '\u3042\u308a\u304c\u3068\u3046@lee@corp\uff61ok \u3067\u3059']) {
     assert(!box.parseMentionLogins(text).some((k) => !k.startsWith('email:')), `${text}: ${JSON.stringify(box.parseMentionLogins(text))}`);
+  }
+});
+
+t('handles written like a part of an address are weak, never mentions of their own', () => {
+  const tails = ['。OK', '。PR已合并', '。pr已合并', '。app已上线', '。ai部分', '。README.md已更新', '。https://tdoc.dev', '看下package.json', '.OK', '...ok', '：v1.2已发', '👍。OK', 'さん。OKです', '님.OK입니다', '+1。OK', 'ー。OK', '。com'];
+  for (const tail of tails) for (const list of ['@lee，@eli', '@Lee、@ELI', '@lee和@eli', '@lee,@eli']) {
+    const weak = new Set();
+    const told = [...box.parseMentionLogins(list + tail, weak), ...weak];
+    if (!told.some((k) => k.startsWith('email:'))) assert(told.sort().join() === 'eli,lee', `${list + tail}: ${told}`);
+  }
+  for (const [text, strong, want] of [
+    ['**@lee**，**@eli**。OK', '', 'lee eli'],
+    ['@lee，@eli。OK', '', 'lee eli'],
+    ['@lee，@eli。OK @eli', 'eli', 'lee'],
+    ['@ana，@lee，@eli。OK', '', 'ana lee eli'],
+    ['@ana @lee，@eli。OK', 'ana', 'lee eli'],
+    ['@john，@gmail。com', '', 'john gmail'],
+    ['@dana@example.com，@lee，@eli。OK', 'email:dana@example.com', 'lee eli'],
+    ['@lee，@eli。OK，@dana@example.com', 'email:dana@example.com', 'lee eli'],
+    // Not a handle of anybody's: a longer word, an address's name, its host.
+    ['@k_l', '', ''],
+    ['@bücher.de', '', ''],
+    ['@dana@example.com', 'email:dana@example.com', ''],
+    ['@dana.k@example.com请', 'email:dana.k@example.com', ''],
+    ['@dana@bücher.example', 'email:dana@bücher.example', ''],
+    ['@dana@example.com@eli.ok', 'email:dana@example.com', 'eli'],
+    ['@dana+x.@example.com', '', 'example'],
+    [`@${'d'.repeat(39)}1.ok`, '', ''],
+    ['@dana@mail.one。com', '', ''],
+    ['x@eli.OK', '', ''],
+  ]) {
+    const weak = new Set();
+    const got = box.parseMentionLogins(text, weak);
+    assert(got.join(' ') === strong && [...weak].join(' ') === want, `${text}: ${got} / ${[...weak]}`);
+  }
+  // The cap is shared, and never taken from the others.
+  const ten = Array.from({ length: 10 }, (_, i) => `@p${i}`).join(' ');
+  for (const [text, strong, rest] of [[`@lee，@eli。OK ${ten}`, 10, 0], [`@lee，@eli。OK ${ten.slice(0, -8)}`, 8, 2], [`${'@w，@v。OK '.replace(/w|v/g, (x) => x)}${Array.from({ length: 15 }, (_, i) => `@w${i}.ok`).join(' ')}`, 0, 10]]) {
+    const weak = [];
+    const named = box.mentionCandidates(text, weak);
+    assert(named.length === strong && weak.length === rest, `${text}: ${named} / ${weak}`);
   }
 });
 
@@ -354,7 +395,7 @@ t('the chip shows the token as typed, including a trailing hyphen', () => {
 // ── the two implementations must agree ───────────────────────────────────
 t('the local server parses mentions the same way as the worker', () => {
   const norm = (s) => s.replace(/\s+/g, ' ').trim();
-  for (const name of ['parseMentionLogins', 'mentionCandidates', 'positionalRecipient']) {
+  for (const name of ['parseMentionLogins', 'emailTagAddress', 'looksLikeHost', 'handleStandsAlone', 'handleMayBeNamed', 'mentionCandidates', 'positionalRecipient']) {
     assert(norm(fn(src, name)) === norm(fn(serverSrc, name)),
       `${name} has DRIFTED between worker.js and server.js`);
   }
@@ -387,6 +428,28 @@ ta('an inbox is NOT evidence — a mention creates one', async () => {
 ta('a stranger with nothing on this host reads as never having used tdoc', async () => {
   assert(await box.hasUsedTdoc(envWith(), 'ada') === false);
   assert(await box.hasUsedTdoc(envWith('recents:ada'), '') === false, 'empty login');
+});
+
+// ── weak handles ─────────────────────────────────────────────────────────
+ta('a weak handle whose lookup fails is not told, and fails nothing else', async () => {
+  const run = vm.runInNewContext(`${fn(src, 'isNonHumanAuthor')}
+${fn(src, 'normalizeActorKey')}
+${fn(src, 'normalizeEmail')}
+${fn(src, 'normalizeGithubLogin')}
+${fn(src, 'commentParticipants')}
+${fn(src, 'canReadDoc')}
+const ownerActorKey = () => 'olga', tokenScopeAllows = (s) => !s.outOfScope, isAllowlisted = (a, s) => s.login !== 'mia', sessionInTeam = () => true, isDocOwnerSession = () => false, actorKeys = (s) => [s.login];
+const inboxReaderSession = async (env, login) => { if (login === 'down') throw new Error('KV is down'); if (login === 'gone') return null.x; return { login }; };
+${fn(src, 'weakMentionsTold')}
+weakMentionsTold`);
+  const args = { poster: { login: 'olga' }, meta: {}, access: { visibility: 'public' }, list: [], readers: new Map() };
+  const told = await run({}, ['ana', 'down', 'gone', 'bo'], args);
+  assert(told.join() === 'ana,bo', told.join());
+  // A token that does not reach this doc is nobody's of it.
+  for (const [poster, want] of [[{ login: 'mia' }, 'ana'], [{ login: 'mia', outOfScope: true }, ''], [{ login: 'mia', feedback: {} }, '']]) {
+    const got = (await run({}, ['ana'], { ...args, poster })).join();
+    assert(got === want, `${JSON.stringify(poster)}: ${got}`);
+  }
 });
 
 // ── who the author still has to reach by hand ────────────────────────────
