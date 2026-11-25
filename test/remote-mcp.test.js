@@ -1369,14 +1369,23 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
 
   await t('rate limit: tool calls per connection per minute', async () => {
     const c = await connect(carl);
-    let limited = null;
-    for (let i = 0; i < 70 && !limited; i++) {
-      const r = await tool(c.access_token, 'list_docs', {});
-      if (r.isError && r.structuredContent.error === 'rate_limited') limited = i;
-    }
-    assert(limited === 60, `limited after ${limited}`);
-    const other = await tool(julieConn.access_token, 'list_docs', {});
-    assert(!other.isError, 'another connection is unaffected');
+    // The limit is per clock minute: the clock stands still while it is reached.
+    const now = Date.now;
+    const at = now();
+    Date.now = () => at;
+    try {
+      let limited = null;
+      for (let i = 0; i < 70 && !limited; i++) {
+        const r = await tool(c.access_token, 'list_docs', {});
+        if (r.isError && r.structuredContent.error === 'rate_limited') limited = i;
+      }
+      assert(limited === 60, `limited after ${limited}`);
+      const other = await tool(julieConn.access_token, 'list_docs', {});
+      assert(!other.isError, 'another connection is unaffected');
+      Date.now = () => at + 60000;
+      const next = await tool(c.access_token, 'list_docs', {});
+      assert(!next.isError, 'the next minute starts over');
+    } finally { Date.now = now; }
   });
 
   await t('audit lines name the step and outcome, never a token, account, client or slug', async () => {
