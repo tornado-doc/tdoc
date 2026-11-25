@@ -430,6 +430,28 @@ ta('a stranger with nothing on this host reads as never having used tdoc', async
   assert(await box.hasUsedTdoc(envWith('recents:ada'), '') === false, 'empty login');
 });
 
+// ── weak handles ─────────────────────────────────────────────────────────
+ta('a weak handle whose lookup fails is not told, and fails nothing else', async () => {
+  const run = vm.runInNewContext(`${fn(src, 'isNonHumanAuthor')}
+${fn(src, 'normalizeActorKey')}
+${fn(src, 'normalizeEmail')}
+${fn(src, 'normalizeGithubLogin')}
+${fn(src, 'commentParticipants')}
+${fn(src, 'canReadDoc')}
+const ownerActorKey = () => 'olga', tokenScopeAllows = (s) => !s.outOfScope, isAllowlisted = (a, s) => s.login !== 'mia', sessionInTeam = () => true, actorKeys = (s) => [s.login];
+const inboxReaderSession = async (env, login) => { if (login === 'down') throw new Error('KV is down'); if (login === 'gone') return null.x; return { login }; };
+${fn(src, 'weakMentionsTold')}
+weakMentionsTold`);
+  const args = { poster: { login: 'olga' }, meta: {}, access: { visibility: 'public' }, list: [], readers: new Map() };
+  const told = await run({}, ['ana', 'down', 'gone', 'bo'], args);
+  assert(told.join() === 'ana,bo', told.join());
+  // A token that does not reach this doc is nobody's of it.
+  for (const [poster, want] of [[{ login: 'mia' }, 'ana'], [{ login: 'mia', outOfScope: true }, ''], [{ login: 'mia', feedback: {} }, '']]) {
+    const got = (await run({}, ['ana'], { ...args, poster })).join();
+    assert(got === want, `${JSON.stringify(poster)}: ${got}`);
+  }
+});
+
 // ── who the author still has to reach by hand ────────────────────────────
 ta('people already on the doc are not reported as newcomers', async () => {
   const out = await box.describeNewcomers(envWith('recents:ada'), {

@@ -17086,7 +17086,8 @@ function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targ
 //                       them changes nothing — plain text, no notification
 //
 // A name that may be part of an address is told only to a person the doc
-// already knows, whatever its visibility (weakMentionsTold).
+// already knows, whatever its visibility, and only as far as the poster may
+// know it too (weakMentionsTold).
 //
 // The last row is the one that matters: an inbox row carries the doc title
 // and a line of the comment, so notifying a stranger about a private doc
@@ -17453,15 +17454,21 @@ function classifyMentions(logins, { canRead, canInvite = false, inviteBudget = 0
 // already knows -- its owner, someone its sharing lists, a member of its team,
 // or someone who wrote on it -- and only if they can read it. Nobody is
 // invited, and an unknown name is not a mention at all (nor a blocked one).
+// Being told says the doc knows them, so to a `poster` who is not of the doc
+// (or a feedback token's) it knows only whom /api/mentions offers them by that
+// very login: the owner, and who wrote on it. Nothing is looked up for them.
 // `readers`: the request's memo, so delivery does not look them up again.
-async function weakMentionsTold(env, logins, { meta, access, list, readers }) {
+async function weakMentionsTold(env, logins, { poster, meta, access, list, readers }) {
   if (!logins.length) return [];
-  const wrote = new Set(commentParticipants(list, { imported: false }).map((p) => p.login));
+  const here = new Set([normalizeActorKey(ownerActorKey(meta, env)), ...commentParticipants(list, { imported: false }).map((p) => p.login)]);
+  const teamId = meta && meta.workspace_id;
+  const insider = !poster.feedback && tokenScopeAllows(poster, meta)
+    && (isAllowlisted(access, poster, env, meta) || sessionInTeam(poster, teamId));
   const told = await Promise.all(logins.map(async (login) => {
+    if (!insider) return here.has(login) && canReadDoc(access, { login }, env, meta);
     try {
       const reader = await inboxReaderSession(env, login, { memo: readers });
-      const known = isAllowlisted(access, reader, env, meta) || sessionInTeam(reader, meta && meta.workspace_id)
-        || actorKeys(reader).some((k) => wrote.has(k));
+      const known = actorKeys(reader).some((k) => here.has(k)) || isAllowlisted(access, reader, env, meta) || sessionInTeam(reader, teamId);
       return known && canReadDoc(access, reader, env, meta);
     } catch { return false; }
   }));
@@ -33894,7 +33901,7 @@ const tdocHandlers = {
           participants: commentParticipants(priorList),
         }).map((u) => u.login),
       });
-      outcome.notified.push(...await weakMentionsTold(env, weak.filter((login) => login !== actorKey(s)), { meta, access, list: priorList, readers }));
+      outcome.notified.push(...await weakMentionsTold(env, weak.filter((login) => login !== actorKey(s)), { poster: s, meta, access, list: priorList, readers }));
       // An invite is a meta write, so it happens before the comment lands: a
       // notification whose link 403s is worse than no notification.
       if (outcome.invited.length) {
