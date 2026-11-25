@@ -240,6 +240,54 @@ const DAVE = 'dave.reader@example.org';
   });
 
   globalThis.fetch = realFetch;
+  // The worker's own functions, by name (they are not exported).
+  const workerSrc = require('fs').readFileSync(process.env.TDOC_WORKER_JS || require('path').join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+  const workerFn = (names) => {
+    const fn = (name) => { const at = workerSrc.indexOf(`function ${name}(`); return at < 0 ? '' : workerSrc.slice(at, workerSrc.indexOf('\n}\n', at) + 3); };
+    return new Function(`${names.map(fn).join('')}return { ${names.filter((n) => fn(n)).join(', ')} };`)();
+  };
+
+  await t('the prompt\'s own tags: what is taken out of a text, and at what cost', () => {
+    const { askFence, suggestFence } = workerFn(['askFence', 'fenceTags', 'suggestFence']);
+    const ask = (s) => s.replace(/<\/?\s*(document|comments|selection|question)\b[^>]*>/gi, '[tag removed]');
+    const suggest = (s) => ask(s).replace(/<\/?\s*(passage|comments_to_fix|request|comment|system|instructions?)\b[^>]*>/gi, '[tag removed]').replace(/\[comment id=/gi, '[comment-id=');
+    let taken = 0;
+    const same = (s) => {
+      if (ask(s) !== s) taken += 1;
+      assert(askFence(s) === ask(s), `ask: ${JSON.stringify(s)}`);
+      assert(suggestFence(s) === suggest(s), `suggest: ${JSON.stringify(s)}`);
+    };
+    const all = (s, depth) => { same(s); if (depth) for (const c of ['<', '/', '>', 'document', 'Request', ' ', 'x', '\n']) all(s + c, depth - 1); };
+    all('', 5);
+    let seed = 11;
+    const next = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return Math.floor(seed / 65536) % n; };
+    const parts = ['<', '</', '>', ' >', 'document', 'COMMENTS', 'selection', 'question', 'request', 'passage', 'comments_to_fix', 'comment', 'system', 'instructions', ' ', '\n', '\u00a0', 'x', '"', '=', '_', '-', '[comment id=', '<document>', '</question >'];
+    for (let i = 0; i < 60000; i++) { let s = ''; for (let j = 1 + next(10); j > 0; j--) s += parts[next(parts.length)]; same(s); }
+    assert(taken > 10000, `texts with a tag: ${taken}`);
+    for (const long of ['<document '.repeat(40000), '</question '.repeat(30000), '<request '.repeat(40000), '<system '.repeat(40000), `<document>${'<'.repeat(100000)}`, `<${' '.repeat(100000)}`]) {
+      const from = process.hrtime.bigint();
+      askFence(long);
+      suggestFence(long);
+      const ms = Math.round(Number(process.hrtime.bigint() - from) / 1e6);
+      assert(ms < 1500, `${long.slice(0, 12)}: ${ms} ms`);
+    }
+  });
+
+  await t('a draft\'s title: the first heading, and at what cost', () => {
+    const { markdownHeading } = workerFn(['markdownHeading']);
+    const was = (s) => { const m = s.match(/^\s*#\s+(.+?)\s*#*\s*$/m); return m ? m[1] : null; };
+    const same = (s) => assert(markdownHeading(s) === was(s), `${JSON.stringify(s)}: ${JSON.stringify([was(s), markdownHeading(s)])}`);
+    const all = (s, depth) => { same(s); if (depth) for (const c of ['#', ' ', '\n', 'a', '\r']) all(s + c, depth - 1); };
+    all('', 7);
+    for (const s of ['# Plan', '  # Plan ##  \nx', 'x\n# Plan # two #', '#\n\nPlan', '## no\n# yes', '# \u2028 a', '#\u00a0a', '# #', '# ## #']) same(s);
+    for (const long of [`# a${' '.repeat(50000)}b`, `# a${'#'.repeat(50000)}b`, `${'\n'.repeat(50000)}x`, '# '.repeat(25000), `#${' '.repeat(50000)}`, '#\n'.repeat(25000)]) {
+      const from = process.hrtime.bigint();
+      markdownHeading(long);
+      const ms = Math.round(Number(process.hrtime.bigint() - from) / 1e6);
+      assert(ms < 1500, `${JSON.stringify(long.slice(0, 6))}: ${ms} ms`);
+    }
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

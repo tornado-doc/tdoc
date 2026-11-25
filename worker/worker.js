@@ -22136,7 +22136,14 @@ function askCut(s, n) {
 // Inside the delimiters the model is told to distrust, a closing tag of our
 // own must not appear: it would let document text pose as the reader.
 function askFence(s) {
-  return String(s == null ? '' : s).replace(/<\/?\s*(document|comments|selection|question)\b[^>]*>/gi, '[tag removed]');
+  return fenceTags(s, /<\/?\s*(document|comments|selection|question)\b[^>]*>/gi);
+}
+// `tags`: patterns that run to the next `>`. After the last one there is
+// nothing for them to match, and what is before it they read once.
+function fenceTags(s, tags) {
+  const text = String(s == null ? '' : s);
+  const end = text.lastIndexOf('>') + 1;
+  return text.slice(0, end).replace(tags, '[tag removed]') + text.slice(end);
 }
 
 function askDocText(rawHtml) {
@@ -22723,9 +22730,28 @@ async function writeWithAiAllowed(env, session) {
 }
 
 // The title is the first "# " line the model wrote, else the sentence.
+// The first `# heading` (/^\s*#\s+(.+?)\s*#*\s*$/m), in linear time: the text
+// of the first line after the mark, without the marks it closes with.
+function markdownHeading(markdown) {
+  const text = String(markdown || '');
+  for (const mark of text.matchAll(/^[^\S\n\r\u2028\u2029]*#(?=\s)/gm)) {
+    const from = mark.index + mark[0].length;
+    const space = /^\s+/.exec(text.slice(from))[0];
+    const line = /^.*/.exec(text.slice(from + space.length))[0];
+    if (!line) {
+      // Nothing after the mark but space, to the end: the last of it on a line.
+      for (let k = space.length - 1; k > 0; k--) if (!/[\n\r\u2028\u2029]/.test(space[k])) return space[k];
+      continue;
+    }
+    let end = line.trimEnd().length;
+    while (end > 0 && line[end - 1] === '#') end -= 1;
+    return line.slice(0, Math.max(1, line.slice(0, end).trimEnd().length));
+  }
+  return null;
+}
 function writeAiTitle(markdown, prompt) {
-  const m = String(markdown || '').match(/^\s*#\s+(.+?)\s*#*\s*$/m);
-  const raw = (m ? m[1] : prompt).replace(/[*_`\[\]<>]/g, '').replace(/\s+/g, ' ').trim();
+  const heading = markdownHeading(markdown);
+  const raw = (heading == null ? prompt : heading).replace(/[*_`\[\]<>]/g, '').replace(/\s+/g, ' ').trim();
   return askCut(raw || 'Untitled', 120).replace(/…$/, '') || 'Untitled';
 }
 
@@ -22823,7 +22849,7 @@ async function handleWriteWithAi(env, req, url, ctx) {
   const messages = [
     { role: 'system', content: WRITE_AI_SYSTEM_PROMPT },
     // An address typed into the sentence leaves the worker hidden, as in Ask.
-    { role: 'user', content: `<request>\n${askFence(askNoEmails(rawPrompt)).replace(/<\/?\s*request\b[^>]*>/gi, '[tag removed]')}\n</request>` },
+    { role: 'user', content: `<request>\n${fenceTags(askFence(askNoEmails(rawPrompt)), /<\/?\s*request\b[^>]*>/gi)}\n</request>` },
   ];
   const modelCfg = { ...cfg, maxTokens: Math.max(cfg.maxTokens, WRITE_AI_MAX_TOKENS) };
   // A client that asked for server-sent events watches the draft arrive.
@@ -24589,8 +24615,7 @@ const SUGGEST_SYSTEM_PROMPT = [
 // comment text could otherwise pose as the editor's request or as another
 // comment to fix.
 function suggestFence(s) {
-  return askFence(s)
-    .replace(/<\/?\s*(passage|comments_to_fix|request|comment|system|instructions?)\b[^>]*>/gi, '[tag removed]')
+  return fenceTags(askFence(s), /<\/?\s*(passage|comments_to_fix|request|comment|system|instructions?)\b[^>]*>/gi)
     .replace(/\[comment id=/gi, '[comment-id=');
 }
 
@@ -24694,7 +24719,7 @@ async function handleSuggest(env, req, url, slug) {
     fix = rows.map((c, i) => {
       // Each piece fenced on its own: the header line is ours, the words
       // in it are not (suggestFence).
-      const f = (x) => suggestFence(askNoEmails(x)).replace(/\s*\n\s*/g, ' ');
+      const f = (x) => suggestFence(askNoEmails(x)).replace(/\s+/g, (ws) => (ws.includes('\n') ? ' ' : ws));
       let s = `[comment id="${f(open[i] ? open[i].id : '').replace(/"/g, '')}"] ${f(c.author)}`;
       if (c.quote) s += ` on "${f(askCut(c.quote, 400))}"`;
       s += `: ${f(askCut(c.text, 1500))}`;
