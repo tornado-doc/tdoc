@@ -508,7 +508,16 @@ function handleStandsAlone(after) {
   return !looksLikeHost(next) && (!!word || !/^[\p{L}\p{N}]/u.test(next));
 }
 
-function parseMentionLogins(text) {
+// Is it a handle all the same, if somebody here has it? Not a longer word, nor
+// an address's name ("@dana.k@example.com").
+function handleMayBeNamed(after) {
+  return !/^(?:_?[A-Za-z0-9]|(?![\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Hangul}])[\p{L}\p{M}]|[A-Za-z0-9._%+'-]*@[A-Za-z0-9-]+\.[A-Za-z0-9])/u.test(after);
+}
+
+// `weak` is filled with the handles that may be part of an address or of a
+// host ("@lee\uff0c@eli\u3002OK" is written like "@john\uff0c@gmail\u3002com"): never in the
+// result, and told only when the doc already knows them.
+function parseMentionLogins(text, weak = new Set()) {
   if (typeof text !== 'string' || !text) return [];
   const out = [];
   const seen = new Set();
@@ -516,6 +525,7 @@ function parseMentionLogins(text) {
   // Email tags first, and blank their spans so the handle pass cannot re-read
   // the local part of an address as a handle.
   let source = '';
+  let loose = ''; // the same, with what may be a list of handles left in
   let from = 0;
   const er = new RegExp(EMAIL_MENTION_RE.source, 'g');
   let m;
@@ -526,18 +536,23 @@ function parseMentionLogins(text) {
     const end = m.index + m[1].length + 2 + tag.host;
     // Nothing is read on from a slash; a handle right after an address is.
     const on = tag.address ? /^[-/_]*(?=@)/.exec(text.slice(end, end + 8)) : null;
-    source += text.slice(from, m.index) + (on ? ' ' : '/');
+    const before = text.slice(from, m.index);
+    source += before + (on ? ' ' : '/');
+    loose += before + (on ? ' ' : tag.address ? '/' : text.slice(m.index, end));
     from = end + (on ? on[0].length : 0);
     er.lastIndex = tag.address || tag.next ? from : from + 1;
   }
-  source += text.slice(from);
-  const re = new RegExp(MENTION_RE.source, 'g');
-  while ((m = re.exec(source))) {
-    // A GitHub login never ends in a hyphen, so `@dana-` names dana.
-    const login = String(m[2]).replace(/-+$/, '').toLowerCase();
-    const at = re.lastIndex - (m[2].length - login.length);
-    if (handleStandsAlone(source.slice(at, at + 600))) add(login);
-  }
+  const handles = (read, named) => {
+    const re = new RegExp(MENTION_RE.source, 'g');
+    while ((m = re.exec(read))) {
+      // A GitHub login never ends in a hyphen, so `@dana-` names dana.
+      const login = String(m[2]).replace(/-+$/, '').toLowerCase();
+      const at = re.lastIndex - (m[2].length - login.length);
+      named(login, read.slice(at, at + 600));
+    }
+  };
+  handles(source + text.slice(from), (login, after) => { if (handleStandsAlone(after)) add(login); });
+  handles(loose + text.slice(from), (login, after) => { if (!seen.has(login) && handleMayBeNamed(after)) weak.add(login); });
   return out;
 }
 
@@ -552,8 +567,11 @@ function positionalRecipient(login, mentions) {
 
 // The logins a single comment may act on: parsed in the order they were
 // typed, deduped, and capped.
-function mentionCandidates(text) {
-  return parseMentionLogins(text).slice(0, MENTION_MAX_PER_COMMENT);
+function mentionCandidates(text, weak = []) {
+  const found = new Set();
+  const out = parseMentionLogins(text, found).slice(0, MENTION_MAX_PER_COMMENT);
+  weak.push(...[...found].slice(0, MENTION_MAX_PER_COMMENT - out.length));
+  return out;
 }
 
 // The local stand-in for the worker's presence probe. A local tree has no
@@ -2568,7 +2586,14 @@ const server = http.createServer(async (req, res) => {
     // Resolved server-side, before the write, so the card chips exactly the
     // names that were notified.
     const me = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
-    const mentions = mentionCandidates(text).filter((login) => login !== me);
+    const weak = [];
+    const mentions = mentionCandidates(text, weak).filter((login) => login !== me);
+    // A weak handle (parseMentionLogins) is told only when this doc knows it: a
+    // person who wrote on it, or its owner.
+    const wrote = comments.flatMap((c) => [c, ...((c && c.replies) || [])])
+      .filter((r) => r && r.agent_status == null && !(r.author && /^(?:agent|system)$/.test(r.author.kind)));
+    const known = new Set(localMentionable(wrote.map(({ author }) => ({ author }))).map((u) => u.login));
+    mentions.push(...weak.filter((login) => login !== me && known.has(login)));
     // The same words twice within seconds is one comment (see the worker).
     const dup = duplicateComment(comments, { author: e2eIdentity(), text, anchor, parent_id, at: created });
     if (dup) return json(res, 200, { ...dup, duplicate_of: dup.id, mention_outcome: localMentionOutcome(comments, []) });
