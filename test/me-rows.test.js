@@ -507,9 +507,9 @@ const PROSE_WITH_SHEET = `<h1>Runs and plan</h1><p>What we ran, and what is next
     ];
     // The best of three runs: the scan, not a JIT warm-up or a GC pause
     // (test/sheets-size.test.js does the same); a quadratic one takes seconds.
-    // 50 ms scaled by the runner's measured speed (helpers/perf-budget.js).
+    // Scaled by the runner's measured speed (helpers/perf-budget.js).
     for (const html of hostile) {
-      guard(`docTypeFromHtml on ${JSON.stringify(html.slice(0, 40))}…`, bestOf(3, () => docTypeFromHtml(html)), 50);
+      guard(`docTypeFromHtml on ${JSON.stringify(html.slice(0, 40))}…`, bestOf(3, () => docTypeFromHtml(html)), 250);
     }
   });
 

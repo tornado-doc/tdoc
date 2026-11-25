@@ -111,12 +111,22 @@ async function startServer(worker, env) {
     page.on('request', (r) => { if (r.url().includes('api.github.com')) github.push(r.url()); });
     const sends = [];
     page.on('request', (r) => { if (r.method() === 'POST' && /\/hand-off$|\/api\/notify\/handoff$/.test(r.url())) sends.push({ path: new URL(r.url()).pathname, body: JSON.parse(r.postData() || '{}') }); });
+    // The handoff goes out after the comment is saved, however long that
+    // takes: handedOff() waits for the server's answer to it.
+    let answered = 0;
+    page.on('response', (r) => { if (r.request().method() === 'POST' && /\/hand-off$|\/api\/notify\/handoff$/.test(r.url())) answered++; });
+    const handedOff = async () => {
+      for (const deadline = Date.now() + 10000; !answered;) {
+        if (Date.now() > deadline) throw new Error(`no handoff was answered: ${JSON.stringify(sends)}`);
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    };
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(`${base}/d/${SLUG}`);
     await page.frameLocator('iframe').locator('h1').waitFor({ timeout: 15000 });
     await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
-    return { ctx, page, sends, errors, github, releaseLists, frame: page.frames().find((f) => f !== page.mainFrame()) };
+    return { ctx, page, sends, handedOff, errors, github, releaseLists, frame: page.frames().find((f) => f !== page.mainFrame()) };
   };
   // The phone: drawer, Reply on the card, @, the agent picked by a tap.
   // On a thread with no replies yet (pass `id` for one made before the page loaded).
@@ -151,7 +161,7 @@ async function startServer(worker, env) {
       assert.match(await v.page.locator('#tdoc-comment-layer .tdoc-reply-form').innerText(), /suggests edits/);
       await shot(v.page, 'reply-pill-390.png');
       await sendReply(v.page);
-      await v.page.waitForTimeout(300);
+      await v.handedOff();
       assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
       assert.equal(v.sends[0].path, '/api/notify/handoff');
       assert.equal(v.sends[0].body.reply_as, 'suggestions');
@@ -181,7 +191,7 @@ async function startServer(worker, env) {
       await box.waitFor({ timeout: 5000 });
       await box.fill('date first');
       await box.press('ControlOrMeta+Shift+Enter');
-      await v.page.waitForTimeout(600);
+      await v.handedOff();
       assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
       assert.equal(v.sends[0].body.reply_as, 'suggestions');
       await v.ctx.close();
@@ -223,7 +233,7 @@ async function startServer(worker, env) {
       const v = await open({ phone: true });
       await replyInDrawer(v.page, /Codex/, id);
       await sendReply(v.page);
-      await v.page.waitForTimeout(600);
+      await v.handedOff();
       assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
       assert.equal(v.sends[0].path.endsWith('/hand-off'), true);
       assert.equal(v.sends[0].body.reply_as, undefined);
@@ -239,6 +249,7 @@ async function startServer(worker, env) {
       await replyInDrawer(v.page, /Claude Code/, fresh);
       assert.doesNotMatch(await v.page.locator('#tdoc-comment-layer .tdoc-reply-form').innerText(), /suggests/);
       await sendReply(v.page);
+      await v.handedOff();
       await v.page.waitForTimeout(800);
       assert.equal(v.sends.length, 1);
       assert.equal(v.sends[0].path.endsWith('/hand-off'), true);
@@ -302,7 +313,7 @@ async function startServer(worker, env) {
       await v.page.keyboard.type('shorter please');
       assert.match(await box.inputValue(), /Claude Code shorter please$/);
       await card.locator('.tdoc-reply-submit').last().tap();
-      await v.page.waitForTimeout(600);
+      await v.handedOff();
       assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
       assert.equal(v.sends[0].body.reply_as, 'suggestions');
       assert.equal(v.sends[0].body.comment_ids[0], id);
@@ -340,7 +351,7 @@ async function startServer(worker, env) {
         assert.match(await form.innerText(), /answers in the thread/);
         await shot(v.page, phone ? 'reply-ask-only-dev-390.png' : 'reply-ask-only-dev-1280.png');
         if (phone) await sendReply(v.page); else await form.locator('.tdoc-reply-submit.ui-btn-primary').click();
-        await v.page.waitForTimeout(800);
+        await v.handedOff();
         assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
         assert.equal(v.sends[0].path.endsWith('/hand-off'), true);
         assert.equal(v.sends[0].body.ask_only, true);
@@ -441,7 +452,7 @@ async function startServer(worker, env) {
       await w.page.keyboard.press('End');
       await w.page.keyboard.type('shorter please');
       await b.card.locator('.tdoc-reply-submit').last().tap();
-      await w.page.waitForTimeout(600);
+      await w.handedOff();
       assert.equal(w.sends.length, 1, JSON.stringify(w.sends));
       assert.equal(w.sends[0].path.endsWith('/hand-off'), true);
       assert.equal(w.sends[0].body.reply_as, undefined);
@@ -461,7 +472,7 @@ async function startServer(worker, env) {
       assert.doesNotMatch(value, /Claude Code/);
       await v.page.keyboard.type('please look');
       await card.locator('.tdoc-reply-submit').last().tap();
-      await v.page.waitForTimeout(600);
+      await v.handedOff();
       assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
       assert.equal(v.sends[0].body.recipient.agent_sub, 'mac-mini_codex');
       await v.ctx.close();
@@ -517,6 +528,7 @@ async function startServer(worker, env) {
       await v.page.keyboard.press('End');
       await v.page.keyboard.type('shorter please');
       await card.locator('.tdoc-reply-submit').last().click();
+      await v.handedOff();
       await v.page.waitForTimeout(600);
       assert.equal(posts.length, 1, 'the reply itself was not posted');
       await plainHandoff(v, suggestCalls);
@@ -537,6 +549,7 @@ async function startServer(worker, env) {
       await card.locator('.tdoc-agent-pill').waitFor();
       await v.page.keyboard.type('shorter please');
       await card.locator('.tdoc-reply-submit').last().tap();
+      await v.handedOff();
       await v.page.waitForTimeout(600);
       await plainHandoff(v, suggestCalls);
       await v.ctx.close();

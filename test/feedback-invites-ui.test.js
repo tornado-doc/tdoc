@@ -288,8 +288,11 @@ async function startSite(state) {
             const prompt = root.locator('.tdoc-fb-invite-prompt');
             await prompt.waitFor();
             await shot(page, `${tag}-server-prompt`);
+            // The prompt closes at once; the choice is saved after it.
+            const kept = page.waitForResponse((r) => /\/api\/feedback\/invite\/keep$/.test(r.url()) && r.request().method() === 'POST');
             await prompt.getByRole('button', { name: 'Keep my own' }).click();
             await prompt.waitFor({ state: 'detached' });
+            await kept;
             assert.equal(await w.env.META.get(`feedback:invite-choice:bob:${w.space.slug}`), 'kept');
             // The list's header is the switcher.
             await root.locator('.tdoc-feedback-dock button', { hasText: 'open' }).click();

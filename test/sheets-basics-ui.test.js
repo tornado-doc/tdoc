@@ -182,6 +182,10 @@ async function shot(page, name) {
       await frameMode(frame, 'comment');
       await frame.evaluate(() => { window.__sameFrame = true; });
       const w0 = await frame.evaluate(() => document.querySelector('.ts-h[data-c="1"]').getBoundingClientRect().width);
+      // The toast comes after the save's answer reaches the page, and goes by
+      // itself: wait for it from the start.
+      const toast = page.locator('.tdoc-shell-toast', { hasText: /^Column width saved$/ }).waitFor();
+      toast.catch(() => {});
       await dragBy(page, f.locator('.ts-h[data-c="1"] .ts-resize'), 90, 0);
       await waitForVersion('resize', 2);
       const v2 = saved('resize', 2);
@@ -190,7 +194,7 @@ async function shot(page, name) {
       const meta2 = versionOf('resize').find((v) => v.n === 2);
       assert(meta2.source === 'browser' && meta2.author === 'owner', `a browser edit by the owner: ${JSON.stringify(meta2)}`);
       assert(new URL(page.url()).pathname === '/d/resize/v/1', `the address is left as it was: ${page.url()}`);
-      assert(await page.locator('.tdoc-shell-toast', { hasText: /^Column width saved$/ }).count(), 'toast: Column width saved');
+      await toast;
       assert(await page.locator(modeSelector('comment')).count(), 'still Comment mode');
       assert(!(await page.locator('.tdoc-editor-toolbar').count()), 'no Save bar');
       assert(await frame.evaluate(() => window.__sameFrame === true), 'no reload');
@@ -293,6 +297,18 @@ async function shot(page, name) {
       // The rest of the page is out of reach under it, by a provider style.
       const hidden = await frame.evaluate(() => ({ p: getComputedStyle(document.getElementById('before')).visibility, grid: getComputedStyle(document.querySelector('.ts-grid')).visibility, inert: document.querySelectorAll('[inert]').length, attr: document.documentElement.hasAttribute('data-tdoc-sheet-expanded') }));
       assert(hidden.p === 'hidden' && hidden.grid === 'visible' && !hidden.inert && !hidden.attr, JSON.stringify(hidden));
+      // Entering Edit mode draws the header and its grips again a few frames
+      // after the mode is set: drag the grip that stays (the same element
+      // through several frames in a row).
+      await frame.evaluate(() => new Promise((resolve) => {
+        let el = null, same = 0;
+        (function look() {
+          const now = document.querySelector('.ts-h[data-c="1"] .ts-resize');
+          same = now && now === el ? same + 1 : 0;
+          el = now;
+          if (same >= 10) resolve(); else requestAnimationFrame(look);
+        })();
+      }));
       await dragBy(page, f.locator('.ts-h[data-c="1"] .ts-resize'), 60, 0);
       await frame.waitForFunction(() => document.querySelectorAll('table[data-tdoc-sheet] thead th')[1].hasAttribute('data-width'));
       // Export while full screen (Download & copy builds from this HTML).

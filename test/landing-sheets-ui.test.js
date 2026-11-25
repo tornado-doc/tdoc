@@ -118,9 +118,12 @@ async function startServer(worker, env) {
       assert(!/sheet=/.test(kept.hash) && !kept.keys.length, `the homepage kept a view: ${JSON.stringify(kept)}`);
       // Comment preview: a cell, its pill, the composer.
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
+      // In Comment mode the cell's click selects it (its pill) and opens the
+      // composer just after. No press on the pill as well: while the composer
+      // is open the next press in the doc only closes it.
       await f.locator('#sheets .ts-row[data-i="1"] .ts-c[data-c="0"]').click();
-      await f.locator('#sheets .ts-c .tdoc-comment-pill').click();
-      await page.locator('.tdoc-popup').waitFor({ timeout: 5000 });
+      await f.locator('#sheets .ts-c .tdoc-comment-pill').waitFor({ timeout: 5000 });
+      await page.locator('.tdoc-popup textarea').waitFor({ timeout: 5000 });
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `landing-sheet-comment-${label}.png`) });
       const writes = requests.filter((r) => !['GET', 'HEAD'].includes(r.method));
       assert(!writes.length, `the homepage wrote: ${JSON.stringify(writes)}`);

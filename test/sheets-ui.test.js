@@ -811,6 +811,12 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await f.getByRole('searchbox', { name: 'Search this sheet' }).fill('run 1');
       await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '11 of 60 rows');
       await f.locator('.ts-row[data-i="2"] .ts-c[data-c="0"]').click();
+      // In Comment mode the cell's click opens the composer, just after it.
+      // Esc is one level at a time: the composer, then full screen.
+      await page.locator('.tdoc-popup textarea').waitFor();
+      await page.keyboard.press('Escape');
+      await page.locator('.tdoc-popup').waitFor({ state: 'detached' });
+      assert(await frame.evaluate(() => window.__tdocSheets.expanded().on), 'the first Esc closes the composer only');
       await page.keyboard.press('Escape');
       await frame.waitForFunction(() => !window.__tdocSheets.expanded().on);
       await page.waitForFunction(() => !/expand=1/.test(location.hash));

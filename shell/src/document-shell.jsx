@@ -2393,7 +2393,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // took (an @ menu, a dialog, the phone sheet) is left alone.
   useEscapeLadder([
     { active: docPicking, close: () => { setDocPicking(false); bridge.send({ type: 'tdoc:cancelPick' }); } },
-    { active: Boolean(composer), close: () => closeComposer() },
+    // A sheet's keys go back to the doc: full screen there closes on the next Esc.
+    { active: Boolean(composer), close: () => { closeComposer(); if (composer.sheet) bridge.frameRef.current?.focus(); } },
     { active: !narrow && Boolean(openCommentId || openClusterKey), close: () => {
       setOpenCommentId(null);
       setOpenClusterKey(null);
