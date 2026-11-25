@@ -306,7 +306,8 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       await f.locator('.ts-h[data-c="0"] .ts-hname').click();
       await f.locator('.ts-h[data-c="0"] .ts-hname').click();
       await frame.waitForFunction(() => document.querySelector('.ts-h[data-c="0"]').getAttribute('aria-sort') === 'descending');
-      await page.waitForFunction(() => /sheet=/.test(location.hash));
+      // The view is written a moment after its last change: the second click's.
+      await page.waitForFunction(() => decodeURIComponent(decodeURIComponent(location.hash)).includes('"s":"-0"'));
       const link = page.url();
       const other = await context.newPage();
       const again = await open('tracker', new URL(link).hash, other);
@@ -1076,7 +1077,7 @@ ${M.tableHtml({ name: 'Inventory', columns: [{ name: 'Item', type: 'text' }, { n
       const avg = (sumOf(shown) / shown.length).toLocaleString('en-US', { maximumFractionDigits: 2 });
       await frame.waitForFunction((want) => document.querySelector('.ts-fc[data-c="1"]').textContent === want, `Average${avg}`);
       // In the hash; a reload brings it back.
-      await page.waitForFunction(() => /%2522g%2522/.test(location.hash));
+      await page.waitForFunction(() => /"1":"avg"/.test(decodeURIComponent(decodeURIComponent(location.hash))));
       await page.reload();
       await frameLoc().locator('.tdoc-sheet .ts-row').first().waitFor();
       const again = page.frames().find((x) => x.url().includes('/frame'));
