@@ -400,6 +400,17 @@ const addresses = (text) => new Set(text.match(/[a-z0-9.]+@(?:corp|people)\.exam
       [first, () => 'then @ann', { names: ['@ann'] }],
       [first, () => 'ask @ann and @ann first, then @ann', { names: ['@ann'] }],
       [first, () => 'neither', 'neither'],
+      ['@ann@corp.example, ok', () => '@ann @ann, ok then', '@ann @ann@corp.example, ok then'],
+      // The name is still there, written another way.
+      ['read @ann@corp.example\'s draft', (s) => s.replace("@ann's", "(@ann's)"), { names: ['@ann'] }],
+      ['read @ann@corp.example now', (s) => s.replace('@ann', '@Ann'), { names: ['@ann'] }],
+      ['read @ann@corp.example now', (s) => s.replace('@ann', '@ann-led'), { names: ['@ann'] }],
+      ['read @ann@corp.example now', (s) => s.replace('@ann', '@ann.then'), { names: ['@ann'] }],
+      ['read @ann@corp.example;@bob@corp.example now', (s) => s.replace('@ann;@bob', "@ann;@bob's"), { names: ['@bob'] }],
+      ['read @ann@corp.example\'s draft', (s) => `${s} now`, 'read @ann@corp.example\'s draft now'],
+      ['ask @ann@corp.example or @ann-led now ok', () => 'well @ann-led then, fine', 'well @ann-led then, fine'],
+      ['ask @ann@corp.example, now ok', () => "well ask @ann now and (@ann's) fine", "well ask @ann@corp.example now and (@ann's) fine"],
+      ['read @ann@corp.example, not @ann-led', (s) => s.replace('@ann, not', 'them, or'), 'read them, or @ann-led'],
       // The words around a name tell which it is; where they do not, or the
       // name is there once too often, nothing is guessed.
       ['ask @ann@corp.example ok? then @ann said no', () => 'well ask @ann said no, fine', { names: ['@ann'] }],
@@ -435,16 +446,25 @@ const addresses = (text) => new Set(text.match(/[a-z0-9.]+@(?:corp|people)\.exam
     const many = range(520, (i) => `@x${i}@corp.example`).join(' ');
     await edits([[many, add, add(many)]], { ways: [true] });
     await edits([[many, add, add(many)]], { ways: [false] });
-    // Very many: quickly, and only what is still there is asked about.
-    const most = range(3000, (i) => `@x${i % 7}@corp.example`).join(' ');
+    // Very many, or very long: quickly. What no longer has a name is saved, and
+    // so is an ordinary long comment.
+    const long = `${'plain words '.repeat(4000)}${range(20, (i) => `@p${i}@corp.example`).join(' and ')} ${'more of it '.repeat(4000)}end`;
+    await edits([[long, add, add(long)], [long, (s) => `well, ${s.replace('and @p7', 'or @p7')}`, `well, ${long.replace('and @p7', 'or @p7')}`]], { failing: isTomb });
     const plain = 'plain words '.repeat(300).trim();
-    await edits([[most, add, add(most)], [most, () => plain, plain]], { ways: [true], failing: isTomb });
-    const n = await notes({ threads: [[most]], failing: isTomb });
-    const started = process.hrtime.bigint();
-    const back = await n.save('onet0', { text: n.shown('onet0').split(' ').reverse().join(' '), base_text: n.shown('onet0') });
-    const ms = Math.round(Number(process.hrtime.bigint() - started) / 1e6);
-    console.log(`    3000 tags turned around: ${ms} ms`);
-    assert(back.status === 409 && ms < 1500, `${back.status} ${ms} ms`);
+    for (const text of [range(3000, (i) => `@x${i % 7}@corp.example`).join(' '), range(8000, (i) => `@u${i}@h.co`).join(';'), range(8000, () => '@u@h.co').join(';')]) {
+      const n = await notes({ threads: [[text]], failing: isTomb });
+      const base_text = n.shown('onet0');
+      for (const next of [`${base_text}!`, base_text.split(/[; ]/).reverse().join(' '), base_text.split(/[; ]/).map((x) => `${x},`).join(' '), plain]) {
+        for (const body of [{ text: next, base_text }, { text: next }]) {
+          const started = process.hrtime.bigint();
+          const r = await n.save('onet0', body);
+          const ms = Math.round(Number(process.hrtime.bigint() - started) / 1e6);
+          const names = r.status === 409 ? JSON.parse(r.text).names : [];
+          assert(ms < 1500 && (next === plain ? r.status === 200 : r.status === 409 && names.length && names.every((x) => base_text.includes(x))), `${text.slice(0, 30)} ${next.slice(0, 20)}: ${r.status} ${ms} ms ${names.slice(0, 4)}`);
+        }
+        if (next === plain) assert(await n.stored('onet0') === plain, 'plain words');
+      }
+    }
 
     // Edited in another window in between: still by what this one was shown.
     const other = await notes({ threads: [[live]], failing: isTomb });

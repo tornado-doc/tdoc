@@ -15296,8 +15296,8 @@ async function redactCommentRowsByDoc(env, docs) {
 // `texts`: what the record has said, newest first. { text }, or { names }: the
 // @names that could be either; or { outdated }: it has changed since `base`.
 const EDIT_TEXTS_MAX = 20;
-// Hidden words x changed characters to find them in: past this, not told either
-// (it runs in the doc's DO).
+// The hidden tags x the characters of the words with an `@` to find them in
+// (it runs in the doc's DO): past this nothing is told.
 const EDIT_LOOK_MAX = 2000000;
 function restoreShortTags(texts, base, next) {
   if (typeof base !== 'string') return { text: next };
@@ -15309,9 +15309,15 @@ function restoreShortTags(texts, base, next) {
     for (let x = 0; x < full.length; x++) if (full[x] === shown[k]) k += 1;
     return k === shown.length && /@[^@]*@/.test(full);
   };
-  const said = texts.slice(0, EDIT_TEXTS_MAX).map(split)
+  const said = texts.map(split)
     .find((S) => S.length === B.length && S.every((w, i) => w === B[i] || cutFrom(B[i], w)));
   if (!said) return !texts.length || !/@[^\s@]*@/.test(texts[0]) ? { text: next } : { outdated: true };
+  const N = split(next);
+  if (!N.some((w) => w.includes('@'))) return { text: next };
+  const tagged = (list) => list.filter((w) => w.includes('@')).join(' ');
+  const size = said.reduce((n, w, i) => n + (w === B[i] ? 0 : w.split('@').length), 0);
+  const [was, now] = [tagged(B), tagged(N)];
+  if (size * (was.length + now.length) > EDIT_LOOK_MAX) return { names: [...new Set(tagged(B.filter((w, i) => w !== said[i])).match(/@[^\s@,;]+/g))].slice(0, 3) };
   // Per word of `base` with an address left out: each name as shown, and the host.
   const hidden = new Map();
   said.forEach((word, i) => {
@@ -15323,12 +15329,11 @@ function restoreShortTags(texts, base, next) {
     }));
   });
   if (!hidden.size) return { text: next };
-  const N = split(next);
   // Where a word has the name, and not a longer one or the whole address.
-  const placesOf = (word, name) => {
+  const placesOf = (word, name, not = /^(?:[A-Za-z0-9_]|[.+'-][A-Za-z0-9]|@[^\s@]+\.)/) => {
     const out = [];
     for (let at = word.indexOf(name); at >= 0; at = word.indexOf(name, at + 1)) {
-      if (!/^(?:[A-Za-z0-9_]|[.+'-][A-Za-z0-9]|@[^\s@]+\.)/.test(word.slice(at + name.length))) out.push(at);
+      if (!not.test(word.slice(at + name.length))) out.push(at);
     }
     return out;
   };
@@ -15341,10 +15346,9 @@ function restoreShortTags(texts, base, next) {
     + Number(i + 1 < B.length ? B[i + 1] === N[j + 1] : j + 1 === N.length);
   const byName = new Map();
   for (const { name, host } of [...hidden.values()].flat()) (byName.get(name) || byName.set(name, []).get(name)).push(host);
-  const [was, now, changed] = [B, N, [...B.slice(head, B.length - tail), ...N.slice(head, N.length - tail)]].map((x) => x.join(' '));
-  const left = [...byName.keys()].filter((name) => now.includes(name));
-  if (!left.length) return { text: next };
-  if (hidden.size * changed.length > EDIT_LOOK_MAX) return { names: left };
+  const changed = tagged([...B.slice(head, B.length - tail), ...N.slice(head, N.length - tail)]);
+  const [lower, left] = [now.toLowerCase(), []];
+  for (const name of byName.keys()) if (lower.includes(name.toLowerCase())) left.push(name);
   // A name that stands for two things is told apart only where the words
   // changed, at one place, are without it.
   const here = (text, name) => placesOf(text, name).length;
@@ -15353,42 +15357,55 @@ function restoreShortTags(texts, base, next) {
   if (names.length) return { names };
   // What both begin with and end with stays as it was said; a word between is
   // the one in `next` that has its name and its neighbours.
+  const words = new Set(B);
+  const spots = [...N.keys()].filter((j) => N[j].includes('@'));
   const put = (p, q) => {
     const out = N.slice();
     for (let i = 0; i < p; i++) out[i] = said[i];
     for (let k = 1; k <= q; k++) out[N.length - k] = said[B.length - k];
     const unclear = new Set();
     const taken = new Set();
+    const back = new Set();
     for (const [i, tags] of hidden) {
       if (i < p || i >= B.length - q) continue;
       const at = [];
-      for (let j = p; j < N.length - q; j++) if (N[j] === B[i] || tags.some((t) => placesOf(N[j], t.name).length)) at.push(j);
-      if (!at.length) continue; // the author took it out
+      for (const j of spots) if (j >= p && j < N.length - q && (N[j] === B[i] || tags.some((t) => placesOf(N[j], t.name).length))) at.push(j);
+      if (!at.length) continue;
       const score = (j) => around(i, j) + (N[j] === B[i] ? 0.5 : 0);
       at.sort((x, y) => score(y) - score(x));
       const j = at[0];
       let word = null;
       if (around(i, j) && (at.length === 1 || score(j) > score(at[1])) && !taken.has(j)) {
         taken.add(j);
-        if (N[j] === B[i]) word = said[i];
-        else {
+        if (N[j] === B[i]) {
+          word = said[i];
+          for (const t of tags) back.add(t);
+        } else {
           word = N[j];
           for (const t of tags) {
             const places = placesOf(word, t.name);
             if (places.length > 1) { word = null; break; }
-            if (places.length) word = word.slice(0, places[0] + t.name.length) + t.host + word.slice(places[0] + t.name.length);
+            if (places.length) {
+              word = word.slice(0, places[0] + t.name.length) + t.host + word.slice(places[0] + t.name.length);
+              back.add(t);
+            }
           }
         }
       }
       if (word == null) for (const t of tags) unclear.add(t.name);
       else out[j] = word;
     }
+    // A name not put back was taken out, unless a new word has it some other
+    // way ("(@gone's)", "@Gone").
+    const other = out.slice(p, N.length - q).filter((w) => w.includes('@') && !words.has(w)).join(' ').toLowerCase();
+    for (const [i, tags] of hidden) {
+      if (i >= p && i < B.length - q) for (const t of tags) if (!back.has(t) && placesOf(other, t.name.toLowerCase(), /^[a-z0-9_@]/).length) unclear.add(t.name);
+    }
     return { words: out, unclear };
   };
   const [a, b] = [put(head, Math.min(tail, m - head)), put(Math.min(head, m - tail), tail)];
-  const unclear = new Set([...a.unclear, ...b.unclear]);
-  if (!unclear.size && a.words.some((w, k) => w !== b.words[k])) for (const name of byName.keys()) unclear.add(name);
-  if (unclear.size) return { names: [...unclear] };
+  if (a.unclear.size) return { names: [...a.unclear] };
+  if (a.words.some((w, k) => w !== b.words[k])) return { names: left };
   let k = -1;
   return { text: next.trim().replace(/\S+/g, () => a.words[k += 1]) };
 }
@@ -15407,7 +15424,7 @@ function editUnclear(kept) {
   const { names = [], outdated = false } = kept;
   return { status: 409, body: outdated
     ? { error: 'edit_outdated', message: 'This comment has changed since you opened it. Copy your text, reload the page and edit again.' }
-    : { error: 'edit_hidden_address', names, message: `${names.slice(0, 3).join(', ')} stands for an address that is hidden now. To save, keep the words next to it as they were, or remove or reword it.` } };
+    : { error: 'edit_hidden_address', names, message: `${names.slice(0, 3).join(', ') || 'A name in it'} stands for an address that is hidden now. To save, keep the words next to it as they were, or remove or reword it.` } };
 }
 
 // The addresses `present` in `value` that this reader may not see, replaced.

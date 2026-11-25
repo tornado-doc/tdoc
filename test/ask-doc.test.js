@@ -267,6 +267,8 @@ const DAVE = 'dave.reader@example.org';
     const parts = ['<', '</', '>', ' >', 'document', 'COMMENTS', 'selection', 'question', 'request', 'passage', 'comments_to_fix', 'comment', 'system', 'instructions', ' ', '\n', '\u00a0', 'x', '"', '=', '_', '-', '[comment id=', '[comment  id=', '<document>', '</question >'];
     for (let i = 0; i < 60000; i++) { let s = ''; for (let j = 1 + next(10); j > 0; j--) s += parts[next(parts.length)]; same(s); }
     assert(taken > 10000, `texts with a tag: ${taken}`);
+    for (const s of ['a <documents', 'see </questionable x', '< commentset']) assert(askFence(s) === s, askFence(s));
+    for (const s of ['a <requests', 'see </systems x', '< passages', '<comments_to_fixed']) assert(suggestFence(s) === s, suggestFence(s));
     for (const long of ['<document '.repeat(8000), '</question '.repeat(8000), '<request '.repeat(8000), '<system '.repeat(8000), `<document>${'<'.repeat(80000)}`, `<${' '.repeat(80000)}`, '< '.repeat(40000), `<${'/ '.repeat(40000)}`, `[comment${' '.repeat(80000)}`]) {
       const from = process.hrtime.bigint();
       askFence(long);
