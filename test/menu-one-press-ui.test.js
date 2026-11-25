@@ -227,15 +227,16 @@ const MENU = `
       // The comment list, open (Escape can close it with a menu).
       const ready = async () => {
         if (await thread.isVisible().catch(() => false)) return;
-        const button = page.locator(surface === 'widget' ? '#tdoc-feedback-root .tdoc-feedback-dock button' : phone ? '.tdoc-fab' : '.tdoc-comments-toggle').first();
-        if (surface !== 'space') await button.click();
+        const button = page.locator(surface === 'widget' ? '#tdoc-feedback-root .tdoc-feedback-dock button' : phone ? '.tdoc-fab' : '.tdoc-comments-toggle').filter({ visible: true }).first();
+        // It opens by itself on a wide screen, and may while this is pressed.
+        if (surface !== 'space') await button.click({ timeout: 3000 }).catch(() => {});
         await thread.waitFor({ timeout: 15000 });
         await page.waitForTimeout(450);
       };
       await page.goto(`${base}${surface === 'widget' ? '/__page' : `/d/${surface === 'space' ? space.slug : surface}`}`);
       if (surface.startsWith('press-')) await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
-      if (surface === 'widget') await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button, #tdoc-feedback-root .tdoc-fb-list [data-comment-id]').first().waitFor({ timeout: 15000 });
-      if (surface === 'widget') await thread.waitFor({ timeout: 1500 }).catch(() => {}); // it opens by itself on a wide screen
+      if (surface === 'widget') await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button, #tdoc-feedback-root .tdoc-fb-list [data-comment-id]').filter({ visible: true }).first().waitFor({ timeout: 15000 });
+      if (surface === 'widget') await thread.waitFor({ timeout: 1500 }).catch(() => {});
       await ready();
       await page.waitForTimeout(700);
       return { ctx, page, ready };

@@ -46,7 +46,6 @@ on_exit() {
   if [ -n "$TDOC_TMP" ]; then rm -rf "$TDOC_TMP"; fi
 }
 trap on_exit EXIT
-TDOC_TMP="$(mktemp -d "${TMPDIR:-/tmp}/tdoc-publish.XXXXXX")"
 # BYOK: tell the user immediately when this checkout is behind origin/main.
 # Human nag on stderr; discard the machine line (skill preamble / doctor).
 bash "$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
@@ -255,6 +254,8 @@ WORKER_DIR="$SKILL_DIR/worker"
 VERCEL_APP_DIR="$CONFIG_DIR/vercel-app"
 
 mkdir -p "$CONFIG_DIR"
+# A TMPDIR that is missing or cannot be written must not stop a publish.
+TDOC_TMP="$(mktemp -d "${TMPDIR:-/tmp}/tdoc-publish.XXXXXX" 2>/dev/null || mktemp -d /tmp/tdoc-publish.XXXXXX)"
 
 # Cloudflare API call with timeouts + HTTP-status validation. Without this, a
 # transient 5xx or an HTML error page (e.g. an expired-OAuth 403 returned as a

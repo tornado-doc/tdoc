@@ -158,7 +158,7 @@ if [ -n "$FROM_SHEET" ]; then
     TITLE="$(basename "$FROM_SHEET")"
     TITLE="${TITLE%.*}"
   fi
-  SHEET_HTML="$(mktemp "${TMPDIR:-/tmp}/tdoc-sheet.XXXXXX")"
+  SHEET_HTML="$(mktemp "${TMPDIR:-/tmp}/tdoc-sheet.XXXXXX" 2>/dev/null || mktemp /tmp/tdoc-sheet.XXXXXX)"
   SHEET_ARGS=(--kind "$FROM_KIND" --title "$TITLE")
   if [ "$QUIET" = "1" ]; then SHEET_ARGS+=(--quiet); fi
   if ! node "$(cd "$(dirname "$0")" && pwd)/lib/sheet-from-file.mjs" "${SHEET_ARGS[@]}" "$FROM_SHEET" > "$SHEET_HTML"; then

@@ -120,6 +120,41 @@ const run = (cmd, args, { env = {}, when = null, act = () => {} } = {}) => new P
       assert.ok(!fs.readdirSync(path.join(home, '.tdoc')).some((f) => /tmp|bak/.test(f)), fs.readdirSync(path.join(home, '.tdoc')).join());
     });
   }
+  // A TMPDIR that is missing, a file, or cannot be written: /tmp, removed too.
+  const bad = fresh('bad-');
+  fs.writeFileSync(path.join(bad, 'file'), '');
+  fs.mkdirSync(path.join(bad, 'locked'));
+  fs.chmodSync(path.join(bad, 'locked'), 0o500);
+  const left = (prefix) => fs.readdirSync('/tmp').filter((f) => f.startsWith(prefix));
+  const gone = async (prefix, made) => {
+    for (let i = 0; i < 40 && left(prefix).some((f) => made.includes(f)); i++) await new Promise((x) => setTimeout(x, 50));
+    assert.deepEqual(left(prefix).filter((f) => made.includes(f)), []);
+  };
+  for (const name of ['missing', 'file', 'locked']) {
+    const env = envFor(path.join(bad, name));
+    await t(`tdoc-publish and tdoc-new work, and leave nothing, with a TMPDIR that does not: ${name}`, async () => {
+      mode = 'ok';
+      const before = left('tdoc-publish.');
+      let made = [], uploads = 0;
+      asked = () => { uploads += 1; made = left('tdoc-publish.').filter((f) => !before.includes(f)); };
+      const r = await run('bash', ['bin/tdoc-publish', '--visibility', 'unlisted', 'plan'], { env });
+      assert.equal(r.code, 0, r.out);
+      assert.ok(uploads === 1 && !/mktemp/.test(r.out), r.out);
+      assert.ok(made.length || name === 'locked', 'nothing in /tmp'); // root may write to it
+      await gone('tdoc-publish.', made);
+      const sheets = left('tdoc-sheet.');
+      fs.writeFileSync(path.join(home, 'ok.csv'), 'a,b\n1,2\n');
+      const n = await run('bash', ['bin/tdoc-new', '--quiet', '--no-server', '--slug', `sheet-${name}`, '--from-csv', path.join(home, 'ok.csv')], { env });
+      assert.equal(n.code, 0, n.out);
+      await gone('tdoc-sheet.', left('tdoc-sheet.').filter((f) => !sheets.includes(f)));
+    });
+    await t(`tdoc-publish says what is wrong with its arguments: ${name}`, async () => {
+      for (const [args, says] of [[[], /^usage: tdoc-publish/], [['Not A Slug!'], /^\[tdoc\] invalid slug/], [['a', 'b'], /^usage: tdoc-publish/]]) {
+        const r = await run('bash', ['bin/tdoc-publish', ...args], { env });
+        assert.ok(r.code === 1 && says.test(r.out) && !/mktemp/.test(r.out), `${r.code} ${r.out}`);
+      }
+    });
+  }
   server.close();
 
   for (const [what, args] of [['a sheet', ['--slug', 'sheet-ok', '--from-csv', 'ok.csv']], ['a file that is not one', ['--slug', 'sheet-missing', '--from-csv', 'missing.csv']], ['a slug that is refused', ['--slug', 'Not A Slug!', '--from-csv', 'ok.csv']]]) {
