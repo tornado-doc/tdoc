@@ -69,6 +69,7 @@ import { CopyForAgentContext, useCopyForAgent } from './comments/panel/copy-for-
 import { CommentIcon } from './ui/comment-icon.jsx';
 import { AppButton } from './ui/button.jsx';
 import { isFeatureOn } from './feature-flags.js';
+import { InviteConfirmContext, useInviteConfirm } from './comments/panel/invite-confirm.jsx';
 import { readDevMode } from './dev-mode.js';
 import { VersionHistory } from './document/version-history.jsx';
 import { CommentDocVersionContext, CommentEditedPassageContext, CommentSeeChangesContext } from './document/comment-card.jsx';
@@ -496,6 +497,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
   // A page that published itself in place (modeless autosave, a sheet's
   // column width) comments on the version it is now.
   const commentVersionNow = useCallback(() => Math.max(Number(config.version) || 0, ownVersionRef.current), [config.version]);
+  // Ask before a mention adds someone to this doc (invite-confirm.jsx).
+  const invite = useInviteConfirm(isFeatureOn('confirmMentionInvite'));
   const comments = useComments({
     slug: config.slug,
     version: config.version,
@@ -1324,7 +1327,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       // window's word). Post the held words as that person, then show the
       // page as them, with the new comment open.
       try {
-        const value = await comments.addComment(held, text);
+        const value = await invite.post((confirmInvites) => comments.addComment(held, text, { confirmInvites }));
         if (!value?.id) return;
         try { sessionStorage.removeItem(commentSignInDraftKey(config)); } catch {}
         markCommented();
@@ -1358,8 +1361,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     const target = opts.target || null;
     // Ask only + Only me: nothing is posted; the answer is the asker's alone.
     if (target && opts.askOnly && opts.onlyMe) { await askPrivately(text, selection, target); return; }
-    const { ok, value } = await attempt(() => comments.addComment(composer, text));
-    if (!ok) return;
+    const { ok, value } = await attempt(() => invite.post((confirmInvites) => comments.addComment(composer, text, { confirmInvites })));
+    if (!ok || value === null) return;
     markCommented();
     closeComposer();
     reportMentions(value);
@@ -1526,8 +1529,8 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       await askPrivately(text, anchorText ? { text: anchorText } : null, opts.target, parentId);
       return false;
     }
-    const { ok, value } = await attempt(() => comments.addReply(parentId, text));
-    if (!ok) return false;
+    const { ok, value } = await attempt(() => invite.post((confirmInvites) => comments.addReply(parentId, text, { confirmInvites })));
+    if (!ok || value === null) return false;
     markCommented();
     reportMentions(value);
     // The reply is posted, so its box is done: the sends below report on their
@@ -2706,6 +2709,7 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
     />
   ) : null;
   return (
+    <InviteConfirmContext.Provider value={invite}>
     <CopyForAgentContext.Provider value={copyForAgent}>
     <div
       className="tdoc-document-app"
@@ -3260,5 +3264,6 @@ export function DocumentShell({ boot: servedBoot, config: servedConfig }) {
       </HandoffSendTransport.Provider>
     </div>
     </CopyForAgentContext.Provider>
+    </InviteConfirmContext.Provider>
   );
 }

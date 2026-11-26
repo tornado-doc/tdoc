@@ -67,11 +67,11 @@ t('both hosts check before they write', () => {
   assert(server.includes("const dup = duplicateComment(comments, { author: e2eIdentity(), text, anchor, parent_id, at: created });") && server.includes('duplicate_of: dup.id'), 'server');
 });
 t('the composer submits once at a time, and says so', () => {
-  assert(composer.includes('if (busy || !text.trim()) return;') && composer.includes("{busy ? (signInToPost ? 'Signing in…' : 'Posting…') : POST_LABEL}") && composer.includes("export const POST_LABEL = 'Post';") && composer.includes('<SendToAgentToggle') && composer.includes('disabled={busy}'), 'no busy guard');
+  assert(composer.includes('if (busy || !text.trim()) return;') && composer.includes("{busy && !asking ? (signInToPost ? 'Signing in…' : 'Posting…') : POST_LABEL}") && composer.includes("export const POST_LABEL = 'Post';") && composer.includes('<SendToAgentToggle') && composer.includes('disabled={busy}'), 'no busy guard');
 });
 t('the reply form submits once at a time too', () => {
   const card = read('shell/src/document/comment-card.jsx');
-  assert(card.includes('if (busy || !text.trim()) return;') && card.includes("{busy ? 'Posting…' : 'Reply'}"), 'no busy guard on replies');
+  assert(card.includes('if (busy || !text.trim()) return;') && card.includes("{busy && !asking ? 'Posting…' : 'Reply'}"), 'no busy guard on replies');
 });
 t("an IME's Enter is not a submit", () => {
   assert(field.includes('if (event.isComposing || event.keyCode === 229) return;'), 'no composition guard');

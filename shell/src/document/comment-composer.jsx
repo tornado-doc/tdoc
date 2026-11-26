@@ -6,6 +6,7 @@ import { AgentAskRow, AskOnlyToggle, PrivateAnswer, SendToAgentToggle, agentAskH
 import { setupLinkProps } from './agent-choices.js';
 import { TOP_BAR_HEIGHT, copyText } from './model.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
+import { InviteConfirmRow, useInviteAsking } from '../comments/panel/invite-confirm.jsx';
 
 // The shell's chrome does not scroll — the frame does — so the composer's
 // coordinates are viewport coordinates.
@@ -195,6 +196,7 @@ export function CommentComposer({
   const field = useRef(null);
   const ask = useAgentAsk(text, setText, field);
   const { agents, target } = ask;
+  const asking = useInviteAsking(busy);
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     if (sendToAgent && !agentButtons && !target && !agents.preselected) { ask.putDefault(); return; }
@@ -284,6 +286,7 @@ export function CommentComposer({
           </details>
         </div>
       ) : null}
+      <InviteConfirmRow busy={busy} />
       <div className="foot">
         {signInToPost && !demo ? (
           <span className="hint tdoc-sign-in-to-post" role="status">{busy ? SIGNING_IN_HINT : SIGN_IN_TO_POST_HINT}</span>
@@ -310,7 +313,7 @@ export function CommentComposer({
             <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={onReopenSignIn}>{REOPEN_SIGN_IN_LABEL}</button>
           ) : (
             <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
-              {busy ? (signInToPost ? 'Signing in…' : 'Posting…') : POST_LABEL}
+              {busy && !asking ? (signInToPost ? 'Signing in…' : 'Posting…') : POST_LABEL}
             </button>
           )}
         </div>

@@ -25,6 +25,7 @@ if (main) {
 }
 
 const OFFLINE = [
+  'mention-invite-confirm.test.js', // confirmMentionInvite: confirm_invites 'ask' answers would_invite and writes nothing; a list adds exactly those; without it a mention invites as before; replies, addresses, the "@john, @gmail。com" typo
   'browser-suites-listed.test.js', // every browser suite (test/*-ui.test.js) is run by --browser or --all, or says why not
   'temp-dirs.test.js', // what tests make under the temp folder goes with them: done, failed, thrown, Ctrl-C, kill; every test that makes one uses the helper; tdoc-publish and tdoc-new leave nothing
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
@@ -367,6 +368,7 @@ const BROWSER = [
   'auto-read-comments-ui.test.js', // autoReadComments: a reply seen for a second is read (phone drawer), Mark all as read in the list and the bar's filter menu, a desktop cluster or pin reads what it opens
   'document-comments-ui.test.js', // whole-document comments: one title pin with a count, its popover with every card and internal scrolling, no re-anchor; phone: listed first, filters, drawer snaps to full height
   'team-guests-ui.test.js', // team settings: the guests tab, roster and invite at 1280 and 390, the agent settings deep link, members do not see the guest roster
+  'mention-invite-confirm-ui.test.js', // confirmMentionInvite: the owner's composer and reply box ask "Add @x to this doc?" (Add & post / Post without adding) at 1440 and 390; flag off invites at once
   'feedback-install-ui.test.js', // /feedback: Bookmark / SDK chooser jumps to its section, SDK as a peer section (site picture, 3 steps), Copy prompt + Copy line, signed-in owner sees their real space id; desktop + phone
 ];
 

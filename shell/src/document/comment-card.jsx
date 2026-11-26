@@ -20,6 +20,7 @@ import { canSeeHandoff } from '../comments/core/handoff-state.js';
 import { productPageUrl } from './product-url.js';
 import { observeVisibleRead } from '../comments/core/visible-read.js';
 import { clearReplyDraft, readReplyDraft, writeReplyDraft } from './reply-draft.js';
+import { InviteConfirmRow, useInviteAsking } from '../comments/panel/invite-confirm.jsx';
 
 export function authorLine(author) {
   if (!author) return 'anonymous';
@@ -200,6 +201,7 @@ function ReplyForm({
   // button share the lock, so a second press while the first reply is still
   // in flight does not post a twin.
   const [busy, setBusy] = useState(false);
+  const asking = useInviteAsking(busy);
   const agentButtons = useContext(AgentButtonsContext);
   // The same @agent as the new-comment composer (agent-ask.jsx): the button
   // that puts the default agent's pill in, the pill's dropdown, Only me. The
@@ -301,6 +303,7 @@ function ReplyForm({
         onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
       />
       {v4 ? <AgentAskRow ask={ask} hint={agentAskHint(ask)} /> : null}
+      <InviteConfirmRow busy={busy} />
       <div className="tdoc-reply-form-foot">
         <span className="hint tdoc-keyboard-shortcut-hint">
           {canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
@@ -309,7 +312,7 @@ function ReplyForm({
           {v4 || agentButtons ? <SendToAgentToggle ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent tdoc-send-agent-toggle ui-btn ui-btn-secondary ui-btn-m" /> : null}
           {v4 ? <AskOnlyToggle ask={ask} busy={busy} /> : null}
           <button className="tdoc-reply-submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
-            {busy ? 'Posting…' : 'Reply'}
+            {busy && !asking ? 'Posting…' : 'Reply'}
           </button>
         </div>
       </div>
