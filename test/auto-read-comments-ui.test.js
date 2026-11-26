@@ -31,11 +31,19 @@ let server;
 (async () => {
   fs.writeFileSync(commentsFile, JSON.stringify([...JSON.parse(original), ...seeded]));
   try {
-    server = await resolveTarget({ e2eUser: 'tester' });
-    const url = `${server.url.replace(/\/d\/.*/, '')}/d/hostile-body-css/v/1?shell=1`;
+    // Read state lives on the server, per person (/api/comments/seen; the
+    // local server keeps it in memory): each part starts a server of its
+    // own, so what one part read is unread again in the next.
+    let url;
+    const fresh = async () => {
+      if (server) await server.stop();
+      server = await resolveTarget({ e2eUser: 'tester' });
+      url = `${server.url.replace(/\/d\/.*/, '')}/d/hostile-body-css/v/1?shell=1`;
+    };
     for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
       const browser = await engine.launch({ headless: true });
       try {
+        await fresh();
         const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
         await page.addInitScript(() => { window.__TDOC_FLAGS__ = { autoReadComments: true }; });
         await page.goto(url, { waitUntil: 'networkidle' });
@@ -68,6 +76,7 @@ let server;
         console.log(`  ✓ ${name}: visible replies auto-read; list action clears FAB dot`);
         await page.close();
 
+        await fresh();
         const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 } });
         // The side list closed: it reads what it shows, and the bar menu is under test.
         await desktop.addInitScript(() => { window.__TDOC_FLAGS__ = { autoReadComments: true }; localStorage.setItem('tdoc-comment-panel', '0'); });

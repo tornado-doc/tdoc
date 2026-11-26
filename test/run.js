@@ -18,10 +18,14 @@ const path = require('path');
 // A kill of the runner stops the suite it is running; then the temp folders go
 // (a suite that could not remove its own, too).
 let running = null;
-for (const signal of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.once(signal, () => { if (running) running.kill(signal); });
-require('./helpers/temp-dirs');
+const main = require.main === module;
+if (main) {
+  for (const signal of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.once(signal, () => { if (running) running.kill(signal); });
+  require('./helpers/temp-dirs');
+}
 
 const OFFLINE = [
+  'browser-suites-listed.test.js', // every browser suite (test/*-ui.test.js) is run by --browser or --all, or says why not
   'temp-dirs.test.js', // what tests make under the temp folder goes with them: done, failed, thrown, Ctrl-C, kill; every test that makes one uses the helper; tdoc-publish and tdoc-new leave nothing
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
   'feedback-frame-anchor.test.js', // a comment inside a tdoc doc (anchor.frame): get_comments shows it on one line, no brackets, short, as author content, only for tdoc's own pages
@@ -360,6 +364,9 @@ const BROWSER = [
   'feedback-invites-ui.test.js', // share from the widget: copy link + invite by name; landing page; Join / Keep my own; switcher; SDK Join; Reconnect without a popup; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
   'feedback-try-demo-ui.test.js', // /feedback Try it on this page: the real widget, no account; pick, post in the tab, pin + thread, C copies Markdown, Add to your site; zero comment API calls, no popup; #try starts it; desktop + phone
+  'auto-read-comments-ui.test.js', // autoReadComments: a reply seen for a second is read (phone drawer), Mark all as read in the list and the bar's filter menu, a desktop cluster or pin reads what it opens
+  'document-comments-ui.test.js', // whole-document comments: one title pin with a count, its popover with every card and internal scrolling, no re-anchor; phone: listed first, filters, drawer snaps to full height
+  'team-guests-ui.test.js', // team settings: the guests tab, roster and invite at 1280 and 390, the agent settings deep link, members do not see the guest roster
   'feedback-install-ui.test.js', // /feedback: Bookmark / SDK chooser jumps to its section, SDK as a peer section (site picture, 3 steps), Copy prompt + Copy line, signed-in owner sees their real space id; desktop + phone
 ];
 
@@ -379,6 +386,10 @@ const EXTENDED_BROWSER = [
 
 const INTEGRATION = ['onboarding.test.js', 'publish.test.js'];
 
+// A browser suite (test/*-ui.test.js) is in BROWSER or EXTENDED_BROWSER, or
+// here with the reason it is not run (browser-suites-listed.test.js).
+const UNLISTED_UI = {};
+
 // --perf: the pure performance budgets (test/helpers/perf-budget.js budget())
 // enforced, for the CI `perf` job, which does not block a merge. Elsewhere
 // TDOC_PERF=report turns an overrun into a warning; complexity guards
@@ -392,6 +403,8 @@ const RUNTIME = [
   'doc-download-deps.test.js', // needs npm ci; download output read back with marked and SheetJS (CI: shell runtime job)
   'markdown-source.test.js', // needs npm ci (marked); Edit as Markdown (flag markdownEditMode): plain docs round-trip, untouched blocks byte for byte, unshowable blocks kept behind placeholders, nothing typed becomes markup outside the allow-list (CI: shell runtime job)
 ];
+module.exports = { OFFLINE, BROWSER, EXTENDED_BROWSER, INTEGRATION, PERF, RUNTIME, UNLISTED_UI };
+if (main) {
 const runAll = process.argv.includes('--all');
 const runPerf = process.argv.includes('--perf');
 const runBrowser = process.argv.includes('--browser') || runPerf;
@@ -435,3 +448,4 @@ const run = (file, env) => new Promise((done) => {
   console.log(`PASS — all ${files.length} suite(s) green`);
   if (!runAll && !runBrowser) console.log('(browser suites: npm run test:browser; provider integration: npm run test:all)');
 })();
+}
