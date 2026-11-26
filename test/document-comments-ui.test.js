@@ -35,6 +35,9 @@ async function check(name, run) {
         for (const width of [1400, 390]) {
           const page = await browser.newPage({ viewport: { width, height: 850 } });
           try {
+            // Twelve comments open the side list by themselves on a wide
+            // screen; the cluster's own popover is for the list closed.
+            await page.addInitScript(() => localStorage.setItem('tdoc-comment-panel', '0'));
             await page.goto(url, { waitUntil: 'networkidle' });
             const frame = page.frames().find((item) => item !== page.mainFrame() && item.url().includes('hostile-body-css'));
             await check(`${engineName} ${width}: document comments have one title pin and no spacer`, async () => {
@@ -50,7 +53,8 @@ async function check(name, run) {
               const frameBox = await page.locator('iframe').boundingBox();
               if (Math.abs(pinBox.y - frameBox.y - layout.titleY) > 45) throw new Error('pin is not beside the title');
               if (pinBox.x + pinBox.width > width + 1) throw new Error('pin extends beyond viewport');
-              if ((await pin.textContent()).trim() !== '12') throw new Error('grouped title comments need a count badge');
+              // Pins show what the filter shows: Open, so not the applied one.
+              if ((await pin.textContent()).trim() !== '11') throw new Error(`grouped title comments need a count badge: ${await pin.textContent()}`);
               if (pinBox.width !== 28 || pinBox.height !== 28) throw new Error(`grouped title pin differs from other comment clusters: ${JSON.stringify(pinBox)}`);
               if (await pin.locator('img').count()) throw new Error('grouped title pin still shrinks author avatars');
             });
@@ -59,7 +63,7 @@ async function check(name, run) {
                 await page.locator('.tdoc-pin-document').click();
                 const cards = page.locator('.tdoc-cluster-cards .tdoc-margin-comment[data-comment-id]');
                 await cards.first().waitFor();
-                if (await cards.count() !== 12) throw new Error(`expected 12 cards, got ${await cards.count()}; popovers=${await page.locator('.tdoc-cluster-cards').count()}; ids=${(await cards.evaluateAll((nodes) => nodes.map((node) => node.dataset.commentId))).join(',')}`);
+                if (await cards.count() !== 11) throw new Error(`expected 11 cards, got ${await cards.count()}; popovers=${await page.locator('.tdoc-cluster-cards').count()}; ids=${(await cards.evaluateAll((nodes) => nodes.map((node) => node.dataset.commentId))).join(',')}`);
                 const size = await page.locator('.tdoc-cluster-cards').evaluate((el) => ({
                   top: el.getBoundingClientRect().top, bottom: el.getBoundingClientRect().bottom,
                   scroll: el.scrollHeight, visible: el.clientHeight,
@@ -107,8 +111,13 @@ async function check(name, run) {
                   await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - 17 * step }] });
                 }
                 await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-                await page.waitForTimeout(300);
-                const after = await drawer.boundingBox();
+                // The drawer snaps with an animation: read where it settles.
+                let after = await drawer.boundingBox();
+                for (let k = 0, was = null; k < 100 && (!was || was.y !== after.y); k++) {
+                  was = after;
+                  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+                  after = await drawer.boundingBox();
+                }
                 if (after.y >= before.y - 100 || after.y > 30) throw new Error(`drawer did not expand: ${before.y} → ${after.y}`);
                 const filter = drawer.locator('.tdoc-comment-filter-row');
                 if (!(await filter.isVisible())) throw new Error('filter disappeared in full drawer');
