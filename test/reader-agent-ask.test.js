@@ -217,21 +217,28 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     await register(env, other.token, 'otherbox');
     const mine = (await send(env, reader, { question: 'A private q' })).body.ask;
     await call(env, '/api/agent/ask-reply', { method: 'POST', token: reader.token, body: { slug: 'plan', ask_id: mine.ask_id, text: 'A answer' } });
-    const codes = [];
-    for (let i = 0; i < 12; i++) codes.push((await send(env, other, { question: `spam ${i}` })).status);
-    assert(codes.filter((c) => c === 200).length === 5 && codes.slice(5).every((c) => c === 429), `open-question cap: ${codes}`);
-    // Answer them as they come, so only the hourly budget is left to stop it.
-    const answerAll = async () => {
-      for (const a of (await state(env, other)).body.asks) if (!a.answer) await call(env, '/api/agent/ask-reply', { method: 'POST', token: other.token, body: { slug: 'plan', ask_id: a.ask_id, text: 'ok' } });
-    };
-    let sent = 5;
-    let limited = null;
-    for (let i = 0; i < 30 && !limited; i++) {
-      await answerAll();
-      const r = await send(env, other, { question: `more ${i}` });
-      if (r.status === 200) sent++; else limited = r;
-    }
-    assert(limited && limited.status === 429 && limited.body.error === 'rate_limited' && sent === 20, `hourly budget: sent ${sent}, ${limited && limited.status}`);
+    // The budget is per clock hour: a test that crosses one would get a second
+    // budget. The clock stands still while it sends.
+    const now = Date.now;
+    const at = now();
+    Date.now = () => at;
+    try {
+      const codes = [];
+      for (let i = 0; i < 12; i++) codes.push((await send(env, other, { question: `spam ${i}` })).status);
+      assert(codes.filter((c) => c === 200).length === 5 && codes.slice(5).every((c) => c === 429), `open-question cap: ${codes}`);
+      // Answer them as they come, so only the hourly budget is left to stop it.
+      const answerAll = async () => {
+        for (const a of (await state(env, other)).body.asks) if (!a.answer) await call(env, '/api/agent/ask-reply', { method: 'POST', token: other.token, body: { slug: 'plan', ask_id: a.ask_id, text: 'ok' } });
+      };
+      let sent = 5;
+      let limited = null;
+      for (let i = 0; i < 30 && !limited; i++) {
+        await answerAll();
+        const r = await send(env, other, { question: `more ${i}` });
+        if (r.status === 200) sent++; else limited = r;
+      }
+      assert(limited && limited.status === 429 && limited.body.error === 'rate_limited' && sent === 20, `hourly budget: sent ${sent}, ${limited && limited.status}`);
+    } finally { Date.now = now; }
     const after = (await state(env, reader)).body.asks;
     assert(after.length === 1 && after[0].answer.text === 'A answer', `the reader's question was evicted: ${JSON.stringify(after)}`);
     const again = await call(env, '/api/agent/ask-reply', { method: 'POST', token: reader.token, body: { slug: 'plan', ask_id: mine.ask_id, text: 'again' } });

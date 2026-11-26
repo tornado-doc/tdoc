@@ -49,12 +49,13 @@ process.exitCode = 1; // unless it gets to its end
       const own = env.COMMENTS.get.bind(env.COMMENTS);
       env.COMMENTS.get = (id) => { const stub = own(id); return { ...stub, fetch: (...a) => { cost.stores += 1; if (String(a[0]).endsWith('/search')) cost.searches += 1; return stub.fetch(...a); } }; };
     }
-    const call = async (path, { as = 'julie', ...o } = {}) => {
+    const call = async (path, { as = 'julie', wait = true, ...o } = {}) => {
       cost.requests += 1;
       const r = await mod.default.fetch(req(path, { cookie: who[as], ...o }), env, ctx);
       let body = null;
       try { body = await r.json(); } catch {}
-      await Promise.all(waits.splice(0));
+      const later1 = Promise.all(waits.splice(0));
+      if (wait) await later1;
       return { status: r.status, body };
     };
     const doc = async (slug, meta = {}, threads = null) => {
@@ -244,6 +245,12 @@ process.exitCode = 1; // unless it gets to its end
     const page2 = ids(await more('julie', next));
     assert(page1 !== page2, 'a second page');
     assert(!(await more('bob', next)).body.items.length, 'Bob with hers');
+    // And where Bob has docs of his own: his first page, not his place in hers.
+    const his = range(30, (i) => `bob${String(i).padStart(2, '0')}`);
+    for (const [i, slug] of his.entries()) await w.doc(slug, { hosted: { account_id: 'acct-bob', github_login: 'bob' } }, [w.thread(`b${i}`, at(90000 - i))]);
+    await w.built('p:acct-bob', his, { a: 'acct-bob', o: 'bob' });
+    await w.warm('/api/me/comments?', 'bob');
+    assert(ids(await more('bob', next)) === ids(await more('bob', '')) && ids(await more('bob', '')).startsWith('b0,b1,'), ids(await more('bob', next)));
     // Not one of this feed's, changed, or old: the feed starts again.
     const team = (await w.call('/api/teams', { method: 'POST', body: { name: 'T' } })).body.team;
     const slugs = range(20, (i) => `t${i}`);
@@ -308,9 +315,9 @@ process.exitCode = 1; // unless it gets to its end
     const got = await later(60000, () => w.open());
     assert(got.rows.length === 99 && JSON.stringify(got.rows.map((x) => x.created)) === JSON.stringify(got.rows.map((x) => x.created).sort().reverse()), `${got.rows.length}`);
     up();
-    await w.first();
-    const now = await later(60000, () => w.open());
-    assert(now.rows.length === 100 && !now.pages.some((x) => x.missed) && now.pages[0].through, `${now.rows.length}`);
+    await later(130000, () => w.first());
+    const now = await later(140000, () => w.open());
+    assert(now.rows.length === 100 && !now.pages.some((x) => x.missed) && now.pages[0].through, `${now.rows.length} ${now.pages.map((x) => `${x.missed} ${x.through}`)}`);
     // What is known of one stays when it cannot be read later; many of them.
     const again = w.down('"slug":"d0050"');
     await later(26 * 60 * 60 * 1000, async () => { for (let n = 0; n < 7; n++) await w.first(); });
@@ -330,6 +337,27 @@ process.exitCode = 1; // unless it gets to its end
     const theirs = await t2.first(`/api/team/comments?id=${team.id}&`, 'mia');
     assert(theirs.through && !theirs.missed && theirs.items.length === 1, JSON.stringify(theirs));
     assert((await t2.first(`/api/team/comments?id=${team.id}&`)).missed, 'its owner');
+  });
+
+  await t('a doc whose read hangs: the first answer does not wait long for it, the next not at all; it is read once a minute, after the answer', async () => {
+    const w = await world(30, one);
+    let reads = 0;
+    w.down('"slug":"d0029"', () => { reads += 1; return new Promise(() => {}); });
+    const took = async () => { const from = Date.now(); const page = (await w.call('/api/me/comments?paged=1', { wait: false })).body; return { ms: Date.now() - from, page }; };
+    const first = await took();
+    assert(first.ms < 7000 && first.page.through && first.page.missed && first.page.items[0].id === 'c28', `${first.ms} ms`);
+    reads = 0;
+    for (let n = 0; n < 5; n++) { const next = await took(); assert(next.ms < 1000 && next.page.through, `${next.ms} ms`); }
+    assert(reads === 0, `${reads} reads within the minute`);
+    const due = await later(61000, took);
+    assert(due.ms < 1000 && reads === 1, `${due.ms} ms, ${reads} reads`);
+    // One that hangs when its page is read.
+    const x = await world(30, one);
+    await x.warm();
+    x.down('"slug":"d0029"', () => new Promise(() => {}));
+    const from = Date.now();
+    const page = await x.first();
+    assert(Date.now() - from < 7000 && page.missed && page.items[0].id === 'c28', `${Date.now() - from} ms`);
   });
 
   await t('while in no order: reading on finds the order for the next opening, and a doc made or published meanwhile is there', async () => {
@@ -587,7 +615,8 @@ process.exitCode = 1; // unless it gets to its end
       const without = await y.open();
       y.env.META.get = get;
       assert(without.rows.length === 29 && (!known || without.pages.some((p) => p.missed)), `${known}: ${without.rows.length}`);
-      assert((await y.first()).items[0].id === 'c29', `${known}: not right after`);
+      if (!known) { await y.first(); await later(61000, () => y.first()); }
+      assert((await y.first()).items[0].id === 'c29', `${known}: not after`);
     }
   });
 

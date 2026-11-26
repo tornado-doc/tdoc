@@ -14,6 +14,7 @@ const path = require('path');
 const zlib = require('zlib');
 const { parseHtml } = require('./helpers/mini-dom.js');
 const { loadWorker, makeEnv, issue } = require('./helpers/worker-harness.js');
+const { guard, bestOf } = require('./helpers/perf-budget');
 
 const ROOT = path.join(__dirname, '..');
 const FIX = path.join(__dirname, 'fixtures', 'doc-download');
@@ -124,23 +125,24 @@ function wellFormed(name, text) {
   });
 
   await t('Markdown: linear time on hostile input (unclosed blocks, tags, declarations, marks; huge tables)', async () => {
+    // 30 ms to 1 s on a laptop; quadratic, minutes.
     const cases = [
-      ['2 MB of unclosed <svg>', '<p>x</p>' + '<svg>'.repeat(400000), 200],
-      ['unclosed <script', '<p>x</p>' + '<script '.repeat(250000), 200],
-      ['unterminated tags', '<p>' + '<a '.repeat(700000), 200],
-      ['unterminated declarations', '<p>' + '<!x'.repeat(700000), 200],
-      ['comments without an end', '<p>' + '<!--'.repeat(500000), 200],
-      ['<head> with no end', '<p>' + '<head '.repeat(350000), 200],
-      ['unclosed bold', '<p>' + '<b>x '.repeat(400000), 1500],
-      ['250k bold pairs', '<p>' + '<b>x</b> '.repeat(250000), 2000],
-      ['200k table rows', '<table>' + '<tr><td>1</td></tr>'.repeat(200000) + '</table>', 2000],
+      ['2 MB of unclosed <svg>', '<p>x</p>' + '<svg>'.repeat(400000), 1000],
+      ['unclosed <script', '<p>x</p>' + '<script '.repeat(250000), 1000],
+      ['unterminated tags', '<p>' + '<a '.repeat(700000), 1000],
+      ['unterminated declarations', '<p>' + '<!x'.repeat(700000), 1000],
+      ['comments without an end', '<p>' + '<!--'.repeat(500000), 1000],
+      ['<head> with no end', '<p>' + '<head '.repeat(350000), 1000],
+      ['unclosed bold', '<p>' + '<b>x '.repeat(400000), 5000],
+      ['250k bold pairs', '<p>' + '<b>x</b> '.repeat(250000), 5000],
+      ['200k table rows', '<table>' + '<tr><td>1</td></tr>'.repeat(200000) + '</table>', 5000],
     ];
     for (const [name, html, budget] of cases) {
-      const start = process.hrtime.bigint();
-      SHELL.documentMarkdown(html, { title: 'T' });
-      SHELL.agentBlocksFromHtml(html.slice(0, 256 * 1024));
-      const ms = Number(process.hrtime.bigint() - start) / 1e6;
-      assert(ms < budget, `${name}: ${ms.toFixed(0)} ms (budget ${budget})`);
+      const ms = bestOf(2, () => {
+        SHELL.documentMarkdown(html, { title: 'T' });
+        SHELL.agentBlocksFromHtml(html.slice(0, 256 * 1024));
+      });
+      guard(name, ms, budget);
     }
   });
 

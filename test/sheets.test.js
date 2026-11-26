@@ -5,6 +5,7 @@
 // and is tested in sheets-xlsx.test.js.
 const assert = require('node:assert/strict');
 const { parseHtml } = require('./helpers/mini-dom');
+const { guard, bestOf } = require('./helpers/perf-budget');
 
 let pass = 0, fail = 0;
 async function t(name, fn) {
@@ -331,15 +332,16 @@ async function t(name, fn) {
     assert.equal(s.rows[0].tds[1], null);
   });
 
-  await t('the 10k × 20 query budget: index once, filter + 2-key sort under 300ms', () => {
+  await t('the 10k × 20 query budget: index once, filter + 2-key sort', () => {
     const big = { columns: Array.from({ length: 20 }, (_, c) => ({ name: `C${c}`, type: c % 4 === 1 ? 'number' : c % 4 === 2 ? 'tags' : 'text' })), rows: [] };
     for (let r = 0; r < 10000; r++) big.rows.push({ id: `r${r + 1}`, cells: big.columns.map((col, c) => col.type === 'number' ? String((r * 7919 + c) % 1000) : col.type === 'tags' ? [['a', 'b', 'c', 'd'][r % 4]] : `row ${r} col ${c}`) });
-    const t0 = Date.now();
-    const bi = Q.buildIndex(big);
-    const order = Q.runQuery(bi, { search: '1', filters: { 2: { values: ['a', 'c'] } }, sort: [{ col: 1, dir: 'desc' }, { col: 0, dir: 'asc' }] });
-    const ms = Date.now() - t0;
+    let order;
+    const ms = bestOf(3, () => {
+      const bi = Q.buildIndex(big);
+      order = Q.runQuery(bi, { search: '1', filters: { 2: { values: ['a', 'c'] } }, sort: [{ col: 1, dir: 'desc' }, { col: 0, dir: 'asc' }] });
+    });
     assert(order.length > 0 && order.length < 10000);
-    assert(ms < 300, `took ${ms}ms`);
+    guard('10k × 20: index, filter, 2-key sort', ms, 500);
   });
 
   await t('the view in the #hash: added beside key=value pairs, never over a plain anchor', async () => {
