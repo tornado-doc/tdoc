@@ -176,7 +176,13 @@ export const FLAGS = Object.freeze({
   // feed, read like /api/team/comments). Off: Comments lists the sites, as
   // before.
   commentsSitesTabs: Object.freeze({ label: 'Comments and Sites tabs', owner: 'julie', added: '2026-11-24', default: false, preview: true, graduate_by: '2026-12-01' }),
-  reactSourceCapture: Object.freeze({ label: 'Feedback: React component and source on comments', owner: 'julie', added: '2026-11-20', default: false, preview: true, graduate_by: '2026-11-27' }),
+  reactSourceCapture: Object.freeze({ label: 'Feedback: React component and source on comments', owner: 'julie', added: '2026-11-20', default: false, preview: true, graduate_by: '2026-11-27' }),  // Ask before a comment's @mention adds someone to a private doc: the doc's
+  // owner sees "Add @x to this doc? They can read it." in the composer or
+  // reply box, with Add & post / Post without adding. The client sends
+  // confirm_invites (worker POST /api/comments): 'ask' first, then the logins
+  // confirmed; without it (flag off, older clients, agents, the API) a
+  // mention invites as before. graduate_by is added + 14: two weeks of use.
+  confirmMentionInvite: Object.freeze({ label: 'Ask before a mention adds someone to a doc', owner: 'julie', added: '2026-11-26', default: false, preview: true, graduate_by: '2026-12-10' }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

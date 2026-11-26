@@ -342,3 +342,8 @@ body.tdoc-narrow .tdoc-pin-document {
   body.tdoc-narrow .ui-dialog-popup.tdoc-diagram-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); padding: 12px; }
   .tdoc-diagram-dialog .actions { flex-wrap: wrap; }
 }
+
+/* Ask before a mention adds someone to the doc (invite-confirm.jsx). */
+.tdoc-invite-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 6px 0 2px; padding: 8px 10px; border-radius: 8px; background: rgba(127, 127, 127, 0.12); color: inherit; font-size: 13px; line-height: 1.35; }
+.tdoc-invite-confirm-text { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.tdoc-invite-confirm-actions { display: flex; gap: 6px; flex-wrap: wrap; }

@@ -34387,6 +34387,22 @@ const tdocHandlers = {
           inviteBudget: Math.max(0, MENTION_INVITE_ALLOWLIST_MAX - access.allowed_users.length),
         },
       );
+      // Asked first (flag confirmMentionInvite): with `confirm_invites` in the
+      // request, nobody is added to the doc unless the poster confirmed them.
+      // 'ask': who would be added comes back and nothing is written; a list:
+      // only those in it are added, the rest are not told (not_invited). Without the field
+      // (older clients, agents, the API) a mention invites as it always has.
+      if (body.confirm_invites !== undefined && outcome.invited.length) {
+        if (body.confirm_invites === 'ask') {
+          return json({ error: 'confirm_invites', would_invite: outcome.invited }, { status: 409 });
+        }
+        const yes = new Set(Array.isArray(body.confirm_invites) ? body.confirm_invites.filter((k) => typeof k === 'string') : []);
+        const no = outcome.invited.filter((k) => !yes.has(k));
+        outcome.invited = outcome.invited.filter((k) => yes.has(k));
+        outcome.notified = outcome.notified.filter((k) => !no.includes(k));
+        // Their own choice: not told, and not reported as a name that failed.
+        if (no.length) outcome.not_invited = no;
+      }
       // A mention never fails the comment: what cannot be invited is not told.
       const patched = outcome.invited.length ? applyAccessPatch(meta, {
         allowed_users: access.allowed_users.concat(outcome.invited.map((k) =>

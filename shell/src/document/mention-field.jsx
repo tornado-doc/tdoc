@@ -52,6 +52,9 @@ export function MentionField({
   // A tag the box started with: picking another agent takes its place, since
   // the first agent named is the one a comment goes to.
   replacesTag = '',
+  // Held while the box asks something (invite-confirm.jsx): the words that
+  // post are the ones on screen.
+  readOnly = false,
 }) {
   const ownRef = useRef(null);
   const mirrorRef = useRef(null);
@@ -263,6 +266,7 @@ export function MentionField({
         autoFocus={autoFocus}
         placeholder={placeholder}
         value={value}
+        readOnly={readOnly}
         role="combobox"
         aria-expanded={open}
         aria-autocomplete="list"

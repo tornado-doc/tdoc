@@ -84,7 +84,9 @@ export function useComments({ slug, version, versionNow = null, onChange, onUnau
     }
   }, [applyLocal, onUnauthorized, refresh]);
 
-  const addComment = useCallback(async (selection, text) => {
+  // opts.confirmInvites: the request's confirm_invites (invite-confirm.jsx);
+  // left out, the request is what it always was.
+  const addComment = useCallback(async (selection, text, opts = {}) => {
     if (demo) {
       const comment = {
         id: demoId(),
@@ -104,10 +106,11 @@ export function useComments({ slug, version, versionNow = null, onChange, onUnau
       version: (versionNow && versionNow()) || version,
       text: text.trim(),
       anchor: selection ? anchorFromSelection(selection) : null,
+      ...confirmField(opts),
     }), { show: (list, made) => withPostedComment(list, made) });
   }, [applyLocal, demo, identity, mutate, slug, version, versionNow]);
 
-  const addReply = useCallback(async (parentId, text) => {
+  const addReply = useCallback(async (parentId, text, opts = {}) => {
     if (demo) {
       const reply = {
         id: demoId(),
@@ -128,7 +131,7 @@ export function useComments({ slug, version, versionNow = null, onChange, onUnau
       }));
       return reply;
     }
-    return mutate(() => createComment({ slug, version, text: text.trim(), parent_id: parentId }),
+    return mutate(() => createComment({ slug, version, text: text.trim(), parent_id: parentId, ...confirmField(opts) }),
       { show: (list, made) => withPostedComment(list, made, parentId) });
   }, [applyLocal, demo, identity, mutate, slug, version]);
 
@@ -228,4 +231,8 @@ export function useComments({ slug, version, versionNow = null, onChange, onUnau
     // into the same in-memory list. Nothing on a real doc.
     demoUpdate: demo ? applyLocal : null,
   };
+}
+
+function confirmField(opts) {
+  return opts && opts.confirmInvites !== undefined ? { confirm_invites: opts.confirmInvites } : {};
 }
