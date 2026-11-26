@@ -197,6 +197,9 @@ export function CommentComposer({
   const ask = useAgentAsk(text, setText, field);
   const { agents, target } = ask;
   const asking = useInviteAsking(busy);
+  // A question before the post (invite-confirm.jsx) means nothing is posted
+  // yet: closed now, the words stay a draft. Answered, the post goes on.
+  useEffect(() => { if (busy) sent.current = !asking; }, [busy, asking]);
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     if (sendToAgent && !agentButtons && !target && !agents.preselected) { ask.putDefault(); return; }
@@ -270,6 +273,7 @@ export function CommentComposer({
             ? 'Comment, or type @ to ask an agent'
             : 'What should change? Type @ to notify someone'}
         value={text}
+        readOnly={asking}
         people={mentionable}
         onChange={changeText}
         onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
@@ -286,7 +290,7 @@ export function CommentComposer({
           </details>
         </div>
       ) : null}
-      <InviteConfirmRow busy={busy} />
+      <InviteConfirmRow busy={busy} fieldRef={field} />
       <div className="foot">
         {signInToPost && !demo ? (
           <span className="hint tdoc-sign-in-to-post" role="status">{busy ? SIGNING_IN_HINT : SIGN_IN_TO_POST_HINT}</span>

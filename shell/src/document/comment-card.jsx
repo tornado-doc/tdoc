@@ -297,13 +297,14 @@ function ReplyForm({
         placeholder={demo ? 'Reply… GitHub @ or @email'
           : v4 && (agents.choices || []).length ? 'Reply, or type @ to ask an agent' : 'Reply… (@ to notify someone)'}
         value={text}
+        readOnly={asking}
         people={mentionable}
         replacesTag={prefilled.current}
         onChange={(next) => { touched.current = true; setText(next); }}
         onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
       />
       {v4 ? <AgentAskRow ask={ask} hint={agentAskHint(ask)} /> : null}
-      <InviteConfirmRow busy={busy} />
+      <InviteConfirmRow busy={busy} fieldRef={field} />
       <div className="tdoc-reply-form-foot">
         <span className="hint tdoc-keyboard-shortcut-hint">
           {canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}

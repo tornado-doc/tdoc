@@ -132,6 +132,65 @@ async function startServer(worker, env) {
       await v.ctx.close();
     });
 
+    await t('1440, while it asks: the words are held, the question is said and focused; Esc takes back the question only; closing keeps the draft', async () => {
+      setAllowed(['lee']);
+      const v = await open();
+      const before = await count();
+      await selectWords(v.page, v.frame);
+      const box = v.page.locator('.tdoc-popup textarea').first();
+      await box.waitFor({ timeout: 5000 });
+      await typeInto(v.page, box, 'ask @erin', false);
+      const words = await box.inputValue();
+      await v.page.locator('.tdoc-popup .submit').click();
+      const row = confirmRow(v.page);
+      await row.waitFor({ timeout: 5000 });
+      assert.equal(await box.evaluate((el) => el.readOnly), true, 'the words can change while it asks');
+      await v.page.keyboard.type('xyz');
+      assert.equal(await box.inputValue(), words, 'typed into the held words');
+      assert.equal(await row.locator('[role="status"]').innerText(), 'Add @erin to this doc? They can read it.');
+      assert.equal(await v.page.evaluate(() => document.activeElement && document.activeElement.textContent), 'Add & post', 'focus is not on Add & post');
+      // Esc: the question goes, the box and its words stay, the focus is back in them.
+      await v.page.keyboard.press('Escape');
+      await row.waitFor({ state: 'detached', timeout: 5000 });
+      assert.equal(await v.page.locator('.tdoc-popup').count(), 1, 'Esc closed the composer');
+      assert.equal(await box.evaluate((el) => el === document.activeElement && !el.readOnly), true, 'focus did not go back to the words');
+      assert.equal(await box.inputValue(), words);
+      assert.equal(await count(), before, 'Esc posted');
+      // Asked again, then the box closed while it asks: nothing posts, the words are a draft.
+      await v.page.locator('.tdoc-popup .submit').click();
+      await row.waitFor({ timeout: 5000 });
+      await v.page.locator('.tdoc-popup .x').click();
+      await v.page.locator('.tdoc-popup').waitFor({ state: 'detached', timeout: 5000 });
+      assert.equal(await count(), before, 'closing posted');
+      assert.equal(allowed(), 'lee');
+      await selectWords(v.page, v.frame);
+      await box.waitFor({ timeout: 5000 });
+      assert.equal(await box.inputValue(), words, 'the draft was lost');
+      assert.deepEqual(v.errors, []);
+      await v.ctx.close();
+    });
+
+    await t('1440, reply box: Esc takes back the question and keeps the box and its words', async () => {
+      setAllowed(['lee']);
+      const id = await thread();
+      const v = await open();
+      const before = await count();
+      const { box } = await replyBox(v.page, id, false);
+      await typeInto(v.page, box, 'cc @fay', false);
+      const words = await box.inputValue();
+      await v.page.locator(`[data-comment-id="${id}"] .tdoc-reply-submit.ui-btn-primary`).first().click();
+      const row = v.page.locator(`[data-comment-id="${id}"] .tdoc-invite-confirm`);
+      await row.waitFor({ timeout: 5000 });
+      assert.equal(await box.evaluate((el) => el.readOnly), true);
+      await v.page.keyboard.press('Escape');
+      await row.waitFor({ state: 'detached', timeout: 5000 });
+      assert.equal(await box.isVisible(), true, 'Esc closed the reply box');
+      assert.equal(await box.inputValue(), words);
+      assert.equal(await box.evaluate((el) => el === document.activeElement), true);
+      assert.equal(await count(), before);
+      await v.ctx.close();
+    });
+
     await t('1440, reply box: Add & post adds exactly who it named', async () => {
       setAllowed(['lee']);
       const id = await thread();

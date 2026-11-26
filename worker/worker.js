@@ -34396,7 +34396,7 @@ const tdocHandlers = {
         if (body.confirm_invites === 'ask') {
           return json({ error: 'confirm_invites', would_invite: outcome.invited }, { status: 409 });
         }
-        const yes = new Set(Array.isArray(body.confirm_invites) ? body.confirm_invites.map((k) => String(k)) : []);
+        const yes = new Set(Array.isArray(body.confirm_invites) ? body.confirm_invites.filter((k) => typeof k === 'string') : []);
         const no = outcome.invited.filter((k) => !yes.has(k));
         outcome.invited = outcome.invited.filter((k) => yes.has(k));
         outcome.notified = outcome.notified.filter((k) => !no.includes(k));

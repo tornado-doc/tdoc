@@ -46,19 +46,35 @@ export function useInviteAsking(busy) {
   return Boolean(busy && ctx?.pending);
 }
 
-// The line itself, in the box that is posting. A box that goes away while it
-// asks takes the question with it: nothing is posted.
-export function InviteConfirmRow({ busy }) {
+// The line itself, in the box that is posting: said aloud, with the focus on
+// Add & post. Esc takes the question back (nothing posts, the words stay, the
+// focus goes back to them) and nothing else: the box stays open. A box that
+// goes away while it asks takes the question with it.
+export function InviteConfirmRow({ busy, fieldRef = null }) {
   const ctx = useContext(InviteConfirmContext);
   const asking = Boolean(busy && ctx?.pending);
   const settle = ctx?.settle;
+  const add = useRef(null);
   useEffect(() => (asking ? () => settle(null) : undefined), [asking, settle]);
+  useEffect(() => {
+    if (!asking) return undefined;
+    add.current?.focus({ preventScroll: true });
+    const onKey = (event) => {
+      if (event.key !== 'Escape' || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      settle(null);
+      fieldRef?.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [asking, settle, fieldRef]);
   if (!asking) return null;
   return (
     <div className="tdoc-invite-confirm" role="group" aria-label="Add to this doc">
-      <span className="tdoc-invite-confirm-text">{inviteQuestion(ctx.pending.who)}</span>
+      <span className="tdoc-invite-confirm-text" role="status" aria-live="polite">{inviteQuestion(ctx.pending.who)}</span>
       <span className="tdoc-invite-confirm-actions">
-        <button type="button" className="ui-btn ui-btn-primary ui-btn-s" onClick={() => settle('add')}>Add &amp; post</button>
+        <button ref={add} type="button" className="ui-btn ui-btn-primary ui-btn-s" onClick={() => settle('add')}>Add &amp; post</button>
         <button type="button" className="ui-btn ui-btn-secondary ui-btn-s" onClick={() => settle('skip')}>Post without adding</button>
       </span>
     </div>

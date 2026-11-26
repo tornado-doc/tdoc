@@ -62,6 +62,9 @@ function assert(condition, message) { if (!condition) throw new Error(message ||
     assert(r.status === 200 && r.body.id && !r.body.mention_outcome.invited.length && !r.body.mention_outcome.notified.length, JSON.stringify(r));
     r = await post(olga, 'And @carol', { confirm_invites: 'yes' });
     assert(r.status === 200 && !r.body.mention_outcome.invited.length, JSON.stringify(r));
+    // Only strings confirm: 123 is not the login "123".
+    r = await post(olga, 'And @123', { confirm_invites: [123] });
+    assert(r.status === 200 && !r.body.mention_outcome.invited.length, JSON.stringify(r));
     assert(allowed() === 'lee', allowed());
   });
 
