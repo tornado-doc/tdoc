@@ -25,8 +25,6 @@ if (main) {
 }
 
 const OFFLINE = [
-  'mention-invite-confirm.test.js', // confirmMentionInvite: confirm_invites 'ask' answers would_invite and writes nothing; a list adds exactly those; without it a mention invites as before; replies, addresses, the "@john, @gmail。com" typo
-  'browser-suites-listed.test.js', // every browser suite (test/*-ui.test.js) is run by --browser or --all, or says why not
   'temp-dirs.test.js', // what tests make under the temp folder goes with them: done, failed, thrown, Ctrl-C, kill; every test that makes one uses the helper; tdoc-publish and tdoc-new leave nothing
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
   'feedback-frame-anchor.test.js', // a comment inside a tdoc doc (anchor.frame): get_comments shows it on one line, no brackets, short, as author content, only for tdoc's own pages
@@ -250,6 +248,8 @@ const OFFLINE = [
   'composer-position.test.js', // where the card goes when a keyboard is up
   'reader-patch-drift.test.js', // the phone table rule reaches both runtimes
   'dismiss-rule.test.js',     // the dismiss-first rule keeps its three exceptions
+  'browser-suites-listed.test.js', // every browser suite (test/*-ui.test.js) is run by --browser or --all, or says why not
+  'mention-invite-confirm.test.js', // confirmMentionInvite: confirm_invites 'ask' answers would_invite and writes nothing; a list adds exactly those; without it a mention invites as before; replies, addresses, the "@john, @gmail。com" typo
   'resolved-anchors.test.js', // resolved visibility and anchor fallbacks
 ];
 
