@@ -63,7 +63,7 @@ export const FLAGS = Object.freeze({
   // boot's canSuggest, the routes, propose_edits, reply_as), so pinning the
   // flag in a browser shows nothing to anybody else. graduate_by 2026-11-30
   // (not added + 7): the owner wants it slower and correct first.
-  askEditV2: Object.freeze({ label: 'Ask AI edits the doc (inline suggestions)', owner: 'julie', added: '2026-11-02', default: false, preview: true, graduate_by: '2026-11-30' }),
+  askEditV2: Object.freeze({ label: 'Ask AI edits the doc (inline suggestions)', owner: 'julie', added: '2026-11-02', default: false, preview: true, graduate_by: '2026-12-11' }),
   // Sheets: import a .csv / .tsv / .xlsx as a sheet (Create a doc, or a file
   // dropped on My docs) and edit a sheet's cells, rows, columns and tags in
   // Edit mode. Reading a sheet (<table data-tdoc-sheet>: grid, search,
@@ -112,13 +112,13 @@ export const FLAGS = Object.freeze({
   // to comment (the cell's pill, its menu, a commented cell opens its thread);
   // a newer version shows the "just published" strip rather than a swap.
   // Slides keep their modes. Readers and commenters: unchanged.
-  modelessEdit: Object.freeze({ label: 'Edit without Edit mode (autosave)', owner: 'julie', added: '2026-11-16', default: false, preview: true, graduate_by: '2026-11-23' }),
+  modelessEdit: Object.freeze({ label: 'Edit without Edit mode (autosave)', owner: 'julie', added: '2026-11-16', default: false, preview: true, graduate_by: '2026-12-11' }),
   // Sheet embeds: a <figure data-tdoc-embed="sheet" data-src="/d/<slug>">
   // in a page shows a live view of that sheet (its first rows, the saved
   // view applied, the comment count, Open), read under the SHEET's access
   // for the person reading (shell/src/document/sheet-embed.js, worker
   // /api/embed/sheet). Off: the figure is its fallback link, as in an export.
-  sheetEmbeds: Object.freeze({ label: 'Sheets embedded in pages (live, by reference)', owner: 'julie', added: '2026-11-11', default: false, preview: true, graduate_by: '2026-11-23' }),
+  sheetEmbeds: Object.freeze({ label: 'Sheets embedded in pages (live, by reference)', owner: 'julie', added: '2026-11-11', default: false, preview: true, graduate_by: '2026-12-11' }),
   // ⋯ › "Convert to Sheet": an editor turns a prose doc that holds sheet
   // tables into a sheet doc (title + sheet tables, the rest of the prose in
   // a .sheet-note), published as a new version (document/convert-to-sheet.js).
@@ -135,7 +135,7 @@ export const FLAGS = Object.freeze({
   // has the switch disabled with the reason. Sheets and slides: no switch.
   // The choice is remembered in this browser (document/markdown-edit.jsx,
   // markdown-source.js).
-  markdownEditMode: Object.freeze({ label: 'Edit as Markdown (switch while editing)', owner: 'julie', added: '2026-11-19', default: false, preview: true, graduate_by: '2026-11-26' }),
+  markdownEditMode: Object.freeze({ label: 'Edit as Markdown (switch while editing)', owner: 'julie', added: '2026-11-19', default: false, preview: true, graduate_by: '2026-12-11' }),
   // Feedback widget on a site built with React: a comment's element anchor
   // also records the React component chain (App › Pricing › PlanCard) and,
   // in a dev build, the source file and line (fiber _debugSource, or the
@@ -165,7 +165,7 @@ export const FLAGS = Object.freeze({
   // Delete); the right side is people only: Ask AI · Comments · Share ·
   // avatar. No ⋯; the space switcher is a row of the account menu; the
   // comment filter is the list's own. Doc, slides and sheets alike.
-  docTopbarB: Object.freeze({ label: 'Doc bar B (title menu left, people right)', owner: 'julie', added: '2026-11-21', default: false, graduate_by: '2026-11-28' }),
+  docTopbarB: Object.freeze({ label: 'Doc bar B (title menu left, people right)', owner: 'julie', added: '2026-11-21', default: false, graduate_by: '2026-12-11' }),
   // Comments and Sites (design: tdoc.dev/d/comments-and-sites-design). In
   // My docs and a team, Comments lists only comments, a doc's and a site's
   // (feedback space) together, each marked with where it came from, with
@@ -175,8 +175,8 @@ export const FLAGS = Object.freeze({
   // none it is the /feedback SDK block. Server: /api/me/comments (My docs'
   // feed, read like /api/team/comments). Off: Comments lists the sites, as
   // before.
-  commentsSitesTabs: Object.freeze({ label: 'Comments and Sites tabs', owner: 'julie', added: '2026-11-24', default: false, preview: true, graduate_by: '2026-12-01' }),
-  reactSourceCapture: Object.freeze({ label: 'Feedback: React component and source on comments', owner: 'julie', added: '2026-11-20', default: false, preview: true, graduate_by: '2026-11-27' }),  // Ask before a comment's @mention adds someone to a private doc: the doc's
+  commentsSitesTabs: Object.freeze({ label: 'Comments and Sites tabs', owner: 'julie', added: '2026-11-24', default: false, preview: true, graduate_by: '2026-12-11' }),
+  reactSourceCapture: Object.freeze({ label: 'Feedback: React component and source on comments', owner: 'julie', added: '2026-11-20', default: false, preview: true, graduate_by: '2026-12-11' }),  // Ask before a comment's @mention adds someone to a private doc: the doc's
   // owner sees "Add @x to this doc? They can read it." in the composer or
   // reply box, with Add & post / Post without adding. The client sends
   // confirm_invites (worker POST /api/comments): 'ask' first, then the logins
